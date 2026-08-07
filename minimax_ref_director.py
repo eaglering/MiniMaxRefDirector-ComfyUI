@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import logging
 import folder_paths
 from comfy_api.latest import io
@@ -109,6 +110,33 @@ def _read_template_file(path: str) -> str:
 
     log.warning(f"[MiniMaxRefDirector] Could not read prompt_template file: {search_path}")
     return "{user_prompt}"
+
+
+def _contains_chinese(text: str) -> bool:
+    """Check if text contains Chinese characters (CJK Unified Ideographs)."""
+    return bool(re.search(r'[\u4e00-\u9fff\u3400-\u4dbf]', text))
+
+
+def _process_dialogue(prompt: str) -> str:
+    """Detect dialogue in [], 【】, Chinese quotes (""), or English quotes (""),
+    and wrap them with <d> tags indicating language: Chinese or English.
+    """
+    # Pattern: [...]  or 【】 or Chinese quotes "..."  or  English quotes "..."
+    dialogue_pattern = re.compile(
+        r'\[([^\]]*)\]'
+        r'|\u3010([^\u3011]*?)\u3011'
+        r'|\u201c([^\u201d]*?)\u201d'
+        r'|"([^"]*?)"'
+    )
+
+    def _replacer(m: re.Match) -> str:
+        content = m.group(1) or m.group(2) or m.group(3) or m.group(4) or ""
+        if not content.strip():
+            return m.group(0)
+        lang = "Chinese" if _contains_chinese(content) else "English"
+        return f"<d>[{lang}]{content}</d>"
+
+    return dialogue_pattern.sub(_replacer, prompt)
 
 
 def _parse_references(prompt: str, subjects: list[dict]) -> tuple[list[int], str]:
@@ -346,7 +374,8 @@ class MiniMaxRefDirector(io.ComfyNode):
         segment_count = 0
 
         def _process_prompt(raw_prompt: str, dur_arg: int, first_frame_arg=None):
-            subject_index, rewritten = _parse_references(raw_prompt, subject)
+            dialogue_processed = _process_dialogue(raw_prompt)
+            subject_index, rewritten = _parse_references(dialogue_processed, subject)
             final_prompt = _build_segment_prompt(
                 user_prompt=rewritten,
                 subject_index=subject_index,

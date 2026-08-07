@@ -5735,7 +5735,7 @@ class TimelineEditor {
       if (seg) {
         if (this.selectionType !== "motion") {
           this.promptInput.value = seg.prompt || "";
-          this.promptInput.placeholder = "Detailed Description:\n\nOverall Soundscape:\n\nCamera Movement:\n\n";
+          this.promptInput.placeholder = "泥泞的乡野道路上, @主体小心翼翼地走着，轻声地说[这里怎么破破烂烂的]。\n\nOverall Soundscape:\n\n也吹过树叶的声音。Camera Movement:\n\n镜头慢慢靠近@主体\n\n";
         }
         this.promptInput.disabled = false;
         this.promptInput.style.opacity = "1.0";
