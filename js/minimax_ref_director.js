@@ -4,10 +4,9 @@ const { api } = window.comfyAPI.api;
 // --- UI Constants & Configuration ---
 const RULER_HEIGHT = 24;
 const BLOCK_HEIGHT = 160; // Increased to make the image timeline area much taller
-const AUDIO_TRACK_HEIGHT = 80;
-const MOTION_TRACK_HEIGHT = 80; // used as Motion Guide track height
-const CANVAS_HEIGHT = RULER_HEIGHT + BLOCK_HEIGHT;
-// const CANVAS_HEIGHT = RULER_HEIGHT + BLOCK_HEIGHT + MOTION_TRACK_HEIGHT + AUDIO_TRACK_HEIGHT;
+const AUDIO_TRACK_HEIGHT = 0;
+const MOTION_TRACK_HEIGHT = 0; // used as Motion Guide track height
+const CANVAS_HEIGHT = RULER_HEIGHT + BLOCK_HEIGHT + MOTION_TRACK_HEIGHT + AUDIO_TRACK_HEIGHT;
 const HANDLE_HIT_PX = 14;
 const MIN_SEGMENT_LENGTH = 6;
 const MAX_THUMBNAIL_DIM = 512; // Increased to maintain quality for taller images
