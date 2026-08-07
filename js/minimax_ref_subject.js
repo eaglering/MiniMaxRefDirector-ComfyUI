@@ -69,19 +69,23 @@ const MSCSS = `
     letter-spacing: 0.5px;
 }
 .ref-ms-card-remove {
-    background: transparent;
-    color: #ff6666;
-    border: 1px solid #3a1515;
-    border-radius: 3px;
+    background: #222;
+    color: #e0e0e0;
+    border: 1px solid #111;
+    border-radius: 4px;
     cursor: pointer;
     font-size: 11px;
-    padding: 2px 8px;
-    transition: all 0.15s;
+    font-weight: 500;
+    padding: 4px 10px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
-.ref-ms-card-remove:hover {
+.ref-ms-card-remove:hover:not(:disabled) {
     background: #4a1515;
-    color: #ffaaaa;
     border-color: #cc4444;
+    color: #ffaaaa;
 }
 .ref-ms-row {
     display: flex;
@@ -130,73 +134,126 @@ const MSCSS = `
 .ref-ms-textarea:focus {
     border-color: #888;
 }
-.ref-ms-file-row {
+/* --- Media box styles (right-aligned image & audio) --- */
+.ref-ms-media-row {
     display: flex;
-    gap: 6px;
-    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
 }
-.ref-ms-file-btn {
-    background: #2a2a2a;
-    color: #bbb;
-    border: 1px solid #444;
-    border-radius: 4px;
-    padding: 4px 10px;
-    font-size: 11px;
+.ref-ms-media-box {
+    width: 72px;
+    height: 72px;
+    border: 1px dashed #444;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-.ref-ms-file-btn:hover {
-    background: #333;
-    border-color: #666;
-    color: #fff;
-}
-.ref-ms-file-btn.has-file {
-    border-color: #38bdf8;
-    color: #38bdf8;
-    background: rgba(56, 189, 248, 0.08);
-}
-.ref-ms-file-name {
-    font-size: 10px;
-    color: #666;
+    position: relative;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-    min-width: 0;
-}
-.ref-ms-file-name.has-file {
-    color: #38bdf8;
-}
-.ref-ms-thumb-preview {
-    width: 60px;
-    height: 60px;
-    border-radius: 4px;
-    border: 1px solid #444;
-    object-fit: cover;
-    background: #151515;
+    background: #252525;
+    transition: all 0.2s ease;
     flex-shrink: 0;
 }
-.ref-ms-add-btn {
-    background: #252525;
+.ref-ms-media-box:hover {
+    border-color: #666;
+    background: #2a2a2a;
+}
+.ref-ms-media-box.has-file {
+    border-style: solid;
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.05);
+}
+.ref-ms-media-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.ref-ms-media-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    color: #666;
+    font-size: 10px;
+    transition: color 0.2s;
+}
+.ref-ms-media-box:hover .ref-ms-media-icon {
+    color: #aaa;
+}
+.ref-ms-media-box.has-file > img ~ .ref-ms-media-icon {
+    display: none;
+}
+
+/* Overlay for hover controls */
+.ref-ms-media-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+.ref-ms-media-box:hover .ref-ms-media-overlay {
+    opacity: 1;
+    pointer-events: auto;
+}
+.ref-ms-media-action {
+    background: transparent;
+    border: 1px solid #888;
+    color: #ccc;
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    line-height: 1.3;
+}
+.ref-ms-media-action:hover {
+    background: #333;
+    color: #fff;
+    border-color: #bbb;
+}
+.ref-ms-media-action.del:hover {
+    background: #4a1515;
+    border-color: #cc4444;
+    color: #ffaaaa;
+}
+.ref-ms-media-action.play-btn:hover {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: #38bdf8;
     color: #38bdf8;
-    border: 1px dashed #38bdf8;
+}
+.ref-ms-add-btn {
+    background: #222;
+    color: #e0e0e0;
+    border: 1px solid #111;
     border-radius: 4px;
-    padding: 8px 16px;
-    font-size: 12px;
+    padding: 6px 12px;
+    font-size: 11px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: center;
+    transition: all 0.2s ease;
     text-align: center;
     width: 100%;
     box-sizing: border-box;
 }
-.ref-ms-add-btn:hover {
-    background: rgba(56, 189, 248, 0.1);
-    border-style: solid;
+.ref-ms-add-btn:hover:not(:disabled) {
+    background: #333;
+    border-color: #555;
 }
 .ref-ms-add-btn:disabled {
     opacity: 0.35;
@@ -243,7 +300,7 @@ app.registerExtension({
 
                 const addBtn = document.createElement("button");
                 addBtn.className = "ref-ms-add-btn";
-                addBtn.textContent = "+ Add Subject";
+                addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add Subject`;
 
                 const footer = document.createElement("div");
                 footer.className = "ref-ms-footer";
@@ -359,6 +416,70 @@ app.registerExtension({
                     input.click();
                 }
 
+                let _audioEl = null;
+                let _audioPlayBtn = null;
+
+                function updatePlayBtnIcon(btn, isPlaying) {
+                    if (!btn) return;
+                    if (isPlaying) {
+                        btn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop`;
+                        btn.classList.add("playing");
+                    } else {
+                        btn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
+                        btn.classList.remove("playing");
+                    }
+                }
+
+                function stopAudio() {
+                    if (_audioEl) {
+                        _audioEl.pause();
+                        _audioEl.currentTime = 0;
+                        if (_audioPlayBtn) {
+                            updatePlayBtnIcon(_audioPlayBtn, false);
+                        }
+                        _audioEl = null;
+                        _audioPlayBtn = null;
+                    }
+                }
+
+                function playAudio(audioFile, btnEl) {
+                    // If the same audio is currently playing, stop it
+                    if (_audioEl && !_audioEl.paused && _audioPlayBtn === btnEl) {
+                        stopAudio();
+                        return;
+                    }
+
+                    // Stop any other playing audio
+                    if (_audioEl) {
+                        stopAudio();
+                    }
+
+                    if (!audioFile) return;
+                    // Build URL from filename (audioFile may contain subfolder, e.g. "minimaxrefdirector/audio.mp3")
+                    let url = audioFile;
+                    if (!url.startsWith("http") && !url.startsWith("/") && !url.startsWith("data:")) {
+                        const parts = audioFile.replace(/\\/g, "/").split("/");
+                        const filename = parts.pop();
+                        const subfolder = parts.join("/");
+                        url = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+                    }
+                    _audioEl = new Audio(url);
+                    _audioPlayBtn = btnEl;
+                    updatePlayBtnIcon(btnEl, true);
+
+                    _audioEl.play().catch(err => {
+                        console.error("[MiniMaxRefSubject] Audio play error:", err);
+                        updatePlayBtnIcon(btnEl, false);
+                        _audioEl = null;
+                        _audioPlayBtn = null;
+                    });
+                    _audioEl.addEventListener("ended", () => {
+                        updatePlayBtnIcon(btnEl, false);
+                        _audioEl = null;
+                        _audioPlayBtn = null;
+                    });
+                }
+
                 function saveState() {
                     const data = {
                         subjects: subjects.map(s => ({
@@ -402,10 +523,10 @@ app.registerExtension({
 
                         const removeBtn = document.createElement("button");
                         removeBtn.className = "ref-ms-card-remove";
-                        removeBtn.textContent = "Remove";
+                        removeBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Remove`;
                         if (subjects.length <= 1) {
                             removeBtn.disabled = true;
-                            removeBtn.style.opacity = "0.3";
+                            removeBtn.style.opacity = "0.35";
                         }
                         removeBtn.addEventListener("click", () => {
                             if (subjects.length <= 1) return;
@@ -457,105 +578,126 @@ app.registerExtension({
                         descRow.appendChild(descInput);
                         card.appendChild(descRow);
 
-                        // Image upload
-                        const imgRow = document.createElement("div");
-                        imgRow.className = "ref-ms-file-row";
+                        // --- Media boxes (right-aligned image & audio) ---
+                        const mediaRow = document.createElement("div");
+                        mediaRow.className = "ref-ms-media-row";
 
-                        // Thumbnail preview
-                        const thumb = document.createElement("img");
-                        thumb.className = "ref-ms-thumb-preview";
+                        // ----- Image box -----
+                        const imgBox = document.createElement("div");
+                        imgBox.className = "ref-ms-media-box";
                         if (subj.imageFile) {
-                            let subfolder = "";
-                            let fname = subj.imageFile;
-                            if (fname.includes("/") || fname.includes("\\")) {
-                                const sep = fname.includes("/") ? "/" : "\\";
-                                const parts = fname.split(sep);
-                                fname = parts.pop();
-                                subfolder = parts.join("/");
-                            }
-                            thumb.src = subj.imageB64;
+                            imgBox.classList.add("has-file");
+                            const thumbImg = document.createElement("img");
+                            thumbImg.src = subj.imageB64 || subj.imageFile;
+                            thumbImg.alt = "";
+                            imgBox.appendChild(thumbImg);
+                        } else {
+                            const icon = document.createElement("div");
+                            icon.className = "ref-ms-media-icon";
+                            icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><span>Image</span>`;
+                            imgBox.appendChild(icon);
                         }
 
-                        const imgFileBtn = document.createElement("button");
-                        imgFileBtn.className = "ref-ms-file-btn";
-                        if (subj.imageFile) imgFileBtn.classList.add("has-file");
-                        imgFileBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg> Image`;
-                        imgFileBtn.addEventListener("click", () => {
+                        const imgOverlay = document.createElement("div");
+                        imgOverlay.className = "ref-ms-media-overlay";
+
+                        const imgAddBtn = document.createElement("button");
+                        imgAddBtn.className = "ref-ms-media-action";
+                        imgAddBtn.textContent = subj.imageFile ? "Change" : "Add";
+                        imgAddBtn.addEventListener("click", (e) => {
+                            e.stopPropagation();
                             createFileInput("image/*", (filename, imgUrl) => {
                                 subjects[idx].imageFile = filename;
-                                imgFileBtn.classList.add("has-file");
-                                imgFileName.textContent = basename(filename);
-                                imgFileName.classList.add("has-file");
-                                // Update thumbnail
-                                let subfolder = "";
-                                let fname = filename;
-                                if (fname.includes("/") || fname.includes("\\")) {
-                                    const sep = fname.includes("/") ? "/" : "\\";
-                                    const parts = fname.split(sep);
-                                    fname = parts.pop();
-                                    subfolder = parts.join("/");
-                                }
-                                thumb.src = imgUrl;
+                                subjects[idx].imageB64 = imgUrl;
                                 saveState();
+                                renderSubjects();
                             });
                         });
+                        imgOverlay.appendChild(imgAddBtn);
 
-                        const imgFileName = document.createElement("span");
-                        imgFileName.className = "ref-ms-file-name";
                         if (subj.imageFile) {
-                            imgFileName.textContent = basename(subj.imageFile);
-                            imgFileName.classList.add("has-file");
+                            const imgDelBtn = document.createElement("button");
+                            imgDelBtn.className = "ref-ms-media-action del";
+                            imgDelBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+                            imgDelBtn.addEventListener("click", (e) => {
+                                e.stopPropagation();
+                                subjects[idx].imageFile = null;
+                                subjects[idx].imageB64 = null;
+                                saveState();
+                                renderSubjects();
+                            });
+                            imgOverlay.appendChild(imgDelBtn);
+                        }
+                        imgBox.appendChild(imgOverlay);
+                        mediaRow.appendChild(imgBox);
+
+                        // ----- Audio box -----
+                        const audioBox = document.createElement("div");
+                        audioBox.className = "ref-ms-media-box";
+                        if (subj.audioFile) {
+                            audioBox.classList.add("has-file");
+                            const aIcon = document.createElement("div");
+                            aIcon.className = "ref-ms-media-icon";
+                            aIcon.style.cssText = "color:#38bdf8;";
+                            aIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg><span style="font-size:8px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${basename(subj.audioFile)}</span>`;
+                            audioBox.appendChild(aIcon);
                         } else {
-                            imgFileName.textContent = "No file";
+                            const icon = document.createElement("div");
+                            icon.className = "ref-ms-media-icon";
+                            icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg><span>Audio</span>`;
+                            audioBox.appendChild(icon);
                         }
 
-                        imgRow.appendChild(thumb);
-                        imgRow.appendChild(imgFileBtn);
-                        imgRow.appendChild(imgFileName);
-                        card.appendChild(imgRow);
+                        const audioOverlay = document.createElement("div");
+                        audioOverlay.className = "ref-ms-media-overlay";
 
-                        // Audio upload
-                        const audRow = document.createElement("div");
-                        audRow.className = "ref-ms-file-row";
-
-                        const audSpacer = document.createElement("div");
-                        audSpacer.style.width = "60px";
-                        audSpacer.style.flexShrink = "0";
-
-                        const audFileBtn = document.createElement("button");
-                        audFileBtn.className = "ref-ms-file-btn";
-                        if (subj.audioFile) audFileBtn.classList.add("has-file");
-                        audFileBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg> Audio`;
-                        audFileBtn.addEventListener("click", () => {
+                        const audAddBtn = document.createElement("button");
+                        audAddBtn.className = "ref-ms-media-action";
+                        audAddBtn.textContent = subj.audioFile ? "Change" : "Add";
+                        audAddBtn.addEventListener("click", (e) => {
+                            e.stopPropagation();
                             createFileInput("audio/*,video/*", (filename) => {
                                 subjects[idx].audioFile = filename;
-                                audFileBtn.classList.add("has-file");
-                                audFileName.textContent = basename(filename);
-                                audFileName.classList.add("has-file");
                                 saveState();
+                                renderSubjects();
                             });
                         });
+                        audioOverlay.appendChild(audAddBtn);
 
-                        const audFileName = document.createElement("span");
-                        audFileName.className = "ref-ms-file-name";
                         if (subj.audioFile) {
-                            audFileName.textContent = basename(subj.audioFile);
-                            audFileName.classList.add("has-file");
-                        } else {
-                            audFileName.textContent = "No file";
-                        }
+                            const playBtn = document.createElement("button");
+                            playBtn.className = "ref-ms-media-action play-btn";
+                            playBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
+                            playBtn.addEventListener("click", (e) => {
+                                e.stopPropagation();
+                                playAudio(subj.audioFile, playBtn);
+                            });
+                            audioOverlay.appendChild(playBtn);
 
-                        audRow.appendChild(audSpacer);
-                        audRow.appendChild(audFileBtn);
-                        audRow.appendChild(audFileName);
-                        card.appendChild(audRow);
+                            const audDelBtn = document.createElement("button");
+                            audDelBtn.className = "ref-ms-media-action del";
+                            audDelBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+                            audDelBtn.addEventListener("click", (e) => {
+                                e.stopPropagation();
+                                subjects[idx].audioFile = null;
+                                saveState();
+                                renderSubjects();
+                            });
+                            audioOverlay.appendChild(audDelBtn);
+                        }
+                        audioBox.appendChild(audioOverlay);
+                        mediaRow.appendChild(audioBox);
+
+                        card.appendChild(mediaRow);
 
                         subjectList.appendChild(card);
                     });
 
                     // Update add button state
                     addBtn.disabled = subjects.length >= 9;
-                    addBtn.textContent = subjects.length >= 9 ? "Max 9 subjects" : "+ Add Subject";
+                    addBtn.innerHTML = subjects.length >= 9
+                        ? "Max 9 subjects"
+                        : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add Subject`;
                     footer.textContent = `${subjects.length}/9 subjects`;
                 }
 

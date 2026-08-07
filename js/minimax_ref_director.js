@@ -3683,7 +3683,7 @@ class TimelineEditor {
       el._eyeBtn = eyeBtn;
 
       headerRow.appendChild(textSpan);
-      // headerRow.appendChild(eyeBtn);
+      headerRow.appendChild(eyeBtn);
       el.appendChild(headerRow);
 
       return el;
@@ -3788,7 +3788,7 @@ class TimelineEditor {
     overrideAudioToggleBtn.style.opacity = this.motionTrackEnabled ? "1.0" : "0.3";
 
 
-    this.sidebar.appendChild(this.mainTrackLabel);
+    // this.sidebar.appendChild(this.mainTrackLabel);
     // this.sidebar.appendChild(this.audioTrackLabel);
     // this.sidebar.appendChild(this.motionTrackLabel);
 
@@ -3837,7 +3837,7 @@ class TimelineEditor {
 
     this.updateSidebarHeights();
 
-    this.layoutContainer.appendChild(this.sidebar);
+    // this.layoutContainer.appendChild(this.sidebar);
 
     // Viewport takes remaining space
     this.viewport.style.flexGrow = "1";
@@ -11681,8 +11681,7 @@ class TimelineEditor {
     textarea.addEventListener("keydown", (e) => {
       if (dd.style.display !== "flex" || TimelineEditor._mentionActiveTextarea !== textarea) {
         // Check if user just typed @
-        const isAtKey = (e.key === "@" || e.key === "Process");
-        if (isAtKey && !e.ctrlKey && !e.metaKey) {
+        if (e.key === "@" && !e.ctrlKey && !e.metaKey) {
           console.log("[MiniMaxRefDirector] keydown @ detected, key:", e.key, "code:", e.code, "ctrlKey:", e.ctrlKey, "metaKey:", e.metaKey, "altKey:", e.altKey);
           requestAnimationFrame(() => {
             const pos = textarea.selectionStart;
@@ -11729,7 +11728,8 @@ class TimelineEditor {
         e.preventDefault();
         hideDropdown();
       } else if (e.key === "Backspace") {
-        const pos = textarea.selectionStart;
+        const pos = textarea.selectionStart - 1;
+        console.log("[MiniMaxRefDirector] keydown: Backspace>", pos, '|', TimelineEditor._mentionStartPos);
         if (pos <= TimelineEditor._mentionStartPos) {
           hideDropdown();
         } else {
