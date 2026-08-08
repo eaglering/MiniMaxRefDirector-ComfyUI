@@ -37,7 +37,6 @@ PROMPT_REQUIREMENTS = """
 2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
 3. 每个不同的角色分配一个独立的 ROLE 占位符，每个独立的对话片段分配一个 DIALOGUE 占位符。
 4. 每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
-5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 输出格式要求：
 将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0:00-2.5）。
@@ -45,20 +44,20 @@ PROMPT_REQUIREMENTS = """
 
 请输出一个 JSON，包含以下字段：
   - "detailed_description": 包含带时间戳的镜头描述（含角色占位符、对话占位符）
-  - "overall_soundscape": 用户输入的环境音、动作音效等画面内的声音元素。如果没有则输出 None。
-  - "non_diegetic_music": 用户输入的画外配乐、旁白等非画面内声音。如果没有则输出 None。
+  - "overall_soundscape": 用户输入的环境音、动作音效等画面内的声音元素。如果没有则输出 null。
+  - "non_diegetic_music": 用户输入的画外配乐、旁白等非画面内声音。如果没有则输出 null。
   - "mapping": 一个字典，键为占位符名（如 "ROLE_0"），值为对应的实际文本。
 
 输出示例：
 {{
-  "detailed_description": "[Shot 1] 0:00-2.5 场景：咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n[Shot 2] 2.5-5.0 近景，{{ROLE_0}}说，{{ROLE_0_DIALOGUE_0}}。{{ROLE_1}}也说，{{ROLE_1_DIALOGUE_1}}。\\n",
+  "detailed_description": "[Shot 1] 0:00-2.5 场景：咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n[Shot 2] 2.5-5.0 近景，{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"，{{ROLE_1}}也说：\\"{{ROLE_1_DIALOGUE_1}}\\"。\\n",
   "overall_soundscape": "咖啡机蒸汽声、杯盘碰撞声、轻柔背景交谈声",
-  "non_diegetic_music": None,
+  "non_diegetic_music": null,
   "mapping": {{
     "ROLE_0": "张三",
     "ROLE_1": "李四",
-    "ROLE_0_DIALOGUE_0": "[Chinese]你好",
-    "ROLE_1_DIALOGUE_1": "[Chinese]你好"
+    "ROLE_0_DIALOGUE_0": "你好",
+    "ROLE_1_DIALOGUE_1": "你好"
   }}
 }}
 请严格按照上述 JSON 格式输出，不要添加额外文字。"""
@@ -92,15 +91,12 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 2. 如果用户输入中没有提及环境音和动作音效（画面内的声音），请根据场景合理补充。
 3. 如果用户输入中没有提及运镜方式，请为每个镜头合理补充运镜描述（如：缓慢推镜、侧拍、环绕、固定镜头等）。
 4. 确保镜头之间的连贯性，人物姿态、道具位置等硬约束严格连续。
-5. mapping 中的对话值必须带语言标签前缀：[zh]表示中文，[en]表示英文，需自动检测对话内容的语言。
 
 ## 占位符要求：
 1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
 2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
 3. 每个不同的角色分配一个独立的 ROLE 占位符，每个独立的对话片段分配一个 DIALOGUE 占位符。
 4. 每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
-5. 对话必须转成陈述句形式，不允许使用引号包裹对话。例如原文"小明高兴地说：今天真开心！"应转为"{{ROLE_0}}高兴地说，{{ROLE_0_DIALOGUE_0}}"。即去掉引号，用逗号替代冒号+引号结构。
-6. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 ## 输出格式要求：
 将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0:00-2.5）。
@@ -108,20 +104,20 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 
 请输出一个 JSON，包含以下字段：
   - "detailed_description": 包含带时间戳的镜头描述（含角色占位符、对话占位符、运镜方式）
-  - "overall_soundscape": 画面内的环境音、动作音效等。如果没有则输出 None。
-  - "non_diegetic_music": 画外配乐、旁白等非画面内声音。如果没有则输出 None。
+  - "overall_soundscape": 画面内的环境音、动作音效等。如果没有则输出 null。
+  - "non_diegetic_music": 画外配乐、旁白等非画面内声音。如果没有则输出 null。
   - "mapping": 一个字典，键为占位符名（如 "ROLE_0"），值为对应的实际文本。
 
 输出示例：
 {{
-  "detailed_description": "[Shot 1] 0:00-2.5 场景：昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。运镜：缓慢推镜，从全景推向中近景。\\n[Shot 2] 2.5-5.0 近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口，{{ROLE_0_DIALOGUE_0}}。运镜：固定镜头，浅景深。\\n[Shot 3] 5.0-8.0 反打镜头切至{{ROLE_1}}，她回应道，{{ROLE_1_DIALOGUE_1}}。运镜：过肩侧拍。\\n",
+  "detailed_description": "[Shot 1] 0:00-2.5 场景：昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。运镜：缓慢推镜，从全景推向中近景。\\n[Shot 2] 2.5-5.0 近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口。运镜：固定镜头，浅景深。{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"\\n[Shot 3] 5.0-8.0 反打镜头切至{{ROLE_1}}，她也回应道。运镜：过肩侧拍。{{ROLE_1}}说：\\"{{ROLE_1_DIALOGUE_1}}\\"\\n",
   "overall_soundscape": "咖啡机蒸汽声、杯盘轻微碰撞声、远处低沉交谈声、窗外雨滴敲打玻璃声",
-  "non_diegetic_music": None,
+  "non_diegetic_music": null,
   "mapping": {{
     "ROLE_0": "张三",
     "ROLE_1": "李四",
-    "ROLE_0_DIALOGUE_0": "[Chinese]好久不见。",
-    "ROLE_1_DIALOGUE_1": "[Chinese]是啊，三年了。"
+    "ROLE_0_DIALOGUE_0": "好久不见。",
+    "ROLE_1_DIALOGUE_1": "是啊，三年了。"
   }}
 }}
 请严格按照上述 JSON 格式输出，不要添加额外文字。"""
@@ -216,24 +212,6 @@ def parse_generated_json(generated_text: str) -> dict:
             clean_text = generated_text.strip()
 
     return json.loads(clean_text)
-
-
-_PLACEHOLDER_RE = re.compile(r"\{\{([A-Z_0-9]+)\}\}")
-
-
-def _extract_placeholders(text: str) -> set:
-    """提取文本中所有 {{PLACEHOLDER}} 格式的占位符名称（不含花括号）。"""
-    return set(_PLACEHOLDER_RE.findall(text))
-
-
-def clean_mapping_by_description(description: str, mapping: dict) -> dict:
-    """移除 mapping 中在 detailed_description 里未出现的占位符 key。
-
-    例如 mapping 中有 ROLE_0_DIALOGUE_0 但 description 中没有 {{ROLE_0_DIALOGUE_0}}，
-    则该 key 会被移除，保证 mapping 与 description 的占位符一致。
-    """
-    used = _extract_placeholders(description)
-    return {k: v for k, v in mapping.items() if k in used}
 
 
 def generate_prompt_with_clip(
@@ -354,13 +332,8 @@ def generate_prompt_with_clip(
         overall_soundscape = result.get("overall_soundscape") or ""
         non_diegetic_music = result.get("non_diegetic_music") or ""
         mapping_data = result.get("mapping", {}) or {}
-
-        # 清洗 mapping：移除在 detailed_description 中没有对应占位符的 key
-        mapping_data = clean_mapping_by_description(detailed_description, mapping_data)
         mapping_str = json.dumps(mapping_data, ensure_ascii=False)
 
-        # 更新 result 中的 mapping
-        result["mapping"] = mapping_data
         # 构建完整 JSON 输出
         output_json = json.dumps(result, ensure_ascii=False)
     except (json.JSONDecodeError, TypeError) as e:
