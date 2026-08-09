@@ -1,3 +1,4 @@
+import gc
 import json
 import logging
 import math
@@ -5,6 +6,7 @@ import re
 
 import comfy.sd
 import folder_paths
+import torch
 from comfy_api.latest import io
 
 log = logging.getLogger(__name__)
@@ -36,7 +38,7 @@ PROMPT_REQUIREMENTS = """
 1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
 2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
 3. 每个不同的角色分配一个独立的 ROLE 占位符。
-4. 每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
+4. 用户新输入中的每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
 5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 输出格式要求：
@@ -97,7 +99,7 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
 2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
 3. 每个不同的角色分配一个独立的 ROLE 占位符。
-4. 每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色，不使用冒号引号包裹对话。
+4. 用户新输入中的每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色，不使用冒号引号包裹对话。
 5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 ## 输出格式要求：
@@ -311,52 +313,66 @@ def generate_prompt_with_clip(
         f"has_image: {has_image}, shot1_dur: {shot1_dur})"
     )
 
-    # Tokenize: 将 prompt 和 image（如有）一起编码
-    tokenize_kwargs = {
-        "skip_template": not use_default_template,
-        "min_length": 1,
-        "thinking": thinking,
-    }
-    if has_image:
-        tokenize_kwargs["image"] = image
-
-    tokens = clip.tokenize(prompt_text, **tokenize_kwargs)
-
-    # 生成文本
-    generated_ids = clip.generate(
-        tokens,
-        do_sample=do_sample,
-        max_length=max_length,
-        temperature=temperature,
-        top_k=top_k,
-        top_p=top_p,
-        min_p=min_p,
-        repetition_penalty=repetition_penalty,
-        presence_penalty=presence_penalty,
-        seed=seed,
-    )
-
-    generated_text = clip.decode(generated_ids)
-    log.info(f"[MiniMaxRefPromptEnhance] 生成结果（前200字符）: {generated_text[:200]}")
-
-    # 解析 JSON
+    tokens = None
+    generated_ids = None
+    generated_text = ""
     try:
-        result = parse_generated_json(generated_text)
-        detailed_description = result.get("detailed_description", "") or ""
-        detailed_description = _normalize_description(detailed_description)
-        result["detailed_description"] = detailed_description
-    except (json.JSONDecodeError, TypeError) as e:
-        log.error(f"[MiniMaxRefPromptEnhance] JSON 解析失败: {e}")
-        log.error(f"[MiniMaxRefPromptEnhance] 原始输出: {generated_text}")
-        # 回退：用原始文本作为 detailed_description
-        result = {
-            "detailed_description": generated_text.strip(),
-            "overall_soundscape": None,
-            "non_diegetic_music": None,
-            "mapping": {},
+        # Tokenize: 将 prompt 和 image（如有）一起编码
+        tokenize_kwargs = {
+            "skip_template": not use_default_template,
+            "min_length": 1,
+            "thinking": thinking,
         }
+        if has_image:
+            tokenize_kwargs["image"] = image
 
-    return result
+        tokens = clip.tokenize(prompt_text, **tokenize_kwargs)
+
+        # 生成文本（inference_mode 禁用 autograd，减少显存开销）
+        with torch.inference_mode():
+            generated_ids = clip.generate(
+                tokens,
+                do_sample=do_sample,
+                max_length=max_length,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                min_p=min_p,
+                repetition_penalty=repetition_penalty,
+                presence_penalty=presence_penalty,
+                seed=seed,
+            )
+
+        generated_text = clip.decode(generated_ids)
+        log.info(f"[MiniMaxRefPromptEnhance] 生成结果（前200字符）: {generated_text[:200]}")
+
+        # 解析 JSON（在 finally 清理之前完成）
+        try:
+            result = parse_generated_json(generated_text)
+            detailed_description = result.get("detailed_description", "") or ""
+            detailed_description = _normalize_description(detailed_description)
+            result["detailed_description"] = detailed_description
+        except (json.JSONDecodeError, TypeError) as e:
+            log.error(f"[MiniMaxRefPromptEnhance] JSON 解析失败: {e}")
+            log.error(f"[MiniMaxRefPromptEnhance] 原始输出: {generated_text}")
+            # 回退：用原始文本作为 detailed_description
+            result = {
+                "detailed_description": generated_text.strip(),
+                "overall_soundscape": None,
+                "non_diegetic_music": None,
+                "mapping": {},
+            }
+
+        return result
+
+    finally:
+        # 释放生成过程中产生的中间张量，避免显存残留
+        del tokens, generated_ids
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # 释放 CLIP 模型本地引用（ComfyUI 内部缓存仍保留副本，不影响后续使用）
+        del clip
 
 
 class MinimaxRefPromptEnhance(io.ComfyNode):
@@ -429,10 +445,10 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                 ),
                 io.Int.Input(
                     "max_length",
-                    default=1024,
+                    default=512,
                     min=16,
                     max=32768,
-                    tooltip="生成文本的最大长度",
+                    tooltip="生成文本的最大长度（含输入 prompt），降低此值可显著加速生成",
                     advanced=True,
                 ),
                 io.Boolean.Input(
@@ -559,7 +575,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
         duration=5.0,
         fps=24.0,
         enhance=False,
-        max_length=1024,
+        max_length=512,
         do_sample=True,
         temperature=0.1,
         top_k=32,

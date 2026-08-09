@@ -54,12 +54,12 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                     default="qwen3vl",
                     tooltip="CLIP model type",
                 ),
-                io.Combo.Input(
-                    "last_refer_mode", options=["ON", "OFF"], default="OFF", optional=True,
+                io.Boolean.Input(
+                    "last_refer_mode", default=False,
                     tooltip="Whether to use the last reference frame as the first frame of the next segment.",
                 ),
-                io.Combo.Input(
-                    "prompt_enhance", options=["ON", "OFF"], default="OFF", optional=True,
+                io.Boolean.Input(
+                    "prompt_enhance", default=False,
                     tooltip="Whether to enhance the prompt generation.",
                 ),
                 io.Int.Input(
@@ -90,7 +90,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
 
     @classmethod
     def execute(cls, guide_data=None, first_frame=None, clip_name="", clip_type="qwen3vl", 
-                last_refer_mode="OFF", prompt_enhance="OFF", seg_index=0) -> io.NodeOutput:
+                last_refer_mode=False, prompt_enhance=False, seg_index=0) -> io.NodeOutput:
         """Extract segment-level data and load all referenced subject images/audio."""
 
         if guide_data is None:
@@ -101,7 +101,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         out_h = int(guide_data.get("height", 1080))
         fps = float(guide_data.get("frame_rate", 24))
         global_prompt = guide_data.get("global_prompt", "") or ""
-        subjects = guide_data.get("subjects", []) or []
+        subject_data = guide_data.get("subject_data", []) or []
         timeline = guide_data.get("timeline_data", []) or []
 
         segment_count = len(timeline)
@@ -115,16 +115,16 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         seg = timeline[idx]
         prompt = str(seg.get("prompt", ""))
         prev_prompt = str(seg.get("prev_prompt", ""))
-        prev_prompt = prev_prompt if last_refer_mode == "ON" else ""
+        prev_prompt = prev_prompt if last_refer_mode else ""
         frame_refer = seg.get("first_frame", "")
         duration_frames = seg.get("duration_frames", 0)
         if frame_refer:
             first_frame = load_image_tensor(frame_refer)
         else:
-            first_frame = first_frame if last_refer_mode == "ON" else None
+            first_frame = first_frame if last_refer_mode else None
 
         result = cls._process_prompt(
-            subject_data=subjects,
+            subject_data=subject_data,
             global_prompt=global_prompt,
             prompt=prompt,
             duration_frames=duration_frames,
@@ -133,24 +133,30 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             clip_name=clip_name,
             clip_type=clip_type,
             frame_rate=fps,
-            enhance=prompt_enhance == "ON",
+            enhance=prompt_enhance,
         )
-
         # --- Load all referenced subject images as [C, H, W] tensors ---
         images = []
         audios = []
 
-        for subject in result["subjects"]:
-            # Load image
-            image_path = resolve_input_path(str(subject.get("imageFile", "")))
-            if image_path and os.path.exists(image_path):
-                img_tensor = load_image_tensor(image_path)
-                images.append(img_tensor)
-            else:
-                images.append(None)
+        for subject_item in result["subjects"]:
+            subject = subject_item.get("subject", {})
+
+            if subject_item.get("subject_definition", None):
+                image_file = subject.get("imageFile", "")
+                if isinstance(image_file, torch.Tensor):
+                    images.append(image_file)
+                else:
+                    # Load image
+                    image_path = resolve_input_path(str(subject.get("imageFile", "")))
+                    if image_path and os.path.exists(image_path):
+                        img_tensor = load_image_tensor(image_path)
+                        images.append(img_tensor)
+                    else:
+                        images.append(None)
 
             # Load audio if available
-            if subject.get("audio_definition", None):
+            if subject_item.get("audio_definition", None):
                 audio_path = resolve_input_path(str(subject.get("audioFile", "")))
                 if audio_path and os.path.exists(audio_path):
                     audio_tensor = load_audio_tensor(audio_path)
@@ -170,8 +176,8 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
 
         log.info(
             f"[MiniMaxRefDirectorGuide] seg_index={idx}/{segment_count} | "
-            f"subjects={len(subjects)} | images={len(images)} audios={len(audios)} | "
-            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames}"
+            f"subjects={len(subject_data)} | images={len(images)} audios={len(audios)} | "
+            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | first_frame={"Yes" if first_frame is not None else "No"}"
         )
         
         return io.NodeOutput(
@@ -179,9 +185,9 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             *audios,
             out_w,
             out_h,
-            duration_frames,
+            result["duration_frames"],
             fps,
-            prompt,
+            result["prompt"],
         )
 
 
@@ -223,7 +229,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 "subject": {
                     "name": "First frame",
                     "description": "The first frame of the video",
-                    "imageFile": "",
+                    "imageFile": first_frame,
                     "audioFile": "",
                 },
                 "first_frame": True,
@@ -232,21 +238,23 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             })
         # 构建 detailed_description / overall_soundscape / non_diegetic_music
         detailed_description = clip_result.get("detailed_description", "")
-        for key, value in replacements:
+        for key, value in replacements.items():
             detailed_description = detailed_description.replace(key, value)
         detailed_description = global_prompt + "\n" + detailed_description
         overall_soundscape = clip_result.get("overall_soundscape", None)
         non_diegetic_music = clip_result.get("non_diegetic_music", None)
         overall_soundscape = overall_soundscape if overall_soundscape else "None"
         non_diegetic_music = non_diegetic_music if non_diegetic_music else "None"
-        final_prompt = {
-            subject_definitions,
-            retention_analysis,
-            detailed_description,
-            overall_soundscape,
-            non_diegetic_music,
+        final_prompt_attr = {
+            "subject_definitions": subject_definitions,
+            "retention_analysis": retention_analysis,
+            "detailed_description": detailed_description,
+            "overall_soundscape": overall_soundscape,
+            "non_diegetic_music": non_diegetic_music,
         }
-
+        final_prompt = ""
+        for key, value in final_prompt_attr.items():
+            final_prompt += f"{key}:\n{value}\n"
         return {
             "subjects": subjects,
             "prompt": final_prompt,
@@ -277,52 +285,56 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         replacements: dict[str, str] = {}  # {key: value}
 
         for key, value in mapping.items():
-            replacements[key] = value
+            rKey = "{{" + key + "}}"
+            replacements[rKey] = value
             dm = _DIALOGUE_KEY_RE.match(key)
             if dm:
-                replacements[key] = f"<d>{value}</d>"
+                replacements[rKey] = f"<d>{value}</d>"
                 role_key = f"ROLE_{dm.group(1)}"
                 if role_key not in mapping:
-                    replacements[key] = f"<d>{value}</d>"
                     continue
                 role_name = mapping[role_key]
                 # 找到对应的主体
-                index = find_index(subject_data, lambda x, role_name=role_name: x["role_name"] == role_name)
-                if index == -1:
+                subject_data_index = find_index(subject_data, lambda x, name=role_name: x["name"] == name)
+                if subject_data_index == -1:
                     continue
                 # 增加主体
                 index = find_index(subjects, lambda x, dm=dm: x["index"] == int(dm.group(1)))
-                if index == -1:
-                    subjects[index]["video"] = f"<Video {index + 1}>"
+                if index > -1:
+                    subjects[index]["audio_definition"] = f"<Audio {index + 1}>"
                 else:
-                    len = len(subjects)
+                    length = len(subjects)
                     subjects.append({
                         "index": int(dm.group(1)),
-                        "subject": subject_data[index],
-                        "subject_definition": f"<Subject {len + 1}>",
-                        "audio_definition": f"<Audio {len + 1}>"
+                        "subject": subject_data[subject_data_index],
+                        "subject_definition": f"<Subject {length + 1}>",
+                        "audio_definition": f"<Audio {length + 1}>"
                     })
             m = _ROLE_KEY_RE.match(key)
             if m:
                 index = find_index(subjects, lambda x, m=m: x["index"] == int(m.group(1)))
                 if index == -1:
                     # 找到对应的主体
-                    index = find_index(subject_data, lambda x, role_name=role_name: x["role_name"] == role_name)
-                    if index == -1:
+                    subject_data_index = find_index(subject_data, lambda x, name=value: x["name"] == name)
+                    if subject_data_index == -1:
                         continue
-                    len = len(subjects)
+                    length = len(subjects)
+                    subject_definition = f"<Subject {length + 1}>"
                     subjects.append({
                         "index": int(m.group(1)),
-                        "subject": subject_data[index],
-                        "subject_definition": f"<Subject {len + 1}>",
+                        "subject": subject_data[subject_data_index],
+                        "subject_definition": subject_definition,
                         "audio_definition": None
                     })
+                    replacements[rKey] = subject_definition
+                else:
+                    replacements[rKey] = subjects[index]["subject_definition"]
 
         subject_lines: list[str] = []
         retention_lines: list[str] = []
 
         for value in subjects:
-            subject_lines.append(f"{value['subject_definition']} is {value['subject']['description']}")
+            subject_lines.append(f"{value['subject_definition']} {value['subject']['description']}")
             retention_lines.append(f"{value['subject_definition']}: fully_preserved")
             if value["audio_definition"]:
                 subject_lines.append(f"{value['audio_definition']} is the voice timbre reference for "
