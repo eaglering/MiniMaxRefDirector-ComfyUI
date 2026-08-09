@@ -99,7 +99,7 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
 2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
 3. 每个不同的角色分配一个独立的 ROLE 占位符。
-4. 用户新输入中的每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色，不使用冒号引号包裹对话。
+4. 用户新输入中的每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
 5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 ## 输出格式要求：

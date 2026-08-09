@@ -242,7 +242,13 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             detailed_description = detailed_description.replace(key, value)
         detailed_description = global_prompt + "\n" + detailed_description
         overall_soundscape = clip_result.get("overall_soundscape", None)
+        if overall_soundscape:
+            for key, value in replacements.items():
+                overall_soundscape = overall_soundscape.replace(key, value)
         non_diegetic_music = clip_result.get("non_diegetic_music", None)
+        if non_diegetic_music:
+            for key, value in replacements.items():
+                non_diegetic_music = non_diegetic_music.replace(key, value)
         overall_soundscape = overall_soundscape if overall_soundscape else "None"
         non_diegetic_music = non_diegetic_music if non_diegetic_music else "None"
         final_prompt_attr = {
