@@ -14,7 +14,7 @@ Repository = "https://github.com/eaglering/MiniMaxRefDirector-ComfyUI"
 "Issue Tracker" = "https://github.com/eaglering/MiniMaxRefDirector-ComfyUI/issues"
 
 [tool.comfy]
-PublisherId = "minimaxrefdirector"
+PublisherId = "tenz8"
 DisplayName = "MiniMaxRefDirector-ComfyUI"
 includes = []
 
