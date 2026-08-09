@@ -17,5 +17,4 @@ Repository = "https://github.com/eaglering/MiniMaxRefDirector-ComfyUI"
 PublisherId = "minimaxrefdirector"
 DisplayName = "MiniMaxRefDirector-ComfyUI"
 includes = []
-# "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
 
