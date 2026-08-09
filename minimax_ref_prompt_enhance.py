@@ -35,8 +35,9 @@ PROMPT_REQUIREMENTS = """
 要求：
 1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
 2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
-3. 每个不同的角色分配一个独立的 ROLE 占位符，每个独立的对话片段分配一个 DIALOGUE 占位符。
+3. 每个不同的角色分配一个独立的 ROLE 占位符。
 4. 每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
+5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 输出格式要求：
 将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0:00-2.5）。
@@ -56,8 +57,8 @@ PROMPT_REQUIREMENTS = """
   "mapping": {{
     "ROLE_0": "张三",
     "ROLE_1": "李四",
-    "ROLE_0_DIALOGUE_0": "你好",
-    "ROLE_1_DIALOGUE_1": "你好"
+    "ROLE_0_DIALOGUE_0": "[Chinese]你好!",
+    "ROLE_1_DIALOGUE_1": "[English]Hello!"
   }}
 }}
 请严格按照上述 JSON 格式输出，不要添加额外文字。"""
@@ -95,8 +96,9 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 ## 占位符要求：
 1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
 2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
-3. 每个不同的角色分配一个独立的 ROLE 占位符，每个独立的对话片段分配一个 DIALOGUE 占位符。
-4. 每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
+3. 每个不同的角色分配一个独立的 ROLE 占位符。
+4. 每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色，不使用冒号引号包裹对话。
+5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 ## 输出格式要求：
 将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0:00-2.5）。
@@ -116,8 +118,8 @@ PROMPT_ENHANCE_REQUIREMENTS = """
   "mapping": {{
     "ROLE_0": "张三",
     "ROLE_1": "李四",
-    "ROLE_0_DIALOGUE_0": "好久不见。",
-    "ROLE_1_DIALOGUE_1": "是啊，三年了。"
+    "ROLE_0_DIALOGUE_0": "[Chinese]好久不见。",
+    "ROLE_1_DIALOGUE_1": "[Chinese]是啊，三年了。"
   }}
 }}
 请严格按照上述 JSON 格式输出，不要添加额外文字。"""
@@ -195,6 +197,18 @@ def build_prompt_text(
         parts.append(PROMPT_REQUIREMENTS)
 
     return "\n".join(parts)
+
+def _normalize_description(text: str) -> str:
+    """规范化 detailed_description 文本：
+    - 全角冒号（：）和半角冒号（:）统一转为半角逗号（,）
+    - 移除所有半角双引号（"）和全角双引号（""）
+    """
+    text = text.replace("：", "，")  # 全角冒号 → 全角逗号
+    text = text.replace(":", ",")       # 半角冒号 → 半角逗号
+    text = text.replace('"', "")
+    text = text.replace("“", "")
+    text = text.replace("”", "")
+    return text
 
 
 def parse_generated_json(generated_text: str) -> dict:
@@ -329,38 +343,20 @@ def generate_prompt_with_clip(
     try:
         result = parse_generated_json(generated_text)
         detailed_description = result.get("detailed_description", "") or ""
-        overall_soundscape = result.get("overall_soundscape") or ""
-        non_diegetic_music = result.get("non_diegetic_music") or ""
-        mapping_data = result.get("mapping", {}) or {}
-        mapping_str = json.dumps(mapping_data, ensure_ascii=False)
-
-        # 构建完整 JSON 输出
-        output_json = json.dumps(result, ensure_ascii=False)
+        detailed_description = _normalize_description(detailed_description)
+        result["detailed_description"] = detailed_description
     except (json.JSONDecodeError, TypeError) as e:
         log.error(f"[MiniMaxRefPromptEnhance] JSON 解析失败: {e}")
         log.error(f"[MiniMaxRefPromptEnhance] 原始输出: {generated_text}")
         # 回退：用原始文本作为 detailed_description
-        detailed_description = generated_text.strip()
-        overall_soundscape = ""
-        non_diegetic_music = ""
-        mapping_str = "{}"
-        output_json = json.dumps(
-            {
-                "detailed_description": detailed_description,
-                "overall_soundscape": None,
-                "non_diegetic_music": None,
-                "mapping": {},
-            },
-            ensure_ascii=False,
-        )
+        result = {
+            "detailed_description": generated_text.strip(),
+            "overall_soundscape": None,
+            "non_diegetic_music": None,
+            "mapping": {},
+        }
 
-    return {
-        "output_json": output_json,
-        "detailed_description": detailed_description,
-        "overall_soundscape": overall_soundscape,
-        "non_diegetic_music": non_diegetic_music,
-        "mapping_str": mapping_str,
-    }
+    return result
 
 
 class MinimaxRefPromptEnhance(io.ComfyNode):
@@ -597,10 +593,13 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
             use_default_template=use_default_template,
         )
 
+        output_json = json.dumps(result['output_json'], ensure_ascii=False)
+        mapping_str = json.dumps(result['mapping_data'], ensure_ascii=False)
+
         return io.NodeOutput(
-            result["output_json"],
+            output_json,
             result["detailed_description"],
-            result["mapping_str"],
+            mapping_str,
         )
 
 
