@@ -177,7 +177,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         log.info(
             f"[MiniMaxRefDirectorGuide] seg_index={idx}/{segment_count} | "
             f"subjects={len(subject_data)} | images={len(images)} audios={len(audios)} | "
-            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | first_frame={"Yes" if first_frame is not None else "No"}"
+            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | first_frame={'Yes' if first_frame is not None else 'No'}"
         )
         
         return io.NodeOutput(
