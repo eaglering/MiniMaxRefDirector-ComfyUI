@@ -104,7 +104,7 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 
 ## 输出格式要求：
 将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0:00-2.5）。
-镜头间需有状态继承，确保人物姿态、道具位置等硬约束严格连续。
+每个镜头描述中需包含：画面描述、运镜方式、对话（如有）。
 
 请输出一个 JSON，包含以下字段：
   - "detailed_description": 包含带时间戳的镜头描述（含角色占位符、对话占位符、运镜方式）
@@ -121,7 +121,7 @@ PROMPT_ENHANCE_REQUIREMENTS = """
     "ROLE_0": "张三",
     "ROLE_1": "李四",
     "ROLE_0_DIALOGUE_0": "[Chinese]好久不见。",
-    "ROLE_1_DIALOGUE_1": "[Chinese]是啊，三年了。"
+    "ROLE_1_DIALOGUE_1": "[English]Hello!"
   }}
 }}
 请严格按照上述 JSON 格式输出，不要添加额外文字。"""
@@ -246,7 +246,7 @@ def generate_prompt_with_clip(
     top_p: float = 0.9,
     min_p: float = 0.0,
     repetition_penalty: float = 1.0,
-    seed: int = 42,
+    seed: int = 62,
     presence_penalty: float = 0.0,
     thinking: bool = False,
     use_default_template: bool = True,
@@ -344,7 +344,7 @@ def generate_prompt_with_clip(
             )
 
         generated_text = clip.decode(generated_ids)
-        log.info(f"[MiniMaxRefPromptEnhance] 生成结果（前200字符）: {generated_text[:200]}")
+        log.info(f"[MiniMaxRefPromptEnhance] 生成结果（前200字符）: {generated_text}")
 
         # 解析 JSON（在 finally 清理之前完成）
         try:
@@ -609,11 +609,11 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
             use_default_template=use_default_template,
         )
 
-        output_json = json.dumps(result['output_json'], ensure_ascii=False)
-        mapping_str = json.dumps(result['mapping_data'], ensure_ascii=False)
+        full_json = json.dumps(result, ensure_ascii=False)
+        mapping_str = json.dumps(result.get("mapping", {}), ensure_ascii=False)
 
         return io.NodeOutput(
-            output_json,
+            full_json,
             result["detailed_description"],
             mapping_str,
         )
