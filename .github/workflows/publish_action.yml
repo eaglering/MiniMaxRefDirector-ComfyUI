@@ -24,6 +24,4 @@ jobs:
         run: pip install comfy-cli
 
       - name: Publish to Comfy Registry
-        run: |
-          comfy --skip-prompt --no-enable-telemetry env comfy node publish \
-            --token ${{ secrets.REGISTRYCOMFYORG }}
+        run: comfy node publish --token ${{ secrets.REGISTRYCOMFYORG }}
