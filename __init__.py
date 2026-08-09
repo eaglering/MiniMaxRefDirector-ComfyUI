@@ -1,6 +1,7 @@
 from .minimax_ref_subject import MiniMaxRefSubject
 from .minimax_ref_director import MiniMaxRefDirector
 from .minimax_ref_director_guide import MiniMaxRefDirectorGuide
+from .minimax_ref_prompt_enhance import MinimaxRefPromptEnhance
 from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
 
@@ -11,6 +12,7 @@ class PromptRelay(ComfyExtension):
             MiniMaxRefDirector,
             MiniMaxRefDirectorGuide,
             MiniMaxRefSubject,
+            MinimaxRefPromptEnhance,
         ]
 
 async def comfy_entrypoint() -> PromptRelay:
@@ -20,12 +22,14 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxRefSubject": MiniMaxRefSubject,
     "MiniMaxRefDirector": MiniMaxRefDirector,
     "MiniMaxRefDirectorGuide": MiniMaxRefDirectorGuide,
+    "MiniMaxRefPromptEnhance": MinimaxRefPromptEnhance,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefSubject": "MiniMax Subject",
     "MiniMaxRefDirector": "MiniMax Super Director",
     "MiniMaxRefDirectorGuide": "MiniMax Super Director Guide",
+    "MiniMaxRefPromptEnhance": "MiniMax Ref Prompt Enhance",
 }
 
 WEB_DIRECTORY = "./js"

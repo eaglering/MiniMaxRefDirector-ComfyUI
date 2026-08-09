@@ -1,9 +1,9 @@
 import json
 import os
-import re
 import logging
-import folder_paths
 from comfy_api.latest import io
+
+from .lib import resolve_input_path
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")
@@ -59,198 +59,17 @@ def _calc_resolution(preset: str, million_pixels: float, divide_by=32) -> tuple[
 
 
 def _read_template_file(path: str) -> str:
-    """Read prompt template file. Falls back to default if path is empty."""
-    search_path = path.strip() if path and path.strip() else _DEFAULT_TEMPLATE
-
-    # Try absolute path
-    if os.path.isabs(search_path):
-        try:
-            if os.path.isfile(search_path):
-                with open(search_path, "r", encoding="utf-8") as f:
-                    return f.read()
-        except Exception:
-            pass
-
-    # Try relative to ComfyUI input directory
+    search_path = resolve_input_path(path) if path else _DEFAULT_TEMPLATE
+    if not search_path:
+        return "{user_prompt}"
     try:
-        full = os.path.join(folder_paths.get_input_directory(), search_path)
-        if os.path.isfile(full):
-            with open(full, "r", encoding="utf-8") as f:
-                return f.read()
+        if os.path.isfile(search_path):
+            with open(search_path, "r", encoding="utf-8") as f:
+                result = f.read()
+                return result if result.find("{user_prompt}") != -1 else "{user_prompt}"
     except Exception:
-        pass
-
-    # Try relative to ComfyUI base directory
-    try:
-        base = os.path.dirname(os.path.dirname(folder_paths.get_input_directory()))
-        full = os.path.join(base, search_path)
-        if os.path.isfile(full):
-            with open(full, "r", encoding="utf-8") as f:
-                return f.read()
-    except Exception:
-        pass
-
-    # Try relative to project root
-    try:
-        full = os.path.join(_PROJECT_ROOT, search_path) if not os.path.isabs(search_path) else search_path
-        if os.path.isfile(full):
-            with open(full, "r", encoding="utf-8") as f:
-                return f.read()
-    except Exception:
-        pass
-
-    # Fallback: try default template from project root
-    try:
-        if os.path.isfile(_DEFAULT_TEMPLATE):
-            with open(_DEFAULT_TEMPLATE, "r", encoding="utf-8") as f:
-                log.warning(f"[MiniMaxRefDirector] prompt_template not found, using default: {_DEFAULT_TEMPLATE}")
-                return f.read()
-    except Exception:
-        pass
-
-    log.warning(f"[MiniMaxRefDirector] Could not read prompt_template file: {search_path}")
+        log.error("[MiniMaxRefDirector] Failed to read prompt_template file.")
     return "{user_prompt}"
-
-
-def _contains_chinese(text: str) -> bool:
-    """Check if text contains Chinese characters (CJK Unified Ideographs)."""
-    return bool(re.search(r'[\u4e00-\u9fff\u3400-\u4dbf]', text))
-
-
-def _process_dialogue(prompt: str) -> str:
-    """Detect dialogue in [], 【】, Chinese quotes (""), or English quotes (""),
-    and wrap them with <d> tags indicating language: Chinese or English.
-    """
-    # Pattern: [...]  or 【】 or Chinese quotes "..."  or  English quotes "..."
-    dialogue_pattern = re.compile(
-        r'\[([^\]]*)\]'
-        r'|\u3010([^\u3011]*?)\u3011'
-        r'|\u201c([^\u201d]*?)\u201d'
-        r'|"([^"]*?)"'
-    )
-
-    def _replacer(m: re.Match) -> str:
-        content = m.group(1) or m.group(2) or m.group(3) or m.group(4) or ""
-        if not content.strip():
-            return m.group(0)
-        lang = "Chinese" if _contains_chinese(content) else "English"
-        return f"<d>[{lang}]{content}</d>"
-
-    return dialogue_pattern.sub(_replacer, prompt)
-
-
-def _parse_references(prompt: str, subjects: list[dict]) -> tuple[list[int], str]:
-    """
-    Parse @SubjectName and @SubjectName-音频 references in a prompt.
-
-    Sorts subject names by length (longest first), then for each name:
-      1. Check @name-音频  → audio reference
-      2. Check @name       → picture reference
-
-    Returns:
-        subject_index: ordered list of unique subject indices (audio-referenced first)
-        rewritten_prompt: prompt with @refs replaced by <Picture N> / <Audio M>
-    """
-    if not prompt or not subjects:
-        return [], prompt or ""
-
-    # Build (name, index) pairs sorted by name length descending (longest first)
-    name_idx_pairs: list[tuple[str, int]] = []
-    for idx, subj in enumerate(subjects):
-        name = subj.get("name", "").strip()
-        if name:
-            name_idx_pairs.append((name, idx))
-    name_idx_pairs.sort(key=lambda x: len(x[0]), reverse=True)
-
-    audio_subjects: set[int] = set()
-    all_subjects: set[int] = set()
-
-    # Phase 1: match @name-音频 first
-    for name, idx in name_idx_pairs:
-        if f"@{name}-音频" in prompt:
-            audio_subjects.add(idx)
-            all_subjects.add(idx)
-
-    # Phase 2: match @name
-    for name, idx in name_idx_pairs:
-        if f"@{name}" in prompt:
-            all_subjects.add(idx)
-
-    if not all_subjects:
-        return [], prompt
-
-    # Build ordered subject_index: audio-referenced first, then non-audio
-    audio_list = sorted(audio_subjects)
-    non_audio_list = sorted(all_subjects - audio_subjects)
-    subject_index = audio_list + non_audio_list
-
-    # Build 1-based picture/audio number mappings
-    pic_map = {sid: i + 1 for i, sid in enumerate(subject_index)}
-    audio_map = {sid: i + 1 for i, sid in enumerate(audio_list)}
-
-    # Build replacements sorted by length descending (longer first)
-    replacements: list[tuple[str, str]] = []
-    for name, idx in name_idx_pairs:
-        if idx in audio_subjects:
-            old = f"@{name}-音频"
-            new = f"(参考音频<Audio {audio_map[idx]}>)"
-            replacements.append((old, new))
-        if idx in all_subjects:
-            old = f"@{name}"
-            new = f"<Picture {pic_map[idx]}>"
-            replacements.append((old, new))
-
-    replacements.sort(key=lambda x: len(x[0]), reverse=True)
-
-    rewritten = prompt
-    for old, new in replacements:
-        rewritten = rewritten.replace(old, new)
-
-    return subject_index, rewritten
-
-
-def _build_segment_prompt(
-    user_prompt: str,
-    subject_index: list[int],
-    subjects: list[dict],
-    global_prompt: str,
-    template_content: str,
-) -> str:
-    """Build the final segment prompt with reference pictures, story content, global prompt, and template wrapping."""
-
-    # --- 【参考图片】section ---
-    picture_lines = []
-    for i, sid in enumerate(subject_index):
-        pic_num = i + 1
-        if 0 <= sid < len(subjects):
-            desc = subjects[sid].get("description", "")
-            picture_lines.append(f"<Picture {pic_num}> {desc}")
-        else:
-            picture_lines.append(f"<Picture {pic_num}>")
-
-    # --- 【故事内容】section ---
-    story = user_prompt
-
-    # --- Assemble ---
-    parts = []
-    if picture_lines:
-        parts.append("主体定义：\n" + "\n".join(picture_lines))
-    parts.append(f"详情描述：\n{{first_frame}}{story}")
-
-    assembled = "\n\n".join(parts)
-
-    # Prepend global_prompt
-    if global_prompt and global_prompt.strip():
-        assembled = "摘要：\n" + global_prompt.strip() + "\n" + assembled
-
-    # Wrap with template if {user_prompt} placeholder exists
-    if "{user_prompt}" in template_content:
-        final_prompt = template_content.replace("{user_prompt}", assembled)
-    else:
-        final_prompt = assembled
-
-    return final_prompt
-
 
 class MiniMaxRefDirector(io.ComfyNode):
     """Timeline director with resolution config and guide_data output for MiniMax pipelines."""
@@ -340,11 +159,9 @@ class MiniMaxRefDirector(io.ComfyNode):
     def execute(cls, subject_data=None, global_prompt="", start_second=0.0, end_second=5.0,
                 duration_seconds=5.0, start_frame=0, end_frame=120, duration_frames=120,
                 prompt_template="", timeline_data="", local_prompts="", segment_lengths="",
-                frame_rate=24, display_mode="seconds",
-                outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
+                frame_rate=24, display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
-        log.info(f"[MiniMaxRefDirector] subject_data: {subject_data}, {local_prompts}, {global_prompt}")
-        subject = subject_data.get("subjects", []) or []
+        subject = subject_data.get("subjects", []) if subject_data else []
 
         if not timeline_data or not timeline_data.strip():
             raise ValueError("[MiniMaxRefDirector] timeline_data is required and must not be empty.")
@@ -368,33 +185,25 @@ class MiniMaxRefDirector(io.ComfyNode):
         else:
             range_start = start_frame
             range_end = end_frame
+        range_end = max(range_end, range_start + 1)
+        duration_frames = int(range_end - range_start)
 
         # --- Build timeline_data array for guide_data ---
         guide_timeline = []
         segment_count = 0
+        prev_prompt = ""
 
-        def _process_prompt(raw_prompt: str, dur_arg: int, first_frame_arg=None):
-            dialogue_processed = _process_dialogue(raw_prompt)
-            subject_index, rewritten = _parse_references(dialogue_processed, subject)
-            final_prompt = _build_segment_prompt(
-                user_prompt=rewritten,
-                subject_index=subject_index,
-                subjects=subject,
-                global_prompt=global_prompt,
-                template_content=template_content,
-            )
-            return {
-                "subject_index": subject_index,
-                "prompt": final_prompt,
-                "first_frame": first_frame_arg,
-                "duration_frames": dur_arg,
-            }
-
-        for idx, seg in enumerate(timeline_segments):
-            # Durations from segment_lengths are always in pixel-space frames
+        if len(timeline_segments) == 0:
+            timeline_segments = [{
+                "length": duration_frames,
+                "start": 0,
+                "prompt": "",
+                "imageFile": "",
+            }]
+        
+        for seg in timeline_segments:
             dur = int(seg.get("length", 1))
-            seg_start = seg.get("start", 0)
-            seg_start_frames = int(seg_start)
+            seg_start_frames = int(seg.get("start", 0))
             seg_end_frames = seg_start_frames + dur
 
             if seg_start_frames < range_start:
@@ -406,35 +215,27 @@ class MiniMaxRefDirector(io.ComfyNode):
             if dur <= 0:
                 continue
             first_frame = seg.get("imageFile", "") if seg.get("type", "text") == "image" else ""
-            guide_timeline.append(_process_prompt(seg.get("prompt", ""), dur, first_frame))
-            segment_count += 1
-
-        # Guarantee at least 1 segment
-        if segment_count == 0:
-            final_prompt = _build_segment_prompt(
-                user_prompt="",
-                subject_index=[],
-                subjects=subject,
-                global_prompt=global_prompt,
-                template_content=template_content,
-            )
+            prompt = seg.get("prompt", "").replace("@", "")
+            prompt = template_content.replace("{user_prompt}", prompt)
             guide_timeline.append({
-                "subject_index": [],
-                "prompt": final_prompt,
-                "duration_frames": max(end_frame - start_frame, 1),
+                "prompt": prompt,
+                "prev_prompt": prev_prompt,
+                "first_frame": first_frame,
+                "duration_frames": dur,
             })
-            segment_count = 1
+            prev_prompt = prompt
+            segment_count += 1
 
         # --- Resolve output resolution ---
         out_w, out_h = _calc_resolution(outpu_resolution, million_pixels)
 
         # --- Assemble guide_data ---
         guide_data = {
-            "subjects": subject,
             "width": out_w,
             "height": out_h,
+            "global_prompt": global_prompt,
             "frame_rate": float(frame_rate),
-            "prompt_template": template_content,
+            "subject_data": subject,
             "timeline_data": guide_timeline,
         }
 
@@ -448,7 +249,6 @@ class MiniMaxRefDirector(io.ComfyNode):
             guide_data,
             segment_count,
         )
-
 
 NODE_CLASS_MAPPINGS = {
     "MiniMaxRefDirector": MiniMaxRefDirector,

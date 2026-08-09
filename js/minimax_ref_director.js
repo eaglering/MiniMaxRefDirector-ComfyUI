@@ -5735,7 +5735,7 @@ class TimelineEditor {
       if (seg) {
         if (this.selectionType !== "motion") {
           this.promptInput.value = seg.prompt || "";
-          this.promptInput.placeholder = "泥泞的乡野道路上, @主体小心翼翼地走着，轻声地说[这里怎么破破烂烂的]。\n\nOverall Soundscape:\n\n也吹过树叶的声音。Camera Movement:\n\n镜头慢慢靠近@主体\n\n";
+          this.promptInput.placeholder = "Enter your storyboard prompt here, type @ to bring up the subject selector.";
         }
         this.promptInput.disabled = false;
         this.promptInput.style.opacity = "1.0";
@@ -11514,18 +11514,6 @@ class TimelineEditor {
                         imageB64: s.imageB64 || "",
                         type: "subject",
                       });
-                      // If subject has audio bound, add an audio-variant entry
-                      if (s.audioFile) {
-                        const audioName = s.name + "-音频";
-                        if (!subjects.find(x => x.name === audioName)) {
-                          subjects.push({
-                            name: audioName,
-                            description: s.description || "",
-                            type: "audio",
-                            parentName: s.name,
-                          });
-                        }
-                      }
                     }
                   }
                 }

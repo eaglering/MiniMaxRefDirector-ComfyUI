@@ -1,0 +1,6 @@
+# MiniMaxRefDirector-ComfyUI 依赖
+# 以下包在 ComfyUI 中已自带，无需额外安装：
+#   torch, numpy, Pillow, typing_extensions
+
+# 音频/视频加载（lib.py 使用 av 读取音频）
+av>=12.0.0
