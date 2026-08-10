@@ -25,10 +25,10 @@ PROMPT_USER_SECTION = """
 【视频总时长】{duration} 秒"""
 
 PROMPT_SHOT1_SECTION = """
-首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 0:00-{shot1_dur}，根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
+首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 0.0-{shot1_dur}，根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
 
 PROMPT_SHOT1_DIALOGUE_SECTION = """
-首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 0:00-{shot1_dur}，结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
+首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 0.0-{shot1_dur}，结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
 
 PROMPT_NO_IMAGE_INSTRUCTION = """
 请直接根据文本信息生成提示词，无需分析图片。"""
@@ -42,7 +42,7 @@ PROMPT_REQUIREMENTS = """
 5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 输出格式要求：
-将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0:00-2.5）。
+将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0.0-2.5）。
 镜头间需有状态继承，确保人物姿态、道具位置等硬约束严格连续。
 
 请输出一个 JSON，包含以下字段：
@@ -53,7 +53,7 @@ PROMPT_REQUIREMENTS = """
 
 输出示例：
 {{
-  "detailed_description": "[Shot 1] 0:00-2.5 场景：咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n[Shot 2] 2.5-5.0 近景，{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"，{{ROLE_1}}也说：\\"{{ROLE_1_DIALOGUE_1}}\\"。\\n",
+  "detailed_description": "[Shot 1] 0.0-2.5 场景：咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n[Shot 2] 2.5-5.0 近景，{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"，{{ROLE_1}}也说：\\"{{ROLE_1_DIALOGUE_1}}\\"。\\n",
   "overall_soundscape": "咖啡机蒸汽声、杯盘碰撞声、轻柔背景交谈声",
   "non_diegetic_music": null,
   "mapping": {{
@@ -67,7 +67,7 @@ PROMPT_REQUIREMENTS = """
 
 # ── 增强 Prompt ────────────────────────────────────────────────────
 
-PROMPT_ENHANCE_HEADER = """【任务】处理多段视频/故事任务。你需要对用户输入进行优化润色，使其更适合视频生成。"""
+PROMPT_ENHANCE_HEADER = """【任务】处理多段视频/故事任务。你需要对用户输入进行优化，使其更适合视频生成。"""
 
 PROMPT_ENHANCE_IMAGE_SECTION = """
 【首帧图片】请根据首帧图片内容，分析场景、角色、氛围，作为视频的起始状态。"""
@@ -80,10 +80,10 @@ PROMPT_ENHANCE_USER_SECTION = """
 【视频总时长】{duration} 秒"""
 
 PROMPT_ENHANCE_SHOT1_SECTION = """
-首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 0:00-{shot1_dur}，根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
+首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 0.0-{shot1_dur}，根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
 
 PROMPT_ENHANCE_SHOT1_DIALOGUE_SECTION = """
-首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 0:00-{shot1_dur}，结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
+首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 0.0-{shot1_dur}，结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
 
 PROMPT_ENHANCE_NO_IMAGE = """
 请直接根据文本信息生成提示词。"""
@@ -103,7 +103,7 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 ## 输出格式要求：
-将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0:00-2.5）。
+将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0.0-2.5）。
 每个镜头描述中需包含：画面描述、运镜方式、对话（如有）。
 
 请输出一个 JSON，包含以下字段：
@@ -114,7 +114,7 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 
 输出示例：
 {{
-  "detailed_description": "[Shot 1] 0:00-2.5 场景：昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。运镜：缓慢推镜，从全景推向中近景。\\n[Shot 2] 2.5-5.0 近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口。运镜：固定镜头，浅景深。{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"\\n[Shot 3] 5.0-8.0 反打镜头切至{{ROLE_1}}，她也回应道。运镜：过肩侧拍。{{ROLE_1}}说：\\"{{ROLE_1_DIALOGUE_1}}\\"\\n",
+  "detailed_description": "[Shot 1] 0.0-2.5 场景：昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。运镜：缓慢推镜，从全景推向中近景。\\n[Shot 2] 2.5-5.0 近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口：\\"{{ROLE_0_DIALOGUE_0}}\\"。运镜：固定镜头，浅景深。\\n[Shot 3] 5.0-8.0 反打镜头切至{{ROLE_1}}，{{ROLE_1}}满脸笑容地说：\\"{{ROLE_1_DIALOGUE_1}}\\"。运镜：过肩侧拍。\\n",
   "overall_soundscape": "咖啡机蒸汽声、杯盘轻微碰撞声、远处低沉交谈声、窗外雨滴敲打玻璃声",
   "non_diegetic_music": null,
   "mapping": {{
