@@ -18,7 +18,8 @@ PROMPT_BASE_HEADER = """【任务】处理多段视频/故事任务。"""
 PROMPT_IMAGE_SECTION = """
 【首帧图片】请根据首帧图片内容，分析场景、角色、氛围，作为视频的起始状态。"""
 PROMPT_LAST_SECTION = """
-【上一段提示词】{prev_prompt}"""
+【上一段提示词】请从中提取场景环境和角色状态概要（忽略对话、运镜、时间戳等细节），仅用于推断当前起点状态：
+{prev_prompt}"""
 
 PROMPT_USER_SECTION = """
 【用户新输入】{user_input}
@@ -33,15 +34,20 @@ PROMPT_SHOT1_DIALOGUE_SECTION = """
 PROMPT_NO_IMAGE_INSTRUCTION = """
 请直接根据文本信息生成提示词，无需分析图片。"""
 
-PROMPT_REQUIREMENTS = """
-要求：
-1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
-2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
-3. 每个不同的角色分配一个独立的 ROLE 占位符。
-4. 用户新输入中的每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
-5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
+# ── 共用占位符规则（基础版和增强版共用）─────────────────────────────
 
-输出格式要求：
+_PLACEHOLDER_RULES = """
+## 占位符规则：
+1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
+2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_1_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
+3. 每个不同的角色分配一个独立的 ROLE 占位符。
+4. 用户输入中的每句对话分配一个 DIALOGUE 占位符，占位符前缀 ROLE_ 对应说话的角色。
+5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。"""
+
+PROMPT_REQUIREMENTS = """
+{placeholder_rules}
+
+要求：
 将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0.0-2.5）。
 镜头间需有状态继承，确保人物姿态、道具位置等硬约束严格连续。
 
@@ -73,7 +79,8 @@ PROMPT_ENHANCE_IMAGE_SECTION = """
 【首帧图片】请根据首帧图片内容，分析场景、角色、氛围，作为视频的起始状态。"""
 
 PROMPT_ENHANCE_LAST_SECTION = """
-【上一段提示词】{prev_prompt}"""
+【上一段提示词】请从中提取场景环境和角色状态概要（忽略对话、运镜、时间戳等细节），仅用于推断当前起点状态：
+{prev_prompt}"""
 
 PROMPT_ENHANCE_USER_SECTION = """
 【用户新输入】{user_input}
@@ -89,25 +96,20 @@ PROMPT_ENHANCE_NO_IMAGE = """
 请直接根据文本信息生成提示词。"""
 
 PROMPT_ENHANCE_REQUIREMENTS = """
+{placeholder_rules}
+
 ## 优化要求：
 1. 对场景描述进行润色和细化，增加画面细节、光影、色彩、氛围描写。
 2. 如果用户输入中没有提及环境音和动作音效（画面内的声音），请根据场景合理补充。
 3. 如果用户输入中没有提及运镜方式，请为每个镜头合理补充运镜描述（如：缓慢推镜、侧拍、环绕、固定镜头等）。
 4. 确保镜头之间的连贯性，人物姿态、道具位置等硬约束严格连续。
 
-## 占位符要求：
-1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
-2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_0_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
-3. 每个不同的角色分配一个独立的 ROLE 占位符。
-4. 用户新输入中的每个对话分配一个DIALOGUE 占位符，占位符前面的ROLE_说话的角色。
-5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
-
 ## 输出格式要求：
 将视频按镜头切分（如 [Shot 1]），使用明确的时间戳（如 0.0-2.5）。
 每个镜头描述中需包含：画面描述、运镜方式、对话（如有）。
 
 请输出一个 JSON，包含以下字段：
-  - "detailed_description": 包含带时间戳的镜头描述（含角色占位符、对话占位符、运镜方式）
+  - "detailed_description": 包含带时间戳的镜头描述（含 ROLE 和 DIALOGUE 占位符、运镜方式）
   - "overall_soundscape": 画面内的环境音、动作音效等。如果没有则输出 null。
   - "non_diegetic_music": 画外配乐、旁白等非画面内声音。如果没有则输出 null。
   - "mapping": 一个字典，键为占位符名（如 "ROLE_0"），值为对应的实际文本。
@@ -178,7 +180,7 @@ def build_prompt_text(
                 parts.append(PROMPT_ENHANCE_SHOT1_DIALOGUE_SECTION.format(shot1_dur=shot1_dur))
             else:
                 parts.append(PROMPT_ENHANCE_SHOT1_SECTION.format(shot1_dur=shot1_dur))
-        parts.append(PROMPT_ENHANCE_REQUIREMENTS)
+        parts.append(PROMPT_ENHANCE_REQUIREMENTS.format(placeholder_rules=_PLACEHOLDER_RULES))
     else:
         parts = [PROMPT_BASE_HEADER]
         if has_image:
@@ -196,7 +198,7 @@ def build_prompt_text(
                 parts.append(PROMPT_SHOT1_DIALOGUE_SECTION.format(shot1_dur=shot1_dur))
             else:
                 parts.append(PROMPT_SHOT1_SECTION.format(shot1_dur=shot1_dur))
-        parts.append(PROMPT_REQUIREMENTS)
+        parts.append(PROMPT_REQUIREMENTS.format(placeholder_rules=_PLACEHOLDER_RULES))
 
     return "\n".join(parts)
 
