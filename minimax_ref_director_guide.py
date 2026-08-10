@@ -54,6 +54,16 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                     default="qwen3vl",
                     tooltip="CLIP model type",
                 ),
+                io.Int.Input(
+                    "seed",
+                    optional=True,
+                    display_name="seed",
+                    default=42,
+                    min=0,
+                    max=0xFFFFFFFFFFFFFFFF,
+                    tooltip="随机种子，传递给 CLIP 模型生成",
+                    advanced=True,
+                ),
                 io.Boolean.Input(
                     "last_refer_mode", default=False,
                     tooltip="Whether to use the last reference frame as the first frame of the next segment.",
@@ -89,7 +99,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, guide_data=None, first_frame=None, clip_name="", clip_type="qwen3vl", 
+    def execute(cls, guide_data=None, first_frame=None, clip_name="", clip_type="qwen3vl", seed=42, 
                 last_refer_mode=False, prompt_enhance=False, seg_index=0) -> io.NodeOutput:
         """Extract segment-level data and load all referenced subject images/audio."""
 
@@ -134,6 +144,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             clip_type=clip_type,
             frame_rate=fps,
             enhance=prompt_enhance,
+            seed=seed,
         )
         # --- Load all referenced subject images as [C, H, W] tensors ---
         images = []
@@ -195,7 +206,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
     def _process_prompt(cls, subject_data: list[dict], global_prompt: str, prompt: str,
                        duration_frames: int, first_frame: torch.Tensor|None = None, last_prompt: str = "",
                        clip_name: str = "", clip_type: str = "qwen3vl",
-                       frame_rate: float = 24.0, enhance: bool = False) -> dict:
+                       frame_rate: float = 24.0, enhance: bool = False, seed: int = 42) -> dict:
         """处理单个分镜提示词：调用 VLM 增强 → 解析 mapping → 构建 subject_definitions / retention_analysis。"""
 
         # 调用 VLM 生成增强提示词
@@ -209,6 +220,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             duration=duration_sec,
             fps=frame_rate,
             enhance=enhance,
+            seed=seed,
         )
 
         # 解析 mapping
