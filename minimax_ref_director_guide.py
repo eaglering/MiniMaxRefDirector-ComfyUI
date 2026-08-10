@@ -42,17 +42,21 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                     "first_frame", optional=True,
                     tooltip="Use first frame input if it's not set",
                 ),
+                io.Clip.Input(
+                    "clip", optional=True,
+                    tooltip="External CLIP model input (priority over clip_name/clip_type). Connect from a CLIP Loader node.",
+                ),
                 io.Combo.Input(
                     "clip_name",
                     options=text_encoders,
                     default=text_encoders[0] if text_encoders else "",
-                    tooltip="Choose text encoder（CLIP/VL）text_encodes",
+                    tooltip="Choose text encoder（CLIP/VL）text_encodes (used when no external clip connected).",
                 ),
                 io.Combo.Input(
                     "clip_type",
                     options=clip_types,
                     default="qwen3vl",
-                    tooltip="CLIP model type",
+                    tooltip="CLIP model type (used when no external clip connected).",
                 ),
                 io.Int.Input(
                     "seed",
@@ -95,11 +99,12 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 io.Int.Output(display_name="length", tooltip="Frame count."),
                 io.Float.Output(display_name="frame_rate", tooltip="Frame rate from global config."),
                 io.String.Output(display_name="prompt", tooltip="Fully assembled prompt for the selected segment."),
+                io.String.Output(display_name="raw_prompt", tooltip="Raw prompt for the selected segment."),
             ],
         )
 
     @classmethod
-    def execute(cls, guide_data=None, first_frame=None, clip_name="", clip_type="qwen3vl", seed=42, 
+    def execute(cls, guide_data=None, first_frame=None, clip=None, clip_name="", clip_type="qwen3vl", seed=42, 
                 last_refer_mode=False, prompt_enhance=False, seg_index=0) -> io.NodeOutput:
         """Extract segment-level data and load all referenced subject images/audio."""
 
@@ -140,6 +145,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             duration_frames=duration_frames,
             first_frame=first_frame,
             last_prompt=prev_prompt,
+            clip=clip,
             clip_name=clip_name,
             clip_type=clip_type,
             frame_rate=fps,
@@ -199,22 +205,24 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             result["duration_frames"],
             fps,
             result["prompt"],
+            result["raw_prompt"]
         )
 
 
     @classmethod
     def _process_prompt(cls, subject_data: list[dict], global_prompt: str, prompt: str,
                        duration_frames: int, first_frame: torch.Tensor|None = None, last_prompt: str = "",
-                       clip_name: str = "", clip_type: str = "qwen3vl",
+                       clip=None, clip_name: str = "", clip_type: str = "qwen3vl",
                        frame_rate: float = 24.0, enhance: bool = False, seed: int = 42) -> dict:
         """处理单个分镜提示词：调用 VLM 增强 → 解析 mapping → 构建 subject_definitions / retention_analysis。"""
 
         # 调用 VLM 生成增强提示词
         duration_sec = max(duration_frames / max(frame_rate, 1.0), 0.1)
         clip_result = generate_prompt_with_clip(
+            image=first_frame,
+            clip=clip,
             clip_name=clip_name,
             clip_type=clip_type,
-            image=first_frame,
             last_prompt=last_prompt,
             prompt=prompt,
             duration=duration_sec,
@@ -273,12 +281,38 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         final_prompt = ""
         for key, value in final_prompt_attr.items():
             final_prompt += f"{key}:\n{value}\n"
+
+        raw_prompt = ""
+        detailed_description = clip_result.get("detailed_description", "")
+        detailed_description = cls._build_raw_prompt(detailed_description, mapping_data)
+        raw_prompt += f"{detailed_description}\n"
+        overall_soundscape = clip_result.get("overall_soundscape", None)
+        if overall_soundscape:
+            overall_soundscape = cls._build_raw_prompt(overall_soundscape, mapping_data)
+            raw_prompt += f"{overall_soundscape}\n"
+        non_diegetic_music = clip_result.get("non_diegetic_music", None)
+        if non_diegetic_music:
+            non_diegetic_music = cls._build_raw_prompt(non_diegetic_music, mapping_data)
+            raw_prompt += f"{non_diegetic_music}\n"
+
         return {
             "subjects": subjects,
             "prompt": final_prompt,
+            "raw_prompt": raw_prompt,
             "first_frame": first_frame is not None,
             "duration_frames": duration_frames,
         }
+
+    @classmethod
+    def _build_raw_prompt(cls, prompt: str, mapping_data: dict[str, str]) -> str:
+        for key, value in sorted(mapping_data.items(), key=lambda x: len(x[0]), reverse=True) :
+            if prompt.find("{{" + key + "}}") == -1:
+                continue
+            if key.find("_DIALOGUE_") != -1:
+                value = re.sub(r"\[[a-zA-Z]+\]", "", value)
+                value = f"\"{value}\""
+            prompt = prompt.replace("{{" + key + "}}", value)
+        return prompt
 
     @classmethod
     def _build_first_frame_definition_and_retention(cls, subjects: list[dict], subject_definitions: str, retention_analysis: str) -> tuple[str, str]:

@@ -22,41 +22,38 @@ PROMPT_LAST_SECTION = """
 {prev_prompt}"""
 
 PROMPT_USER_SECTION = """
-【用户新输入】{user_input}
-【视频总时长】{duration} 秒"""
+【用户新输入】{user_input}"""
 
 PROMPT_SHOT1_SECTION = """
-首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
+首帧镜头说明：根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
 
 PROMPT_SHOT1_DIALOGUE_SECTION = """
-首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
+首帧镜头说明：结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
 
 PROMPT_NO_IMAGE_INSTRUCTION = """
+首帧镜头说明：无
 请直接根据文本信息生成提示词，无需分析图片。"""
 
 PROMPT_REQUIREMENTS = """
 ## 占位符规则：
-1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
-2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_1_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
+1. 所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
+2. 所有对话内容必须用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_1_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
 3. 每个不同的角色分配一个独立的 ROLE 占位符。
-4. 用户输入中的每句对话分配一个 DIALOGUE 占位符，占位符前缀 ROLE_ 对应说话的角色。
+4. 每句对话分配一个 DIALOGUE 占位符，占位符前缀 ROLE_ 对应说话的角色。
 5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 ## 输出格式要求：
-将视频按镜头切分（如 [Shot 1]、[Shot 2]...）。
-每个镜头描述中需包含：画面描述、运镜方式、对话（如有）。
-
 请输出一个 JSON，包含以下字段：
-  - "detailed_description": 包含镜头描述（含角色占位符、对话占位符）
+  - "shot1_description": 首帧镜头描述，如果没有则输出 null。
+  - "detailed_description": 用户输入的镜头描述（含角色占位符、对话占位符）
   - "overall_soundscape": 用户输入的环境音、动作音效等画面内的声音元素。如果没有则输出 null。
-  - "non_diegetic_music": 用户输入的画外配乐、旁白等非画面内声音。如果没有则输出 null。
-  - "mapping": 一个字典，键为占位符名（如 "ROLE_0"），值为对应的实际文本。
+  - "mapping": 一个字典，键为占位符名（如 "ROLE_0"，"ROLE_0_DIALOGUE_0"），值为对应的实际文本。
 
 输出示例：
 {{
-  "detailed_description": "[Shot 1] 咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n[Shot 2] 近景，{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"，{{ROLE_1}}也说：\\"{{ROLE_1_DIALOGUE_1}}\\"。\\n",
+  "shot1_description": null,
+  "detailed_description": "咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n近景，{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"，{{ROLE_1}}也说：\\"{{ROLE_1_DIALOGUE_1}}\\"。\\n",
   "overall_soundscape": "咖啡机蒸汽声、杯盘碰撞声、轻柔背景交谈声",
-  "non_diegetic_music": null,
   "mapping": {{
     "ROLE_0": "张三",
     "ROLE_1": "李四",
@@ -68,7 +65,7 @@ PROMPT_REQUIREMENTS = """
 
 # ── 增强 Prompt ────────────────────────────────────────────────────
 
-PROMPT_ENHANCE_HEADER = """【任务】处理多段视频/故事任务。你需要对用户输入进行优化，使其更适合视频生成。"""
+PROMPT_ENHANCE_HEADER = """【任务】处理多段视频/故事任务。你需要对用户输入进行提示词增强，使其更适合视频生成。"""
 
 PROMPT_ENHANCE_IMAGE_SECTION = """
 【首帧图片】请根据首帧图片内容，分析场景、角色、氛围，作为视频的起始状态。"""
@@ -78,16 +75,16 @@ PROMPT_ENHANCE_LAST_SECTION = """
 {prev_prompt}"""
 
 PROMPT_ENHANCE_USER_SECTION = """
-【用户新输入】{user_input}
-【视频总时长】{duration} 秒"""
+【用户新输入】{user_input}"""
 
 PROMPT_ENHANCE_SHOT1_SECTION = """
-首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
+首帧镜头说明：根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
 
 PROMPT_ENHANCE_SHOT1_DIALOGUE_SECTION = """
-首帧镜头说明：请在 detailed_description 最前面增加 [Shot 1] 结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
+首帧镜头说明：结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
 
 PROMPT_ENHANCE_NO_IMAGE = """
+首帧镜头说明：无
 请直接根据文本信息生成提示词。"""
 
 PROMPT_ENHANCE_REQUIREMENTS = """
@@ -98,26 +95,23 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 4. 用户输入中的每句对话分配一个 DIALOGUE 占位符，占位符前缀 ROLE_ 对应说话的角色。
 5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
-## 优化要求：
+## 增强要求：
 1. 对场景描述进行润色和细化，增加画面细节、光影、色彩、氛围描写。
 2. 如果用户输入中没有提及环境音和动作音效（画面内的声音），请根据场景合理补充。
-3. 如果用户输入中没有提及运镜方式，请根据场景合理补充运镜描述（如：缓慢推镜、侧拍、环绕、固定镜头等）。
+3. 如果用户输入中没有任何运镜描述，请根据场景合理补充（如：缓慢推镜、侧拍、环绕、固定镜头等）。
 
 ## 输出格式要求：
-将视频按镜头切分（如 [Shot 1]、[Shot 2]...）。
-每个镜头描述中需包含：画面描述、运镜方式、对话（如有）。
-
 请输出一个 JSON，包含以下字段：
+  - "shot1_description": 首帧镜头描述，如果没有则输出 null。
   - "detailed_description": 包含镜头描述（含 ROLE 和 DIALOGUE 占位符、运镜方式）
   - "overall_soundscape": 画面内的环境音、动作音效等。如果没有则输出 null。
-  - "non_diegetic_music": 画外配乐、旁白等非画面内声音。如果没有则输出 null。
   - "mapping": 一个字典，键为占位符名（如 "ROLE_0"），值为对应的实际文本。
 
 输出示例：
 {{
-  "detailed_description": "[Shot 1] 昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。运镜：缓慢推镜，从全景推向中近景。\\n[Shot 2] 近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口：\\"{{ROLE_0_DIALOGUE_0}}\\"。运镜：固定镜头，浅景深。\\n[Shot 3] 反打镜头切至{{ROLE_1}}，{{ROLE_1}}满脸笑容地说：\\"{{ROLE_1_DIALOGUE_1}}\\"。运镜：过肩侧拍。\\n",
+  "shot1_description": null,
+  "detailed_description": "昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。镜头缓慢推镜，从全景推向中近景。\\n近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口：\\"{{ROLE_0_DIALOGUE_0}}\\"。固定镜头，浅景深。\\n反打镜头切至{{ROLE_1}}，{{ROLE_1}}满脸笑容地说：\\"{{ROLE_1_DIALOGUE_1}}\\"。过肩侧拍镜头。\\n",
   "overall_soundscape": "咖啡机蒸汽声、杯盘轻微碰撞声、远处低沉交谈声、窗外雨滴敲打玻璃声",
-  "non_diegetic_music": null,
   "mapping": {{
     "ROLE_0": "张三",
     "ROLE_1": "李四",
@@ -198,7 +192,7 @@ def build_prompt_text(
             else:
                 parts.append(PROMPT_SHOT1_SECTION.format(shot1_dur=shot1_dur))
         parts.append(PROMPT_REQUIREMENTS)
-
+    log.info(f"prompt: {json.dumps(parts, indent=2, ensure_ascii=False)}")
     return "\n".join(parts)
 
 def _normalize_description(text: str) -> str:
@@ -232,9 +226,10 @@ def parse_generated_json(generated_text: str) -> dict:
 
 
 def generate_prompt_with_clip(
-    clip_name: str,
-    clip_type: str,
     image,
+    clip=None,
+    clip_name: str = "",
+    clip_type: str = "qwen3vl",
     last_prompt: str = "",
     prompt: str = "",
     duration: float = 5.0,
@@ -255,9 +250,10 @@ def generate_prompt_with_clip(
     """使用 CLIP 模型分析首帧图片并生成带占位符的提示词 JSON。
 
     Args:
-        clip_name: text_encoders 目录下的模型文件名
-        clip_type: CLIP 模型类型 ("minimax", "qwen3vl", "gemma")
         image: ComfyUI 图像张量 [B, H, W, C], 可选（None 表示纯文本模式）
+        clip: 外部传入的 CLIP 模型对象（可选，优先使用；为 None 则通过 clip_name/clip_type 加载）
+        clip_name: text_encoders 目录下的模型文件名（clip 为 None 时必填）
+        clip_type: CLIP 模型类型 ("minimax", "qwen3vl", "gemma")
         last_prompt: 上一段提示词（可为空）
         prompt: 用户新输入的提示词
         duration: 视频总时长（秒）
@@ -287,15 +283,19 @@ def generate_prompt_with_clip(
     has_image = _has_image(image)
     shot1_dur = _calc_shot1_duration(fps) if has_image else 0.0
 
-    # 加载 CLIP 模型
-    clip_type_enum = getattr(comfy.sd.CLIPType, clip_type.upper(), comfy.sd.CLIPType.MINIMAX)
-    clip_path = folder_paths.get_full_path_or_raise("text_encoders", clip_name)
-    clip = comfy.sd.load_clip(
-        ckpt_paths=[clip_path],
-        embedding_directory=folder_paths.get_folder_paths("embeddings"),
-        clip_type=clip_type_enum,
-    )
-    log.info(f"[MiniMaxRefPromptEnhance] 已加载 CLIP 模型: {clip_name} (type={clip_type})")
+    # 加载 CLIP 模型（优先使用外部传入的 clip）
+    external_clip = clip is not None
+    if not external_clip:
+        clip_type_enum = getattr(comfy.sd.CLIPType, clip_type.upper(), comfy.sd.CLIPType.MINIMAX)
+        clip_path = folder_paths.get_full_path_or_raise("text_encoders", clip_name)
+        clip = comfy.sd.load_clip(
+            ckpt_paths=[clip_path],
+            embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            clip_type=clip_type_enum,
+        )
+        log.info(f"[MiniMaxRefPromptEnhance] 已加载 CLIP 模型: {clip_name} (type={clip_type})")
+    else:
+        log.info(f"[MiniMaxRefPromptEnhance] 使用外部传入的 CLIP 模型")
 
     # 构建 prompt 文本
     prompt_text = build_prompt_text(
@@ -372,8 +372,10 @@ def generate_prompt_with_clip(
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        # 释放 CLIP 模型本地引用（ComfyUI 内部缓存仍保留副本，不影响后续使用）
-        del clip
+        # 仅释放内部加载的 CLIP 模型引用（ComfyUI 内部缓存仍保留副本）
+        # 外部传入的 clip 不释放，由调用方管理生命周期
+        if not external_clip:
+            del clip
 
 
 class MinimaxRefPromptEnhance(io.ComfyNode):
