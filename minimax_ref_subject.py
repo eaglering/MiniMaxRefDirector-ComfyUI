@@ -10,7 +10,7 @@ SubjectData = io.Custom("SUBJECT_DATA")
 
 
 class MiniMaxRefSubject(io.ComfyNode):
-    """Multi-subject input node supporting up to 9 subjects with name, description,
+    """Multi-subject input node supporting any number of subjects with name, description,
     reference image, and audio file for multi-subject video generation workflows."""
 
     @classmethod
@@ -20,7 +20,7 @@ class MiniMaxRefSubject(io.ComfyNode):
             display_name="MiniMax Reference Subject",
             category="minimax",
             description=(
-                "Define up to 9 subjects, each with a name, description, reference image, "
+                "Define any number of subjects, each with a name, description, reference image, "
                 "and audio file. Connect to LTX Director for @-mention subject injection "
                 "in prompts."
             ),
@@ -30,7 +30,7 @@ class MiniMaxRefSubject(io.ComfyNode):
                     tooltip="JSON state of all subjects (auto-managed by the UI; do not edit by hand).",
                 ),
                 io.Int.Input(
-                    "subject_count", default=1, min=1, max=9, step=1,
+                    "subject_count", default=1, min=1, step=1,
                     tooltip="Number of active subjects to display in the UI.",
                 ),
             ],

@@ -257,9 +257,19 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 "audio_definition": None
             })
         # 构建 detailed_description / overall_soundscape / non_diegetic_music
+        shot1_desc = clip_result.get("shot1_description", None)
+        if shot1_desc:
+            for key, value in replacements.items():
+                shot1_desc = shot1_desc.replace(key, value)
         detailed_description = clip_result.get("detailed_description", "")
         for key, value in replacements.items():
             detailed_description = detailed_description.replace(key, value)
+        if shot1_desc:
+            shot1_dur = round(1.0 / max(frame_rate, 1.0), 2)
+            detailed_description = (
+                f"[Shot 1] 0.0-{shot1_dur}s {shot1_desc}\n"
+                f"[Shot 2] {detailed_description}"
+            )
         detailed_description = global_prompt + "\n" + detailed_description
         overall_soundscape = clip_result.get("overall_soundscape", None)
         if overall_soundscape:

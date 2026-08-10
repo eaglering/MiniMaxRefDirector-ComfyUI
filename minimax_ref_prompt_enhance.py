@@ -43,16 +43,14 @@ PROMPT_REQUIREMENTS = """
 5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
 
 ## 输出格式要求：
-请输出一个 JSON，包含以下字段：
-  - "shot1_description": 首帧镜头描述，如果没有则输出 null。
+请输出一个 JSON，包含以下字段：__SHOT1_DESC__
   - "detailed_description": 用户输入的镜头描述（含角色占位符、对话占位符）
   - "overall_soundscape": 用户输入的环境音、动作音效等画面内的声音元素。如果没有则输出 null。
   - "mapping": 一个字典，键为占位符名（如 "ROLE_0"，"ROLE_0_DIALOGUE_0"），值为对应的实际文本。
 
 输出示例：
 {{
-  "shot1_description": null,
-  "detailed_description": "咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n近景，{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"，{{ROLE_1}}也说：\\"{{ROLE_1_DIALOGUE_1}}\\"。\\n",
+__SHOT1_EXAMPLE__  "detailed_description": "咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n近景，{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"，{{ROLE_1}}也说：\\"{{ROLE_1_DIALOGUE_1}}\\"。\\n",
   "overall_soundscape": "咖啡机蒸汽声、杯盘碰撞声、轻柔背景交谈声",
   "mapping": {{
     "ROLE_0": "张三",
@@ -84,7 +82,6 @@ PROMPT_ENHANCE_SHOT1_DIALOGUE_SECTION = """
 首帧镜头说明：结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
 
 PROMPT_ENHANCE_NO_IMAGE = """
-首帧镜头说明：无
 请直接根据文本信息生成提示词。"""
 
 PROMPT_ENHANCE_REQUIREMENTS = """
@@ -101,16 +98,14 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 3. 如果用户输入中没有任何运镜描述，请根据场景合理补充（如：缓慢推镜、侧拍、环绕、固定镜头等）。
 
 ## 输出格式要求：
-请输出一个 JSON，包含以下字段：
-  - "shot1_description": 首帧镜头描述，如果没有则输出 null。
+请输出一个 JSON，包含以下字段：__SHOT1_DESC__
   - "detailed_description": 包含镜头描述（含 ROLE 和 DIALOGUE 占位符、运镜方式）
   - "overall_soundscape": 画面内的环境音、动作音效等。如果没有则输出 null。
   - "mapping": 一个字典，键为占位符名（如 "ROLE_0"），值为对应的实际文本。
 
 输出示例：
 {{
-  "shot1_description": null,
-  "detailed_description": "昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。镜头缓慢推镜，从全景推向中近景。\\n近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口：\\"{{ROLE_0_DIALOGUE_0}}\\"。固定镜头，浅景深。\\n反打镜头切至{{ROLE_1}}，{{ROLE_1}}满脸笑容地说：\\"{{ROLE_1_DIALOGUE_1}}\\"。过肩侧拍镜头。\\n",
+__SHOT1_EXAMPLE__  "detailed_description": "昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。镜头缓慢推镜，从全景推向中近景。\\n近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口：\\"{{ROLE_0_DIALOGUE_0}}\\"。固定镜头，浅景深。\\n反打镜头切至{{ROLE_1}}，{{ROLE_1}}满脸笑容地说：\\"{{ROLE_1_DIALOGUE_1}}\\"。过肩侧拍镜头。\\n",
   "overall_soundscape": "咖啡机蒸汽声、杯盘轻微碰撞声、远处低沉交谈声、窗外雨滴敲打玻璃声",
   "mapping": {{
     "ROLE_0": "张三",
@@ -156,6 +151,15 @@ def build_prompt_text(
     """
     has_last = bool(last_prompt.strip())
 
+    shot1_desc_instruction = (
+        '\n  - "shot1_description": 根据首帧图片描述初始画面状态和角色初始姿态。必须输出完整的画面描述，绝不能填 null！'
+        if has_image else ''
+    )
+    shot1_example = (
+        '  "shot1_description": "首帧画面中，角色姿态与场景环境的详细描摹。",\n'
+        if has_image else ''
+    )
+
     if enhance:
         parts = [PROMPT_ENHANCE_HEADER]
         if has_image:
@@ -173,7 +177,9 @@ def build_prompt_text(
                 parts.append(PROMPT_ENHANCE_SHOT1_DIALOGUE_SECTION.format(shot1_dur=shot1_dur))
             else:
                 parts.append(PROMPT_ENHANCE_SHOT1_SECTION.format(shot1_dur=shot1_dur))
-        parts.append(PROMPT_ENHANCE_REQUIREMENTS)
+        parts.append(PROMPT_ENHANCE_REQUIREMENTS
+                     .replace("__SHOT1_DESC__", shot1_desc_instruction)
+                     .replace("__SHOT1_EXAMPLE__", shot1_example))
     else:
         parts = [PROMPT_BASE_HEADER]
         if has_image:
@@ -191,7 +197,9 @@ def build_prompt_text(
                 parts.append(PROMPT_SHOT1_DIALOGUE_SECTION.format(shot1_dur=shot1_dur))
             else:
                 parts.append(PROMPT_SHOT1_SECTION.format(shot1_dur=shot1_dur))
-        parts.append(PROMPT_REQUIREMENTS)
+        parts.append(PROMPT_REQUIREMENTS
+                     .replace("__SHOT1_DESC__", shot1_desc_instruction)
+                     .replace("__SHOT1_EXAMPLE__", shot1_example))
     log.info(f"prompt: {json.dumps(parts, indent=2, ensure_ascii=False)}")
     return "\n".join(parts)
 

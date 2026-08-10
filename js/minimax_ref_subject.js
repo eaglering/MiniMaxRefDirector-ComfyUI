@@ -304,7 +304,7 @@ app.registerExtension({
 
                 const footer = document.createElement("div");
                 footer.className = "ref-ms-footer";
-                footer.textContent = "Up to 9 subjects";
+                footer.textContent = "Up 9 subjects，3 audios per shot";
 
                 wrapper.appendChild(subjectList);
                 wrapper.appendChild(addBtn);
@@ -355,7 +355,7 @@ app.registerExtension({
                     } catch (_) { }
 
                     const countVal = subjectCountWidget ? parseInt(subjectCountWidget.value) || 1 : 1;
-                    subjectCount = Math.max(1, Math.min(9, countVal));
+                    subjectCount = Math.max(1, countVal);
 
                     if (subjects.length === 0) {
                         while (subjects.length < subjectCount) {
@@ -694,11 +694,9 @@ app.registerExtension({
                     });
 
                     // Update add button state
-                    addBtn.disabled = subjects.length >= 9;
-                    addBtn.innerHTML = subjects.length >= 9
-                        ? "Max 9 subjects"
-                        : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add Subject`;
-                    footer.textContent = `${subjects.length}/9 subjects`;
+                    addBtn.disabled = false;
+                    addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add Subject`;
+                    footer.textContent = `${subjects.length} subject${subjects.length !== 1 ? "s" : ""}`;
                 }
 
                 function basename(path) {
@@ -718,7 +716,6 @@ app.registerExtension({
                 }
 
                 addBtn.addEventListener("click", () => {
-                    if (subjects.length >= 9) return;
                     subjects.push({ name: "", description: "", imageFile: "", audioFile: "" });
                     subjectCount = subjects.length;
                     renderSubjects();
@@ -746,24 +743,18 @@ app.registerExtension({
                         uploadFile(file, (filename, imgUrl) => {
                             // Add dropped file as image for the first empty image slot
                             // or create a new subject
-                            const targetIdx = subjects.length < 9 ? subjects.length : -1;
-                            if (targetIdx >= 0) {
-                                // Check if we need to add a new subject
-                                const last = subjects[subjects.length - 1];
-                                if (!last || last.imageFile || last.name) {
-                                    if (subjects.length < 9) {
-                                        subjects.push({ name: "", description: "", imageFile: filename, imageB64: imgUrl, audioFile: "" });
-                                        subjectCount = subjects.length;
-                                        renderSubjects();
-                                        saveState();
-                                        updateNodeSize();
-                                    }
-                                } else {
-                                    last.imageFile = filename;
-                                    last.imageB64 = imgUrl;
-                                    renderSubjects();
-                                    saveState();
-                                }
+                            const last = subjects[subjects.length - 1];
+                            if (!last || last.imageFile || last.name) {
+                                subjects.push({ name: "", description: "", imageFile: filename, imageB64: imgUrl, audioFile: "" });
+                                subjectCount = subjects.length;
+                                renderSubjects();
+                                saveState();
+                                updateNodeSize();
+                            } else {
+                                last.imageFile = filename;
+                                last.imageB64 = imgUrl;
+                                renderSubjects();
+                                saveState();
                             }
                         });
                     }
