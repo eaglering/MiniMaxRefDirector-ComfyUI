@@ -11,114 +11,187 @@ from comfy_api.latest import io
 
 log = logging.getLogger(__name__)
 
-# ── 基础 Prompt（无增强） ──────────────────────────────────────────
+# ── Basic Prompt (no enhancement) ──────────────────────────────────
 
-PROMPT_BASE_HEADER = """【任务】处理多段视频/故事任务。"""
+PROMPT_BASE_HEADER = """You are a video prompt writer for a full-reference text-to-video generation system. Convert user input into a structured video prompt with character and dialogue placeholders for downstream mapping and generation.
+
+Write all shot descriptions in English. Only dialogue content in the mapping may retain its original language (Chinese or English) with a `[Chinese]` or `[English]` prefix."""
 
 PROMPT_IMAGE_SECTION = """
-【首帧图片】请根据首帧图片内容，分析场景、角色、氛围，作为视频的起始状态。"""
+## First Frame Reference Image:
+Analyze the provided reference image as the starting visual state. Describe the scene, characters, lighting, and atmosphere visible in the image to establish the initial shot."""
+
 PROMPT_LAST_SECTION = """
-【上一段提示词】请从中提取场景环境和角色状态概要（忽略对话、运镜、时间戳等细节），仅用于推断当前起点状态：
+## Previous Shot Context:
+The following is the prompt from the previous video segment. Extract the environment, character positions, clothing, and visible state to determine the starting state for the current segment. Ignore dialogue, camera movements, and timestamps—only retain what defines visual continuity:
 {prev_prompt}"""
 
 PROMPT_USER_SECTION = """
-【用户新输入】{user_input}"""
+## User Input:
+{user_input}
+
+Video duration: {duration} seconds at 24fps."""
 
 PROMPT_SHOT1_SECTION = """
-首帧镜头说明：根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
+## Opening Shot (from reference image):
+Describe the opening scene exactly as seen in the reference image. This shot is NOT counted toward the user-specified total duration and serves as the starting visual state before the directed action begins."""
 
 PROMPT_SHOT1_DIALOGUE_SECTION = """
-首帧镜头说明：结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
+## Opening Shot (from reference image, with previous continuity):
+Describe the opening scene by combining the reference image with the previous shot context below. Identify characters (matching ROLE_N assignments from the previous segment where applicable) and describe their current positions and states as visible in the image. This shot is NOT counted toward the user-specified total duration."""
 
 PROMPT_NO_IMAGE_INSTRUCTION = """
-首帧镜头说明：无
-请直接根据文本信息生成提示词，无需分析图片。"""
+No reference image provided. Generate descriptions based on the text input alone."""
 
 PROMPT_REQUIREMENTS = """
-## 占位符规则：
-1. 所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
-2. 所有对话内容必须用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_1_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
-3. 每个不同的角色分配一个独立的 ROLE 占位符。
-4. 每句对话分配一个 DIALOGUE 占位符，占位符前缀 ROLE_ 对应说话的角色。
-5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
+## Placeholder Rules:
+1. All character names MUST be represented with placeholders using the format `{{ROLE_0}}`, `{{ROLE_1}}`, etc.
+2. All dialogue MUST be represented with placeholders using the format `{{ROLE_0_DIALOGUE_0}}`, `{{ROLE_1_DIALOGUE_1}}`, `{{ROLE_1_DIALOGUE_2}}`, etc.
+3. Assign one ROLE_N placeholder per distinct character (ascending from 0).
+4. Assign one ROLE_N_DIALOGUE_M placeholder per dialogue line. The ROLE_N prefix must match the speaking character.
+5. Mapping values for dialogue must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content.
 
-## 输出格式要求：
-请输出一个 JSON，包含以下字段：__SHOT1_DESC__
-  - "detailed_description": 用户输入的镜头描述（含角色占位符、对话占位符）
-  - "overall_soundscape": 用户输入的环境音、动作音效等画面内的声音元素。如果没有则输出 null。
-  - "mapping": 一个字典，键为占位符名（如 "ROLE_0"，"ROLE_0_DIALOGUE_0"），值为对应的实际文本。
+## Writing Guidelines (Full-Reference Video Prompt Standard):
 
-输出示例：
+### detailed_description:
+- Begin with 1–2 English sentences establishing the overall visual style, lighting tone, and color palette before `[Shot 1]`.
+- Structure shots with `[Shot 1]`, `[Shot 2] At MM:SS.mmm`, `[Shot 3] At MM:SS.mmm`, etc. The opening style sentence has no shot marker, and `[Shot 1]` has no timestamp.
+- Write camera movement as natural English prose within each shot description (e.g., "the camera slowly pushes in from a wide establishing shot to a medium close-up", "a static wide shot with shallow depth of field", "a smooth handheld tracking shot").
+- Label each speaking character with (S1), (S2), etc., corresponding to their `{{ROLE_N}}` assignment order.
+- When a character speaks, place the dialogue placeholder immediately after: `{{ROLE_N}} (Sx) says, {{ROLE_N_DIALOGUE_M}}` or `{{ROLE_N}} (Sx) looks up and replies, {{ROLE_N_DIALOGUE_M}}`.
+- For each shot, clearly establish: shot composition (e.g., wide/medium/close-up/over-the-shoulder), subject appearance and position, environment and lighting, character actions and state changes, camera movement, and relevant on-screen sound.
+- Describe what is actually visible in the frame—avoid reducing descriptions to plot summaries.
+- All shot text must be in English. Only the dialogue values in the mapping may be non-English.
+
+### overall_soundscape:
+- Summarize continuous ambient sound and recurring physical sound effects that persist across the full video.
+- Dialogue, singing, and shot-specific isolated sound events should remain in detailed_description.
+- Example: "Soft indoor room tone and distant traffic hum continue throughout."
+- Output null if no continuous ambient sound is specified.
+
+### non_diegetic_music:
+- Describe background music audible only to the audience (not to characters in the scene). State instrumentation, tempo, and dynamic development.
+- Example: "A restrained solo-piano score at a slow tempo, with sustained low cello underneath."
+- Use "N/A" if no background music is present.
+
+## Output Format:
+Output a single JSON object with these fields:
+__SHOT1_DESC__
+  - "detailed_description": String (as described above)
+  - "overall_soundscape": String or null
+  - "non_diegetic_music": String (use "N/A" if none)
+  - "mapping": Object (keys: "ROLE_0", "ROLE_1", "ROLE_0_DIALOGUE_0" etc.; values: corresponding actual text with language prefix for dialogue)
+
+Example output:
 {{
-__SHOT1_EXAMPLE__  "detailed_description": "咖啡馆内，{{ROLE_0}}和{{ROLE_1}}相对而坐。\\n近景，{{ROLE_0}}说：\\"{{ROLE_0_DIALOGUE_0}}\\"，{{ROLE_1}}也说：\\"{{ROLE_1_DIALOGUE_1}}\\"。\\n",
-  "overall_soundscape": "咖啡机蒸汽声、杯盘碰撞声、轻柔背景交谈声",
+__SHOT1_EXAMPLE__  "detailed_description": "The target video is in a warm, cinematic style with soft natural lighting and shallow depth of field.\\n[Shot 1] A cozy cafe interior with exposed brick walls and warm pendant lights. {{ROLE_0}} (S1) and {{ROLE_1}} (S2) sit across from each other at a wooden table by the window. {{ROLE_0}} (S1) leans forward with a serious expression and says, {{ROLE_0_DIALOGUE_0}}.\\n[Shot 2] At 00:03.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2) as they smile warmly and reply, {{ROLE_1_DIALOGUE_1}}. The camera holds steady in a medium close-up with shallow focus.\\n",
+  "overall_soundscape": "Soft coffee-machine steam, gentle cup clinking, and low background chatter continue throughout.",
+  "non_diegetic_music": "N/A",
   "mapping": {{
-    "ROLE_0": "张三",
-    "ROLE_1": "李四",
+    "ROLE_0": "Zhang San",
+    "ROLE_1": "Li Si",
     "ROLE_0_DIALOGUE_0": "[Chinese]你好!",
     "ROLE_1_DIALOGUE_1": "[English]Hello!"
   }}
 }}
-请严格按照上述 JSON 格式输出，不要添加额外文字。"""
 
-# ── 增强 Prompt ────────────────────────────────────────────────────
+Output ONLY the JSON object. Do not add any text before or after it."""
 
-PROMPT_ENHANCE_HEADER = """【任务】处理多段视频/故事任务。你需要对用户输入进行提示词增强，使其更适合视频生成。"""
+# ── Enhanced Prompt ──────────────────────────────────────────────────
+
+PROMPT_ENHANCE_HEADER = """You are a video prompt writer for a full-reference text-to-video generation system. Convert user input into a structured, enriched video prompt with character and dialogue placeholders for downstream mapping and generation.
+
+In addition to basic conversion, you will enhance the output: fill in missing visual details, ambient sound, camera movement, and background music where the user has not specified them. Write all shot descriptions in English."""
 
 PROMPT_ENHANCE_IMAGE_SECTION = """
-【首帧图片】请根据首帧图片内容，分析场景、角色、氛围，作为视频的起始状态。"""
+## First Frame Reference Image:
+Analyze the provided reference image as the starting visual state. Describe the scene, characters, lighting, and atmosphere visible in the image to establish the initial shot."""
 
 PROMPT_ENHANCE_LAST_SECTION = """
-【上一段提示词】请从中提取场景环境和角色状态概要（忽略对话、运镜、时间戳等细节），仅用于推断当前起点状态：
+## Previous Shot Context:
+The following is the prompt from the previous video segment. Extract the environment, character positions, clothing, and visible state to determine the starting state for the current segment. Ignore dialogue, camera movements, and timestamps—only retain what defines visual continuity:
 {prev_prompt}"""
 
 PROMPT_ENHANCE_USER_SECTION = """
-【用户新输入】{user_input}"""
+## User Input:
+{user_input}
+
+Video duration: {duration} seconds at 24fps."""
 
 PROMPT_ENHANCE_SHOT1_SECTION = """
-首帧镜头说明：根据首帧图片描述初始画面状态和角色初始姿态。此镜头不计入用户输入的总时长。"""
+## Opening Shot (from reference image):
+Describe the opening scene exactly as seen in the reference image. This shot is NOT counted toward the user-specified total duration and serves as the starting visual state before the directed action begins."""
 
 PROMPT_ENHANCE_SHOT1_DIALOGUE_SECTION = """
-首帧镜头说明：结合首帧图片和上一段提示词，描述上一段结束时的画面状态、角色姿态和位置关系（作为本段起点）。此镜头不计入用户输入的总时长。"""
+## Opening Shot (from reference image, with previous continuity):
+Describe the opening scene by combining the reference image with the previous shot context below. Identify characters (matching ROLE_N assignments from the previous segment where applicable) and describe their current positions and states as visible in the image. This shot is NOT counted toward the user-specified total duration."""
 
 PROMPT_ENHANCE_NO_IMAGE = """
-请直接根据文本信息生成提示词。"""
+No reference image provided. Generate and enhance descriptions based on the text input alone."""
 
 PROMPT_ENHANCE_REQUIREMENTS = """
-## 占位符规则：
-1. 提示词中所有角色名称必须用占位符表示（格式：{{ROLE_0}}, {{ROLE_1}}...）。
-2. 所有对话内容用占位符表示（格式：{{ROLE_0_DIALOGUE_0}}, {{ROLE_1_DIALOGUE_1}}, {{ROLE_1_DIALOGUE_2}}...）。
-3. 每个不同的角色分配一个独立的 ROLE 占位符。
-4. 用户输入中的每句对话分配一个 DIALOGUE 占位符，占位符前缀 ROLE_ 对应说话的角色。
-5. mapping 中的对话值必须带语言标签前缀：[Chinese]表示中文，[English]表示英文，需自动检测对话内容的语言。
+## Placeholder Rules:
+1. All character names MUST be represented with placeholders using the format `{{ROLE_0}}`, `{{ROLE_1}}`, etc.
+2. All dialogue MUST be represented with placeholders using the format `{{ROLE_0_DIALOGUE_0}}`, `{{ROLE_1_DIALOGUE_1}}`, `{{ROLE_1_DIALOGUE_2}}`, etc.
+3. Assign one ROLE_N placeholder per distinct character (ascending from 0).
+4. Assign one ROLE_N_DIALOGUE_M placeholder per dialogue line. The ROLE_N prefix must match the speaking character.
+5. Mapping values for dialogue must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content.
 
-## 增强要求：
-1. 对场景描述进行润色和细化，增加画面细节、光影、色彩、氛围描写。
-2. 如果用户输入中没有提及环境音和动作音效（画面内的声音），请根据场景合理补充。
-3. 如果用户输入中没有任何运镜描述，请根据场景合理补充（如：缓慢推镜、侧拍、环绕、固定镜头等）。
+## Enhancement Capabilities:
+1. **Visual Enrichment**: Polish and enrich scene descriptions with specific visual detail, lighting descriptors, color palette, texture, and atmosphere. Fill in reasonable visual details where the user input is sparse.
+2. **Ambient Sound Completion**: When the user input lacks ambient sound description, infer and add appropriate continuous ambient sound based on the scene context (environment type, weather, location, time of day, on-screen actions).
+3. **Camera Movement Completion**: When the user input lacks camera direction, infer and add appropriate camera movements based on the scene's emotional tone and action (e.g., slow push-in for intimacy, static shot for tension, handheld for urgency, tracking for movement).
+4. **Background Music Suggestion**: When applicable, suggest appropriate non-diegetic music based on the scene's emotional tone and pacing. Use "N/A" if unsuitable.
 
-## 输出格式要求：
-请输出一个 JSON，包含以下字段：__SHOT1_DESC__
-  - "detailed_description": 包含镜头描述（含 ROLE 和 DIALOGUE 占位符、运镜方式）
-  - "overall_soundscape": 画面内的环境音、动作音效等。如果没有则输出 null。
-  - "mapping": 一个字典，键为占位符名（如 "ROLE_0"），值为对应的实际文本。
+## Writing Guidelines (Full-Reference Video Prompt Standard):
 
-输出示例：
+### detailed_description:
+- Begin with 1–2 English sentences establishing the overall visual style, lighting tone, and color palette before `[Shot 1]`.
+- Structure shots with `[Shot 1]`, `[Shot 2] At MM:SS.mmm`, `[Shot 3] At MM:SS.mmm`, etc. The opening style sentence has no shot marker, and `[Shot 1]` has no timestamp.
+- Write camera movement as natural English prose within each shot description (e.g., "the camera slowly pushes in from a wide establishing shot to a medium close-up", "a static wide shot with shallow depth of field", "a smooth handheld tracking shot").
+- Label each speaking character with (S1), (S2), etc., corresponding to their `{{ROLE_N}}` assignment order.
+- When a character speaks, place the dialogue placeholder immediately after: `{{ROLE_N}} (Sx) says, {{ROLE_N_DIALOGUE_M}}` or `{{ROLE_N}} (Sx) looks up and replies, {{ROLE_N_DIALOGUE_M}}`.
+- For each shot, clearly establish: shot composition (e.g., wide/medium/close-up/over-the-shoulder), subject appearance and position, environment and lighting, character actions and state changes, camera movement, and relevant on-screen sound.
+- Describe what is actually visible in the frame—avoid reducing descriptions to plot summaries.
+- All shot text must be in English. Only the dialogue values in the mapping may be non-English.
+
+### overall_soundscape:
+- Summarize continuous ambient sound and recurring physical sound effects that persist across the full video.
+- Dialogue, singing, and shot-specific isolated sound events should remain in detailed_description.
+- Example: "Soft indoor room tone and distant traffic hum continue throughout."
+- Output null if no continuous ambient sound is specified.
+
+### non_diegetic_music:
+- Describe background music audible only to the audience (not to characters in the scene). State instrumentation, tempo, and dynamic development.
+- Example: "A restrained solo-piano score at a slow tempo, with sustained low cello underneath."
+- Use "N/A" if no background music is present.
+
+## Output Format:
+Output a single JSON object with these fields:
+__SHOT1_DESC__
+  - "detailed_description": String (as described above)
+  - "overall_soundscape": String or null
+  - "non_diegetic_music": String (use "N/A" if none)
+  - "mapping": Object (keys: "ROLE_0", "ROLE_1", "ROLE_0_DIALOGUE_0" etc.; values: corresponding actual text with language prefix for dialogue)
+
+Example output:
 {{
-__SHOT1_EXAMPLE__  "detailed_description": "昏暗的咖啡馆内，暖黄色灯光洒在橡木桌面上，{{ROLE_0}}和{{ROLE_1}}相对而坐。镜头缓慢推镜，从全景推向中近景。\\n近景特写{{ROLE_0}}的面部，他神色凝重，缓缓开口：\\"{{ROLE_0_DIALOGUE_0}}\\"。固定镜头，浅景深。\\n反打镜头切至{{ROLE_1}}，{{ROLE_1}}满脸笑容地说：\\"{{ROLE_1_DIALOGUE_1}}\\"。过肩侧拍镜头。\\n",
-  "overall_soundscape": "咖啡机蒸汽声、杯盘轻微碰撞声、远处低沉交谈声、窗外雨滴敲打玻璃声",
+__SHOT1_EXAMPLE__  "detailed_description": "The target video is in a moody, cinematic style with dim warm lighting, deep shadows, and rich amber tones.\\n[Shot 1] A dimly lit cafe interior with exposed brick walls. {{ROLE_0}} (S1) and {{ROLE_1}} (S2) sit across from each other at a worn wooden table. Rain streaks down the window behind them. The camera slowly pushes in from a wide establishing shot to a medium two-shot.\\n[Shot 2] At 00:04.000, a close-up on {{ROLE_0}} (S1). His expression is grave. Fixed camera, shallow depth of field. He says, {{ROLE_0_DIALOGUE_0}}.\\n[Shot 3] At 00:08.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2). {{ROLE_1}} (S2) smiles warmly and replies, {{ROLE_1_DIALOGUE_1}}. The camera holds steady in a medium close-up.\\n",
+  "overall_soundscape": "Soft coffee-machine steam, gentle cup clinking, distant muffled conversation, and rain tapping against the window continue throughout.",
+  "non_diegetic_music": "A restrained solo-piano score at a slow tempo, with sustained low cello underneath, growing subtly more hopeful in the middle section.",
   "mapping": {{
-    "ROLE_0": "张三",
-    "ROLE_1": "李四",
+    "ROLE_0": "Zhang San",
+    "ROLE_1": "Li Si",
     "ROLE_0_DIALOGUE_0": "[Chinese]好久不见。",
     "ROLE_1_DIALOGUE_1": "[English]Hello!"
   }}
 }}
-请严格按照上述 JSON 格式输出，不要添加额外文字。"""
+
+Output ONLY the JSON object. Do not add any text before or after it."""
 
 
 def _has_image(image) -> bool:
-    """检查 image 是否有效（不为 None 且不为空张量）。"""
+    """Check whether the image is valid (not None and not an empty tensor)."""
     if image is None:
         return False
     if hasattr(image, "numel") and image.numel() == 0:
@@ -127,40 +200,42 @@ def _has_image(image) -> bool:
 
 
 def _calc_shot1_duration(fps: float) -> float:
-    """计算首帧镜头的时长（秒）：ceil(8*100/fps)/100，保留2位小数。"""
-    return round(math.ceil(8 * 100 / fps) / 100, 2)
+    """Calculate first shot duration (seconds): ceil(1*100/fps)/100, rounded to 2 decimal places."""
+    return round(math.ceil(1 * 100 / fps) / 100, 2)
 
 
 def build_prompt_text(
     last_prompt: str,
     prompt: str,
     duration: float,
-    enhance: bool,
+    enhance: str,
     has_image: bool,
     shot1_dur: float = 0.0,
 ) -> str:
-    """根据参数动态构建发送给 CLIP 模型的 prompt 文本。
+    """Build the prompt text sent to the CLIP/VLM model dynamically.
 
     Args:
-        last_prompt: 上一段提示词（可为空）
-        prompt: 用户新输入
-        duration: 视频总时长（秒）
-        enhance: 是否启用提示词增强
-        has_image: 是否有首帧图片
-        shot1_dur: 首帧镜头时长（仅 has_image=True 时使用）
+        last_prompt: previous segment prompt (can be empty)
+        prompt: new user input
+        duration: total video duration (seconds)
+        enhance: prompt mode ("Basic" = basic, "Enhanced" = enhanced). "None" mode skips VLM entirely and never calls this function.
+        has_image: whether a first-frame reference image is provided
+        shot1_dur: first shot duration (only used when has_image=True, for log info)
     """
     has_last = bool(last_prompt.strip())
 
     shot1_desc_instruction = (
-        '\n  - "shot1_description": 根据首帧图片描述初始画面状态和角色初始姿态。必须输出完整的画面描述，绝不能填 null！'
+        '\n  - "shot1_description": Describe the opening scene from the reference image. Describe the environment, characters, lighting, and atmosphere. Must output a full visual description—never use null!'
         if has_image else ''
     )
     shot1_example = (
-        '  "shot1_description": "首帧画面中，角色姿态与场景环境的详细描摹。",\n'
+        '  "shot1_description": "A warm cafe interior bathed in soft afternoon light. {{ROLE_0}} sits alone at a corner table, staring pensively at a cup of coffee. {{ROLE_1}} enters through the door in the background, partially silhouetted against the bright street outside.",\n'
         if has_image else ''
     )
 
-    if enhance:
+    is_enhanced = enhance == "Enhanced"
+
+    if is_enhanced:
         parts = [PROMPT_ENHANCE_HEADER]
         if has_image:
             parts.append(PROMPT_ENHANCE_IMAGE_SECTION)
@@ -169,14 +244,14 @@ def build_prompt_text(
         if not has_image:
             parts.append(PROMPT_ENHANCE_NO_IMAGE)
         parts.append(PROMPT_ENHANCE_USER_SECTION.format(
-            user_input=prompt or "(无)",
+            user_input=prompt or "(none)",
             duration=f"{duration:.1f}",
         ))
         if has_image:
             if has_last:
-                parts.append(PROMPT_ENHANCE_SHOT1_DIALOGUE_SECTION.format(shot1_dur=shot1_dur))
+                parts.append(PROMPT_ENHANCE_SHOT1_DIALOGUE_SECTION)
             else:
-                parts.append(PROMPT_ENHANCE_SHOT1_SECTION.format(shot1_dur=shot1_dur))
+                parts.append(PROMPT_ENHANCE_SHOT1_SECTION)
         parts.append(PROMPT_ENHANCE_REQUIREMENTS
                      .replace("__SHOT1_DESC__", shot1_desc_instruction)
                      .replace("__SHOT1_EXAMPLE__", shot1_example))
@@ -189,14 +264,14 @@ def build_prompt_text(
         if not has_image:
             parts.append(PROMPT_NO_IMAGE_INSTRUCTION)
         parts.append(PROMPT_USER_SECTION.format(
-            user_input=prompt or "(无)",
+            user_input=prompt or "(none)",
             duration=f"{duration:.1f}",
         ))
         if has_image:
             if has_last:
-                parts.append(PROMPT_SHOT1_DIALOGUE_SECTION.format(shot1_dur=shot1_dur))
+                parts.append(PROMPT_SHOT1_DIALOGUE_SECTION)
             else:
-                parts.append(PROMPT_SHOT1_SECTION.format(shot1_dur=shot1_dur))
+                parts.append(PROMPT_SHOT1_SECTION)
         parts.append(PROMPT_REQUIREMENTS
                      .replace("__SHOT1_DESC__", shot1_desc_instruction)
                      .replace("__SHOT1_EXAMPLE__", shot1_example))
@@ -204,26 +279,26 @@ def build_prompt_text(
     return "\n".join(parts)
 
 def _normalize_description(text: str) -> str:
-    """规范化 detailed_description 文本：
-    - 全角冒号（：）和半角冒号（:）统一转为半角逗号（,）
-    - 移除所有半角双引号（"）和全角双引号（""）
+    """Normalize detailed_description text:
+    - Full-width colon (:）and half-width colon (:) converted to half-width comma (,)
+    - Remove all double-quotes (", ", "")
     """
-    text = text.replace("：", "，")  # 全角冒号 → 全角逗号
-    text = text.replace(":", ",")       # 半角冒号 → 半角逗号
+    text = text.replace("：", "，")  # full-width colon → full-width comma
+    text = text.replace(":", ",")   # half-width colon → half-width comma
     text = text.replace('"', "")
-    text = text.replace("“", "")
-    text = text.replace("”", "")
+    text = text.replace(""", "")
+    text = text.replace(""", "")
     return text
 
 
 def parse_generated_json(generated_text: str) -> dict:
-    """从模型输出中解析 JSON，返回包含各字段的字典。"""
-    # 优先匹配被 ```json ... ``` 包裹的 JSON 块
+    """Parse JSON from model output, return a dict with all fields."""
+    # Prefer extracting content from ```json ... ``` code blocks
     json_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", generated_text)
     if json_match:
         clean_text = json_match.group(1)
     else:
-        # 回退：尝试匹配文本中第一个纯 JSON 对象
+        # Fallback: match the first raw JSON object in the text
         json_match = re.search(r"\{[\s\S]*\}", generated_text)
         if json_match:
             clean_text = json_match.group(0)
@@ -242,7 +317,7 @@ def generate_prompt_with_clip(
     prompt: str = "",
     duration: float = 5.0,
     fps: float = 24.0,
-    enhance: bool = False,
+    enhance: str = "Basic",
     max_length: int = 1024,
     do_sample: bool = True,
     temperature: float = 0.1,
@@ -255,43 +330,58 @@ def generate_prompt_with_clip(
     thinking: bool = False,
     use_default_template: bool = True,
 ) -> dict:
-    """使用 CLIP 模型分析首帧图片并生成带占位符的提示词 JSON。
+    """Use a CLIP model to analyze the first-frame image and generate a placeholder-tagged prompt JSON.
 
     Args:
-        image: ComfyUI 图像张量 [B, H, W, C], 可选（None 表示纯文本模式）
-        clip: 外部传入的 CLIP 模型对象（可选，优先使用；为 None 则通过 clip_name/clip_type 加载）
-        clip_name: text_encoders 目录下的模型文件名（clip 为 None 时必填）
-        clip_type: CLIP 模型类型 ("minimax", "qwen3vl", "gemma")
-        last_prompt: 上一段提示词（可为空）
-        prompt: 用户新输入的提示词
-        duration: 视频总时长（秒）
-        fps: 帧率
-        enhance: 是否启用提示词增强（润色、补充环境音、补充运镜）
-        max_length: 生成文本最大长度
-        do_sample: 是否随机采样
-        temperature: 采样温度
-        top_k: Top-K 采样
-        top_p: Top-P 采样
-        min_p: Min-P 采样
-        repetition_penalty: 重复惩罚
-        seed: 随机种子
-        presence_penalty: 存在惩罚
-        thinking: 思考模式
-        use_default_template: 是否使用模型内置模板
+        image: ComfyUI image tensor [B, H, W, C], optional (None = text-only mode)
+        clip: external CLIP model object (optional, preferred when set; loaded via clip_name/clip_type when None)
+        clip_name: model filename under text_encoders directory (required when clip is None)
+        clip_type: CLIP model variant ("minimax", "qwen3vl", "gemma")
+        last_prompt: previous segment prompt (can be empty)
+        prompt: new user prompt; in "None" mode this is a pre-formatted skills JSON
+        duration: total video duration (seconds)
+        fps: frame rate
+        enhance: prompt mode ("None" = skip VLM, only placeholder replacement; "Basic" = standard; "Enhanced" = polish)
+        max_length: max generated text length
+        do_sample: whether to use random sampling
+        temperature: sampling temperature
+        top_k: Top-K sampling
+        top_p: Top-P sampling
+        min_p: Min-P sampling
+        repetition_penalty: repetition penalty
+        seed: random seed
+        presence_penalty: presence penalty
+        thinking: thinking mode
+        use_default_template: whether to use the model's built-in template
 
     Returns:
         dict: {
-            "output_json": str,
             "detailed_description": str,
             "overall_soundscape": str,
             "non_diegetic_music": str,
-            "mapping_str": str,
+            "mapping": dict,
         }
     """
+
+    # "None" mode: user prompt is already pre-formatted per skills JSON — parse directly, skip VLM
+    if enhance == "None":
+        log.info("[MiniMaxRefPromptEnhance] None mode: skipping VLM, parsing user prompt directly...")
+        try:
+            result = parse_generated_json(prompt)
+        except (json.JSONDecodeError, TypeError) as e:
+            log.warning(f"[MiniMaxRefPromptEnhance] Failed to parse user prompt as JSON: {e}, falling back to raw detailed_description")
+            result = {
+                "detailed_description": prompt,
+                "overall_soundscape": None,
+                "non_diegetic_music": None,
+                "mapping": {},
+            }
+        return result
+
     has_image = _has_image(image)
     shot1_dur = _calc_shot1_duration(fps) if has_image else 0.0
 
-    # 加载 CLIP 模型（优先使用外部传入的 clip）
+    # Load CLIP model (prefer externally-provided clip)
     external_clip = clip is not None
     if not external_clip:
         clip_type_enum = getattr(comfy.sd.CLIPType, clip_type.upper(), comfy.sd.CLIPType.MINIMAX)
@@ -301,11 +391,11 @@ def generate_prompt_with_clip(
             embedding_directory=folder_paths.get_folder_paths("embeddings"),
             clip_type=clip_type_enum,
         )
-        log.info(f"[MiniMaxRefPromptEnhance] 已加载 CLIP 模型: {clip_name} (type={clip_type})")
+        log.info(f"[MiniMaxRefPromptEnhance] Loaded CLIP model: {clip_name} (type={clip_type})")
     else:
-        log.info(f"[MiniMaxRefPromptEnhance] 使用外部传入的 CLIP 模型")
+        log.info(f"[MiniMaxRefPromptEnhance] Using externally-provided CLIP model")
 
-    # 构建 prompt 文本
+    # Build prompt text
     prompt_text = build_prompt_text(
         last_prompt=last_prompt,
         prompt=prompt,
@@ -316,7 +406,7 @@ def generate_prompt_with_clip(
     )
 
     log.info(
-        f"[MiniMaxRefPromptEnhance] 生成提示词... "
+        f"[MiniMaxRefPromptEnhance] Generating prompt... "
         f"(last_prompt: {len(last_prompt)} chars, prompt: {len(prompt)} chars, "
         f"duration: {duration:.1f}s, fps: {fps}, enhance: {enhance}, "
         f"has_image: {has_image}, shot1_dur: {shot1_dur})"
@@ -326,7 +416,7 @@ def generate_prompt_with_clip(
     generated_ids = None
     generated_text = ""
     try:
-        # Tokenize: 将 prompt 和 image（如有）一起编码
+        # Tokenize: encode prompt and image (if available) together
         tokenize_kwargs = {
             "skip_template": not use_default_template,
             "min_length": 1,
@@ -337,7 +427,7 @@ def generate_prompt_with_clip(
 
         tokens = clip.tokenize(prompt_text, **tokenize_kwargs)
 
-        # 生成文本（inference_mode 禁用 autograd，减少显存开销）
+        # Generate text (inference_mode disables autograd to reduce VRAM)
         with torch.inference_mode():
             generated_ids = clip.generate(
                 tokens,
@@ -353,18 +443,18 @@ def generate_prompt_with_clip(
             )
 
         generated_text = clip.decode(generated_ids)
-        log.info(f"[MiniMaxRefPromptEnhance] 生成结果（前200字符）: {generated_text}")
+        log.info(f"[MiniMaxRefPromptEnhance] Generated (first 200 chars): {generated_text}")
 
-        # 解析 JSON（在 finally 清理之前完成）
+        # Parse JSON (before finally cleanup)
         try:
             result = parse_generated_json(generated_text)
             detailed_description = result.get("detailed_description", "") or ""
             detailed_description = _normalize_description(detailed_description)
             result["detailed_description"] = detailed_description
         except (json.JSONDecodeError, TypeError) as e:
-            log.error(f"[MiniMaxRefPromptEnhance] JSON 解析失败: {e}")
-            log.error(f"[MiniMaxRefPromptEnhance] 原始输出: {generated_text}")
-            # 回退：用原始文本作为 detailed_description
+            log.error(f"[MiniMaxRefPromptEnhance] JSON parse failed: {e}")
+            log.error(f"[MiniMaxRefPromptEnhance] Raw output: {generated_text}")
+            # Fallback: use raw text as detailed_description
             result = {
                 "detailed_description": generated_text.strip(),
                 "overall_soundscape": None,
@@ -375,19 +465,19 @@ def generate_prompt_with_clip(
         return result
 
     finally:
-        # 释放生成过程中产生的中间张量，避免显存残留
+        # Release intermediate tensors to avoid VRAM leaks
         del tokens, generated_ids
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        # 仅释放内部加载的 CLIP 模型引用（ComfyUI 内部缓存仍保留副本）
-        # 外部传入的 clip 不释放，由调用方管理生命周期
+        # Only release internally-loaded CLIP model reference (ComfyUI's internal cache keeps a copy)
+        # Externally-provided clip is NOT released — managed by the caller
         if not external_clip:
             del clip
 
 
 class MinimaxRefPromptEnhance(io.ComfyNode):
-    """使用 CLIP 模型分析首帧图片并生成带占位符的格式化提示词 JSON。"""
+    """Use a CLIP model to analyze the first-frame image (optional) and generate placeholder-tagged formatting prompt JSON."""
 
     @classmethod
     def define_schema(cls):
@@ -398,38 +488,38 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
             node_id="MiniMaxRefPromptEnhance",
             display_name="MiniMax Ref Prompt Enhance",
             category="minimaxrefdirector/prompt",
-            description="使用 CLIP 模型分析首帧图片（可选），综合上一段提示词（可选）和用户新输入，生成带角色/对话占位符的格式化提示词。",
+            description="Uses a CLIP model to analyze the first-frame image (optional), incorporate the previous prompt (optional) and user input, then produce structured placeholder-tagged shot descriptions.",
             inputs=[
                 io.Combo.Input(
                     "clip_name",
                     options=text_encoders,
                     default=text_encoders[0] if text_encoders else "",
-                    tooltip="选择一个 text encoder（CLIP/VL）模型",
+                    tooltip="Select a text encoder (CLIP/VL) model",
                 ),
                 io.Combo.Input(
                     "clip_type",
                     options=clip_types,
                     default="qwen3vl",
-                    tooltip="CLIP 模型类型",
+                    tooltip="CLIP model variant",
                 ),
                 io.Image.Input(
                     "image",
                     optional=True,
-                    tooltip="首帧图片（可选），用于分析场景和角色；不连接则纯文本模式",
+                    tooltip="First-frame image (optional). Text-only mode when not connected.",
                 ),
                 io.String.Input(
                     "last_prompt",
                     display_name="last_prompt",
                     multiline=True,
                     default="",
-                    tooltip="上一段提示词（可选，有首帧图片时提供上下文）",
+                    tooltip="Previous segment prompt (optional, provides context when first frame is present)",
                 ),
                 io.String.Input(
                     "prompt",
                     display_name="prompt",
                     multiline=True,
                     default="",
-                    tooltip="用户新输入的提示词",
+                    tooltip="New user prompt; in 'None' mode this should be a pre-formatted skills JSON",
                 ),
                 io.Float.Input(
                     "duration",
@@ -438,7 +528,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     min=0.5,
                     max=3600.0,
                     step=0.5,
-                    tooltip="视频总时长（秒）",
+                    tooltip="Total video duration (seconds)",
                 ),
                 io.Float.Input(
                     "fps",
@@ -447,26 +537,27 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     min=1.0,
                     max=120.0,
                     step=0.01,
-                    tooltip="帧率（每秒帧数），用于计算首帧镜头时长",
+                    tooltip="Frame rate (fps), used for calculating first-shot duration",
                 ),
-                io.Boolean.Input(
+                io.Combo.Input(
                     "enhance",
-                    default=False,
-                    tooltip="开启后会对提示词进行优化润色，自动补充环境音和运镜描述",
+                    options=["None", "Basic", "Enhanced"],
+                    default="Basic",
+                    tooltip="Prompt generation mode: None=skip VLM, placeholder replacement only | Basic=standard generation | Enhanced=polish + fill ambient sound / camera movement / BGM",
                 ),
                 io.Int.Input(
                     "max_length",
                     default=512,
                     min=16,
                     max=32768,
-                    tooltip="生成文本的最大长度（含输入 prompt），降低此值可显著加速生成",
+                    tooltip="Max generated text length (including input prompt). Lower values speed up generation.",
                     advanced=True,
                 ),
                 io.Boolean.Input(
                     "do_sample",
                     optional=True,
                     default=True,
-                    tooltip="启用随机采样（关闭则使用贪心解码）",
+                    tooltip="Enable random sampling (disable for greedy decoding)",
                     advanced=True,
                 ),
                 io.Float.Input(
@@ -477,7 +568,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     min=0.01,
                     max=2.0,
                     step=0.01,
-                    tooltip="采样温度",
+                    tooltip="Sampling temperature",
                     advanced=True,
                 ),
                 io.Int.Input(
@@ -487,7 +578,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     default=32,
                     min=0,
                     max=1000,
-                    tooltip="Top-K 采样",
+                    tooltip="Top-K sampling",
                     advanced=True,
                 ),
                 io.Float.Input(
@@ -498,7 +589,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     min=0.0,
                     max=1.0,
                     step=0.01,
-                    tooltip="Top-P (nucleus) 采样",
+                    tooltip="Top-P (nucleus) sampling",
                     advanced=True,
                 ),
                 io.Float.Input(
@@ -509,7 +600,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     min=0.0,
                     max=1.0,
                     step=0.01,
-                    tooltip="Min-P 采样",
+                    tooltip="Min-P sampling",
                     advanced=True,
                 ),
                 io.Float.Input(
@@ -520,7 +611,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     min=0.0,
                     max=5.0,
                     step=0.01,
-                    tooltip="重复惩罚",
+                    tooltip="Repetition penalty",
                     advanced=True,
                 ),
                 io.Int.Input(
@@ -530,7 +621,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     default=42,
                     min=0,
                     max=0xFFFFFFFFFFFFFFFF,
-                    tooltip="随机种子",
+                    tooltip="Random seed",
                     advanced=True,
                 ),
                 io.Float.Input(
@@ -541,36 +632,36 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     min=0.0,
                     max=5.0,
                     step=0.01,
-                    tooltip="存在惩罚",
+                    tooltip="Presence penalty",
                     advanced=True,
                 ),
                 io.Boolean.Input(
                     "thinking",
                     optional=True,
                     default=False,
-                    tooltip="启用思考模式（如果模型支持）",
+                    tooltip="Enable thinking mode (if supported by the model)",
                     advanced=True,
                 ),
                 io.Boolean.Input(
                     "use_default_template",
                     optional=True,
                     default=True,
-                    tooltip="使用模型内置的 system prompt/template",
+                    tooltip="Use model built-in system prompt / template",
                     advanced=True,
                 ),
             ],
             outputs=[
                 io.String.Output(
                     display_name="JSON",
-                    tooltip="含 detailed_description、overall_soundscape、non_diegetic_music 和 mapping 的 JSON 字符串",
+                    tooltip="JSON string containing detailed_description, overall_soundscape, non_diegetic_music, and mapping",
                 ),
                 io.String.Output(
                     display_name="detailed_description",
-                    tooltip="格式化后的镜头描述（含时间戳和占位符）",
+                    tooltip="Formatted shot descriptions (with timestamps and placeholders)",
                 ),
                 io.String.Output(
                     display_name="mapping",
-                    tooltip="占位符到实际文本的映射（JSON 字符串）",
+                    tooltip="Placeholder-to-text mapping (JSON string)",
                 ),
             ],
         )
@@ -585,7 +676,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
         prompt="",
         duration=5.0,
         fps=24.0,
-        enhance=False,
+        enhance="Basic",
         max_length=512,
         do_sample=True,
         temperature=0.1,

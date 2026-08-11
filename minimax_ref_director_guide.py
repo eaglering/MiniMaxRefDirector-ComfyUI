@@ -65,16 +65,18 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                     default=42,
                     min=0,
                     max=0xFFFFFFFFFFFFFFFF,
-                    tooltip="随机种子，传递给 CLIP 模型生成",
+                    tooltip="Random seed, forwarded to CLIP model generation",
                     advanced=True,
                 ),
                 io.Boolean.Input(
                     "last_refer_mode", default=False,
                     tooltip="Whether to use the last reference frame as the first frame of the next segment.",
                 ),
-                io.Boolean.Input(
-                    "prompt_enhance", default=False,
-                    tooltip="Whether to enhance the prompt generation.",
+                io.Combo.Input(
+                    "prompt_enhance",
+                    options=["None", "Basic", "Enhanced"],
+                    default="Basic",
+                    tooltip="Prompt enhancement mode: None=skip VLM, placeholder replacement only | Basic=standard generation | Enhanced=polish + fill ambient sound / camera movement / BGM",
                 ),
                 io.Int.Input(
                     "seg_index", default=0, min=0, max=1000, step=1,
@@ -105,7 +107,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
 
     @classmethod
     def execute(cls, guide_data=None, first_frame=None, clip=None, clip_name="", clip_type="qwen3vl", seed=42, 
-                last_refer_mode=False, prompt_enhance=False, seg_index=0) -> io.NodeOutput:
+                last_refer_mode=False, prompt_enhance="Basic", seg_index=0) -> io.NodeOutput:
         """Extract segment-level data and load all referenced subject images/audio."""
 
         if guide_data is None:
@@ -133,10 +135,18 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         prev_prompt = prev_prompt if last_refer_mode else ""
         frame_refer = seg.get("first_frame", "")
         duration_frames = seg.get("duration_frames", 0)
-        if frame_refer:
-            first_frame = load_image_tensor(frame_refer)
+        if prompt_enhance == "None":
+            # "None" mode: user prompt is already pre-formatted per skills — skip VLM
+            # Only parse the first frame when frame_refer is NOT set AND last_refer_mode is enabled
+            if not frame_refer and last_refer_mode:
+                first_frame = first_frame  # keep socket input
+            else:
+                first_frame = None
         else:
-            first_frame = first_frame if last_refer_mode else None
+            if frame_refer:
+                first_frame = load_image_tensor(frame_refer)
+            else:
+                first_frame = first_frame if last_refer_mode else None
 
         result = cls._process_prompt(
             subject_data=subject_data,
@@ -213,10 +223,10 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
     def _process_prompt(cls, subject_data: list[dict], global_prompt: str, prompt: str,
                        duration_frames: int, first_frame: torch.Tensor|None = None, last_prompt: str = "",
                        clip=None, clip_name: str = "", clip_type: str = "qwen3vl",
-                       frame_rate: float = 24.0, enhance: bool = False, seed: int = 42) -> dict:
-        """处理单个分镜提示词：调用 VLM 增强 → 解析 mapping → 构建 subject_definitions / retention_analysis。"""
+                       frame_rate: float = 24.0, enhance: str = "Basic", seed: int = 42) -> dict:
+        """Process a single segment prompt: call VLM enhancement → parse mapping → build subject_definitions / retention_analysis."""
 
-        # 调用 VLM 生成增强提示词
+        # Call VLM to generate enhanced prompt
         duration_sec = max(duration_frames / max(frame_rate, 1.0), 0.1)
         clip_result = generate_prompt_with_clip(
             image=first_frame,
@@ -231,7 +241,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             seed=seed,
         )
 
-        # 解析 mapping
+        # Parse mapping
         mapping_data = clip_result.get("mapping", {})
         if isinstance(mapping_data, str):
             try:
@@ -239,7 +249,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             except json.JSONDecodeError:
                 mapping_data = {}
 
-        # 构建 subject_definitions / retention_analysis
+        # Build subject_definitions / retention_analysis
         subjects, replacements, subject_definitions, retention_analysis = cls._build_subject_definitions_and_retention(subject_data, mapping_data)
 
         if first_frame is not None:
@@ -256,7 +266,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 "subject_definition": f"<Subject {length + 1}>",
                 "audio_definition": None
             })
-        # 构建 detailed_description / overall_soundscape / non_diegetic_music
+        # Build detailed_description / overall_soundscape / non_diegetic_music
         shot1_desc = clip_result.get("shot1_description", None)
         if shot1_desc:
             for key, value in replacements.items():
@@ -327,24 +337,24 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
     @classmethod
     def _build_first_frame_definition_and_retention(cls, subjects: list[dict], subject_definitions: str, retention_analysis: str) -> tuple[str, str]:
         length = len(subjects)
-        subject_definitions += "\n" + f"<Subject {length + 1}> is the first frame of the video."
-        retention_analysis += "\n" + f"<Subject {length + 1}> (appears in [Shot 1]): fully_preserved"
+        subject_definitions += "\n" + f"<Picture {length + 1}> is the first frame of [Shot 1]."
+        retention_analysis += "\n" + f"<Picture {length + 1}> ([Shot 1] first frame): fully_preserved."
         return subject_definitions, retention_analysis
 
     @classmethod
     def _build_subject_definitions_and_retention(cls, subject_data: list[dict], mapping: dict) -> tuple[list[dict], dict[str, str], str, str]:
-        """从 mapping 构建 subject_definitions 和 retention_analysis。
+        """Build subject_definitions and retention_analysis from mapping.
 
-        subject_definitions 格式:
-            <Subject 1> is {角色名}
+        subject_definitions format:
+            <Subject 1> is {role_name}
             <Audio 1> is the voice timbre reference for <Subject 1>'s voice, ...
 
-        retention_analysis 格式:
+        retention_analysis format:
             <Subject 1> fully_preserved
             <Audio 1>: reference - ...
         """
-        subjects: list[dict] = []      # {index: 角色名}
-        replacements: dict[str, str] = {}  # {key: value}
+        subjects: list[dict] = []           # [{index: role_name}]
+        replacements: dict[str, str] = {}   # {key: value}
 
         for key, value in mapping.items():
             rKey = "{{" + key + "}}"
@@ -356,11 +366,11 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 if role_key not in mapping:
                     continue
                 role_name = mapping[role_key]
-                # 找到对应的主体
+                # Find corresponding subject
                 subject_data_index = find_index(subject_data, lambda x, name=role_name: x["name"] == name)
                 if subject_data_index == -1:
                     continue
-                # 增加主体
+                # Add subject
                 index = find_index(subjects, lambda x, dm=dm: x["index"] == int(dm.group(1)))
                 if index > -1:
                     subjects[index]["audio_definition"] = f"<Audio {index + 1}>"
@@ -376,7 +386,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             if m:
                 index = find_index(subjects, lambda x, m=m: x["index"] == int(m.group(1)))
                 if index == -1:
-                    # 找到对应的主体
+                    # Find corresponding subject
                     subject_data_index = find_index(subject_data, lambda x, name=value: x["name"] == name)
                     if subject_data_index == -1:
                         continue
@@ -399,11 +409,11 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             subject_lines.append(f"{value['subject_definition']} {value['subject']['description']}")
             retention_lines.append(f"{value['subject_definition']}: fully_preserved")
             if value["audio_definition"]:
-                subject_lines.append(f"{value['audio_definition']} is the voice timbre reference for "
-                                    f"{value['subject_definition']}'s voice, containing a spoken voiceover.")
-                retention_lines.append(f"{value['audio_definition']}: reference - the target audio references "
-                                    f"the voice timbre from {value['audio_definition']} to generate "
-                                    f"{value['subject_definition']}'s spoken dialogue.")
+                subject_lines.append(f"{value['audio_definition']} is the voice-timbre reference for "
+                                    f"{value['subject_definition']}")
+                retention_lines.append(f"{value['audio_definition']}: reference - the target speaker follows "
+                                    f"{value['audio_definition']}'s voice timbre and measured delivery "
+                                    f"without copying the original signal.")
 
         return subjects, replacements, "\n".join(subject_lines), "\n".join(retention_lines)
 
