@@ -3567,7 +3567,7 @@ class TimelineEditor {
     const promptEnhanceSelectGroup = document.createElement("div")
     const promptEnhanceLabel = document.createElement("span")
     promptEnhanceLabel.name = "prompt_enhance";
-    promptEnhanceLabel.textContent = "Enhance Mode: "
+    promptEnhanceLabel.textContent = "Prompt Enhance: "
     promptEnhanceLabel.className = "pr-segment-bounds"
     promptEnhanceSelectGroup.appendChild(promptEnhanceLabel)
     const promptEnhanceSelect = document.createElement("select");

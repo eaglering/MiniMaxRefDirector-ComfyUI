@@ -27,7 +27,7 @@ A first-frame reference image IS provided. `[Shot 1]` is RESERVED for the first-
 EXAMPLE_BASIC_NO_IMAGE = ('"[Shot 1] A cozy cafe interior with exposed brick walls and warm pendant lights. '
                           '{{ROLE_0}} (S1) and {{ROLE_1}} (S2) sit across from each other at a wooden table by the window. '
                           '{{ROLE_0}} (S1) leans forward with a serious expression and says, {{ROLE_0_DIALOGUE_0}}.\\n'
-                          '[Shot 2] At 00:03.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2) '
+                          '[Shot 2] At 00:05.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2) '
                           'as they smile warmly and reply, {{ROLE_1_DIALOGUE_1}}. '
                           'The camera holds steady in a medium close-up with shallow focus.\\n"')
 
@@ -91,6 +91,14 @@ PROMPT_REQUIREMENTS = """
 4. Assign one ROLE_N_DIALOGUE_M placeholder per dialogue line. The ROLE_N prefix must match the speaking character.
 5. Character name mapping values must preserve the original language as provided by the user. Do NOT add any language prefix to character names. Do NOT translate character names.
 6. Dialogue mapping values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content. Do NOT translate dialogue content—only add the language prefix.
+
+## Shot Timing Guidelines (CRITICAL):
+Placeholders like `{{ROLE_0_DIALOGUE_0}}` are SHORT tokens but represent the ACTUAL dialogue text from the User Input. DO NOT estimate shot duration from placeholder length!
+- Chinese dialogue: ~3–4 characters per second of speaking time. A 12-character Chinese sentence ≈ 3–4 seconds. Add 0.5–1s of pause before and after.
+- English dialogue: ~2–3 words per second of speaking time. A 10-word English sentence ≈ 3–5 seconds. Add 0.5–1s of pause before and after.
+- Pure visual shots (no dialogue): allow adequate time for described actions and camera movements to play out visually (typically 2–5 seconds per shot).
+- The sum of all shot durations should fit within the specified total video duration. Distribute time proportionally across shots based on content complexity.
+- Shot timestamps must be monotonically increasing. The timestamp format is `At MM:SS.mmm`.
 
 ## Writing Guidelines (Full-Reference Video Prompt Standard):
 
@@ -177,6 +185,14 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 4. Assign one ROLE_N_DIALOGUE_M placeholder per dialogue line. The ROLE_N prefix must match the speaking character.
 5. Character name mapping values must preserve the original language as provided by the user. Do NOT add any language prefix to character names. Do NOT translate character names.
 6. Dialogue mapping values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content. Do NOT translate dialogue content—only add the language prefix.
+
+## Shot Timing Guidelines (CRITICAL):
+Placeholders like `{{ROLE_0_DIALOGUE_0}}` are SHORT tokens but represent the ACTUAL dialogue text from the User Input. DO NOT estimate shot duration from placeholder length!
+- Chinese dialogue: ~3–4 characters per second of speaking time. A 12-character Chinese sentence ≈ 3–4 seconds. Add 0.5–1s of pause before and after.
+- English dialogue: ~2–3 words per second of speaking time. A 10-word English sentence ≈ 3–5 seconds. Add 0.5–1s of pause before and after.
+- Pure visual shots (no dialogue): allow adequate time for described actions and camera movements to play out visually (typically 2–5 seconds per shot).
+- The sum of all shot durations should fit within the specified total video duration. Distribute time proportionally across shots based on content complexity.
+- Shot timestamps must be monotonically increasing. The timestamp format is `At MM:SS.mmm`.
 
 ## Enhancement Capabilities:
 1. **Visual Enrichment**: Polish and enrich scene descriptions with specific visual detail, lighting descriptors, color palette, texture, and atmosphere. Fill in reasonable visual details where the user input is sparse.
