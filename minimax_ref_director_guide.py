@@ -74,9 +74,9 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "prompt_enhance",
-                    options=["None", "Basic", "Enhanced"],
+                    options=["Basic", "Enhanced", "Pre-formatted"],
                     default="Basic",
-                    tooltip="Prompt enhancement mode: None=skip VLM, placeholder replacement only | Basic=standard generation | Enhanced=polish + fill ambient sound / camera movement / BGM",
+                    tooltip="Prompt enhancement mode: Basic=standard generation | Enhanced=polish + fill ambient sound / camera movement / BGM | Pre-formatted=parse prompt as pre-formatted JSON (no VLM)",
                 ),
                 io.Int.Input(
                     "seg_index", default=0, min=0, max=1000, step=1,
@@ -133,27 +133,27 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         prompt = str(seg.get("prompt", ""))
         prev_prompt = str(seg.get("prev_prompt", ""))
         prev_prompt = prev_prompt if last_refer_mode else ""
-        frame_refer = seg.get("first_frame", "")
+        director_first_frame = seg.get("first_frame", "")
         duration_frames = seg.get("duration_frames", 0)
-        if prompt_enhance == "None":
-            # "None" mode: user prompt is already pre-formatted per skills — skip VLM
-            # Only parse the first frame when frame_refer is NOT set AND last_refer_mode is enabled
-            if not frame_refer and last_refer_mode:
-                first_frame = first_frame  # keep socket input
+        if prompt_enhance == "Pre-formatted":
+            # "Pre-formatted" mode: skip VLM
+            # Only parse the first frame when director_first_frame is NOT set AND last_refer_mode is enabled
+            if not director_first_frame and last_refer_mode:
+                input_first_frame = first_frame  # keep socket input
             else:
-                first_frame = None
+                input_first_frame = None
         else:
-            if frame_refer:
-                first_frame = load_image_tensor(frame_refer)
+            if director_first_frame:
+                input_first_frame = load_image_tensor(director_first_frame)
             else:
-                first_frame = first_frame if last_refer_mode else None
+                input_first_frame = first_frame if last_refer_mode else None
 
         result = cls._process_prompt(
             subject_data=subject_data,
             global_prompt=global_prompt,
             prompt=prompt,
             duration_frames=duration_frames,
-            first_frame=first_frame,
+            first_frame=input_first_frame,
             last_prompt=prev_prompt,
             clip=clip,
             clip_name=clip_name,
@@ -204,7 +204,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         log.info(
             f"[MiniMaxRefDirectorGuide] seg_index={idx}/{segment_count} | "
             f"subjects={len(subject_data)} | images={len(images)} audios={len(audios)} | "
-            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | first_frame={'Yes' if first_frame is not None else 'No'}"
+            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | first_frame={'Yes' if input_first_frame is not None else 'No'}"
         )
         
         return io.NodeOutput(
@@ -275,11 +275,17 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         for key, value in replacements.items():
             detailed_description = detailed_description.replace(key, value)
         if shot1_desc:
-            shot1_dur = round(1.0 / max(frame_rate, 1.0), 2)
+            # Safety: strip any leading [Shot 1] that may have slipped through
+            # (prompt templates now instruct VLM to start from [Shot 2] when first frame exists)
+            detailed_description = re.sub(r'^\[Shot 1\]\s*', '', detailed_description.lstrip())
+            shot_start = "[Shot 2] " if not detailed_description.startswith("[Shot ") else ""
             detailed_description = (
-                f"[Shot 1] 0.0-{shot1_dur}s {shot1_desc}\n"
-                f"[Shot 2] {detailed_description}"
+                f"[Shot 1] {shot1_desc}\n"
+                f"{shot_start}{detailed_description}"
             )
+        else:
+            shot_start = "[Shot 1]" if not detailed_description.startswith("[Shot ") else ""
+            detailed_description = f"{shot_start}{detailed_description}"
         detailed_description = global_prompt + "\n" + detailed_description
         overall_soundscape = clip_result.get("overall_soundscape", None)
         if overall_soundscape:
@@ -302,18 +308,12 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         for key, value in final_prompt_attr.items():
             final_prompt += f"{key}:\n{value}\n"
 
-        raw_prompt = ""
-        detailed_description = clip_result.get("detailed_description", "")
-        detailed_description = cls._build_raw_prompt(detailed_description, mapping_data)
-        raw_prompt += f"{detailed_description}\n"
-        overall_soundscape = clip_result.get("overall_soundscape", None)
-        if overall_soundscape:
-            overall_soundscape = cls._build_raw_prompt(overall_soundscape, mapping_data)
-            raw_prompt += f"{overall_soundscape}\n"
-        non_diegetic_music = clip_result.get("non_diegetic_music", None)
-        if non_diegetic_music:
-            non_diegetic_music = cls._build_raw_prompt(non_diegetic_music, mapping_data)
-            raw_prompt += f"{non_diegetic_music}\n"
+        raw_prompt = json.dumps({
+            "detailed_description": clip_result.get("detailed_description", ""),
+            "overall_soundscape": clip_result.get("overall_soundscape") or None,
+            "non_diegetic_music": clip_result.get("non_diegetic_music") or None,
+            "mapping": mapping_data,
+        }, ensure_ascii=False, indent=2)
 
         return {
             "subjects": subjects,

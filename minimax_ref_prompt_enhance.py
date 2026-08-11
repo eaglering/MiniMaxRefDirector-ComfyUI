@@ -9,13 +9,53 @@ import folder_paths
 import torch
 from comfy_api.latest import io
 
+from .lib import seconds_to_mmssmmm
 log = logging.getLogger(__name__)
+
+# ── Shot structure instructions (conditional on first-frame image) ─
+
+SHOT_STRUCTURE_NO_IMAGE = """- Structure shots with `[Shot 1]`, `[Shot 2] At MM:SS.mmm`, `[Shot 3] At MM:SS.mmm`, etc. The opening style sentence has no shot marker, and `[Shot 1]` has no timestamp."""
+
+SHOT_STRUCTURE_HAS_IMAGE = """## IMPORTANT — First-Frame Shot Numbering:
+A first-frame reference image IS provided. `[Shot 1]` is RESERVED for the first-frame image and MUST be described separately as `shot1_description`. Do NOT include `[Shot 1]` in `detailed_description`!
+- Structure `detailed_description` shots starting from `[Shot 2] At {shot1_dur}s`, then `[Shot 3] At MM:SS.mmm`, `[Shot 4] At MM:SS.mmm`, etc.
+- The opening style sentence has no shot marker.
+- `[Shot 2]` has only a start timestamp (no duration range). All subsequent shots (`[Shot 3]`+) follow the normal `At MM:SS.mmm` format."""
+
+# ── Example detailed_description variants (conditional on first-frame image) ─
+
+EXAMPLE_BASIC_NO_IMAGE = ('"[Shot 1] A cozy cafe interior with exposed brick walls and warm pendant lights. '
+                          '{{ROLE_0}} (S1) and {{ROLE_1}} (S2) sit across from each other at a wooden table by the window. '
+                          '{{ROLE_0}} (S1) leans forward with a serious expression and says, {{ROLE_0_DIALOGUE_0}}.\\n'
+                          '[Shot 2] At 00:03.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2) '
+                          'as they smile warmly and reply, {{ROLE_1_DIALOGUE_1}}. '
+                          'The camera holds steady in a medium close-up with shallow focus.\\n"')
+
+EXAMPLE_BASIC_HAS_IMAGE = ('"[Shot 2] At 00:03.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2) '
+                           'as they smile warmly and reply, {{ROLE_1_DIALOGUE_1}}. '
+                           'The camera holds steady in a medium close-up with shallow focus.\\n"')
+
+EXAMPLE_ENHANCED_NO_IMAGE = ('"[Shot 1] A dimly lit cafe interior with exposed brick walls. '
+                             '{{ROLE_0}} (S1) and {{ROLE_1}} (S2) sit across from each other at a worn wooden table. '
+                             'Rain streaks down the window behind them. '
+                             'The camera slowly pushes in from a wide establishing shot to a medium two-shot.\\n'
+                             '[Shot 2] At 00:04.000, a close-up on {{ROLE_0}} (S1). His expression is grave. '
+                             'Fixed camera, shallow depth of field. He says, {{ROLE_0_DIALOGUE_0}}.\\n'
+                             '[Shot 3] At 00:08.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2). '
+                             '{{ROLE_1}} (S2) smiles warmly and replies, {{ROLE_1_DIALOGUE_1}}. '
+                             'The camera holds steady in a medium close-up.\\n"')
+
+EXAMPLE_ENHANCED_HAS_IMAGE = ('"[Shot 2] At 00:04.000, a close-up on {{ROLE_0}} (S1). His expression is grave. '
+                              'Fixed camera, shallow depth of field. He says, {{ROLE_0_DIALOGUE_0}}.\\n'
+                              '[Shot 3] At 00:08.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2). '
+                              '{{ROLE_1}} (S2) smiles warmly and replies, {{ROLE_1_DIALOGUE_1}}. '
+                              'The camera holds steady in a medium close-up.\\n"')
 
 # ── Basic Prompt (no enhancement) ──────────────────────────────────
 
 PROMPT_BASE_HEADER = """You are a video prompt writer for a full-reference text-to-video generation system. Convert user input into a structured video prompt with character and dialogue placeholders for downstream mapping and generation.
 
-Write all shot descriptions in English. Only dialogue content in the mapping may retain its original language (Chinese or English) with a `[Chinese]` or `[English]` prefix."""
+Write all shot descriptions in English. Preserve the original language of character names and dialogue content exactly as provided by the user—do not translate them. In the mapping, character name values must use their original language without any prefix. Dialogue values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English."""
 
 PROMPT_IMAGE_SECTION = """
 ## First Frame Reference Image:
@@ -49,19 +89,19 @@ PROMPT_REQUIREMENTS = """
 2. All dialogue MUST be represented with placeholders using the format `{{ROLE_0_DIALOGUE_0}}`, `{{ROLE_1_DIALOGUE_1}}`, `{{ROLE_1_DIALOGUE_2}}`, etc.
 3. Assign one ROLE_N placeholder per distinct character (ascending from 0).
 4. Assign one ROLE_N_DIALOGUE_M placeholder per dialogue line. The ROLE_N prefix must match the speaking character.
-5. Mapping values for dialogue must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content.
+5. Character name mapping values must preserve the original language as provided by the user. Do NOT add any language prefix to character names. Do NOT translate character names.
+6. Dialogue mapping values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content. Do NOT translate dialogue content—only add the language prefix.
 
 ## Writing Guidelines (Full-Reference Video Prompt Standard):
 
 ### detailed_description:
-- Begin with 1–2 English sentences establishing the overall visual style, lighting tone, and color palette before `[Shot 1]`.
-- Structure shots with `[Shot 1]`, `[Shot 2] At MM:SS.mmm`, `[Shot 3] At MM:SS.mmm`, etc. The opening style sentence has no shot marker, and `[Shot 1]` has no timestamp.
+__SHOT_STRUCTURE__
 - Write camera movement as natural English prose within each shot description (e.g., "the camera slowly pushes in from a wide establishing shot to a medium close-up", "a static wide shot with shallow depth of field", "a smooth handheld tracking shot").
 - Label each speaking character with (S1), (S2), etc., corresponding to their `{{ROLE_N}}` assignment order.
 - When a character speaks, place the dialogue placeholder immediately after: `{{ROLE_N}} (Sx) says, {{ROLE_N_DIALOGUE_M}}` or `{{ROLE_N}} (Sx) looks up and replies, {{ROLE_N_DIALOGUE_M}}`.
 - For each shot, clearly establish: shot composition (e.g., wide/medium/close-up/over-the-shoulder), subject appearance and position, environment and lighting, character actions and state changes, camera movement, and relevant on-screen sound.
 - Describe what is actually visible in the frame—avoid reducing descriptions to plot summaries.
-- All shot text must be in English. Only the dialogue values in the mapping may be non-English.
+- All shot text must be in English. Character names and dialogue values in the mapping may preserve their original language.
 
 ### overall_soundscape:
 - Summarize continuous ambient sound and recurring physical sound effects that persist across the full video.
@@ -84,7 +124,7 @@ __SHOT1_DESC__
 
 Example output:
 {{
-__SHOT1_EXAMPLE__  "detailed_description": "The target video is in a warm, cinematic style with soft natural lighting and shallow depth of field.\\n[Shot 1] A cozy cafe interior with exposed brick walls and warm pendant lights. {{ROLE_0}} (S1) and {{ROLE_1}} (S2) sit across from each other at a wooden table by the window. {{ROLE_0}} (S1) leans forward with a serious expression and says, {{ROLE_0_DIALOGUE_0}}.\\n[Shot 2] At 00:03.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2) as they smile warmly and reply, {{ROLE_1_DIALOGUE_1}}. The camera holds steady in a medium close-up with shallow focus.\\n",
+__SHOT1_EXAMPLE__  "detailed_description": __SHOT_EXAMPLE__
   "overall_soundscape": "Soft coffee-machine steam, gentle cup clinking, and low background chatter continue throughout.",
   "non_diegetic_music": "N/A",
   "mapping": {{
@@ -101,7 +141,7 @@ Output ONLY the JSON object. Do not add any text before or after it."""
 
 PROMPT_ENHANCE_HEADER = """You are a video prompt writer for a full-reference text-to-video generation system. Convert user input into a structured, enriched video prompt with character and dialogue placeholders for downstream mapping and generation.
 
-In addition to basic conversion, you will enhance the output: fill in missing visual details, ambient sound, camera movement, and background music where the user has not specified them. Write all shot descriptions in English."""
+In addition to basic conversion, you will enhance the output: fill in missing visual details, ambient sound, camera movement, and background music where the user has not specified them. Write all shot descriptions in English. Preserve the original language of character names and dialogue content exactly as provided by the user—do not translate them. In the mapping, character name values must use their original language without any prefix. Dialogue values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English."""
 
 PROMPT_ENHANCE_IMAGE_SECTION = """
 ## First Frame Reference Image:
@@ -135,7 +175,8 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 2. All dialogue MUST be represented with placeholders using the format `{{ROLE_0_DIALOGUE_0}}`, `{{ROLE_1_DIALOGUE_1}}`, `{{ROLE_1_DIALOGUE_2}}`, etc.
 3. Assign one ROLE_N placeholder per distinct character (ascending from 0).
 4. Assign one ROLE_N_DIALOGUE_M placeholder per dialogue line. The ROLE_N prefix must match the speaking character.
-5. Mapping values for dialogue must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content.
+5. Character name mapping values must preserve the original language as provided by the user. Do NOT add any language prefix to character names. Do NOT translate character names.
+6. Dialogue mapping values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content. Do NOT translate dialogue content—only add the language prefix.
 
 ## Enhancement Capabilities:
 1. **Visual Enrichment**: Polish and enrich scene descriptions with specific visual detail, lighting descriptors, color palette, texture, and atmosphere. Fill in reasonable visual details where the user input is sparse.
@@ -146,14 +187,13 @@ PROMPT_ENHANCE_REQUIREMENTS = """
 ## Writing Guidelines (Full-Reference Video Prompt Standard):
 
 ### detailed_description:
-- Begin with 1–2 English sentences establishing the overall visual style, lighting tone, and color palette before `[Shot 1]`.
-- Structure shots with `[Shot 1]`, `[Shot 2] At MM:SS.mmm`, `[Shot 3] At MM:SS.mmm`, etc. The opening style sentence has no shot marker, and `[Shot 1]` has no timestamp.
+__SHOT_STRUCTURE__
 - Write camera movement as natural English prose within each shot description (e.g., "the camera slowly pushes in from a wide establishing shot to a medium close-up", "a static wide shot with shallow depth of field", "a smooth handheld tracking shot").
 - Label each speaking character with (S1), (S2), etc., corresponding to their `{{ROLE_N}}` assignment order.
 - When a character speaks, place the dialogue placeholder immediately after: `{{ROLE_N}} (Sx) says, {{ROLE_N_DIALOGUE_M}}` or `{{ROLE_N}} (Sx) looks up and replies, {{ROLE_N_DIALOGUE_M}}`.
 - For each shot, clearly establish: shot composition (e.g., wide/medium/close-up/over-the-shoulder), subject appearance and position, environment and lighting, character actions and state changes, camera movement, and relevant on-screen sound.
 - Describe what is actually visible in the frame—avoid reducing descriptions to plot summaries.
-- All shot text must be in English. Only the dialogue values in the mapping may be non-English.
+- All shot text must be in English. Character names and dialogue values in the mapping may preserve their original language.
 
 ### overall_soundscape:
 - Summarize continuous ambient sound and recurring physical sound effects that persist across the full video.
@@ -176,7 +216,7 @@ __SHOT1_DESC__
 
 Example output:
 {{
-__SHOT1_EXAMPLE__  "detailed_description": "The target video is in a moody, cinematic style with dim warm lighting, deep shadows, and rich amber tones.\\n[Shot 1] A dimly lit cafe interior with exposed brick walls. {{ROLE_0}} (S1) and {{ROLE_1}} (S2) sit across from each other at a worn wooden table. Rain streaks down the window behind them. The camera slowly pushes in from a wide establishing shot to a medium two-shot.\\n[Shot 2] At 00:04.000, a close-up on {{ROLE_0}} (S1). His expression is grave. Fixed camera, shallow depth of field. He says, {{ROLE_0_DIALOGUE_0}}.\\n[Shot 3] At 00:08.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2). {{ROLE_1}} (S2) smiles warmly and replies, {{ROLE_1_DIALOGUE_1}}. The camera holds steady in a medium close-up.\\n",
+__SHOT1_EXAMPLE__  "detailed_description": __SHOT_EXAMPLE__
   "overall_soundscape": "Soft coffee-machine steam, gentle cup clinking, distant muffled conversation, and rain tapping against the window continue throughout.",
   "non_diegetic_music": "A restrained solo-piano score at a slow tempo, with sustained low cello underneath, growing subtly more hopeful in the middle section.",
   "mapping": {{
@@ -199,9 +239,9 @@ def _has_image(image) -> bool:
     return True
 
 
-def _calc_shot1_duration(fps: float) -> float:
-    """Calculate first shot duration (seconds): ceil(1*100/fps)/100, rounded to 2 decimal places."""
-    return round(math.ceil(1 * 100 / fps) / 100, 2)
+def calc_shot1_duration(fps: float) -> float:
+    """Calculate first shot duration (seconds): ceil(8*100/fps)/100, rounded to 3 decimal places."""
+    return round(math.ceil(8 * 100 / fps) / 100, 3)
 
 
 def build_prompt_text(
@@ -218,7 +258,7 @@ def build_prompt_text(
         last_prompt: previous segment prompt (can be empty)
         prompt: new user input
         duration: total video duration (seconds)
-        enhance: prompt mode ("Basic" = basic, "Enhanced" = enhanced). "None" mode skips VLM entirely and never calls this function.
+        enhance: prompt mode ("Basic" = basic, "Enhanced" = enhanced). "Pre-formatted" skips VLM and never calls this function.
         has_image: whether a first-frame reference image is provided
         shot1_dur: first shot duration (only used when has_image=True, for log info)
     """
@@ -232,6 +272,13 @@ def build_prompt_text(
         '  "shot1_description": "A warm cafe interior bathed in soft afternoon light. {{ROLE_0}} sits alone at a corner table, staring pensively at a cup of coffee. {{ROLE_1}} enters through the door in the background, partially silhouetted against the bright street outside.",\n'
         if has_image else ''
     )
+    shot1_dur_str = seconds_to_mmssmmm(shot1_dur)
+    shot_structure = SHOT_STRUCTURE_HAS_IMAGE.format(shot1_dur=shot1_dur_str) if has_image else SHOT_STRUCTURE_NO_IMAGE
+
+    if enhance == "Enhanced":
+        shot_example = EXAMPLE_ENHANCED_HAS_IMAGE if has_image else EXAMPLE_ENHANCED_NO_IMAGE
+    else:
+        shot_example = EXAMPLE_BASIC_HAS_IMAGE if has_image else EXAMPLE_BASIC_NO_IMAGE
 
     is_enhanced = enhance == "Enhanced"
 
@@ -254,7 +301,9 @@ def build_prompt_text(
                 parts.append(PROMPT_ENHANCE_SHOT1_SECTION)
         parts.append(PROMPT_ENHANCE_REQUIREMENTS
                      .replace("__SHOT1_DESC__", shot1_desc_instruction)
-                     .replace("__SHOT1_EXAMPLE__", shot1_example))
+                     .replace("__SHOT1_EXAMPLE__", shot1_example)
+                     .replace("__SHOT_STRUCTURE__", shot_structure)
+                     .replace("__SHOT_EXAMPLE__", shot_example))
     else:
         parts = [PROMPT_BASE_HEADER]
         if has_image:
@@ -274,7 +323,9 @@ def build_prompt_text(
                 parts.append(PROMPT_SHOT1_SECTION)
         parts.append(PROMPT_REQUIREMENTS
                      .replace("__SHOT1_DESC__", shot1_desc_instruction)
-                     .replace("__SHOT1_EXAMPLE__", shot1_example))
+                     .replace("__SHOT1_EXAMPLE__", shot1_example)
+                     .replace("__SHOT_STRUCTURE__", shot_structure)
+                     .replace("__SHOT_EXAMPLE__", shot_example))
     log.info(f"prompt: {json.dumps(parts, indent=2, ensure_ascii=False)}")
     return "\n".join(parts)
 
@@ -284,7 +335,8 @@ def _normalize_description(text: str) -> str:
     - Remove all double-quotes (", ", "")
     """
     text = text.replace("：", "，")  # full-width colon → full-width comma
-    text = text.replace(":", ",")   # half-width colon → half-width comma
+    # Replace half-width colon with comma, but skip timestamps like "00:00.340"
+    text = re.sub(r'(?<!\d\d):(?!\d\d\.\d\d\d)', ',', text)
     text = text.replace('"', "")
     text = text.replace(""", "")
     text = text.replace(""", "")
@@ -306,6 +358,18 @@ def parse_generated_json(generated_text: str) -> dict:
             clean_text = generated_text.strip()
 
     return json.loads(clean_text)
+
+
+def _renumber_shots_for_first_frame(text: str) -> str:
+    """Increment all [Shot N] numbers by 1 to reserve [Shot 1] for the first frame.
+
+    Used in Pre-formatted mode when a first-frame image is provided: the user's
+    pre-formatted detailed_description is assumed to start from [Shot 1], and we
+    shift all shot numbers up so [Shot 1] becomes [Shot 2], etc.
+    """
+    if not text:
+        return text
+    return re.sub(r'\[Shot (\d+)\]', lambda m: f'[Shot {int(m.group(1)) + 1}]', text)
 
 
 def generate_prompt_with_clip(
@@ -338,10 +402,10 @@ def generate_prompt_with_clip(
         clip_name: model filename under text_encoders directory (required when clip is None)
         clip_type: CLIP model variant ("minimax", "qwen3vl", "gemma")
         last_prompt: previous segment prompt (can be empty)
-        prompt: new user prompt; in "None" mode this is a pre-formatted skills JSON
+        prompt: new user prompt; in "Pre-formatted" mode this is a pre-formatted skills JSON
         duration: total video duration (seconds)
         fps: frame rate
-        enhance: prompt mode ("None" = skip VLM, only placeholder replacement; "Basic" = standard; "Enhanced" = polish)
+        enhance: prompt mode ("Basic" = standard; "Enhanced" = polish)
         max_length: max generated text length
         do_sample: whether to use random sampling
         temperature: sampling temperature
@@ -363,9 +427,12 @@ def generate_prompt_with_clip(
         }
     """
 
-    # "None" mode: user prompt is already pre-formatted per skills JSON — parse directly, skip VLM
-    if enhance == "None":
-        log.info("[MiniMaxRefPromptEnhance] None mode: skipping VLM, parsing user prompt directly...")
+    has_image = _has_image(image)
+    shot1_dur = calc_shot1_duration(fps) if has_image else 0.0
+
+    # "Pre-formatted" mode: prompt is already a pre-formatted skills JSON, parse directly.
+    if enhance == "Pre-formatted":
+        log.info("[MiniMaxRefPromptEnhance] Pre-formatted mode: parsing user prompt as JSON, skipping VLM...")
         try:
             result = parse_generated_json(prompt)
         except (json.JSONDecodeError, TypeError) as e:
@@ -376,10 +443,16 @@ def generate_prompt_with_clip(
                 "non_diegetic_music": None,
                 "mapping": {},
             }
+        # When first-frame image is provided, renumber shots in detailed_description:
+        # [Shot 1] → [Shot 2], [Shot 2] → [Shot 3], etc. (Shot 1 is reserved for first frame)
+        if has_image:
+            dd = result.get("detailed_description", "")
+            if dd:
+                result["detailed_description"] = _renumber_shots_for_first_frame(dd)
+                log.info("[MiniMaxRefPromptEnhance] Pre-formatted mode: renumbered shots for first frame")
         return result
 
-    has_image = _has_image(image)
-    shot1_dur = _calc_shot1_duration(fps) if has_image else 0.0
+    # (has_image and shot1_dur already computed above for Basic/Enhanced modes)
 
     # Load CLIP model (prefer externally-provided clip)
     external_clip = clip is not None
@@ -519,7 +592,7 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     display_name="prompt",
                     multiline=True,
                     default="",
-                    tooltip="New user prompt; in 'None' mode this should be a pre-formatted skills JSON",
+                    tooltip="New user prompt; in 'Pre-formatted' mode this should be a pre-formatted skills JSON",
                 ),
                 io.Float.Input(
                     "duration",
@@ -541,9 +614,9 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "enhance",
-                    options=["None", "Basic", "Enhanced"],
+                    options=["Basic", "Enhanced", "Pre-formatted"],
                     default="Basic",
-                    tooltip="Prompt generation mode: None=skip VLM, placeholder replacement only | Basic=standard generation | Enhanced=polish + fill ambient sound / camera movement / BGM",
+                    tooltip="Prompt generation mode: Basic=standard generation | Enhanced=polish + fill ambient sound / camera movement / BGM | Pre-formatted=parse prompt as pre-formatted JSON (no VLM)",
                 ),
                 io.Int.Input(
                     "max_length",

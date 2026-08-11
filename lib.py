@@ -85,3 +85,14 @@ def _f32_pcm(wav: torch.Tensor) -> torch.Tensor:
     elif wav.dtype == torch.int32:
         return wav.float() / (2 ** 31)
     raise ValueError(f"Unsupported wav dtype: {wav.dtype}")
+
+def seconds_to_mmssmmm(seconds: float) -> str:
+    """Convert float seconds to MM:SS.mmm format string.
+
+    Example: 0.04 -> "00:00.040", 3.0 -> "00:03.000", 65.5 -> "01:05.500".
+    """
+    total_seconds = max(0.0, seconds)
+    minutes = int(total_seconds // 60)
+    secs = int(total_seconds % 60)
+    millis = int(round((total_seconds - int(total_seconds)) * 1000))
+    return f"{minutes:02d}:{secs:02d}.{millis:03d}"
