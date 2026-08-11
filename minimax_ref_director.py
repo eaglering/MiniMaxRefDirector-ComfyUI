@@ -222,6 +222,7 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "prev_prompt": prev_prompt,
                 "first_frame": first_frame,
                 "duration_frames": dur,
+                "prompt_enhance": seg.get("prompt_enhance", "Default"),
             })
             prev_prompt = prompt
             segment_count += 1

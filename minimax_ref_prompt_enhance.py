@@ -326,7 +326,6 @@ def build_prompt_text(
                      .replace("__SHOT1_EXAMPLE__", shot1_example)
                      .replace("__SHOT_STRUCTURE__", shot_structure)
                      .replace("__SHOT_EXAMPLE__", shot_example))
-    log.info(f"prompt: {json.dumps(parts, indent=2, ensure_ascii=False)}")
     return "\n".join(parts)
 
 def _normalize_description(text: str) -> str:
@@ -358,18 +357,6 @@ def parse_generated_json(generated_text: str) -> dict:
             clean_text = generated_text.strip()
 
     return json.loads(clean_text)
-
-
-def _renumber_shots_for_first_frame(text: str) -> str:
-    """Increment all [Shot N] numbers by 1 to reserve [Shot 1] for the first frame.
-
-    Used in Pre-formatted mode when a first-frame image is provided: the user's
-    pre-formatted detailed_description is assumed to start from [Shot 1], and we
-    shift all shot numbers up so [Shot 1] becomes [Shot 2], etc.
-    """
-    if not text:
-        return text
-    return re.sub(r'\[Shot (\d+)\]', lambda m: f'[Shot {int(m.group(1)) + 1}]', text)
 
 
 def generate_prompt_with_clip(
@@ -443,13 +430,6 @@ def generate_prompt_with_clip(
                 "non_diegetic_music": None,
                 "mapping": {},
             }
-        # When first-frame image is provided, renumber shots in detailed_description:
-        # [Shot 1] → [Shot 2], [Shot 2] → [Shot 3], etc. (Shot 1 is reserved for first frame)
-        if has_image:
-            dd = result.get("detailed_description", "")
-            if dd:
-                result["detailed_description"] = _renumber_shots_for_first_frame(dd)
-                log.info("[MiniMaxRefPromptEnhance] Pre-formatted mode: renumbered shots for first frame")
         return result
 
     # (has_image and shot1_dur already computed above for Basic/Enhanced modes)

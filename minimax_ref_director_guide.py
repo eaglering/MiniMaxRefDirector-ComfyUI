@@ -102,6 +102,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 io.Float.Output(display_name="frame_rate", tooltip="Frame rate from global config."),
                 io.String.Output(display_name="prompt", tooltip="Fully assembled prompt for the selected segment."),
                 io.String.Output(display_name="raw_prompt", tooltip="Raw prompt for the selected segment."),
+                io.String.Output(display_name="pre_formatted", tooltip="Prompt as pre-formatted JSON"),
             ],
         )
 
@@ -135,11 +136,14 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         prev_prompt = prev_prompt if last_refer_mode else ""
         director_first_frame = seg.get("first_frame", "")
         duration_frames = seg.get("duration_frames", 0)
-        if prompt_enhance == "Pre-formatted":
+        # --- Determine effective prompt_enhance: per-segment overrides global when not "Default" ---
+        seg_prompt_enhance = seg.get("prompt_enhance", "Default")
+        effective_prompt_enhance = seg_prompt_enhance if seg_prompt_enhance != "Default" else prompt_enhance
+
+        if effective_prompt_enhance == "Pre-formatted":
             # "Pre-formatted" mode: skip VLM
-            # Only parse the first frame when director_first_frame is NOT set AND last_refer_mode is enabled
-            if not director_first_frame and last_refer_mode:
-                input_first_frame = first_frame  # keep socket input
+            if director_first_frame:
+                input_first_frame = load_image_tensor(director_first_frame)
             else:
                 input_first_frame = None
         else:
@@ -159,7 +163,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             clip_name=clip_name,
             clip_type=clip_type,
             frame_rate=fps,
-            enhance=prompt_enhance,
+            enhance=effective_prompt_enhance,
             seed=seed,
         )
         # --- Load all referenced subject images as [C, H, W] tensors ---
@@ -204,7 +208,8 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         log.info(
             f"[MiniMaxRefDirectorGuide] seg_index={idx}/{segment_count} | "
             f"subjects={len(subject_data)} | images={len(images)} audios={len(audios)} | "
-            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | first_frame={'Yes' if input_first_frame is not None else 'No'}"
+            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | effective_prompt_enhance={effective_prompt_enhance} | "
+            f"first_frame={'Yes' if input_first_frame is not None else 'No'}"
         )
         
         return io.NodeOutput(
@@ -215,7 +220,8 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             result["duration_frames"],
             fps,
             result["prompt"],
-            result["raw_prompt"]
+            result["raw_prompt"],
+            result['pre_formatted']
         )
 
 
@@ -253,7 +259,8 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         subjects, replacements, subject_definitions, retention_analysis = cls._build_subject_definitions_and_retention(subject_data, mapping_data)
 
         if first_frame is not None:
-            subject_definitions, retention_analysis = cls._build_first_frame_definition_and_retention(subjects, subject_definitions, retention_analysis)
+            if enhance != "Pre-formatted":
+                subject_definitions, retention_analysis = cls._build_first_frame_definition_and_retention(subjects, subject_definitions, retention_analysis)
             length = len(subjects) - 1
             subjects.append({
                 "subject": {
@@ -263,7 +270,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                     "audioFile": "",
                 },
                 "first_frame": True,
-                "subject_definition": f"<Subject {length + 1}>",
+                "subject_definition": f"<Picture {length + 1}>",
                 "audio_definition": None
             })
         # Build detailed_description / overall_soundscape / non_diegetic_music
@@ -308,7 +315,20 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         for key, value in final_prompt_attr.items():
             final_prompt += f"{key}:\n{value}\n"
 
-        raw_prompt = json.dumps({
+        raw_prompt = ""
+        detailed_description = clip_result.get("detailed_description", "")
+        detailed_description = cls._build_raw_prompt(detailed_description, mapping_data)
+        raw_prompt += f"{detailed_description}\n"
+        overall_soundscape = clip_result.get("overall_soundscape", None)
+        if overall_soundscape:
+            overall_soundscape = cls._build_raw_prompt(overall_soundscape, mapping_data)
+            raw_prompt += f"{overall_soundscape}\n"
+        non_diegetic_music = clip_result.get("non_diegetic_music", None)
+        if non_diegetic_music:
+            non_diegetic_music = cls._build_raw_prompt(non_diegetic_music, mapping_data)
+            raw_prompt += f"{non_diegetic_music}\n"
+
+        pre_formatted = json.dumps({
             "detailed_description": clip_result.get("detailed_description", ""),
             "overall_soundscape": clip_result.get("overall_soundscape") or None,
             "non_diegetic_music": clip_result.get("non_diegetic_music") or None,
@@ -319,6 +339,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             "subjects": subjects,
             "prompt": final_prompt,
             "raw_prompt": raw_prompt,
+            "pre_formatted": pre_formatted,
             "first_frame": first_frame is not None,
             "duration_frames": duration_frames,
         }

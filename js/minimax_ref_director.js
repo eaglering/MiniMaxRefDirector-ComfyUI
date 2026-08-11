@@ -3560,10 +3560,49 @@ class TimelineEditor {
         }
       }
     });
+    const blankEl = document.createElement("div")
+    blankEl.style.cssText = "flex:1"
+
+       // --- Prompt enhance select (per-segment) ---
+    const promptEnhanceSelectGroup = document.createElement("div")
+    const promptEnhanceLabel = document.createElement("span")
+    promptEnhanceLabel.name = "prompt_enhance";
+    promptEnhanceLabel.textContent = "Enhance Mode: "
+    promptEnhanceLabel.className = "pr-segment-bounds"
+    promptEnhanceSelectGroup.appendChild(promptEnhanceLabel)
+    const promptEnhanceSelect = document.createElement("select");
+    promptEnhanceSelect.name = "prompt_enhance";
+    promptEnhanceSelect.style.cssText = "display:none;padding:2px 4px;border-radius:4px;background-color:#000";
+    const enhanceOptions = [
+      { value: "Default", label: "Default" },
+      { value: "Basic", label: "Basic" },
+      { value: "Enhanced", label: "Enhanced" },
+      { value: "Pre-formatted", label: "Pre-formatted" },
+    ];
+    enhanceOptions.forEach((opt) => {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      promptEnhanceSelect.appendChild(option);
+    });
+    promptEnhanceSelect.value = "Default";
+    promptEnhanceSelect.addEventListener("change", () => {
+      if (this.selectedIndex >= 0 && this.selectionType === "image") {
+        const seg = this.timeline.segments[this.selectedIndex];
+        if (seg) {
+          seg.prompt_enhance = promptEnhanceSelect.value === "Default" ? undefined : promptEnhanceSelect.value;
+          this.commitChanges();
+        }
+      }
+    });
+    this.promptEnhanceSelect = promptEnhanceSelect;
+    promptEnhanceSelectGroup.appendChild(promptEnhanceSelect)
 
     this.strengthRow.appendChild(this.timeCodeDisplay);
     this.strengthRow.appendChild(this.segmentBoundsDisplay);
     // this.strengthRow.appendChild(this.strengthLabel);
+    this.strengthRow.appendChild(blankEl)
+    this.strengthRow.appendChild(promptEnhanceSelectGroup);
     this.strengthRow.appendChild(zoomControls);
     // this.strengthRow.appendChild(this.strengthValue);
     // this.strengthRow.appendChild(this.vidStrLabel);
@@ -3851,6 +3890,7 @@ class TimelineEditor {
     controlsGroup.className = "pr-controls-group";
     controlsGroup.appendChild(this.strengthRow);
     controlsGroup.appendChild(playerControls);
+
     this.wrapper.appendChild(controlsGroup);
     this.wrapper.appendChild(propContainer);
     // this.wrapper.appendChild(this.globalPropContainer);
@@ -5630,6 +5670,7 @@ class TimelineEditor {
       this.promptInput.placeholder = "";
       this.promptInput.style.opacity = "";
     }
+    if (this.promptEnhanceSelect) this.promptEnhanceSelect.style.display = "none";
 
     if (this.retakeMode) {
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
@@ -5745,6 +5786,12 @@ class TimelineEditor {
         this.strengthValue.value = strength.toFixed(2);
         this.strengthValue.disabled = !isImage;
         this.strengthValue.style.opacity = isImage ? "1.0" : "0.35";
+        // Update per-segment prompt_enhance select
+        if (this.promptEnhanceSelect) {
+          this.promptEnhanceSelect.style.display = "";
+          const segEnhance = seg.prompt_enhance || "Default";
+          this.promptEnhanceSelect.value = segEnhance;
+        }
       } else {
         this.promptInput.value = "";
         this.promptInput.placeholder = "No segment selected!";
@@ -9991,23 +10038,23 @@ class TimelineEditor {
         }
       };
 
-      const vidBtn = document.createElement("button");
-      vidBtn.className = "pr-gap-menu-btn";
-      vidBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Segment`;
-      vidBtn.onclick = () => {
-        this.dismissContextMenu();
-        const fi = document.createElement("input");
-        fi.type = "file"; fi.accept = "video/*";
-        fi.addEventListener("change", (ev) => {
-          if (ev.target.files?.[0]) this.handleVideoUpload([ev.target.files[0]], gap.frameStart);
-        });
-        fi.click();
-      };
+      // const vidBtn = document.createElement("button");
+      // vidBtn.className = "pr-gap-menu-btn";
+      // vidBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Segment`;
+      // vidBtn.onclick = () => {
+      //   this.dismissContextMenu();
+      //   const fi = document.createElement("input");
+      //   fi.type = "file"; fi.accept = "video/*";
+      //   fi.addEventListener("change", (ev) => {
+      //     if (ev.target.files?.[0]) this.handleVideoUpload([ev.target.files[0]], gap.frameStart);
+      //   });
+      //   fi.click();
+      // };
 
       menu.appendChild(pasteImageBtn);
       menu.appendChild(textBtn);
       menu.appendChild(imgBtn);
-      menu.appendChild(vidBtn);
+      // menu.appendChild(vidBtn);
     } else if (currentTrack === "motion") {
       const pasteImageBtn = document.createElement("button");
       pasteImageBtn.className = "pr-gap-menu-btn";
