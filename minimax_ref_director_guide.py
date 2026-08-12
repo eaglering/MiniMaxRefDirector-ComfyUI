@@ -259,8 +259,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         subjects, replacements, subject_definitions, retention_analysis = cls._build_subject_definitions_and_retention(subject_data, mapping_data)
 
         if first_frame is not None:
-            if enhance != "Pre-formatted":
-                subject_definitions, retention_analysis = cls._build_first_frame_definition_and_retention(subjects, subject_definitions, retention_analysis)
+            subject_definitions, retention_analysis = cls._build_first_frame_definition_and_retention(subjects, subject_definitions, retention_analysis)
             length = len(subjects) - 1
             subjects.append({
                 "subject": {
@@ -291,7 +290,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 f"{shot_start}{detailed_description}"
             )
         else:
-            shot_start = "[Shot 1]" if not detailed_description.startswith("[Shot ") else ""
+            shot_start = "[Shot 1] " if not detailed_description.startswith("[Shot ") else ""
             detailed_description = f"{shot_start}{detailed_description}"
         detailed_description = global_prompt + "\n" + detailed_description
         overall_soundscape = clip_result.get("overall_soundscape", None)
@@ -329,6 +328,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             raw_prompt += f"{non_diegetic_music}\n"
 
         pre_formatted = json.dumps({
+            "shot1_description": clip_result.get("shot1_description", None),
             "detailed_description": clip_result.get("detailed_description", ""),
             "overall_soundscape": clip_result.get("overall_soundscape") or None,
             "non_diegetic_music": clip_result.get("non_diegetic_music") or None,

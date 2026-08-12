@@ -31,7 +31,7 @@ EXAMPLE_BASIC_NO_IMAGE = ('"[Shot 1] A cozy cafe interior with exposed brick wal
                           'as they smile warmly and reply, {{ROLE_1_DIALOGUE_1}}. '
                           'The camera holds steady in a medium close-up with shallow focus.\\n"')
 
-EXAMPLE_BASIC_HAS_IMAGE = ('"[Shot 2] At 00:03.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2) '
+EXAMPLE_BASIC_HAS_IMAGE = ('"[Shot 2] At 00:05.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2) '
                            'as they smile warmly and reply, {{ROLE_1_DIALOGUE_1}}. '
                            'The camera holds steady in a medium close-up with shallow focus.\\n"')
 
@@ -39,15 +39,15 @@ EXAMPLE_ENHANCED_NO_IMAGE = ('"[Shot 1] A dimly lit cafe interior with exposed b
                              '{{ROLE_0}} (S1) and {{ROLE_1}} (S2) sit across from each other at a worn wooden table. '
                              'Rain streaks down the window behind them. '
                              'The camera slowly pushes in from a wide establishing shot to a medium two-shot.\\n'
-                             '[Shot 2] At 00:04.000, a close-up on {{ROLE_0}} (S1). His expression is grave. '
+                             '[Shot 2] At 00:05.000, a close-up on {{ROLE_0}} (S1). His expression is grave. '
                              'Fixed camera, shallow depth of field. He says, {{ROLE_0_DIALOGUE_0}}.\\n'
-                             '[Shot 3] At 00:08.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2). '
+                             '[Shot 3] At 00:10.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2). '
                              '{{ROLE_1}} (S2) smiles warmly and replies, {{ROLE_1_DIALOGUE_1}}. '
                              'The camera holds steady in a medium close-up.\\n"')
 
-EXAMPLE_ENHANCED_HAS_IMAGE = ('"[Shot 2] At 00:04.000, a close-up on {{ROLE_0}} (S1). His expression is grave. '
+EXAMPLE_ENHANCED_HAS_IMAGE = ('"[Shot 2] At 00:05.000, a close-up on {{ROLE_0}} (S1). His expression is grave. '
                               'Fixed camera, shallow depth of field. He says, {{ROLE_0_DIALOGUE_0}}.\\n'
-                              '[Shot 3] At 00:08.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2). '
+                              '[Shot 3] At 00:10.000, a reverse over-the-shoulder shot on {{ROLE_1}} (S2). '
                               '{{ROLE_1}} (S2) smiles warmly and replies, {{ROLE_1_DIALOGUE_1}}. '
                               'The camera holds steady in a medium close-up.\\n"')
 
@@ -70,7 +70,7 @@ PROMPT_USER_SECTION = """
 ## User Input:
 {user_input}
 
-Video duration: {duration} seconds at 24fps."""
+Video duration: {duration} seconds."""
 
 PROMPT_SHOT1_SECTION = """
 ## Opening Shot (from reference image):
@@ -138,8 +138,8 @@ __SHOT1_EXAMPLE__  "detailed_description": __SHOT_EXAMPLE__
   "mapping": {{
     "ROLE_0": "Zhang San",
     "ROLE_1": "Li Si",
-    "ROLE_0_DIALOGUE_0": "[Chinese]你好!",
-    "ROLE_1_DIALOGUE_1": "[English]Hello!"
+    "ROLE_0_DIALOGUE_0": "[Chinese]我们已经有三年没见面了，你一点都没变。",
+    "ROLE_1_DIALOGUE_1": "[English]It's good to see you again. How have you been all these years?"
   }}
 }}
 
@@ -164,7 +164,7 @@ PROMPT_ENHANCE_USER_SECTION = """
 ## User Input:
 {user_input}
 
-Video duration: {duration} seconds at 24fps."""
+Video duration: {duration} seconds."""
 
 PROMPT_ENHANCE_SHOT1_SECTION = """
 ## Opening Shot (from reference image):
@@ -238,8 +238,8 @@ __SHOT1_EXAMPLE__  "detailed_description": __SHOT_EXAMPLE__
   "mapping": {{
     "ROLE_0": "Zhang San",
     "ROLE_1": "Li Si",
-    "ROLE_0_DIALOGUE_0": "[Chinese]好久不见。",
-    "ROLE_1_DIALOGUE_1": "[English]Hello!"
+    "ROLE_0_DIALOGUE_0": "[Chinese]好久不见，这些年你过得还好吗？",
+    "ROLE_1_DIALOGUE_1": "[English]I've thought about this moment for a long time."
   }}
 }}
 
@@ -260,6 +260,53 @@ def calc_shot1_duration(fps: float) -> float:
     return round(math.ceil(8 * 100 / fps) / 100, 3)
 
 
+def _remove_dialogue(text: str) -> str:
+    """Remove dialogue content from a plain-text previous prompt.
+
+    Strips:
+    - `{{ROLE_N_DIALOGUE_M}}` dialogue placeholders
+    - Quoted dialogue fragments (Chinese 「」『』“” and English "...")
+    - Residual speech verbs such as "says, / replies:"
+    """
+    text = re.sub(r"\{\{\s*ROLE_\d+_DIALOGUE_\d+\s*\}\}", "", text)
+    text = re.sub(r"“[^”]*”", "", text)
+    text = re.sub(r"‘[^’]*’", "", text)
+    text = re.sub(r"「[^」]*」", "", text)
+    text = re.sub(r"『[^』]*』", "", text)
+    text = re.sub(r'"[^"\n]*"', "", text)
+    text = re.sub(
+        r"\b(?:says|said|replies|replied|asks|asked|answers|answered)\b\s*[,:：]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return text
+
+
+def _extract_prev_prompt(last_prompt: str) -> str:
+    """Extract the usable visual reference from the previous segment prompt.
+
+    Rules:
+    - Empty input → ""
+    - Valid JSON (structured output) → "" — a structured JSON cannot be used
+      directly as a reference, so it is discarded
+    - Plain text → dialogue content removed, rest kept for visual continuity
+    """
+    if not last_prompt:
+        return ""
+    stripped = last_prompt.strip()
+    if not stripped:
+        return ""
+    try:
+        parse_generated_json(stripped)
+        log.info("[MiniMaxRefPromptEnhance] prev_prompt is JSON, ignored as reference")
+        return ""
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return _remove_dialogue(stripped)
+
+
 def build_prompt_text(
     last_prompt: str,
     prompt: str,
@@ -278,7 +325,10 @@ def build_prompt_text(
         has_image: whether a first-frame reference image is provided
         shot1_dur: first shot duration (only used when has_image=True, for log info)
     """
-    has_last = bool(last_prompt.strip())
+    # Sanitize the previous prompt: discard structured JSON (not usable as a
+    # reference) and strip dialogue content from plain text.
+    prev_prompt = _extract_prev_prompt(last_prompt)
+    has_last = bool(prev_prompt)
 
     shot1_desc_instruction = (
         '\n  - "shot1_description": Describe the opening scene from the reference image. Describe the environment, characters, lighting, and atmosphere. Must output a full visual description—never use null!'
@@ -303,7 +353,7 @@ def build_prompt_text(
         if has_image:
             parts.append(PROMPT_ENHANCE_IMAGE_SECTION)
         if has_last:
-            parts.append(PROMPT_ENHANCE_LAST_SECTION.format(prev_prompt=last_prompt))
+            parts.append(PROMPT_ENHANCE_LAST_SECTION.format(prev_prompt=prev_prompt))
         if not has_image:
             parts.append(PROMPT_ENHANCE_NO_IMAGE)
         parts.append(PROMPT_ENHANCE_USER_SECTION.format(
@@ -325,7 +375,7 @@ def build_prompt_text(
         if has_image:
             parts.append(PROMPT_IMAGE_SECTION)
         if has_last:
-            parts.append(PROMPT_LAST_SECTION.format(prev_prompt=last_prompt))
+            parts.append(PROMPT_LAST_SECTION.format(prev_prompt=prev_prompt))
         if not has_image:
             parts.append(PROMPT_NO_IMAGE_INSTRUCTION)
         parts.append(PROMPT_USER_SECTION.format(

@@ -448,6 +448,12 @@ const STYLES = `
     user-select: none;
     -webkit-user-select: none;
   }
+  .pr-dialogue-duration {
+    font-size: 12px;
+    color: #f0a;
+    font-family: monospace;
+    white-space: nowrap;
+  }
   .pr-timecode {
     font-size: 14px;
     font-weight: bold;
@@ -2394,6 +2400,10 @@ class TimelineEditor {
     this.segmentBoundsDisplay.className = "pr-segment-bounds";
     this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
 
+    this.dialogueDurationDisplay = document.createElement("div");
+    this.dialogueDurationDisplay.className = "pr-dialogue-duration pr-segment-bounds";
+    this.dialogueDurationDisplay.textContent = "";
+
     this.timeCodeDisplay = document.createElement("div");
     this.timeCodeDisplay.className = "pr-timecode";
     this.timeCodeDisplay.textContent = this.formatTime(0);
@@ -3055,6 +3065,7 @@ class TimelineEditor {
         if (saveTimeout) clearTimeout(saveTimeout);
         saveTimeout = setTimeout(triggerAutoSave, 300);
       }
+      this._updateDialogueDurationDisplay();
     });
 
     // ── @ Mention Dropdown for segment prompt ──
@@ -3600,6 +3611,7 @@ class TimelineEditor {
 
     this.strengthRow.appendChild(this.timeCodeDisplay);
     this.strengthRow.appendChild(this.segmentBoundsDisplay);
+    this.strengthRow.appendChild(this.dialogueDurationDisplay);
     // this.strengthRow.appendChild(this.strengthLabel);
     this.strengthRow.appendChild(blankEl)
     this.strengthRow.appendChild(promptEnhanceSelectGroup);
@@ -5416,6 +5428,43 @@ class TimelineEditor {
     return dropSuffix ? Math.round(frames).toString() : Math.round(frames) + " frames";
   }
 
+  _estimateDialogueDuration(text) {
+    if (!text) return 0;
+    const results = [];
+    // English double quotes: "..."
+    const enMatches = text.match(/"([^"]*)"/g);
+    if (enMatches) results.push(...enMatches);
+    // Chinese double quotes: \u201c...\u201d
+    const cnMatches = text.match(/\u201c([^\u201d]*)\u201d/g);
+    if (cnMatches) results.push(...cnMatches);
+    if (!results.length) return 0;
+    let totalSeconds = 0;
+    for (const match of results) {
+      const inner = match.slice(1, -1).trim();
+      if (!inner) continue;
+      const hasChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(inner);
+      if (hasChinese) {
+        const charCount = [...inner].filter(c => !/\s/.test(c)).length;
+        totalSeconds += charCount / 4;
+      } else {
+        const words = inner.split(/\s+/).filter(w => w.length > 0).length;
+        totalSeconds += words / 3;
+      }
+    }
+    return Math.round(totalSeconds);
+  }
+
+  _updateDialogueDurationDisplay() {
+    if (!this.dialogueDurationDisplay) return;
+    const text = this.promptInput ? this.promptInput.value : "";
+    const secs = this._estimateDialogueDuration(text);
+    if (secs > 0) {
+      this.dialogueDurationDisplay.textContent = " | dialogue: " + secs + "s";
+    } else {
+      this.dialogueDurationDisplay.textContent = "";
+    }
+  }
+
   updateWidgetVisibility() {
     const mode = this.displayModeWidget ? this.displayModeWidget.value : "seconds";
     const isSeconds = mode === "seconds";
@@ -5813,6 +5862,7 @@ class TimelineEditor {
         this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
       }
     }
+    this._updateDialogueDurationDisplay();
   }
 
 
