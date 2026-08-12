@@ -6,8 +6,13 @@ import torch
 import folder_paths
 from comfy_api.latest import io
 
+try:
+    from comfy_execution.graph import ExecutionBlocker
+except Exception:
+    ExecutionBlocker = None
+
 from .minimax_ref_prompt_enhance import generate_prompt_with_clip
-from .lib import find_index, load_image_tensor, load_audio_tensor, resolve_input_path
+from .lib import find_index, load_image_tensor, load_audio_tensor, resolve_input_path, seconds_to_mmssmmm
 
 GuideData = io.Custom("GUIDE_DATA")
 
@@ -131,6 +136,15 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
 
         # --- Extract segment data ---
         seg = timeline[idx]
+        if seg.get("is_end_frame") and ExecutionBlocker is not None:
+            # 尾帧：跳过当前 Easy-Use 循环迭代（类似 continue）。
+            # 返回 ExecutionBlocker 会阻断本轮的提示词/生成/保存等所有下游节点，
+            # 而循环的 index 由 forLoopEnd/whileLoopEnd 自动递增，从而进入下一次迭代。
+            log.info(
+                f"[MiniMaxRefDirectorGuide] seg_index={idx} is an END frame "
+                "-> skipping this loop iteration (continue)"
+            )
+            return io.NodeOutput(*([ExecutionBlocker(None)] * 19))
         prompt = str(seg.get("prompt", ""))
         prev_prompt = str(seg.get("prev_prompt", ""))
         prev_prompt = prev_prompt if last_refer_mode else ""
@@ -139,7 +153,6 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         # --- Determine effective prompt_enhance: per-segment overrides global when not "Default" ---
         seg_prompt_enhance = seg.get("prompt_enhance", "Default")
         effective_prompt_enhance = seg_prompt_enhance if seg_prompt_enhance != "Default" else prompt_enhance
-
         if effective_prompt_enhance == "Pre-formatted":
             # "Pre-formatted" mode: skip VLM
             if director_first_frame:
@@ -151,7 +164,16 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 input_first_frame = load_image_tensor(director_first_frame)
             else:
                 input_first_frame = first_frame if last_refer_mode else None
-
+        # --- Detect the end frame of the current segment ---
+        end_frame_tensor = None
+        end_frame_time = None
+        if idx + 1 < segment_count:
+            next_seg = timeline[idx + 1]
+            if next_seg.get("is_end_frame") and next_seg.get("first_frame"):
+                end_frame_tensor = load_image_tensor(str(next_seg.get("first_frame")))
+                log.info(
+                    f"[MiniMaxRefDirectorGuide] seg_index={idx} next segment (idx={idx + 1}) is an END frame"
+                )
         result = cls._process_prompt(
             subject_data=subject_data,
             global_prompt=global_prompt,
@@ -165,6 +187,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             frame_rate=fps,
             enhance=effective_prompt_enhance,
             seed=seed,
+            end_frame=end_frame_tensor,
         )
         # --- Load all referenced subject images as [C, H, W] tensors ---
         images = []
@@ -209,7 +232,8 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             f"[MiniMaxRefDirectorGuide] seg_index={idx}/{segment_count} | "
             f"subjects={len(subject_data)} | images={len(images)} audios={len(audios)} | "
             f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | effective_prompt_enhance={effective_prompt_enhance} | "
-            f"first_frame={'Yes' if input_first_frame is not None else 'No'}"
+            f"first_frame={'Yes' if input_first_frame is not None else 'No'} | "
+            f"end_frame={'Yes' if end_frame_tensor is not None else 'No'}"
         )
         
         return io.NodeOutput(
@@ -229,7 +253,8 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
     def _process_prompt(cls, subject_data: list[dict], global_prompt: str, prompt: str,
                        duration_frames: int, first_frame: torch.Tensor|None = None, last_prompt: str = "",
                        clip=None, clip_name: str = "", clip_type: str = "qwen3vl",
-                       frame_rate: float = 24.0, enhance: str = "Basic", seed: int = 42) -> dict:
+                       frame_rate: float = 24.0, enhance: str = "Basic", seed: int = 42,
+                       end_frame: torch.Tensor|None = None, end_frame_time: float|None = None) -> dict:
         """Process a single segment prompt: call VLM enhancement → parse mapping → build subject_definitions / retention_analysis."""
 
         # Call VLM to generate enhanced prompt
@@ -272,6 +297,21 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 "subject_definition": f"<Picture {length + 1}>",
                 "audio_definition": None
             })
+        # Append end-frame subject: the next segment's first-frame image is the last frame of this segment
+        end_frame_picture = None
+        if end_frame is not None:
+            end_frame_picture = len(subjects) + 1
+            subjects.append({
+                "subject": {
+                    "name": "End frame",
+                    "description": "The last frame of the video",
+                    "imageFile": end_frame,
+                    "audioFile": "",
+                },
+                "end_frame": True,
+                "subject_definition": f"<Picture {end_frame_picture}>",
+                "audio_definition": None
+            })
         # Build detailed_description / overall_soundscape / non_diegetic_music
         shot1_desc = clip_result.get("shot1_description", None)
         if shot1_desc:
@@ -292,6 +332,18 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         else:
             shot_start = "[Shot 1] " if not detailed_description.startswith("[Shot ") else ""
             detailed_description = f"{shot_start}{detailed_description}"
+        # Append the end-frame reference (next segment's first-frame image) as the last frame of this segment
+        if end_frame_picture is not None:
+            shot_nums = [int(m) for m in re.findall(r"\[Shot (\d+)\]", detailed_description)]
+            last_shot = max(shot_nums) + 1 if shot_nums else 1
+            end_frame_time = max(duration_frames / max(frame_rate, 1.0), 0.1)
+            time_str = seconds_to_mmssmmm(end_frame_time) if end_frame_time is not None else "00:00.000"
+            subject_definitions += f"\n<Picture {end_frame_picture}> is the last frame of [Shot {last_shot}]."
+            retention_analysis += f"\n<Picture {end_frame_picture}> ([Shot {last_shot}] last frame): fully_preserved."
+            detailed_description += (
+                f"\n[Shot {last_shot}] At {time_str} "
+                f"<Picture {end_frame_picture}> is fully referenced."
+            )
         detailed_description = global_prompt + "\n" + detailed_description
         overall_soundscape = clip_result.get("overall_soundscape", None)
         if overall_soundscape:
