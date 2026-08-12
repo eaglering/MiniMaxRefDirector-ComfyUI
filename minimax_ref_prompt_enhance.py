@@ -269,6 +269,8 @@ def _remove_dialogue(text: str) -> str:
     - Residual speech verbs such as "says, / replies:"
     """
     text = re.sub(r"\{\{\s*ROLE_\d+_DIALOGUE_\d+\s*\}\}", "", text)
+    text = re.sub(r"：", ".", text)
+    text = re.sub(r":", ".", text)
     text = re.sub(r"“[^”]*”", "", text)
     text = re.sub(r"‘[^’]*’", "", text)
     text = re.sub(r"「[^」]*」", "", text)

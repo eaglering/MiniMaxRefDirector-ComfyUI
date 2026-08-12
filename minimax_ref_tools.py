@@ -1317,7 +1317,6 @@ class MiniMaxRefSaveImage(io.ComfyNode):
                 "(ComfyUI/output) with the given filename prefix."
             ),
             inputs=[
-                io.Image.Input("images", tooltip="The images to save."),
                 io.String.Input(
                     "filename_prefix",
                     default="Tenz",
@@ -1326,11 +1325,18 @@ class MiniMaxRefSaveImage(io.ComfyNode):
                         "Images are saved to the ComfyUI output directory."
                     ),
                 ),
+                io.Image.Input("images", tooltip="The images to save."),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
             outputs=[io.Image.Output(display_name="images", tooltip="The saved images.")],
         )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        # Force execution on every iteration so a changing filename_prefix
+        # (e.g. from MiniMaxRefJoinString inside a loop) is picked up each pass.
+        return float("NaN")
 
     @classmethod
     def execute(cls, images, filename_prefix="Tenz") -> io.NodeOutput:
@@ -1364,7 +1370,6 @@ class MiniMaxRefSaveAudio(io.ComfyNode):
             ),
             category="minimax",
             inputs=[
-                io.Audio.Input("audio", tooltip="The audio to save."),
                 io.String.Input(
                     "filename_prefix",
                     default="Tenz/audio",
@@ -1394,11 +1399,18 @@ class MiniMaxRefSaveAudio(io.ComfyNode):
                     ],
                     tooltip="The file format in which to save the audio.",
                 ),
+                io.Audio.Input("audio", tooltip="The audio to save."),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
             outputs=[io.Audio.Output("audio", tooltip="The saved audio.")],
         )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        # Force execution on every iteration so a changing filename_prefix
+        # (e.g. from MiniMaxRefJoinString inside a loop) is picked up each pass.
+        return float("NaN")
 
     @classmethod
     def execute(cls, audio, filename_prefix: str, format: dict) -> io.NodeOutput:
@@ -1486,11 +1498,19 @@ class MiniMaxRefJoinString(io.ComfyNode):
                     ),
                 ),
             ],
-            is_output_node=True,
             outputs=[
                 io.String.Output("output", tooltip="The substituted string."),
             ],
+            is_output_node=True,
         )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        # Force execution on every loop iteration. Easy-Use's while-loop cache
+        # signature only tracks connection endpoints, not actual values, so a
+        # node whose input values change every pass would otherwise be skipped
+        # and keep returning the first iteration's string.
+        return float("NaN")
 
     @classmethod
     def execute(
@@ -1501,7 +1521,6 @@ class MiniMaxRefJoinString(io.ComfyNode):
         value4: io.MultiType.Type = None,
         expression: str = "",
     ) -> io.NodeOutput:
-        print(f"[MiniMaxRefJoinString] execute: value1={value1!r}, value2={value2!r}, value3={value3!r}, value4={value4!r}, expression={expression!r}")
         values = {
             "value1": "" if value1 is None else str(value1),
             "value2": "" if value2 is None else str(value2),
