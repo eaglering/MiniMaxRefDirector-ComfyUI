@@ -6,8 +6,13 @@ import torch
 import folder_paths
 from comfy_api.latest import io
 
+try:
+    from comfy_execution.graph import ExecutionBlocker
+except Exception:
+    ExecutionBlocker = None
+
 from .minimax_ref_prompt_enhance import generate_prompt_with_clip
-from .lib import find_index, load_image_tensor, load_audio_tensor, resolve_input_path
+from .lib import find_index, load_image_tensor, load_audio_tensor, resolve_input_path, seconds_to_mmssmmm
 
 GuideData = io.Custom("GUIDE_DATA")
 
@@ -42,25 +47,41 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                     "first_frame", optional=True,
                     tooltip="Use first frame input if it's not set",
                 ),
+                io.Clip.Input(
+                    "clip", optional=True,
+                    tooltip="External CLIP model input (priority over clip_name/clip_type). Connect from a CLIP Loader node.",
+                ),
                 io.Combo.Input(
                     "clip_name",
                     options=text_encoders,
                     default=text_encoders[0] if text_encoders else "",
-                    tooltip="Choose text encoder（CLIP/VL）text_encodes",
+                    tooltip="Choose text encoder（CLIP/VL）text_encodes (used when no external clip connected).",
                 ),
                 io.Combo.Input(
                     "clip_type",
                     options=clip_types,
                     default="qwen3vl",
-                    tooltip="CLIP model type",
+                    tooltip="CLIP model type (used when no external clip connected).",
+                ),
+                io.Int.Input(
+                    "seed",
+                    optional=True,
+                    display_name="seed",
+                    default=42,
+                    min=0,
+                    max=0xFFFFFFFFFFFFFFFF,
+                    tooltip="Random seed, forwarded to CLIP model generation",
+                    advanced=True,
                 ),
                 io.Boolean.Input(
                     "last_refer_mode", default=False,
                     tooltip="Whether to use the last reference frame as the first frame of the next segment.",
                 ),
-                io.Boolean.Input(
-                    "prompt_enhance", default=False,
-                    tooltip="Whether to enhance the prompt generation.",
+                io.Combo.Input(
+                    "prompt_enhance",
+                    options=["Basic", "Enhanced", "Pre-formatted"],
+                    default="Basic",
+                    tooltip="Prompt enhancement mode: Basic=standard generation | Enhanced=polish + fill ambient sound / camera movement / BGM | Pre-formatted=parse prompt as pre-formatted JSON (no VLM)",
                 ),
                 io.Int.Input(
                     "seg_index", default=0, min=0, max=1000, step=1,
@@ -85,12 +106,14 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 io.Int.Output(display_name="length", tooltip="Frame count."),
                 io.Float.Output(display_name="frame_rate", tooltip="Frame rate from global config."),
                 io.String.Output(display_name="prompt", tooltip="Fully assembled prompt for the selected segment."),
+                io.String.Output(display_name="raw_prompt", tooltip="Raw prompt for the selected segment."),
+                io.String.Output(display_name="pre_formatted", tooltip="Prompt as pre-formatted JSON"),
             ],
         )
 
     @classmethod
-    def execute(cls, guide_data=None, first_frame=None, clip_name="", clip_type="qwen3vl", 
-                last_refer_mode=False, prompt_enhance=False, seg_index=0) -> io.NodeOutput:
+    def execute(cls, guide_data=None, first_frame=None, clip=None, clip_name="", clip_type="qwen3vl", seed=42, 
+                last_refer_mode=False, prompt_enhance="Basic", seg_index=0) -> io.NodeOutput:
         """Extract segment-level data and load all referenced subject images/audio."""
 
         if guide_data is None:
@@ -113,27 +136,58 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
 
         # --- Extract segment data ---
         seg = timeline[idx]
+        if seg.get("is_end_frame") and ExecutionBlocker is not None:
+            # 尾帧：跳过当前 Easy-Use 循环迭代（类似 continue）。
+            # 返回 ExecutionBlocker 会阻断本轮的提示词/生成/保存等所有下游节点，
+            # 而循环的 index 由 forLoopEnd/whileLoopEnd 自动递增，从而进入下一次迭代。
+            log.info(
+                f"[MiniMaxRefDirectorGuide] seg_index={idx} is an END frame "
+                "-> skipping this loop iteration (continue)"
+            )
+            return io.NodeOutput(*([ExecutionBlocker(None)] * 19))
         prompt = str(seg.get("prompt", ""))
         prev_prompt = str(seg.get("prev_prompt", ""))
         prev_prompt = prev_prompt if last_refer_mode else ""
-        frame_refer = seg.get("first_frame", "")
+        director_first_frame = seg.get("first_frame", "")
         duration_frames = seg.get("duration_frames", 0)
-        if frame_refer:
-            first_frame = load_image_tensor(frame_refer)
+        # --- Determine effective prompt_enhance: per-segment overrides global when not "Default" ---
+        seg_prompt_enhance = seg.get("prompt_enhance", "Default")
+        effective_prompt_enhance = seg_prompt_enhance if seg_prompt_enhance != "Default" else prompt_enhance
+        if effective_prompt_enhance == "Pre-formatted":
+            # "Pre-formatted" mode: skip VLM
+            if director_first_frame:
+                input_first_frame = load_image_tensor(director_first_frame)
+            else:
+                input_first_frame = None
         else:
-            first_frame = first_frame if last_refer_mode else None
-
+            if director_first_frame:
+                input_first_frame = load_image_tensor(director_first_frame)
+            else:
+                input_first_frame = first_frame if last_refer_mode else None
+        # --- Detect the end frame of the current segment ---
+        end_frame_tensor = None
+        end_frame_time = None
+        if idx + 1 < segment_count:
+            next_seg = timeline[idx + 1]
+            if next_seg.get("is_end_frame") and next_seg.get("first_frame"):
+                end_frame_tensor = load_image_tensor(str(next_seg.get("first_frame")))
+                log.info(
+                    f"[MiniMaxRefDirectorGuide] seg_index={idx} next segment (idx={idx + 1}) is an END frame"
+                )
         result = cls._process_prompt(
             subject_data=subject_data,
             global_prompt=global_prompt,
             prompt=prompt,
             duration_frames=duration_frames,
-            first_frame=first_frame,
+            first_frame=input_first_frame,
             last_prompt=prev_prompt,
+            clip=clip,
             clip_name=clip_name,
             clip_type=clip_type,
             frame_rate=fps,
-            enhance=prompt_enhance,
+            enhance=effective_prompt_enhance,
+            seed=seed,
+            end_frame=end_frame_tensor,
         )
         # --- Load all referenced subject images as [C, H, W] tensors ---
         images = []
@@ -177,7 +231,9 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         log.info(
             f"[MiniMaxRefDirectorGuide] seg_index={idx}/{segment_count} | "
             f"subjects={len(subject_data)} | images={len(images)} audios={len(audios)} | "
-            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | first_frame={'Yes' if first_frame is not None else 'No'}"
+            f"{out_w}×{out_h} @ {fps}fps | length={duration_frames} | effective_prompt_enhance={effective_prompt_enhance} | "
+            f"first_frame={'Yes' if input_first_frame is not None else 'No'} | "
+            f"end_frame={'Yes' if end_frame_tensor is not None else 'No'}"
         )
         
         return io.NodeOutput(
@@ -188,30 +244,35 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             result["duration_frames"],
             fps,
             result["prompt"],
+            result["raw_prompt"],
+            result['pre_formatted']
         )
 
 
     @classmethod
     def _process_prompt(cls, subject_data: list[dict], global_prompt: str, prompt: str,
                        duration_frames: int, first_frame: torch.Tensor|None = None, last_prompt: str = "",
-                       clip_name: str = "", clip_type: str = "qwen3vl",
-                       frame_rate: float = 24.0, enhance: bool = False) -> dict:
-        """处理单个分镜提示词：调用 VLM 增强 → 解析 mapping → 构建 subject_definitions / retention_analysis。"""
+                       clip=None, clip_name: str = "", clip_type: str = "qwen3vl",
+                       frame_rate: float = 24.0, enhance: str = "Basic", seed: int = 42,
+                       end_frame: torch.Tensor|None = None, end_frame_time: float|None = None) -> dict:
+        """Process a single segment prompt: call VLM enhancement → parse mapping → build subject_definitions / retention_analysis."""
 
-        # 调用 VLM 生成增强提示词
+        # Call VLM to generate enhanced prompt
         duration_sec = max(duration_frames / max(frame_rate, 1.0), 0.1)
         clip_result = generate_prompt_with_clip(
+            image=first_frame,
+            clip=clip,
             clip_name=clip_name,
             clip_type=clip_type,
-            image=first_frame,
             last_prompt=last_prompt,
             prompt=prompt,
             duration=duration_sec,
             fps=frame_rate,
             enhance=enhance,
+            seed=seed,
         )
 
-        # 解析 mapping
+        # Parse mapping
         mapping_data = clip_result.get("mapping", {})
         if isinstance(mapping_data, str):
             try:
@@ -219,7 +280,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             except json.JSONDecodeError:
                 mapping_data = {}
 
-        # 构建 subject_definitions / retention_analysis
+        # Build subject_definitions / retention_analysis
         subjects, replacements, subject_definitions, retention_analysis = cls._build_subject_definitions_and_retention(subject_data, mapping_data)
 
         if first_frame is not None:
@@ -233,13 +294,56 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                     "audioFile": "",
                 },
                 "first_frame": True,
-                "subject_definition": f"<Subject {length + 1}>",
+                "subject_definition": f"<Picture {length + 1}>",
                 "audio_definition": None
             })
-        # 构建 detailed_description / overall_soundscape / non_diegetic_music
+        # Append end-frame subject: the next segment's first-frame image is the last frame of this segment
+        end_frame_picture = None
+        if end_frame is not None:
+            end_frame_picture = len(subjects) + 1
+            subjects.append({
+                "subject": {
+                    "name": "End frame",
+                    "description": "The last frame of the video",
+                    "imageFile": end_frame,
+                    "audioFile": "",
+                },
+                "end_frame": True,
+                "subject_definition": f"<Picture {end_frame_picture}>",
+                "audio_definition": None
+            })
+        # Build detailed_description / overall_soundscape / non_diegetic_music
+        shot1_desc = clip_result.get("shot1_description", None)
+        if shot1_desc:
+            for key, value in replacements.items():
+                shot1_desc = shot1_desc.replace(key, value)
         detailed_description = clip_result.get("detailed_description", "")
         for key, value in replacements.items():
             detailed_description = detailed_description.replace(key, value)
+        if shot1_desc:
+            # Safety: strip any leading [Shot 1] that may have slipped through
+            # (prompt templates now instruct VLM to start from [Shot 2] when first frame exists)
+            detailed_description = re.sub(r'^\[Shot 1\]\s*', '', detailed_description.lstrip())
+            shot_start = "[Shot 2] " if not detailed_description.startswith("[Shot ") else ""
+            detailed_description = (
+                f"[Shot 1] {shot1_desc}\n"
+                f"{shot_start}{detailed_description}"
+            )
+        else:
+            shot_start = "[Shot 1] " if not detailed_description.startswith("[Shot ") else ""
+            detailed_description = f"{shot_start}{detailed_description}"
+        # Append the end-frame reference (next segment's first-frame image) as the last frame of this segment
+        if end_frame_picture is not None:
+            shot_nums = [int(m) for m in re.findall(r"\[Shot (\d+)\]", detailed_description)]
+            last_shot = max(shot_nums) + 1 if shot_nums else 1
+            end_frame_time = max(duration_frames / max(frame_rate, 1.0), 0.1)
+            time_str = seconds_to_mmssmmm(end_frame_time) if end_frame_time is not None else "00:00.000"
+            subject_definitions += f"\n<Picture {end_frame_picture}> is the last frame of [Shot {last_shot}]."
+            retention_analysis += f"\n<Picture {end_frame_picture}> ([Shot {last_shot}] last frame): fully_preserved."
+            detailed_description += (
+                f"\n[Shot {last_shot}] At {time_str} "
+                f"<Picture {end_frame_picture}> is fully referenced."
+            )
         detailed_description = global_prompt + "\n" + detailed_description
         overall_soundscape = clip_result.get("overall_soundscape", None)
         if overall_soundscape:
@@ -261,34 +365,69 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         final_prompt = ""
         for key, value in final_prompt_attr.items():
             final_prompt += f"{key}:\n{value}\n"
+
+        raw_prompt = ""
+        detailed_description = clip_result.get("detailed_description", "")
+        detailed_description = cls._build_raw_prompt(detailed_description, mapping_data)
+        raw_prompt += f"{detailed_description}\n"
+        overall_soundscape = clip_result.get("overall_soundscape", None)
+        if overall_soundscape:
+            overall_soundscape = cls._build_raw_prompt(overall_soundscape, mapping_data)
+            raw_prompt += f"{overall_soundscape}\n"
+        non_diegetic_music = clip_result.get("non_diegetic_music", None)
+        if non_diegetic_music:
+            non_diegetic_music = cls._build_raw_prompt(non_diegetic_music, mapping_data)
+            raw_prompt += f"{non_diegetic_music}\n"
+
+        pre_formatted = json.dumps({
+            "shot1_description": clip_result.get("shot1_description", None),
+            "detailed_description": clip_result.get("detailed_description", ""),
+            "overall_soundscape": clip_result.get("overall_soundscape") or None,
+            "non_diegetic_music": clip_result.get("non_diegetic_music") or None,
+            "mapping": mapping_data,
+        }, ensure_ascii=False, indent=2)
+
         return {
             "subjects": subjects,
             "prompt": final_prompt,
+            "raw_prompt": raw_prompt,
+            "pre_formatted": pre_formatted,
             "first_frame": first_frame is not None,
             "duration_frames": duration_frames,
         }
 
     @classmethod
+    def _build_raw_prompt(cls, prompt: str, mapping_data: dict[str, str]) -> str:
+        for key, value in sorted(mapping_data.items(), key=lambda x: len(x[0]), reverse=True) :
+            if prompt.find("{{" + key + "}}") == -1:
+                continue
+            if key.find("_DIALOGUE_") != -1:
+                value = re.sub(r"\[[a-zA-Z]+\]", "", value)
+                value = f"\"{value}\""
+            prompt = prompt.replace("{{" + key + "}}", value)
+        return prompt
+
+    @classmethod
     def _build_first_frame_definition_and_retention(cls, subjects: list[dict], subject_definitions: str, retention_analysis: str) -> tuple[str, str]:
         length = len(subjects)
-        subject_definitions += "\n" + f"<Subject {length + 1}> is the first frame of the video."
-        retention_analysis += "\n" + f"<Subject {length + 1}> (appears in [Shot 1]): fully_preserved"
+        subject_definitions += "\n" + f"<Picture {length + 1}> is the first frame of [Shot 1]."
+        retention_analysis += "\n" + f"<Picture {length + 1}> ([Shot 1] first frame): fully_preserved."
         return subject_definitions, retention_analysis
 
     @classmethod
     def _build_subject_definitions_and_retention(cls, subject_data: list[dict], mapping: dict) -> tuple[list[dict], dict[str, str], str, str]:
-        """从 mapping 构建 subject_definitions 和 retention_analysis。
+        """Build subject_definitions and retention_analysis from mapping.
 
-        subject_definitions 格式:
-            <Subject 1> is {角色名}
+        subject_definitions format:
+            <Subject 1> is {role_name}
             <Audio 1> is the voice timbre reference for <Subject 1>'s voice, ...
 
-        retention_analysis 格式:
+        retention_analysis format:
             <Subject 1> fully_preserved
             <Audio 1>: reference - ...
         """
-        subjects: list[dict] = []      # {index: 角色名}
-        replacements: dict[str, str] = {}  # {key: value}
+        subjects: list[dict] = []           # [{index: role_name}]
+        replacements: dict[str, str] = {}   # {key: value}
 
         for key, value in mapping.items():
             rKey = "{{" + key + "}}"
@@ -300,11 +439,11 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 if role_key not in mapping:
                     continue
                 role_name = mapping[role_key]
-                # 找到对应的主体
+                # Find corresponding subject
                 subject_data_index = find_index(subject_data, lambda x, name=role_name: x["name"] == name)
                 if subject_data_index == -1:
                     continue
-                # 增加主体
+                # Add subject
                 index = find_index(subjects, lambda x, dm=dm: x["index"] == int(dm.group(1)))
                 if index > -1:
                     subjects[index]["audio_definition"] = f"<Audio {index + 1}>"
@@ -320,7 +459,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             if m:
                 index = find_index(subjects, lambda x, m=m: x["index"] == int(m.group(1)))
                 if index == -1:
-                    # 找到对应的主体
+                    # Find corresponding subject
                     subject_data_index = find_index(subject_data, lambda x, name=value: x["name"] == name)
                     if subject_data_index == -1:
                         continue
@@ -343,11 +482,11 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             subject_lines.append(f"{value['subject_definition']} {value['subject']['description']}")
             retention_lines.append(f"{value['subject_definition']}: fully_preserved")
             if value["audio_definition"]:
-                subject_lines.append(f"{value['audio_definition']} is the voice timbre reference for "
-                                    f"{value['subject_definition']}'s voice, containing a spoken voiceover.")
-                retention_lines.append(f"{value['audio_definition']}: reference - the target audio references "
-                                    f"the voice timbre from {value['audio_definition']} to generate "
-                                    f"{value['subject_definition']}'s spoken dialogue.")
+                subject_lines.append(f"{value['audio_definition']} is the voice-timbre reference for "
+                                    f"{value['subject_definition']}")
+                retention_lines.append(f"{value['audio_definition']}: reference - the target speaker follows "
+                                    f"{value['audio_definition']}'s voice timbre and measured delivery "
+                                    f"without copying the original signal.")
 
         return subjects, replacements, "\n".join(subject_lines), "\n".join(retention_lines)
 

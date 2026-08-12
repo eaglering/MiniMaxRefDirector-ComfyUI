@@ -448,6 +448,12 @@ const STYLES = `
     user-select: none;
     -webkit-user-select: none;
   }
+  .pr-dialogue-duration {
+    font-size: 12px;
+    color: #f0a;
+    font-family: monospace;
+    white-space: nowrap;
+  }
   .pr-timecode {
     font-size: 14px;
     font-weight: bold;
@@ -2394,6 +2400,10 @@ class TimelineEditor {
     this.segmentBoundsDisplay.className = "pr-segment-bounds";
     this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
 
+    this.dialogueDurationDisplay = document.createElement("div");
+    this.dialogueDurationDisplay.className = "pr-dialogue-duration pr-segment-bounds";
+    this.dialogueDurationDisplay.textContent = "";
+
     this.timeCodeDisplay = document.createElement("div");
     this.timeCodeDisplay.className = "pr-timecode";
     this.timeCodeDisplay.textContent = this.formatTime(0);
@@ -3055,6 +3065,7 @@ class TimelineEditor {
         if (saveTimeout) clearTimeout(saveTimeout);
         saveTimeout = setTimeout(triggerAutoSave, 300);
       }
+      this._updateDialogueDurationDisplay();
     });
 
     // ── @ Mention Dropdown for segment prompt ──
@@ -3560,10 +3571,50 @@ class TimelineEditor {
         }
       }
     });
+    const blankEl = document.createElement("div")
+    blankEl.style.cssText = "flex:1"
+
+       // --- Prompt enhance select (per-segment) ---
+    const promptEnhanceSelectGroup = document.createElement("div")
+    const promptEnhanceLabel = document.createElement("span")
+    promptEnhanceLabel.name = "prompt_enhance";
+    promptEnhanceLabel.textContent = "Prompt Enhance: "
+    promptEnhanceLabel.className = "pr-segment-bounds"
+    promptEnhanceSelectGroup.appendChild(promptEnhanceLabel)
+    const promptEnhanceSelect = document.createElement("select");
+    promptEnhanceSelect.name = "prompt_enhance";
+    promptEnhanceSelect.style.cssText = "display:none;padding:2px 4px;border-radius:4px;background-color:#000";
+    const enhanceOptions = [
+      { value: "Default", label: "Default" },
+      { value: "Basic", label: "Basic" },
+      { value: "Enhanced", label: "Enhanced" },
+      { value: "Pre-formatted", label: "Pre-formatted" },
+    ];
+    enhanceOptions.forEach((opt) => {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      promptEnhanceSelect.appendChild(option);
+    });
+    promptEnhanceSelect.value = "Default";
+    promptEnhanceSelect.addEventListener("change", () => {
+      if (this.selectedIndex >= 0 && this.selectionType === "image") {
+        const seg = this.timeline.segments[this.selectedIndex];
+        if (seg) {
+          seg.prompt_enhance = promptEnhanceSelect.value === "Default" ? undefined : promptEnhanceSelect.value;
+          this.commitChanges();
+        }
+      }
+    });
+    this.promptEnhanceSelect = promptEnhanceSelect;
+    promptEnhanceSelectGroup.appendChild(promptEnhanceSelect)
 
     this.strengthRow.appendChild(this.timeCodeDisplay);
     this.strengthRow.appendChild(this.segmentBoundsDisplay);
+    this.strengthRow.appendChild(this.dialogueDurationDisplay);
     // this.strengthRow.appendChild(this.strengthLabel);
+    this.strengthRow.appendChild(blankEl)
+    this.strengthRow.appendChild(promptEnhanceSelectGroup);
     this.strengthRow.appendChild(zoomControls);
     // this.strengthRow.appendChild(this.strengthValue);
     // this.strengthRow.appendChild(this.vidStrLabel);
@@ -3851,6 +3902,7 @@ class TimelineEditor {
     controlsGroup.className = "pr-controls-group";
     controlsGroup.appendChild(this.strengthRow);
     controlsGroup.appendChild(playerControls);
+
     this.wrapper.appendChild(controlsGroup);
     this.wrapper.appendChild(propContainer);
     // this.wrapper.appendChild(this.globalPropContainer);
@@ -5376,6 +5428,43 @@ class TimelineEditor {
     return dropSuffix ? Math.round(frames).toString() : Math.round(frames) + " frames";
   }
 
+  _estimateDialogueDuration(text) {
+    if (!text) return 0;
+    const results = [];
+    // English double quotes: "..."
+    const enMatches = text.match(/"([^"]*)"/g);
+    if (enMatches) results.push(...enMatches);
+    // Chinese double quotes: \u201c...\u201d
+    const cnMatches = text.match(/\u201c([^\u201d]*)\u201d/g);
+    if (cnMatches) results.push(...cnMatches);
+    if (!results.length) return 0;
+    let totalSeconds = 0;
+    for (const match of results) {
+      const inner = match.slice(1, -1).trim();
+      if (!inner) continue;
+      const hasChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(inner);
+      if (hasChinese) {
+        const charCount = [...inner].filter(c => !/\s/.test(c)).length;
+        totalSeconds += charCount / 4;
+      } else {
+        const words = inner.split(/\s+/).filter(w => w.length > 0).length;
+        totalSeconds += words / 3;
+      }
+    }
+    return Math.round(totalSeconds);
+  }
+
+  _updateDialogueDurationDisplay() {
+    if (!this.dialogueDurationDisplay) return;
+    const text = this.promptInput ? this.promptInput.value : "";
+    const secs = this._estimateDialogueDuration(text);
+    if (secs > 0) {
+      this.dialogueDurationDisplay.textContent = " | dialogue: " + secs + "s";
+    } else {
+      this.dialogueDurationDisplay.textContent = "";
+    }
+  }
+
   updateWidgetVisibility() {
     const mode = this.displayModeWidget ? this.displayModeWidget.value : "seconds";
     const isSeconds = mode === "seconds";
@@ -5630,6 +5719,7 @@ class TimelineEditor {
       this.promptInput.placeholder = "";
       this.promptInput.style.opacity = "";
     }
+    if (this.promptEnhanceSelect) this.promptEnhanceSelect.style.display = "none";
 
     if (this.retakeMode) {
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
@@ -5745,6 +5835,12 @@ class TimelineEditor {
         this.strengthValue.value = strength.toFixed(2);
         this.strengthValue.disabled = !isImage;
         this.strengthValue.style.opacity = isImage ? "1.0" : "0.35";
+        // Update per-segment prompt_enhance select
+        if (this.promptEnhanceSelect) {
+          this.promptEnhanceSelect.style.display = "";
+          const segEnhance = seg.prompt_enhance || "Default";
+          this.promptEnhanceSelect.value = segEnhance;
+        }
       } else {
         this.promptInput.value = "";
         this.promptInput.placeholder = "No segment selected!";
@@ -5766,6 +5862,7 @@ class TimelineEditor {
         this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
       }
     }
+    this._updateDialogueDurationDisplay();
   }
 
 
@@ -9991,23 +10088,23 @@ class TimelineEditor {
         }
       };
 
-      const vidBtn = document.createElement("button");
-      vidBtn.className = "pr-gap-menu-btn";
-      vidBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Segment`;
-      vidBtn.onclick = () => {
-        this.dismissContextMenu();
-        const fi = document.createElement("input");
-        fi.type = "file"; fi.accept = "video/*";
-        fi.addEventListener("change", (ev) => {
-          if (ev.target.files?.[0]) this.handleVideoUpload([ev.target.files[0]], gap.frameStart);
-        });
-        fi.click();
-      };
+      // const vidBtn = document.createElement("button");
+      // vidBtn.className = "pr-gap-menu-btn";
+      // vidBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Segment`;
+      // vidBtn.onclick = () => {
+      //   this.dismissContextMenu();
+      //   const fi = document.createElement("input");
+      //   fi.type = "file"; fi.accept = "video/*";
+      //   fi.addEventListener("change", (ev) => {
+      //     if (ev.target.files?.[0]) this.handleVideoUpload([ev.target.files[0]], gap.frameStart);
+      //   });
+      //   fi.click();
+      // };
 
       menu.appendChild(pasteImageBtn);
       menu.appendChild(textBtn);
       menu.appendChild(imgBtn);
-      menu.appendChild(vidBtn);
+      // menu.appendChild(vidBtn);
     } else if (currentTrack === "motion") {
       const pasteImageBtn = document.createElement("button");
       pasteImageBtn.className = "pr-gap-menu-btn";

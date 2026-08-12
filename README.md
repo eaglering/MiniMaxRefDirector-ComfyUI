@@ -1,11 +1,12 @@
 # MiniMaxRefDirector-ComfyUI
 
-MiniMax导演台2.0 参考图生视频工作流。提供可视化时间线编辑器、多主体管理、基于 VLM 的智能提示词增强以及尾帧自动转首帧参考功能。
+**v2.1.0** — MiniMax 导演台参考图生视频工作流。提供可视化时间线编辑器、多主体管理、基于 VLM 的智能提示词增强，以及尾帧自动转首帧参考、循环内尾帧跳过（continue）功能。
 
 ## 目录
 
 - [节点概览](#节点概览)
 - [安装](#安装)
+- [更新日志](#更新日志)
 - [模型准备](#模型准备)
 - [节点详解](#节点详解)
   - [MiniMax Reference Subject](#minimax-reference-subject)
@@ -23,9 +24,27 @@ MiniMax导演台2.0 参考图生视频工作流。提供可视化时间线编辑
 | 节点 | 类别 | 功能 |
 |------|------|------|
 | **MiniMax Reference Subject** | `minimax` | 可视化配置最多 9 个主体（名称、描述、参考图、音频） |
-| **MiniMax Reference Director** | `minimax` | 时间线编辑器，整合分镜提示词、主体数据和分辨率配置 |
-| **MiniMax Reference Director Guide** | `minimaxrefdirector` | 按分镜索引提取段数据，调用 VLM 增强提示词，输出主体图片/音频张量 |
+| **MiniMax Reference Director** | `minimax` | 时间线编辑器，整合分镜提示词、主体数据、尾帧标记和分辨率配置 |
+| **MiniMax Reference Director Guide** | `minimaxrefdirector` | 按分镜索引提取段数据，调用 VLM 增强提示词，输出主体图片/音频张量，支持尾帧跳过与自动拼接 |
 | **MiniMax Ref Prompt Enhance** | `minimaxrefdirector/prompt` | 独立 VLM 节点：输入图片/文本，输出 JSON 格式的镜头描述与占位符映射 |
+
+---
+
+## 更新日志
+
+### v2.1.0
+
+- **尾帧循环跳过（continue）**：`Guide` 节点遇到 `is_end_frame` 尾帧段时返回 `ExecutionBlocker`，直接跳过当前 Easy-Use 循环迭代（跳过提示词生成/视频生成/保存等所有下游节点），循环索引照常递增进入下一段。
+- **尾帧自动拼接**：若当前段的下一个 segment 是尾帧且带有首帧图片，`Guide` 自动将该图片作为当前段「末帧」参考加载，并写入提示词：
+  - `detailed_description` 追加 `[Shot x] At MM:SS.mmm <Picture n> fully_preserved.`（时间戳为当前段结束时刻，不受尾帧段时长影响）
+  - `subject_definitions` 追加 `<Picture n> is the last frame of [Shot x].`
+  - `retention_analysis` 追加 `<Picture n> ([Shot x] last frame): fully_preserved.`
+- **Guide 节点升级**：`prompt_enhance` 由布尔开关升级为三模式（`Basic` / `Enhanced` / `Pre-formatted`）；新增外部 `clip` 输入、`seed` 参数及 `raw_prompt` / `pre_formatted` 输出。
+- 新增示例工作流：`workflow/MiniMax H3 Reference Director 2.1.json`。
+
+### v2.0.0
+
+- 可视化时间线编辑器、多主体管理、VLM 提示词增强、尾帧自动转首帧参考。
 
 ---
 
@@ -150,11 +169,15 @@ ComfyUI/models/text_encoders/
 |------|------|--------|------|
 | `guide_data` | GUIDE_DATA | — | 从 MiniMax Reference Director 连接 |
 | `first_frame` | IMAGE | 可选 | 首帧图片输入（未在时间线中设置时使用） |
+| `clip` | CLIP | 可选 | 外部 CLIP/VL 模型输入（优先于 `clip_name`/`clip_type`，从 CLIP Loader 节点连接） |
 | `clip_name` | COMBO | 第一个可用 | text_encoder 模型名称 |
 | `clip_type` | COMBO | `qwen3vl` | 模型类型（`qwen3vl` / `minimax`） |
+| `seed` | INT | `42` | 随机种子（高级参数） |
 | `last_refer_mode` | BOOLEAN | `false` | 是否使用上一段的首帧作为当前段参考 |
-| `prompt_enhance` | BOOLEAN | `false` | 启用 VLM 提示词增强 |
+| `prompt_enhance` | COMBO | `Basic` | 增强模式：`Basic`=标准生成 \| `Enhanced`=润色并补充环境音/运镜/BGM \| `Pre-formatted`=按预格式化 JSON 解析（不调用 VLM） |
 | `seg_index` | INT | `0` | 分镜索引（0-based），提取第 N 个分镜 |
+
+> 每个分镜可在时间线编辑器内单独覆盖 `prompt_enhance` 模式（`Default` 表示跟随节点全局设置）。
 
 #### 输出
 
@@ -167,13 +190,22 @@ ComfyUI/models/text_encoders/
 | `length` | INT | 当前分镜帧数 |
 | `frame_rate` | FLOAT | 帧率 |
 | `prompt` | STRING | 组装后的完整提示词 |
+| `raw_prompt` | STRING | VLM 原始输出提示词 |
+| `pre_formatted` | STRING | 预格式化 JSON 形式提示词 |
 
-#### 提示词增强流程（`prompt_enhance=true`）
+#### 提示词增强流程（`prompt_enhance=Basic` / `Enhanced`）
 
 1. 调用 VLM 生成：详见 [MiniMax Ref Prompt Enhance](#minimax-ref-prompt-enhance)
 2. 解析 `mapping`，构建 `subject_definitions` 和 `retention_analysis`
 3. 替换占位符为实际主体名称
 4. 与 `global_prompt` 拼接输出最终提示词
+
+#### 尾帧行为
+
+- **跳过（continue）**：当前分镜是尾帧（`is_end_frame`）时，`Guide` 对全部输出返回 `ExecutionBlocker`，跳过该轮 Easy-Use 循环迭代中所有下游节点，循环照常进入下一轮。
+- **自动拼接（end frame）**：下一个分镜是尾帧且带有首帧图片时，`Guide` 将该图片作为当前分镜的末帧参考加载，并以 `[Shot x] At MM:SS.mmm <Picture n> fully_preserved.` 形式写入 `detailed_description`（同时写入 `subject_definitions` / `retention_analysis`）。时间戳为当前分镜的结束时刻，仅由前面分镜与当前分镜时长决定，不受尾帧段时长影响。
+
+> 注意：若 Easy-Use 循环的 `forLoopEnd`/`whileLoopEnd` 还携带来自生成链的累积值（如上一段末帧），被跳过的轮次会因 `ExecutionBlocker` 传染而卡死循环，需经 Easy-Use 的懒节点 `easy ifElse`（`on_true`/`on_false`）中转。
 
 ---
 
@@ -192,7 +224,7 @@ ComfyUI/models/text_encoders/
 | `prompt` | STRING | `""` | 用户新输入的提示词 |
 | `duration` | FLOAT | `5.0` | 视频总时长（秒） |
 | `fps` | FLOAT | `24.0` | 帧率 |
-| `enhance` | BOOLEAN | `false` | 开启提示词润色，自动补充环境音和运镜描述 |
+| `enhance` | COMBO | `Basic` | 生成模式：`Basic`=标准生成 \| `Enhanced`=润色并补充环境音/运镜/BGM \| `Pre-formatted`=按预格式化 JSON 解析（不调用 VLM） |
 
 **高级参数**（`advanced=True`）：
 
@@ -245,6 +277,8 @@ ComfyUI/models/text_encoders/
 
 ## 工作流连接
 
+内置示例工作流：`workflow/MiniMax H3 Reference Director 2.1.json`（在 ComfyUI 中通过 Load 导入）。
+
 推荐连接顺序：
 
 ```
@@ -254,14 +288,14 @@ MiniMax Reference Subject ──→ MiniMax Reference Director ──→ MiniMax
                                       │                              ├── audio0..2 → Video Model
                                       │                              └── prompt     → Video Model
                                       │
-                                      └── segment_count（分段数）
+                                      └── segment_count（分段数，驱动循环）
 ```
 
 ### 典型用法
 
 1. **定义主体**：在 `MiniMax Reference Subject` 中填好角色名称、描述、参考图
-2. **编辑时间线**：在 `MiniMax Reference Director` 的 UI 中拖拽分镜、填写提示词（用 `@` 引用主体）
-3. **生成增强提示词**：`MiniMax Reference Director Guide` 开启 `prompt_enhance`，自动调用 VLM 增强描述并替换占位符
+2. **编辑时间线**：在 `MiniMax Reference Director` 的 UI 中拖拽分镜、填写提示词（用 `@` 引用主体），可标记尾帧段（`is_end_frame`）
+3. **生成增强提示词**：`MiniMax Reference Director Guide` 设置 `prompt_enhance` 为 `Basic`/`Enhanced`，自动调用 VLM 增强描述并替换占位符；尾帧段会被自动跳过，且自动拼接下一尾帧段的末帧参考
 4. **手动使用增强节点**：也可跳过 Director，直接在 `MiniMax Ref Prompt Enhance` 中输入图片和文本进行增强
 
 ---

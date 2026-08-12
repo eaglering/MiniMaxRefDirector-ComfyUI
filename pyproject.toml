@@ -1,13 +1,8 @@
 [project]
 name = "MiniMaxRefDirector-ComfyUI"
 description = "MiniMax Reference Director — ComfyUI custom nodes for subject management, timeline editing, and VLM-enhanced prompt generation."
-version = "2.0.0"
+version = "2.1.0"
 license = {file = "LICENSE"}
-classifiers = [
-    "Operating System :: OS Independent",
-    "Environment :: GPU :: NVIDIA CUDA",
-]
-
 
 [project.urls]
 Repository = "https://github.com/eaglering/MiniMaxRefDirector-ComfyUI"
