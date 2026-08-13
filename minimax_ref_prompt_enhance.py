@@ -1,8 +1,12 @@
+import copy
 import gc
+import hashlib
 import json
 import logging
 import math
+import os
 import re
+from collections import OrderedDict
 
 import comfy.sd
 import folder_paths
@@ -427,9 +431,405 @@ def parse_generated_json(generated_text: str) -> dict:
     return json.loads(clean_text)
 
 
-def generate_prompt_with_clip(
+# ── Cloud VLM API providers (OpenAI-compatible) ─
+
+API_PROVIDERS = {
+    "GLM": {
+        "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "model": "glm-4v-flash",  # 完全免费视觉模型
+        "env_key": "ZHIPU_API_KEY",
+    },
+    "Kimi": {
+        "base_url": "https://api.moonshot.cn/v1/chat/completions",
+        "model": "moonshot-v1-8k-vision-preview",
+        "env_key": "MOONSHOT_API_KEY",
+    },
+    "Qwen": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "model": "qwen-vl-plus",
+        "env_key": "DASHSCOPE_API_KEY",
+    },
+    "Doubao": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+        "model": "doubao-1.5-vision-pro-32k",
+        "env_key": "ARK_API_KEY",
+    },
+}
+
+
+def _tensor_to_base64(image) -> str:
+    """Convert a ComfyUI image tensor [B, H, W, C] (float 0-1) to a JPEG base64 data URL."""
+    import base64 as _b64
+    import io as _io
+    from PIL import Image as _PILImage
+
+    img = image[0].float().clamp(0, 1).cpu().numpy()
+    img = (img * 255).round().astype("uint8")
+    pil_img = _PILImage.fromarray(img, mode="RGB")
+    buf = _io.BytesIO()
+    pil_img.save(buf, format="JPEG", quality=92)
+    return "data:image/jpeg;base64," + _b64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _finalize_generated_text(generated_text: str, source_label: str) -> dict:
+    """Parse raw VLM output into the standard result dict (shared by API / GGUF backends)."""
+    try:
+        result = parse_generated_json(generated_text)
+        dd = result.get("detailed_description", "") or ""
+        result["detailed_description"] = _normalize_description(dd)
+    except (json.JSONDecodeError, TypeError) as e:
+        log.error(f"[MiniMaxRefPromptEnhance] JSON parse failed from {source_label}: {e}")
+        result = {
+            "detailed_description": generated_text.strip(),
+            "overall_soundscape": None,
+            "non_diegetic_music": None,
+            "mapping": {},
+        }
+    return result
+
+
+def generate_prompt_with_api(
+    image,
+    prompt: str,
+    last_prompt: str = "",
+    duration: float = 5.0,
+    fps: float = 24.0,
+    enhance: str = "Basic",
+    provider: str = "GLM",
+    api_key: str = "",
+    seed: int | None = None,
+) -> dict:
+    """Call a cloud VLM API (OpenAI-compatible) to generate placeholder-tagged prompt JSON.
+
+    Args:
+        image: ComfyUI image tensor [B, H, W, C], optional (None = text-only mode)
+        prompt: user prompt
+        last_prompt: previous segment prompt (can be empty)
+        duration: total video duration (seconds)
+        fps: frame rate
+        enhance: prompt mode ("Basic" = standard; "Enhanced" = polish)
+        provider: API provider key ("GLM" / "Kimi" / "Qwen" / "Doubao")
+        api_key: explicit API key (empty → read from env var of the provider)
+        seed: sampling seed forwarded to the API (supported by most OpenAI-compatible
+            providers). None = don't send the field. Best-effort determinism only —
+            the result cache guarantees identical outputs within the same process.
+
+    Returns:
+        dict: same shape as generate_prompt_with_clip
+    """
+    import os
+    import urllib.error
+    import urllib.request
+
+    cfg = API_PROVIDERS.get(provider)
+    if cfg is None:
+        raise ValueError(
+            f"[MiniMaxRefPromptEnhance] Unknown API provider: {provider}. "
+            f"Supported: {list(API_PROVIDERS)}"
+        )
+    key = (api_key or "").strip() or os.environ.get(cfg["env_key"], "").strip()
+    if not key:
+        raise ValueError(
+            f"[MiniMaxRefPromptEnhance] No API key for {provider}. "
+            f"Provide api_key or set env var {cfg['env_key']}."
+        )
+
+    has_image = _has_image(image)
+    shot1_dur = calc_shot1_duration(fps) if has_image else 0.0
+    prompt_text = build_prompt_text(
+        last_prompt=last_prompt,
+        prompt=prompt,
+        duration=duration,
+        enhance=enhance,
+        has_image=has_image,
+        shot1_dur=shot1_dur,
+    )
+
+    content: list[dict] = [{"type": "text", "text": prompt_text}]
+    if has_image:
+        content.append({"type": "image_url", "image_url": {"url": _tensor_to_base64(image)}})
+
+    payload = {
+        "model": cfg["model"],
+        "messages": [{"role": "user", "content": content}],
+        "temperature": 0.1,
+        "max_tokens": 4096,
+    }
+    if seed is not None:
+        payload["seed"] = int(seed)
+    req = urllib.request.Request(
+        cfg["base_url"],
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+        method="POST",
+    )
+    log.info(f"[MiniMaxRefPromptEnhance] Calling {provider} API ({cfg['model']}) ...")
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"[MiniMaxRefPromptEnhance] {provider} API HTTP {e.code}: {detail}") from e
+
+    data = json.loads(body)
+    try:
+        generated_text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(
+            f"[MiniMaxRefPromptEnhance] Unexpected {provider} API response: {body[:500]}"
+        ) from e
+
+    log.info(f"[MiniMaxRefPromptEnhance] {provider} API generated (first 200 chars): {generated_text[:200]}")
+    return _finalize_generated_text(generated_text, f"{provider} API")
+
+
+# ── Local GGUF VLM via llama-cpp-python ─
+
+_LLAMA_MODEL_CACHE: dict = {}
+
+
+def _ensure_llm_folder_registered() -> None:
+    """Register ComfyUI's models/llm directory (used for GGUF files) if not present."""
+    try:
+        folder_paths.get_folder_paths("llm")
+    except KeyError:
+        folder_paths.add_model_folder_path("llm", os.path.join(folder_paths.models_dir, "llm"))
+
+
+def _py_tag() -> str:
+    """Python tag for wheel matching, e.g. 'cp310'."""
+    import sys
+    return f"cp{sys.version_info.major}{sys.version_info.minor}"
+
+
+def _cuda_tag() -> str | None:
+    """CUDA tag from torch, e.g. '13.1' -> 'cu131'; None when torch has no CUDA build."""
+    try:
+        ver = torch.version.cuda
+    except Exception:
+        return None
+    return "cu" + "".join(ver.split(".")[:2]) if ver else None
+
+
+def _ensure_llama_cpp() -> None:
+    """Make llama_cpp importable; print a manual-install hint when missing.
+
+    llama-cpp-python is intentionally NOT auto-installed. When it is missing,
+    a console message with the download link and install steps is printed
+    instead, so the user can pick the correct prebuilt wheel for their
+    environment (platform / Python / CUDA).
+    """
+    try:
+        import llama_cpp  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    py_tag = _py_tag()
+    cuda_tag = _cuda_tag() or "CPU/unknown"
+    log.error(
+        "[MiniMaxRefPromptEnhance] llama-cpp-python 未安装，无法加载本地 GGUF 模型"
+        "（已移除自动安装，请按以下步骤手动安装）：\n"
+        "1. 打开 https://github.com/JamePeng/llama-cpp-python/releases 下载最新 release 中的预编译 wheel\n"
+        f"2. 选择与你的环境匹配的文件（形如 llama_cpp_python-0.3.46+cu131-{py_tag}-{py_tag}-win_amd64.whl）：\n"
+        f"   - win_amd64：Windows x64 平台\n"
+        f"   - {py_tag}：当前 Python 版本（由本机解释器检测）\n"
+        f"   - cuXXX：CUDA 版本（本机 torch 为 {cuda_tag}，优先选择相同 cu 标签的 wheel，"
+        "没有则任意 cu 版本均可）\n"
+        "3. 用 ComfyUI portable 自带的 python 安装（在 ComfyUI_windows_portable 目录下执行）：\n"
+        '   python_embeded\\python.exe -m pip install <下载的 .whl 文件路径>\n'
+        "4. 安装完成后重启 ComfyUI 再重试\n"
+    )
+    raise RuntimeError(
+        "[MiniMaxRefPromptEnhance] llama-cpp-python is not installed. "
+        "See the console output above for the manual install steps."
+    )
+
+
+def _get_llama_model(gguf_path: str, mmproj_path: str = ""):
+    """Load (and cache) a GGUF model with llama-cpp-python; GPU first, CPU fallback."""
+    global _LLAMA_MODEL_CACHE
+    key = (gguf_path, mmproj_path)
+    cached = _LLAMA_MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    _ensure_llama_cpp()
+    from llama_cpp import Llama
+
+    kwargs: dict = dict(
+        model_path=gguf_path,
+        n_ctx=8192,
+        n_gpu_layers=-1,  # all layers on GPU
+        verbose=False,
+    )
+    if mmproj_path:
+        kwargs["mmproj"] = mmproj_path
+    log.info(
+        f"[MiniMaxRefPromptEnhance] Loading GGUF model: {os.path.basename(gguf_path)} "
+        f"(mmproj={os.path.basename(mmproj_path) if mmproj_path else 'None'}) ..."
+    )
+    try:
+        model = Llama(**kwargs)
+    except Exception as e:
+        log.warning(f"[MiniMaxRefPromptEnhance] GPU load failed ({e}); retrying on CPU (n_gpu_layers=0)")
+        kwargs["n_gpu_layers"] = 0
+        model = Llama(**kwargs)
+    _LLAMA_MODEL_CACHE[key] = model
+    return model
+
+
+def generate_prompt_with_llama(
+    image,
+    gguf_path: str,
+    mmproj_path: str = "",
+    prompt: str = "",
+    last_prompt: str = "",
+    duration: float = 5.0,
+    fps: float = 24.0,
+    enhance: str = "Basic",
+    seed: int = 42,
+) -> dict:
+    """Generate the placeholder-tagged prompt JSON with a local GGUF VLM via llama-cpp-python.
+
+    Args:
+        image: ComfyUI image tensor [B, H, W, C], optional (None = text-only mode)
+        gguf_path: full path to the GGUF text model
+        mmproj_path: full path to the vision projector GGUF (required for image analysis)
+        prompt: user prompt
+        last_prompt: previous segment prompt (can be empty)
+        duration: total video duration (seconds)
+        fps: frame rate
+        enhance: prompt mode ("Basic" = standard; "Enhanced" = polish)
+        seed: sampling seed for llama.cpp
+
+    Returns:
+        dict: same shape as generate_prompt_with_clip
+    """
+    has_image = _has_image(image) and bool(mmproj_path)
+    if _has_image(image) and not mmproj_path:
+        log.warning(
+            "[MiniMaxRefPromptEnhance] Image provided but no mmproj (vision projector) selected "
+            "-> running in text-only mode."
+        )
+    shot1_dur = calc_shot1_duration(fps) if has_image else 0.0
+    prompt_text = build_prompt_text(
+        last_prompt=last_prompt,
+        prompt=prompt,
+        duration=duration,
+        enhance=enhance,
+        has_image=has_image,
+        shot1_dur=shot1_dur,
+    )
+
+    llm = _get_llama_model(gguf_path, mmproj_path)
+    content: list[dict] = [{"type": "text", "text": prompt_text}]
+    if has_image:
+        content.append({"type": "image_url", "image_url": {"url": _tensor_to_base64(image)}})
+    log.info(f"[MiniMaxRefPromptEnhance] Generating with GGUF model: {os.path.basename(gguf_path)} ...")
+    try:
+        resp = llm.create_chat_completion(
+            messages=[{"role": "user", "content": content}],
+            max_tokens=4096,
+            temperature=0.1,
+            seed=int(seed) if seed is not None else None,
+        )
+    except Exception as e:
+        raise RuntimeError(f"[MiniMaxRefPromptEnhance] GGUF generation failed: {e}") from e
+    try:
+        generated_text = resp["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(f"[MiniMaxRefPromptEnhance] Unexpected GGUF response: {str(resp)[:500]}") from e
+    log.info(f"[MiniMaxRefPromptEnhance] GGUF model generated (first 200 chars): {generated_text[:200]}")
+    return _finalize_generated_text(generated_text, f"GGUF({os.path.basename(gguf_path)})")
+
+
+# ── Deterministic result cache (same inputs → same output) ────────────
+#
+# Guarantees identical VLM parsing results for identical inputs within the
+# same process (e.g. Easy-Use for-loop iterations that reuse the same prompt /
+# seed / image). Cache key = hash of every generation-affecting input.
+
+_RESULT_CACHE: "OrderedDict[str, dict]" = OrderedDict()
+_RESULT_CACHE_MAX = 128
+
+
+def _image_hash(image) -> str:
+    """Stable content hash of an image tensor (empty string when no image)."""
+    if image is None:
+        return ""
+    try:
+        arr = image.detach().float().cpu().contiguous().numpy().tobytes()
+    except Exception:
+        return f"id:{id(image)}"
+    return hashlib.sha256(arr).hexdigest()[:32]
+
+
+def _make_cache_key(
+    image,
+    clip,
+    gguf_name: str,
+    mmproj_name: str,
+    vlm_mode: str,
+    api_provider: str,
+    api_key: str,
+    clip_name: str,
+    clip_type: str,
+    last_prompt: str,
+    prompt: str,
+    duration: float,
+    fps: float,
+    enhance: str,
+    max_length: int,
+    do_sample: bool,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    min_p: float,
+    repetition_penalty: float,
+    seed: int,
+    presence_penalty: float,
+    thinking: bool,
+    use_default_template: bool,
+) -> str:
+    fields = {
+        "vlm_mode": str(vlm_mode),
+        "api_provider": str(api_provider),
+        "api_key": hashlib.sha256(str(api_key or "").encode("utf-8")).hexdigest()[:16],
+        "clip_ref": f"id:{id(clip)}" if clip is not None else "",
+        "clip_name": str(clip_name),
+        "clip_type": str(clip_type),
+        "gguf_name": str(gguf_name),
+        "mmproj_name": str(mmproj_name),
+        "last_prompt": str(last_prompt),
+        "prompt": str(prompt),
+        "duration": float(duration),
+        "fps": float(fps),
+        "enhance": str(enhance),
+        "max_length": int(max_length),
+        "do_sample": bool(do_sample),
+        "temperature": float(temperature),
+        "top_k": int(top_k),
+        "top_p": float(top_p),
+        "min_p": float(min_p),
+        "repetition_penalty": float(repetition_penalty),
+        "seed": int(seed) if seed is not None else None,
+        "presence_penalty": float(presence_penalty),
+        "thinking": bool(thinking),
+        "use_default_template": bool(use_default_template),
+        "image_hash": _image_hash(image),
+    }
+    raw = json.dumps(fields, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _generate_prompt_with_clip_uncached(
     image,
     clip=None,
+    gguf_name: str = "",
+    mmproj_name: str = "",
+    vlm_mode: str = "clip",
+    api_provider: str = "GLM",
+    api_key: str = "",
     clip_name: str = "",
     clip_type: str = "qwen3vl",
     last_prompt: str = "",
@@ -449,12 +849,23 @@ def generate_prompt_with_clip(
     thinking: bool = False,
     use_default_template: bool = True,
 ) -> dict:
-    """Use a CLIP model to analyze the first-frame image and generate a placeholder-tagged prompt JSON.
+    """Analyze the first-frame image and generate a placeholder-tagged prompt JSON.
+
+    Mode selection (vlm_mode):
+    - "clip": local CLIP model (external `clip` object, or loaded via clip_name/clip_type)
+    - "llama-cpp": local GGUF VLM via llama-cpp-python (models/llm, optional mmproj for vision)
+    - "api": cloud VLM API (GLM / Kimi / Qwen / Doubao)
+    "Pre-formatted" enhance always parses the user prompt as JSON directly (no model call).
 
     Args:
         image: ComfyUI image tensor [B, H, W, C], optional (None = text-only mode)
-        clip: external CLIP model object (optional, preferred when set; loaded via clip_name/clip_type when None)
-        clip_name: model filename under text_encoders directory (required when clip is None)
+        clip: external CLIP model object (optional; required when vlm_mode=clip and no clip_name)
+        gguf_name: GGUF model filename under models/llm (used when vlm_mode=llama-cpp)
+        mmproj_name: optional vision projector GGUF under models/llm ("None" = text-only)
+        vlm_mode: VLM backend selector: "clip" / "llama-cpp" / "api"
+        api_provider: API provider key ("GLM" / "Kimi" / "Qwen" / "Doubao")
+        api_key: explicit API key (empty → read from provider env var)
+        clip_name: model filename under text_encoders directory (required when clip is None and vlm_mode=clip)
         clip_type: CLIP model variant ("minimax", "qwen3vl", "gemma")
         last_prompt: previous segment prompt (can be empty)
         prompt: new user prompt; in "Pre-formatted" mode this is a pre-formatted skills JSON
@@ -502,9 +913,54 @@ def generate_prompt_with_clip(
 
     # (has_image and shot1_dur already computed above for Basic/Enhanced modes)
 
-    # Load CLIP model (prefer externally-provided clip)
+    # Cloud API mode: vlm_mode == "api" -> remote VLM (GLM/Kimi/Qwen/Doubao)
+    if vlm_mode == "api":
+        log.info(f"[MiniMaxRefPromptEnhance] vlm_mode=api -> calling {api_provider} cloud API")
+        return generate_prompt_with_api(
+            image=image,
+            prompt=prompt,
+            last_prompt=last_prompt,
+            duration=duration,
+            fps=fps,
+            enhance=enhance,
+            provider=api_provider,
+            api_key=api_key,
+            seed=seed,
+        )
+
+    # Local GGUF VLM mode (llama-cpp-python): vlm_mode == "llama-cpp"
+    if vlm_mode == "llama-cpp":
+        if not gguf_name:
+            raise ValueError(
+                "[MiniMaxRefPromptEnhance] vlm_mode=llama-cpp requires a GGUF model: "
+                "set gguf_name (model under models/llm) or switch vlm_mode to 'clip' / 'api'."
+            )
+        _ensure_llm_folder_registered()
+        gguf_path = folder_paths.get_full_path_or_raise("llm", gguf_name)
+        mmproj_path = ""
+        if mmproj_name and mmproj_name != "None":
+            mmproj_path = folder_paths.get_full_path_or_raise("llm", mmproj_name)
+        return generate_prompt_with_llama(
+            image=image,
+            gguf_path=gguf_path,
+            mmproj_path=mmproj_path,
+            prompt=prompt,
+            last_prompt=last_prompt,
+            duration=duration,
+            fps=fps,
+            enhance=enhance,
+            seed=seed,
+        )
+
+    # vlm_mode == "clip": local CLIP model (prefer externally-provided clip)
     external_clip = clip is not None
     if not external_clip:
+        if not clip_name:
+            raise ValueError(
+                "[MiniMaxRefPromptEnhance] vlm_mode=clip requires a local CLIP model: "
+                "connect an external CLIP model (CLIP Loader node) or set clip_name, "
+                "or switch vlm_mode to 'llama-cpp' / 'api'."
+            )
         clip_type_enum = getattr(comfy.sd.CLIPType, clip_type.upper(), comfy.sd.CLIPType.MINIMAX)
         clip_path = folder_paths.get_full_path_or_raise("text_encoders", clip_name)
         clip = comfy.sd.load_clip(
@@ -597,6 +1053,98 @@ def generate_prompt_with_clip(
             del clip
 
 
+def generate_prompt_with_clip(
+    image,
+    clip=None,
+    gguf_name: str = "",
+    mmproj_name: str = "",
+    vlm_mode: str = "clip",
+    api_provider: str = "GLM",
+    api_key: str = "",
+    clip_name: str = "",
+    clip_type: str = "qwen3vl",
+    last_prompt: str = "",
+    prompt: str = "",
+    duration: float = 5.0,
+    fps: float = 24.0,
+    enhance: str = "Basic",
+    max_length: int = 1024,
+    do_sample: bool = True,
+    temperature: float = 0.1,
+    top_k: int = 32,
+    top_p: float = 0.9,
+    min_p: float = 0.0,
+    repetition_penalty: float = 1.0,
+    seed: int = 62,
+    presence_penalty: float = 0.0,
+    thinking: bool = False,
+    use_default_template: bool = True,
+) -> dict:
+    """Analyze the first-frame image and generate a placeholder-tagged prompt JSON.
+
+    Wraps :func:`_generate_prompt_with_clip_uncached` with a process-level result
+    cache, guaranteeing that identical inputs (mode, prompt, image, seed, sampling
+    params) always produce identical outputs — for clip / llama-cpp / api alike.
+    This keeps Easy-Use for-loop iterations and repeated runs deterministic within
+    the same ComfyUI session, and skips redundant API / model calls.
+
+    Args: (same as _generate_prompt_with_clip_uncached)
+
+    Returns:
+        dict: {
+            "detailed_description": str,
+            "overall_soundscape": str,
+            "non_diegetic_music": str,
+            "mapping": dict,
+        }
+    """
+    # "Pre-formatted" mode parses the user prompt directly (no VLM call) — fully
+    # deterministic, so it bypasses the cache.
+    if enhance == "Pre-formatted":
+        return _generate_prompt_with_clip_uncached(
+            image=image, clip=clip, gguf_name=gguf_name, mmproj_name=mmproj_name,
+            vlm_mode=vlm_mode, api_provider=api_provider, api_key=api_key,
+            clip_name=clip_name, clip_type=clip_type, last_prompt=last_prompt,
+            prompt=prompt, duration=duration, fps=fps, enhance=enhance,
+            max_length=max_length, do_sample=do_sample, temperature=temperature,
+            top_k=top_k, top_p=top_p, min_p=min_p,
+            repetition_penalty=repetition_penalty, seed=seed,
+            presence_penalty=presence_penalty, thinking=thinking,
+            use_default_template=use_default_template,
+        )
+
+    cache_key = _make_cache_key(
+        image, clip, gguf_name, mmproj_name, vlm_mode, api_provider, api_key,
+        clip_name, clip_type, last_prompt, prompt, duration, fps, enhance,
+        max_length, do_sample, temperature, top_k, top_p, min_p,
+        repetition_penalty, seed, presence_penalty, thinking, use_default_template,
+    )
+    cached = _RESULT_CACHE.get(cache_key)
+    if cached is not None:
+        log.info(
+            f"[MiniMaxRefPromptEnhance] Result cache HIT "
+            f"(vlm_mode={vlm_mode}, enhance={enhance}, seed={seed})"
+        )
+        _RESULT_CACHE.move_to_end(cache_key)
+        return copy.deepcopy(cached)
+
+    result = _generate_prompt_with_clip_uncached(
+        image=image, clip=clip, gguf_name=gguf_name, mmproj_name=mmproj_name,
+        vlm_mode=vlm_mode, api_provider=api_provider, api_key=api_key,
+        clip_name=clip_name, clip_type=clip_type, last_prompt=last_prompt,
+        prompt=prompt, duration=duration, fps=fps, enhance=enhance,
+        max_length=max_length, do_sample=do_sample, temperature=temperature,
+        top_k=top_k, top_p=top_p, min_p=min_p,
+        repetition_penalty=repetition_penalty, seed=seed,
+        presence_penalty=presence_penalty, thinking=thinking,
+        use_default_template=use_default_template,
+    )
+    _RESULT_CACHE[cache_key] = copy.deepcopy(result)
+    while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
+        _RESULT_CACHE.popitem(last=False)
+    return result
+
+
 class MinimaxRefPromptEnhance(io.ComfyNode):
     """Use a CLIP model to analyze the first-frame image (optional) and generate placeholder-tagged formatting prompt JSON."""
 
@@ -604,6 +1152,8 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
     def define_schema(cls):
         text_encoders = folder_paths.get_filename_list("text_encoders")
         clip_types = ["minimax", "qwen3vl", "gemma"]
+        _ensure_llm_folder_registered()
+        gguf_files = [f for f in folder_paths.get_filename_list("llm") if f.lower().endswith(".gguf")]
 
         return io.Schema(
             node_id="MiniMaxRefPromptEnhance",
@@ -665,6 +1215,34 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
                     options=["Basic", "Enhanced", "Pre-formatted"],
                     default="Basic",
                     tooltip="Prompt generation mode: Basic=standard generation | Enhanced=polish + fill ambient sound / camera movement / BGM | Pre-formatted=parse prompt as pre-formatted JSON (no VLM)",
+                ),
+                io.Combo.Input(
+                    "vlm_mode",
+                    options=["clip", "llama-cpp", "api"],
+                    default="clip",
+                    tooltip="VLM backend for prompt enhancement: clip=local CLIP | llama-cpp=local GGUF via llama-cpp-python (needs gguf_name) | api=cloud API (GLM/Kimi/Qwen/Doubao)",
+                ),
+                io.Combo.Input(
+                    "gguf_name",
+                    options=gguf_files,
+                    default=gguf_files[0] if gguf_files else "",
+                    tooltip="Local GGUF VLM model (e.g. Qwen3-VL) under models/llm, loaded via llama-cpp-python. Used when vlm_mode=llama-cpp.",
+                ),
+                io.Combo.Input(
+                    "mmproj_name",
+                    options=["None"] + gguf_files,
+                    default="None",
+                    tooltip="Optional vision projector (mmproj) GGUF for multimodal models (under models/llm). 'None' = text-only mode.",
+                ),
+                io.Combo.Input(
+                    "api_provider",
+                    options=["GLM", "Kimi", "Qwen", "Doubao"],
+                    default="GLM",
+                    tooltip="Cloud VLM API provider (used when vlm_mode=api). GLM-4V-Flash is fully free; others require quota.",
+                ),
+                io.String.Input(
+                    "api_key", default="", multiline=False,
+                    tooltip="API key. Leave empty to read from environment variable (ZHIPU_API_KEY / MOONSHOT_API_KEY / DASHSCOPE_API_KEY / ARK_API_KEY).",
                 ),
                 io.Int.Input(
                     "max_length",
@@ -798,6 +1376,11 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
         duration=5.0,
         fps=24.0,
         enhance="Basic",
+        vlm_mode="clip",
+        gguf_name="",
+        mmproj_name="None",
+        api_provider="GLM",
+        api_key="",
         max_length=512,
         do_sample=True,
         temperature=0.1,
@@ -813,6 +1396,11 @@ class MinimaxRefPromptEnhance(io.ComfyNode):
         result = generate_prompt_with_clip(
             clip_name=clip_name,
             clip_type=clip_type,
+            vlm_mode=vlm_mode,
+            gguf_name=gguf_name,
+            mmproj_name=mmproj_name,
+            api_provider=api_provider,
+            api_key=api_key,
             image=image,
             last_prompt=last_prompt,
             prompt=prompt,

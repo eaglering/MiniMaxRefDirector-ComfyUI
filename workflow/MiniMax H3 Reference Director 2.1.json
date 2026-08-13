@@ -2414,13 +2414,15 @@
         "aux_id": "minimax-director.git"
       },
       "widgets_values": [
-        "qwen3vl_8b_fp8_scaled.safetensors",
-        "qwen3vl",
+        "clip",
+        "",
+        "None",
+        "GLM",
+        "",
+        42,
         true,
         "Basic",
-        true,
-        120,
-        "randomize"
+        0
       ],
       "color": "#222",
       "bgcolor": "#000"
@@ -3519,6 +3521,14 @@
       "INT"
     ],
     [
+      476,
+      232,
+      0,
+      28,
+      2,
+      "CLIP"
+    ],
+    [
       324,
       147,
       0,
@@ -3765,14 +3775,6 @@
       28,
       4,
       "INT"
-    ],
-    [
-      476,
-      232,
-      0,
-      28,
-      2,
-      "CLIP"
     ],
     [
       478,
