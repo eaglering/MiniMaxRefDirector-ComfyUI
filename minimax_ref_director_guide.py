@@ -3,7 +3,6 @@ import os
 import logging
 import re
 import torch
-import folder_paths
 from comfy_api.latest import io
 
 try:
@@ -12,7 +11,11 @@ except Exception:
     ExecutionBlocker = None
 
 from .api_config import api_config_manager
-from .minimax_ref_prompt_enhance import generate_prompt_with_clip, _ensure_llm_folder_registered
+from .minimax_ref_prompt_enhance import (
+    generate_prompt_with_clip,
+    _ensure_llm_folder_registered,
+    _list_llm_gguf_files,
+)
 from .lib import find_index, load_image_tensor, load_audio_tensor, resolve_input_path, seconds_to_mmssmmm
 
 GuideData = io.Custom("GUIDE_DATA")
@@ -30,7 +33,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         _ensure_llm_folder_registered()
-        gguf_files = [f for f in folder_paths.get_filename_list("llm") if f.lower().endswith(".gguf")]
+        gguf_files = _list_llm_gguf_files()
         provider_options, provider_default = api_config_manager.get_provider_options("vlm")
         return io.Schema(
             node_id="MiniMaxRefDirectorGuide",
@@ -55,13 +58,14 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "vlm_mode",
-                    options=["clip", "llama-cpp", "api"],
+                    options=["clip", "llama-cpp"],
                     default="clip",
-                    tooltip="VLM backend for prompt enhancement: clip=local CLIP | llama-cpp=local GGUF via llama-cpp-python (needs gguf_name) | api=cloud API (GLM/Kimi/Qwen/Doubao)",
+                    # tooltip="VLM backend for prompt enhancement: clip=local CLIP | llama-cpp=local GGUF via llama-cpp-python (needs gguf_name) | api=cloud API (GLM/Kimi/Qwen/Doubao)",
+                    tooltip="VLM backend for prompt enhancement: clip=local CLIP | llama-cpp=local GGUF via llama-cpp-python (needs gguf_name)",
                 ),
                 io.Combo.Input(
                     "gguf_name",
-                    options=[""] + gguf_files,
+                    options=gguf_files,
                     default=gguf_files[0] if gguf_files else "",
                     tooltip="Local GGUF VLM model (e.g. Qwen3-VL) under models/llm, loaded via llama-cpp-python. Used when vlm_mode=llama-cpp.",
                 ),

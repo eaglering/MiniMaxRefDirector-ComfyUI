@@ -709,11 +709,76 @@ _LLAMA_MODEL_CACHE: dict = {}
 
 
 def _ensure_llm_folder_registered() -> None:
-    """Register ComfyUI's models/llm directory (used for GGUF files) if not present."""
+    """Ensure ComfyUI's models/llm directory (used for GGUF files) is registered.
+
+    Always adds models/llm even if another extension already registered 'llm'
+    (pointing elsewhere), so GGUF files placed there are always discoverable.
+    On Windows the models/llm vs models/LLM casing is equivalent.
+    """
+    llm_dir = os.path.join(folder_paths.models_dir, "llm")
     try:
-        folder_paths.get_folder_paths("llm")
+        paths = folder_paths.get_folder_paths("llm")
     except KeyError:
-        folder_paths.add_model_folder_path("llm", os.path.join(folder_paths.models_dir, "llm"))
+        folder_paths.add_model_folder_path("llm", llm_dir)
+        return
+    if llm_dir not in paths:
+        folder_paths.add_model_folder_path("llm", llm_dir)
+
+
+def _list_llm_gguf_files() -> list[str]:
+    """List *.gguf under the registered 'llm' folders plus models/llm (or models/LLM).
+
+    Deliberately bypasses folder_paths.get_filename_list(): its results are kept
+    in a strong cache (cache_helper) that is never invalidated when new
+    directories are registered, so a stale empty result can stick forever (e.g.
+    another extension registered 'llm' to an empty dir before we added ours, or
+    the folder was created after the first call). Scanning the filesystem
+    directly guarantees fresh results.
+    """
+    dirs: list[str] = []
+    try:
+        dirs.extend(folder_paths.get_folder_paths("llm"))
+    except KeyError:
+        pass
+    for name in ("llm", "LLM"):
+        d = os.path.join(folder_paths.models_dir, name)
+        if d not in dirs:
+            dirs.append(d)
+    seen: set[str] = set()
+    out: list[str] = []
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        try:
+            entries = os.listdir(d)
+        except OSError:  # pragma: no cover - defensive
+            continue
+        for f in entries:
+            if f.lower().endswith(".gguf") and f not in seen:
+                seen.add(f)
+                out.append(f)
+    return sorted(out)
+
+
+def _resolve_gguf_inputs(gguf_name: str = "", mmproj_name: str = "") -> tuple[str, str]:
+    """Resolve GGUF model + optional mmproj for vlm_mode=llama-cpp.
+
+    Falls back to auto-detecting the first VLM GGUF under models/llm when the
+    dropdown selection is empty/stale (e.g. files added after the node list was
+    built, or another extension hijacked the 'llm' folder registration).
+    """
+    _ensure_llm_folder_registered()
+    ggufs = _list_llm_gguf_files()
+    mmprojs = [f for f in ggufs if "mmproj" in f.lower()]
+    models = [f for f in ggufs if f not in mmprojs]
+
+    if not gguf_name and models:
+        gguf_name = models[0]
+        log.info(f"[MiniMaxRefPromptEnhance] gguf_name empty, auto-selected {gguf_name!r} from models/llm")
+    if (not mmproj_name or mmproj_name == "None") and mmprojs:
+        mmproj_name = mmprojs[0]
+        log.info(f"[MiniMaxRefPromptEnhance] mmproj_name empty, auto-selected {mmproj_name!r}")
+    return gguf_name, mmproj_name
 
 
 def _py_tag() -> str:
@@ -1051,6 +1116,7 @@ def _generate_prompt_with_clip_uncached(
 
     # Local GGUF VLM mode (llama-cpp-python): vlm_mode == "llama-cpp"
     if vlm_mode == "llama-cpp":
+        gguf_name, mmproj_name = _resolve_gguf_inputs(gguf_name, mmproj_name)
         if not gguf_name:
             raise ValueError(
                 "[MiniMaxRefPromptEnhance] vlm_mode=llama-cpp requires a GGUF model: "
