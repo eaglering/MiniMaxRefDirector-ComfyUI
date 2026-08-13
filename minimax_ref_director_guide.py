@@ -11,6 +11,7 @@ try:
 except Exception:
     ExecutionBlocker = None
 
+from .api_config import api_config_manager
 from .minimax_ref_prompt_enhance import generate_prompt_with_clip, _ensure_llm_folder_registered
 from .lib import find_index, load_image_tensor, load_audio_tensor, resolve_input_path, seconds_to_mmssmmm
 
@@ -30,6 +31,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
     def define_schema(cls):
         _ensure_llm_folder_registered()
         gguf_files = [f for f in folder_paths.get_filename_list("llm") if f.lower().endswith(".gguf")]
+        provider_options, provider_default = api_config_manager.get_provider_options("vlm")
         return io.Schema(
             node_id="MiniMaxRefDirectorGuide",
             display_name="MiniMax Reference Director Guide",
@@ -59,7 +61,7 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "gguf_name",
-                    options=gguf_files,
+                    options=[""] + gguf_files,
                     default=gguf_files[0] if gguf_files else "",
                     tooltip="Local GGUF VLM model (e.g. Qwen3-VL) under models/llm, loaded via llama-cpp-python. Used when vlm_mode=llama-cpp.",
                 ),
@@ -71,13 +73,13 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "api_provider",
-                    options=["GLM", "Kimi", "Qwen", "Doubao"],
-                    default="GLM",
-                    tooltip="Cloud VLM API provider (used when vlm_mode=api). GLM-4V-Flash is fully free; others require quota.",
+                    options=provider_options,
+                    default=provider_default,
+                    tooltip="Cloud VLM API provider (used when vlm_mode=api). Options come from Settings → API 管理器 — add / edit services there, then restart ComfyUI (or re-import this node) to refresh. GLM-4V-Flash is fully free; others require quota.",
                 ),
                 io.String.Input(
                     "api_key", default="", multiline=False,
-                    tooltip="API key. Leave empty to read from environment variable (ZHIPU_API_KEY / MOONSHOT_API_KEY / DASHSCOPE_API_KEY / ARK_API_KEY).",
+                    tooltip="API key. Leave empty to use the key stored in Settings → API 管理器 (built-in providers also fall back to env vars: ZHIPU_API_KEY / MOONSHOT_API_KEY / DASHSCOPE_API_KEY / ARK_API_KEY).",
                 ),
                 io.Int.Input(
                     "seed",
