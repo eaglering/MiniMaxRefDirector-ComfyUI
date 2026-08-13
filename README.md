@@ -39,7 +39,7 @@
   - `detailed_description` 追加 `[Shot x] At MM:SS.mmm <Picture n> fully_preserved.`（时间戳为当前段结束时刻，不受尾帧段时长影响）
   - `subject_definitions` 追加 `<Picture n> is the last frame of [Shot x].`
   - `retention_analysis` 追加 `<Picture n> ([Shot x] last frame): fully_preserved.`
-- **Guide 节点升级**：`prompt_enhance` 由布尔开关升级为三模式（`Basic` / `Enhanced` / `Pre-formatted`）；新增外部 `clip` 输入、`seed` 参数及 `raw_prompt` / `pre_formatted` 输出。
+- **Guide 节点升级**：`prompt_enhance` 由布尔开关升级为三模式（`Basic` / `Enhanced` / `Pre-formatted`）；新增 `seed` 参数及 `raw_prompt` / `pre_formatted` 输出。
 - 新增示例工作流：`workflow/MiniMax H3 Reference Director 2.1.json`。
 
 ### v2.0.0
@@ -169,15 +169,20 @@ ComfyUI/models/text_encoders/
 |------|------|--------|------|
 | `guide_data` | GUIDE_DATA | — | 从 MiniMax Reference Director 连接 |
 | `first_frame` | IMAGE | 可选 | 首帧图片输入（未在时间线中设置时使用） |
-| `clip` | CLIP | 可选 | 外部 CLIP/VL 模型输入（优先于 `clip_name`/`clip_type`，从 CLIP Loader 节点连接） |
-| `clip_name` | COMBO | 第一个可用 | text_encoder 模型名称 |
-| `clip_type` | COMBO | `qwen3vl` | 模型类型（`qwen3vl` / `minimax`） |
+| `clip` | CLIP | 可选 | 本地 CLIP 模型（从 CLIP Loader 连接），`vlm_mode=clip` 时使用 |
+| `vlm_mode` | COMBO | `clip` | VLM 后端选择：`clip`=本地 CLIP / `llama-cpp`=本地 GGUF（需 `gguf_name`）/ `api`=云端 API |
+| `gguf_name` | COMBO | 第一个可用 | 本地 GGUF VLM 模型（如 Qwen3-VL），放在 `models/llm`，通过 llama-cpp-python 加载（`vlm_mode=llama-cpp` 时使用） |
+| `mmproj_name` | COMBO | `None` | 视觉投影器（mmproj）GGUF（多模态模型需要，`None` 为纯文本模式） |
+| `api_provider` | COMBO | `GLM` | 云端 API 提供商（`GLM` / `Kimi` / `Qwen` / `Doubao`），GLM-4V-Flash 完全免费（`vlm_mode=api` 时使用） |
+| `api_key` | STRING | `""` | API Key，留空则读取环境变量（`ZHIPU_API_KEY` / `MOONSHOT_API_KEY` / `DASHSCOPE_API_KEY` / `ARK_API_KEY`） |
 | `seed` | INT | `42` | 随机种子（高级参数） |
 | `last_refer_mode` | BOOLEAN | `false` | 是否使用上一段的首帧作为当前段参考 |
 | `prompt_enhance` | COMBO | `Basic` | 增强模式：`Basic`=标准生成 \| `Enhanced`=润色并补充环境音/运镜/BGM \| `Pre-formatted`=按预格式化 JSON 解析（不调用 VLM） |
 | `seg_index` | INT | `0` | 分镜索引（0-based），提取第 N 个分镜 |
 
 > 每个分镜可在时间线编辑器内单独覆盖 `prompt_enhance` 模式（`Default` 表示跟随节点全局设置）。
+>
+> **VLM 模式选择**：由 `vlm_mode` 下拉框显式选择——`api`=云端 API（无需本地模型，速度快）；`llama-cpp`=本地 GGUF（`gguf_name`，通过 llama-cpp-python 加载，`mmproj_name` 提供视觉能力）；`clip`=本地 CLIP（需连接 `clip` 输入或配置 `clip_name`）。所选模式缺少模型时会给出明确错误提示。
 
 #### 输出
 
@@ -195,10 +200,44 @@ ComfyUI/models/text_encoders/
 
 #### 提示词增强流程（`prompt_enhance=Basic` / `Enhanced`）
 
-1. 调用 VLM 生成：详见 [MiniMax Ref Prompt Enhance](#minimax-ref-prompt-enhance)
-2. 解析 `mapping`，构建 `subject_definitions` 和 `retention_analysis`
-3. 替换占位符为实际主体名称
-4. 与 `global_prompt` 拼接输出最终提示词
+1. 选择 VLM 后端（`vlm_mode`）：`api` 走云端 API（`api_provider`）/ `llama-cpp` 走本地 GGUF（llama-cpp-python，`gguf_name`）/ `clip` 走本地 CLIP（`clip` 输入或 `clip_name`）
+2. 调用 VLM 生成：详见 [MiniMax Ref Prompt Enhance](#minimax-ref-prompt-enhance)
+3. 解析 `mapping`，构建 `subject_definitions` 和 `retention_analysis`
+4. 替换占位符为实际主体名称
+5. 与 `global_prompt` 拼接输出最终提示词
+
+#### 云端 API（`vlm_mode=api`）
+
+内置 OpenAI 兼容接口，支持以下提供商（均通过 `api_provider` 选择）：
+
+| 提供商 | 模型 | 免费情况 | 环境变量 |
+|--------|------|----------|----------|
+| **GLM（智谱）** | `glm-4v-flash` | **完全免费** | `ZHIPU_API_KEY` |
+| **Kimi（月之暗面）** | `moonshot-v1-8k-vision-preview` | 新账户送 ¥15 试用余额（约 50 万 tokens） | `MOONSHOT_API_KEY` |
+| **Qwen（阿里云百炼）** | `qwen-vl-plus` | 新用户每模型 100 万 tokens 免费，90 天有效 | `DASHSCOPE_API_KEY` |
+| **Doubao（火山方舟）** | `doubao-1.5-vision-pro-32k` | 新用户送 50~200 万 tokens 免费额度 | `ARK_API_KEY` |
+
+- `api_key` 输入留空时自动读取对应环境变量（推荐，避免 API Key 明文写入工作流）
+- 首帧图片会以 JPEG base64 data URL 传给云端模型，输出与本地 GGUF/CLIP 完全同构的 JSON
+- API 调用失败（密钥缺失 / HTTP 错误 / JSON 解析失败）会抛出带明确原因的错误
+
+#### 本地 GGUF（llama-cpp-python，`vlm_mode=llama-cpp`）
+
+在本地通过 llama-cpp-python 加载 GGUF 视觉模型（与云端 API 相比无需联网、无额度限制，但更慢，取决于显卡）。支持 llama.cpp 生态的多模态模型（如 Qwen3-VL 系列的 `.gguf` + `mmproj`）。
+
+- **模型放置**：GGUF 与 mmproj 文件放入 `ComfyUI/models/llm/` 目录（节点首次使用会自动注册该目录）
+- **手动安装**（节点不会自动下载安装）：首次使用时会检测 `llama-cpp-python` 是否已安装；未安装则不会自动安装，而是在控制台输出提示（含下载链接与步骤），请按以下步骤手动安装：
+  1. 打开 https://github.com/JamePeng/llama-cpp-python/releases 下载最新 release 中的预编译 wheel
+  2. 选择与你的环境匹配的文件（形如 `llama_cpp_python-0.3.46+cu131-cp313-cp313-win_amd64.whl`），匹配三项：
+     - `win_amd64`：Windows x64 平台
+     - `cp313`：Python 版本（= Python 3.13；控制台提示会给出本机的 `cpXXX` 标签）
+     - `cu131`：CUDA 版本（控制台提示会给出本机 torch 的 `cuXXX` 标签，优先选择相同的，没有则任意 `cu` 版本均可）
+  3. 在 `ComfyUI_windows_portable` 目录下用自带的 python 安装：
+     ```
+     python_embeded\python.exe -m pip install <下载的 .whl 文件路径>
+     ```
+  4. 安装完成后重启 ComfyUI
+- **无 mmproj 时**：`mmproj_name` 选 `None` 则纯文本模式（不分析首帧图片，日志会给出提示）
 
 #### 尾帧行为
 
@@ -217,8 +256,13 @@ ComfyUI/models/text_encoders/
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `clip_name` | COMBO | 第一个可用 | text_encoder 模型 |
+| `clip_name` | COMBO | 第一个可用 | text_encoder 模型（`vlm_mode=clip` 时使用） |
 | `clip_type` | COMBO | `qwen3vl` | 模型类型（`qwen3vl` / `minimax` / `gemma`） |
+| `vlm_mode` | COMBO | `clip` | VLM 后端选择：`clip`=本地 CLIP / `llama-cpp`=本地 GGUF（需 `gguf_name`）/ `api`=云端 API |
+| `gguf_name` | COMBO | 第一个可用 | 本地 GGUF VLM 模型（`vlm_mode=llama-cpp` 时使用） |
+| `mmproj_name` | COMBO | `None` | 视觉投影器（mmproj）GGUF（多模态模型需要，`None` 为纯文本模式） |
+| `api_provider` | COMBO | `GLM` | 云端 API 提供商（`GLM` / `Kimi` / `Qwen` / `Doubao`，`vlm_mode=api` 时使用） |
+| `api_key` | STRING | `""` | API Key，留空则读取环境变量 |
 | `image` | IMAGE | 可选 | 首帧图片（不连接则为纯文本模式） |
 | `last_prompt` | STRING | `""` | 上一段提示词（可选，提供上下文连续性） |
 | `prompt` | STRING | `""` | 用户新输入的提示词 |

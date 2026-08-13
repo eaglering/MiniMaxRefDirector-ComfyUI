@@ -1,3 +1,5 @@
+from . import server  # registers /minimax_ref/api routes
+
 from .minimax_ref_subject import MiniMaxRefSubject
 from .minimax_ref_director import MiniMaxRefDirector
 from .minimax_ref_director_guide import MiniMaxRefDirectorGuide

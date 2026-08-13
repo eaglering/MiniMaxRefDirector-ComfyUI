@@ -3,7 +3,6 @@ import os
 import logging
 import re
 import torch
-import folder_paths
 from comfy_api.latest import io
 
 try:
@@ -11,7 +10,12 @@ try:
 except Exception:
     ExecutionBlocker = None
 
-from .minimax_ref_prompt_enhance import generate_prompt_with_clip
+from .api_config import api_config_manager
+from .minimax_ref_prompt_enhance import (
+    generate_prompt_with_clip,
+    _ensure_llm_folder_registered,
+    _list_llm_gguf_files,
+)
 from .lib import find_index, load_image_tensor, load_audio_tensor, resolve_input_path, seconds_to_mmssmmm
 
 GuideData = io.Custom("GUIDE_DATA")
@@ -28,8 +32,9 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
 
     @classmethod
     def define_schema(cls):
-        text_encoders = folder_paths.get_filename_list("text_encoders")
-        clip_types = ["qwen3vl", "minimax"]
+        _ensure_llm_folder_registered()
+        gguf_files = _list_llm_gguf_files()
+        provider_options, provider_default = api_config_manager.get_provider_options("vlm")
         return io.Schema(
             node_id="MiniMaxRefDirectorGuide",
             display_name="MiniMax Reference Director Guide",
@@ -49,19 +54,35 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 ),
                 io.Clip.Input(
                     "clip", optional=True,
-                    tooltip="External CLIP model input (priority over clip_name/clip_type). Connect from a CLIP Loader node.",
+                    tooltip="Local CLIP model (from CLIP Loader) used when vlm_mode=clip.",
                 ),
                 io.Combo.Input(
-                    "clip_name",
-                    options=text_encoders,
-                    default=text_encoders[0] if text_encoders else "",
-                    tooltip="Choose text encoder（CLIP/VL）text_encodes (used when no external clip connected).",
+                    "vlm_mode",
+                    options=["clip", "llama-cpp", "api[beta]"],
+                    default="clip",
+                    tooltip="VLM backend for prompt enhancement: clip=local CLIP | llama-cpp=local GGUF via llama-cpp-python (needs gguf_name) | api=cloud API (GLM/Kimi/Qwen/Doubao)",
                 ),
                 io.Combo.Input(
-                    "clip_type",
-                    options=clip_types,
-                    default="qwen3vl",
-                    tooltip="CLIP model type (used when no external clip connected).",
+                    "gguf_name",
+                    options=gguf_files,
+                    default=gguf_files[0] if gguf_files else "",
+                    tooltip="Local GGUF VLM model (e.g. Qwen3-VL) under models/llm, loaded via llama-cpp-python. Used when vlm_mode=llama-cpp.",
+                ),
+                io.Combo.Input(
+                    "mmproj_name",
+                    options=["None"] + gguf_files,
+                    default="None",
+                    tooltip="Optional vision projector (mmproj) GGUF for multimodal models (under models/llm). 'None' = text-only mode.",
+                ),
+                io.Combo.Input(
+                    "api_provider",
+                    options=provider_options,
+                    default=provider_default,
+                    tooltip="Cloud VLM API provider (used when vlm_mode=api). Options come from Settings → API 管理器 — add / edit services there, then restart ComfyUI (or re-import this node) to refresh. GLM-4V-Flash is fully free; others require quota.",
+                ),
+                io.String.Input(
+                    "api_key", default="", multiline=False,
+                    tooltip="API key. Leave empty to use the key stored in Settings → API 管理器 (built-in providers also fall back to env vars: ZHIPU_API_KEY / MOONSHOT_API_KEY / DASHSCOPE_API_KEY / ARK_API_KEY).",
                 ),
                 io.Int.Input(
                     "seed",
@@ -112,8 +133,10 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, guide_data=None, first_frame=None, clip=None, clip_name="", clip_type="qwen3vl", seed=42, 
-                last_refer_mode=False, prompt_enhance="Basic", seg_index=0) -> io.NodeOutput:
+    def execute(cls, guide_data=None, first_frame=None, clip=None, vlm_mode="clip",
+                gguf_name="", mmproj_name="None",
+                api_provider="GLM", api_key="", seed=42, last_refer_mode=False,
+                prompt_enhance="Basic", seg_index=0) -> io.NodeOutput:
         """Extract segment-level data and load all referenced subject images/audio."""
 
         if guide_data is None:
@@ -166,7 +189,6 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 input_first_frame = first_frame if last_refer_mode else None
         # --- Detect the end frame of the current segment ---
         end_frame_tensor = None
-        end_frame_time = None
         if idx + 1 < segment_count:
             next_seg = timeline[idx + 1]
             if next_seg.get("is_end_frame") and next_seg.get("first_frame"):
@@ -180,10 +202,13 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
             prompt=prompt,
             duration_frames=duration_frames,
             first_frame=input_first_frame,
-            last_prompt=prev_prompt,
             clip=clip,
-            clip_name=clip_name,
-            clip_type=clip_type,
+            last_prompt=prev_prompt,
+            gguf_name=gguf_name,
+            mmproj_name=mmproj_name,
+            vlm_mode=vlm_mode,
+            api_provider=api_provider,
+            api_key=api_key,
             frame_rate=fps,
             enhance=effective_prompt_enhance,
             seed=seed,
@@ -251,8 +276,9 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
 
     @classmethod
     def _process_prompt(cls, subject_data: list[dict], global_prompt: str, prompt: str,
-                       duration_frames: int, first_frame: torch.Tensor|None = None, last_prompt: str = "",
-                       clip=None, clip_name: str = "", clip_type: str = "qwen3vl",
+                       duration_frames: int, first_frame: torch.Tensor|None = None, clip=None,
+                       last_prompt: str = "", gguf_name: str = "", mmproj_name: str = "",
+                       vlm_mode: str = "clip", api_provider: str = "GLM", api_key: str = "",
                        frame_rate: float = 24.0, enhance: str = "Basic", seed: int = 42,
                        end_frame: torch.Tensor|None = None, end_frame_time: float|None = None) -> dict:
         """Process a single segment prompt: call VLM enhancement → parse mapping → build subject_definitions / retention_analysis."""
@@ -262,8 +288,11 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
         clip_result = generate_prompt_with_clip(
             image=first_frame,
             clip=clip,
-            clip_name=clip_name,
-            clip_type=clip_type,
+            gguf_name=gguf_name,
+            mmproj_name=mmproj_name,
+            vlm_mode=vlm_mode,
+            api_provider=api_provider,
+            api_key=api_key,
             last_prompt=last_prompt,
             prompt=prompt,
             duration=duration_sec,
