@@ -60,7 +60,9 @@ EXAMPLE_ENHANCED_HAS_IMAGE = ('"[Shot 2] At 00:05.000, a close-up on {{ROLE_0}} 
 
 PROMPT_BASE_HEADER = """You are a video prompt writer for a full-reference text-to-video generation system. Convert user input into a structured video prompt with character and dialogue placeholders for downstream mapping and generation.
 
-Write all shot descriptions in English. Preserve the original language of character names and dialogue content exactly as provided by the user—do not translate them. In the mapping, character name values must use their original language without any prefix. Dialogue values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English."""
+Write all shot descriptions in English. Preserve the original language of character names and dialogue content exactly as provided by the user—do not translate them. In the mapping, character name values must use their original language without any prefix. Dialogue values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English.
+
+Dialogue restriction (STRICT): dialogue may appear in shot descriptions ONLY where the user input explicitly provides it. Do NOT invent, add, or fabricate any dialogue that is not present in the user input. If the user input contains no dialogue at all, no shot may contain any dialogue."""
 
 PROMPT_IMAGE_SECTION = """
 ## First Frame Reference Image:
@@ -96,6 +98,7 @@ PROMPT_REQUIREMENTS = """
 4. Assign one ROLE_N_DIALOGUE_M placeholder per dialogue line. The ROLE_N prefix must match the speaking character.
 5. Character name mapping values must preserve the original language as provided by the user. Do NOT add any language prefix to character names. Do NOT translate character names.
 6. Dialogue mapping values must include a language tag prefix: `[Chinese]` for Chinese or `[English]` for English. Auto-detect the language of the dialogue content. Do NOT translate dialogue content—only add the language prefix.
+7. DIALOGUE RESTRICTION (STRICT): Only the dialogue lines explicitly provided in the User Input may appear in the output, and ONLY as their placeholders. Never invent new dialogue, never paraphrase user dialogue into new lines, and never include any dialogue in the shots if the User Input contains none.
 
 ## Shot Timing Guidelines (CRITICAL):
 Placeholders like `{{ROLE_0_DIALOGUE_0}}` are SHORT tokens but represent the ACTUAL dialogue text from the User Input. DO NOT estimate shot duration from placeholder length!
@@ -115,6 +118,7 @@ __SHOT_STRUCTURE__
 - For each shot, clearly establish: shot composition (e.g., wide/medium/close-up/over-the-shoulder), subject appearance and position, environment and lighting, character actions and state changes, camera movement, and relevant on-screen sound.
 - Describe what is actually visible in the frame—avoid reducing descriptions to plot summaries.
 - All shot text must be in English. Character names and dialogue values in the mapping may preserve their original language.
+- Dialogue restriction: a character may speak in a shot ONLY when the User Input provides that dialogue line. Do NOT add, invent, or fabricate any dialogue beyond what the user input contains.
 
 ### overall_soundscape:
 - Summarize continuous ambient sound and recurring physical sound effects that persist across the full video.
@@ -215,6 +219,7 @@ __SHOT_STRUCTURE__
 - For each shot, clearly establish: shot composition (e.g., wide/medium/close-up/over-the-shoulder), subject appearance and position, environment and lighting, character actions and state changes, camera movement, and relevant on-screen sound.
 - Describe what is actually visible in the frame—avoid reducing descriptions to plot summaries.
 - All shot text must be in English. Character names and dialogue values in the mapping may preserve their original language.
+- Dialogue restriction: a character may speak in a shot ONLY when the User Input provides that dialogue line. Do NOT add, invent, or fabricate any dialogue beyond what the user input contains.
 
 ### overall_soundscape:
 - Summarize continuous ambient sound and recurring physical sound effects that persist across the full video.
@@ -831,6 +836,39 @@ def _ensure_llama_cpp() -> None:
     )
 
 
+def _attach_vision_chat_handler(model, mmproj_path: str, use_gpu: bool = True) -> None:
+    """Attach a vision-aware chat handler so GGUF VLM actually sees the image.
+
+    Qwen3-VL GGUFs are NOT recognized by llama-cpp-python's
+    ``guess_chat_format_from_gguf_metadata()``, so ``chat_format`` falls back to
+    ``chat_template.default`` — a generic ``Jinja2ChatFormatter`` that renders
+    text only and silently DROPS ``image_url`` content. The model then never
+    receives visual input and hallucinates an unrelated scene from the prompt
+    text alone.
+
+    Forcing ``Qwen3VLChatHandler`` (MTMD-based) routes images through the real
+    vision pipeline: on first call it loads the mmproj via
+    ``mtmd_init_from_file`` and embeds the image into the KV cache.
+    """
+    try:
+        from llama_cpp.llama_chat_format import Qwen3VLChatHandler
+
+        model.chat_handler = Qwen3VLChatHandler(
+            clip_model_path=mmproj_path,
+            verbose=False,
+            use_gpu=use_gpu,
+        )
+        log.info(
+            "[MiniMaxRefPromptEnhance] Attached Qwen3VLChatHandler "
+            f"(clip={os.path.basename(mmproj_path)}, use_gpu={use_gpu})"
+        )
+    except Exception as e:  # pragma: no cover - defensive
+        log.warning(
+            f"[MiniMaxRefPromptEnhance] Failed to attach Qwen3VLChatHandler ({e}); "
+            "vision input may not work"
+        )
+
+
 def _unload_llama_models(keep: set | None = None) -> None:
     """Explicitly close and drop cached llama-cpp models, freeing their memory.
 
@@ -862,6 +900,13 @@ def _unload_llama_models(keep: set | None = None) -> None:
             continue
         name = os.path.basename(k[0])
         try:
+            # The MTMD chat handler owns its own mmproj/mtmd context; close it
+            # BEFORE the model so the vision resources are freed too.
+            handler = getattr(model, "chat_handler", None)
+            if handler is not None:
+                hclose = getattr(handler, "close", None)
+                if callable(hclose):
+                    hclose()
             close = getattr(model, "close", None)
             if callable(close):
                 close()
@@ -911,6 +956,10 @@ def _get_llama_model(gguf_path: str, mmproj_path: str = ""):
         log.warning(f"[MiniMaxRefPromptEnhance] GPU load failed ({e}); retrying on CPU (n_gpu_layers=0)")
         kwargs["n_gpu_layers"] = 0
         model = Llama(**kwargs)
+
+    if mmproj_path:
+        _attach_vision_chat_handler(model, mmproj_path, use_gpu=kwargs.get("n_gpu_layers", 0) != 0)
+
     _LLAMA_MODEL_CACHE[key] = model
     # Evict any previously cached model(s) so only the freshly loaded one stays
     # resident (avoids holding multiple multi-GB GGUFs in RAM/VRAM at once).
