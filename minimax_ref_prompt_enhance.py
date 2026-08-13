@@ -831,8 +831,60 @@ def _ensure_llama_cpp() -> None:
     )
 
 
+def _unload_llama_models(keep: set | None = None) -> None:
+    """Explicitly close and drop cached llama-cpp models, freeing their memory.
+
+    A llama-cpp-python ``Llama`` object owns native buffers (RAM + VRAM) that
+    are only returned once ``close()`` is called and the object is released —
+    simply removing the dict entry does NOT free anything. This helper:
+
+    1. calls ``Llama.close()`` on every cached model (except keys in ``keep``),
+    2. drops the references and forces a ``gc`` pass,
+    3. calls ``torch.cuda.empty_cache()`` so VRAM freed by llama.cpp is
+       reclaimed from the CUDA allocator pool.
+
+    Args:
+        keep: optional set of cache keys (tuples of (gguf_path, mmproj_path))
+            to retain in memory, e.g. the model about to be reused by the
+            current request.
+    """
+    global _LLAMA_MODEL_CACHE
+    keys = [k for k in list(_LLAMA_MODEL_CACHE) if keep is None or k not in keep]
+    if not keys:
+        return
+    import gc
+    import torch
+
+    freed: list[str] = []
+    for k in keys:
+        model = _LLAMA_MODEL_CACHE.pop(k, None)
+        if model is None:
+            continue
+        name = os.path.basename(k[0])
+        try:
+            close = getattr(model, "close", None)
+            if callable(close):
+                close()
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning(f"[MiniMaxRefPromptEnhance] Error closing llama model {name}: {e}")
+        del model
+        freed.append(name)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    log.info(
+        f"[MiniMaxRefPromptEnhance] Unloaded llama-cpp model(s): {', '.join(freed) or 'n/a'}; "
+        f"cached models remaining: {len(_LLAMA_MODEL_CACHE)}"
+    )
+
+
 def _get_llama_model(gguf_path: str, mmproj_path: str = ""):
-    """Load (and cache) a GGUF model with llama-cpp-python; GPU first, CPU fallback."""
+    """Load (and cache) a GGUF model with llama-cpp-python; GPU first, CPU fallback.
+
+    Only a single model is kept in memory at a time: loading a different GGUF
+    (or different mmproj) evicts the previously cached one, so switching models
+    in the dropdown releases the old model's RAM/VRAM immediately.
+    """
     global _LLAMA_MODEL_CACHE
     key = (gguf_path, mmproj_path)
     cached = _LLAMA_MODEL_CACHE.get(key)
@@ -860,6 +912,9 @@ def _get_llama_model(gguf_path: str, mmproj_path: str = ""):
         kwargs["n_gpu_layers"] = 0
         model = Llama(**kwargs)
     _LLAMA_MODEL_CACHE[key] = model
+    # Evict any previously cached model(s) so only the freshly loaded one stays
+    # resident (avoids holding multiple multi-GB GGUFs in RAM/VRAM at once).
+    _unload_llama_models(keep={key})
     return model
 
 
@@ -1077,6 +1132,12 @@ def _generate_prompt_with_clip_uncached(
             "mapping": dict,
         }
     """
+
+    # The local GGUF model can occupy several GB of RAM/VRAM. Whenever the node
+    # is not configured for vlm_mode=llama-cpp (i.e. clip / api / Pre-formatted),
+    # release it so memory is not held indefinitely after switching modes.
+    if vlm_mode != "llama-cpp":
+        _unload_llama_models()
 
     has_image = _has_image(image)
     shot1_dur = calc_shot1_duration(fps) if has_image else 0.0

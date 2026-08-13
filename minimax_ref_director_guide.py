@@ -58,10 +58,9 @@ class MiniMaxRefDirectorGuide(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "vlm_mode",
-                    options=["clip", "llama-cpp"],
+                    options=["clip", "llama-cpp", "api[beta]"],
                     default="clip",
-                    # tooltip="VLM backend for prompt enhancement: clip=local CLIP | llama-cpp=local GGUF via llama-cpp-python (needs gguf_name) | api=cloud API (GLM/Kimi/Qwen/Doubao)",
-                    tooltip="VLM backend for prompt enhancement: clip=local CLIP | llama-cpp=local GGUF via llama-cpp-python (needs gguf_name)",
+                    tooltip="VLM backend for prompt enhancement: clip=local CLIP | llama-cpp=local GGUF via llama-cpp-python (needs gguf_name) | api=cloud API (GLM/Kimi/Qwen/Doubao)",
                 ),
                 io.Combo.Input(
                     "gguf_name",

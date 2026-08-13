@@ -36,3 +36,20 @@ async def save_api_config(request: web.Request) -> web.Response:
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@PromptServer.instance.routes.post(f"{API_PREFIX}/llama/unload")
+async def unload_llama_models(request: web.Request) -> web.Response:
+    """Unload all cached local GGUF (llama-cpp) models to free RAM/VRAM.
+
+    Lazy import keeps this module import-order agnostic (avoids cycles with
+    minimax_ref_prompt_enhance which imports comfy modules).
+    """
+    try:
+        from .minimax_ref_prompt_enhance import _unload_llama_models as _unload
+
+        _unload()
+        return web.json_response({"success": True, "unloaded": True})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)

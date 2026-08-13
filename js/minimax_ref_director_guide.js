@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 
 // MiniMax Super Director Guide — dynamic visibility of VLM-backend inputs.
 // Depending on vlm_mode (clip / llama-cpp / api) only the relevant widgets are
@@ -95,5 +96,40 @@ app.registerExtension({
 
     // 2. Also apply for freshly dragged-in nodes (no onConfigure fired).
     setTimeout(applyVisibility, 50);
+
+    // 3. Manual "unload GGUF" button: frees the cached llama-cpp model's
+    //    RAM/VRAM on demand (see server.py /minimax_ref/api/llama/unload).
+    if (node.widgets && !node.widgets.some((w) => w.name === "_mmr_unload_gguf")) {
+      const unloadBtn = node.addWidget(
+        "button",
+        "释放 GGUF 模型内存",
+        null,
+        () => {
+          unloadBtn.disabled = true;
+          api
+            .fetchApi("/minimax_ref/api/llama/unload", { method: "POST" })
+            .then((r) => r.json())
+            .then((j) => {
+              if (j.success) {
+                app.extensionManager?.toast?.add({
+                  text: "GGUF 模型已卸载，内存已释放",
+                  severity: "success",
+                });
+              } else {
+                app.extensionManager?.toast?.add({
+                  text: `GGUF 卸载失败: ${j.error || "未知错误"}`,
+                  severity: "error",
+                });
+              }
+            })
+            .catch((e) => console.error("[MiniMaxRef] unload GGUF error:", e))
+            .finally(() => {
+              unloadBtn.disabled = false;
+            });
+        },
+        { serialize: false }
+      );
+      unloadBtn.serializeValue = false;
+    }
   },
 });
