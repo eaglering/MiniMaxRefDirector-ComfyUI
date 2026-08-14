@@ -4,8 +4,8 @@ const { api } = window.comfyAPI.api;
 // --- UI Constants & Configuration ---
 const RULER_HEIGHT = 24;
 const BLOCK_HEIGHT = 160; // Increased to make the image timeline area much taller
-const AUDIO_TRACK_HEIGHT = 0;
-const MOTION_TRACK_HEIGHT = 0; // used as Motion Guide track height
+const AUDIO_TRACK_HEIGHT = 80;
+const MOTION_TRACK_HEIGHT = 80; // used as Motion Guide track height
 const CANVAS_HEIGHT = RULER_HEIGHT + BLOCK_HEIGHT + MOTION_TRACK_HEIGHT + AUDIO_TRACK_HEIGHT;
 const HANDLE_HIT_PX = 14;
 const MIN_SEGMENT_LENGTH = 6;
@@ -20,7 +20,7 @@ function hideWidget(w) {
   if (!w.options) w.options = {};
   w.options.hidden = true;
 
-  // Use computeSize and draw overrides to safely collapse in LiteGraph
+  // Use computeSize and draw overrides to safely collapse in LiteGraph 
   // without triggering ComfyUI's "convert to input slot" auto-behavior.
   if (!window.LiteGraph || !window.LiteGraph.vueNodesMode) {
     w.computeSize = () => [0, -4]; // -4 cancels out ComfyUI's hardcoded 4px widget padding
@@ -448,12 +448,6 @@ const STYLES = `
     user-select: none;
     -webkit-user-select: none;
   }
-  .pr-dialogue-duration {
-    font-size: 12px;
-    color: #f0a;
-    font-family: monospace;
-    white-space: nowrap;
-  }
   .pr-timecode {
     font-size: 14px;
     font-weight: bold;
@@ -624,113 +618,12 @@ const STYLES = `
     border-top: 1px solid #333;
     margin: 4px 0;
   }
-  .pr-mention-dropdown {
-    position: fixed;
-    background: #1e1e1e;
-    border: 1px solid #555;
-    border-radius: 6px;
-    max-height: 260px;
-    overflow-y: auto;
-    z-index: 2147483647;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
-    min-width: 220px;
-    padding: 6px;
-    display: none;
-    flex-direction: column;
-    gap: 3px;
-    pointer-events: auto;
-  }
-  .pr-mention-dropdown::-webkit-scrollbar {
-    width: 6px;
-  }
-  .pr-mention-dropdown::-webkit-scrollbar-track {
-    background: #151515;
-    border-radius: 3px;
-  }
-  .pr-mention-dropdown::-webkit-scrollbar-thumb {
-    background: #444;
-    border-radius: 3px;
-  }
-  .pr-mention-item {
-    padding: 6px 10px;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 12px;
-    color: #ccc;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    transition: background 0.1s;
-  }
-  .pr-mention-item:hover,
-  .pr-mention-item.active {
-    background: #333;
-    color: #fff;
-  }
-  .pr-mention-item-thumb {
-    width: 36px;
-    height: 36px;
-    border-radius: 3px;
-    object-fit: cover;
-    background: #2a2a2a;
-    flex-shrink: 0;
-  }
-  .pr-mention-item-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 3px;
-    background: #38bdf8;
-    color: #000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    font-weight: 700;
-    flex-shrink: 0;
-  }
-  .pr-mention-item-audio-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 3px;
-    background: #444;
-    color: #aaa;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  .pr-mention-item-audio-icon svg {
-    width: 16px;
-    height: 16px;
-  }
-  .pr-mention-item-name {
-    font-weight: 600;
-    color: #ddd;
-  }
-  .pr-mention-item-desc {
-    font-size: 10px;
-    color: #777;
-    max-width: 160px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .pr-mention-no-results {
-    padding: 10px;
-    text-align: center;
-    color: #666;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .pr-mention-no-results:hover {
-    color: #999;
-  }
 `;
 
-let styleEl = document.getElementById("minimax-ref-director-styles");
+let styleEl = document.getElementById("prompt-relay-styles");
 if (!styleEl) {
   styleEl = document.createElement("style");
-  styleEl.id = "minimax-ref-director-styles";
+  styleEl.id = "prompt-relay-styles";
   document.head.appendChild(styleEl);
 }
 styleEl.textContent = STYLES;
@@ -940,7 +833,7 @@ class TimelineEditor {
     this._prevStartFrames = this.getStartFrames();
     this._prevStartSeconds = this.startSecondsWidget ? this.startSecondsWidget.value : 0;
 
-    console.log("[MiniMaxRefDirector debug] Constructor: timelineDataWidget value:", this.timelineDataWidget?.value);
+    console.log("[LTXDirector debug] Constructor: timelineDataWidget value:", this.timelineDataWidget?.value);
     this.timeline = parseInitial(this.timelineDataWidget?.value);
     this.retakeMode = this.timeline.retakeMode === true;
     if (this.retakeMode) {
@@ -954,7 +847,7 @@ class TimelineEditor {
         this.node.properties.global_prompt = this.timeline.global_prompt;
       }
     }
-    console.log("[MiniMaxRefDirector debug] Constructor: parsed timeline:", JSON.stringify(this.timeline));
+    console.log("[LTXDirector debug] Constructor: parsed timeline:", JSON.stringify(this.timeline));
 
     // Treat this.timeline (from timeline_data widget) as the absolute source of truth!
     this.mainTrackEnabled = this.timeline.mainTrackEnabled !== false;
@@ -1503,8 +1396,8 @@ class TimelineEditor {
     this._ensureVideoEl(seg);
     if (!seg.videoEl) return;
     const targetSec = edge === "end"
-        ? (seg.trimStart + seg.length) / this.getFrameRate()
-        : seg.trimStart / this.getFrameRate();
+      ? (seg.trimStart + seg.length) / this.getFrameRate()
+      : seg.trimStart / this.getFrameRate();
 
     seg._scrubTargetSec = targetSec;
   }
@@ -1625,8 +1518,8 @@ class TimelineEditor {
         for (let i = 0; i < numFrames; i++) {
           // Check if the file/segment is still active in the current timeline
           const exists = this.timeline.segments.find(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey) ||
-              this.timeline.motionSegments.find(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey) ||
-              (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey));
+            this.timeline.motionSegments.find(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey) ||
+            (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey));
           if (!exists) break;
 
           const time = (i / numFrames) * duration;
@@ -1915,7 +1808,7 @@ class TimelineEditor {
           seg.waveformPeaks = res.peaks;
         }
       } catch (err) {
-        console.warn("[MiniMaxRefDirector] Awaiting shared server audio extract promise failed:", err);
+        console.warn("[LTXDirector] Awaiting shared server audio extract promise failed:", err);
       }
       return;
     }
@@ -1946,7 +1839,7 @@ class TimelineEditor {
         }
       }
     } catch (err) {
-      console.warn("[MiniMaxRefDirector] Server audio check/extract failed:", err);
+      console.warn("[LTXDirector] Server audio check/extract failed:", err);
     } finally {
       this._audioExtractionPromises.delete(fileKey);
     }
@@ -1995,7 +1888,7 @@ class TimelineEditor {
       return true;
     }
     const isVideo = (seg.audioFile && seg.audioFile.toLowerCase().match(/\.(mp4|webm|mkv|avi|mov|m4v|flv|wmv)$/)) ||
-        (!seg.audioFile && seg._blobUrl);
+      (!seg.audioFile && seg._blobUrl);
     if (isVideo) {
       const isSmall = seg.fileSize && seg.fileSize <= 100 * 1024 * 1024;
       return !!isSmall;
@@ -2338,23 +2231,23 @@ class TimelineEditor {
     uploadBtn.addEventListener("click", () => this.fileInput.click());
     this.uploadBtn = uploadBtn;
 
-    // const uploadAudioBtn = document.createElement("button");
-    // uploadAudioBtn.className = "pr-btn";
-    // uploadAudioBtn.innerHTML = `${ICONS.audio} Add Audio`;
-    // uploadAudioBtn.addEventListener("click", () => this.audioFileInput.click());
-    // this.uploadAudioBtn = uploadAudioBtn;
-    //
-    // const uploadMotionBtn = document.createElement("button");
-    // uploadMotionBtn.className = "pr-btn";
-    // uploadMotionBtn.innerHTML = `${ICONS.motion} Add IC Video`;
-    // uploadMotionBtn.addEventListener("click", () => this.motionFileInput.click());
-    // this.uploadMotionBtn = uploadMotionBtn;
+    const uploadAudioBtn = document.createElement("button");
+    uploadAudioBtn.className = "pr-btn";
+    uploadAudioBtn.innerHTML = `${ICONS.audio} Add Audio`;
+    uploadAudioBtn.addEventListener("click", () => this.audioFileInput.click());
+    this.uploadAudioBtn = uploadAudioBtn;
 
-    // const uploadVideoBtn = document.createElement("button");
-    // uploadVideoBtn.className = "pr-btn";
-    // uploadVideoBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Add Video`;
-    // uploadVideoBtn.addEventListener("click", () => this.videoFileInput.click());
-    // this.uploadVideoBtn = uploadVideoBtn;
+    const uploadMotionBtn = document.createElement("button");
+    uploadMotionBtn.className = "pr-btn";
+    uploadMotionBtn.innerHTML = `${ICONS.motion} Add IC Video`;
+    uploadMotionBtn.addEventListener("click", () => this.motionFileInput.click());
+    this.uploadMotionBtn = uploadMotionBtn;
+
+    const uploadVideoBtn = document.createElement("button");
+    uploadVideoBtn.className = "pr-btn";
+    uploadVideoBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Add Video`;
+    uploadVideoBtn.addEventListener("click", () => this.videoFileInput.click());
+    this.uploadVideoBtn = uploadVideoBtn;
 
     const addTextBtn = document.createElement("button");
     addTextBtn.className = "pr-btn";
@@ -2369,14 +2262,14 @@ class TimelineEditor {
     this.deleteBtn = deleteBtn;
 
     actionGroup.appendChild(this.fileInput);
-    // actionGroup.appendChild(this.audioFileInput);
-    // actionGroup.appendChild(this.motionFileInput);
-    // actionGroup.appendChild(this.videoFileInput);
+    actionGroup.appendChild(this.audioFileInput);
+    actionGroup.appendChild(this.motionFileInput);
+    actionGroup.appendChild(this.videoFileInput);
     actionGroup.appendChild(uploadBtn);
     actionGroup.appendChild(addTextBtn);
-    // actionGroup.appendChild(uploadAudioBtn);
-    // actionGroup.appendChild(uploadVideoBtn);
-    // actionGroup.appendChild(uploadMotionBtn);
+    actionGroup.appendChild(uploadAudioBtn);
+    actionGroup.appendChild(uploadVideoBtn);
+    actionGroup.appendChild(uploadMotionBtn);
     actionGroup.appendChild(deleteBtn);
 
     // Retake-mode-only delete button (shown next to Add Video when retakeMode is on)
@@ -2399,10 +2292,6 @@ class TimelineEditor {
     this.segmentBoundsDisplay = document.createElement("div");
     this.segmentBoundsDisplay.className = "pr-segment-bounds";
     this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
-
-    this.dialogueDurationDisplay = document.createElement("div");
-    this.dialogueDurationDisplay.className = "pr-dialogue-duration pr-segment-bounds";
-    this.dialogueDurationDisplay.textContent = "";
 
     this.timeCodeDisplay = document.createElement("div");
     this.timeCodeDisplay.className = "pr-timecode";
@@ -2722,10 +2611,10 @@ class TimelineEditor {
 
     retakeToggleBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-
+      
       // Stop and mute any active playback first
       this.pauseAudio();
-
+      
       // Save current input value to the mode we are EXITING
       if (this.retakeMode) {
         this.timeline.retake_global_prompt = this.globalPromptInput ? this.globalPromptInput.value : "";
@@ -2774,7 +2663,7 @@ class TimelineEditor {
     btnGroup.style.display = "flex";
     btnGroup.style.gap = "6px";
     btnGroup.style.alignItems = "center";
-    // btnGroup.appendChild(retakeToggleBtn);
+    btnGroup.appendChild(retakeToggleBtn);
     btnGroup.appendChild(snapBtn);
     btnGroup.appendChild(startBtn);
     btnGroup.appendChild(endBtn);
@@ -2912,9 +2801,6 @@ class TimelineEditor {
       if (saveTimeout) clearTimeout(saveTimeout);
       triggerAutoSave();
     });
-
-    // ── @ Mention Dropdown ──
-    // this._setupMentionDropdown(this.globalPromptInput, globalPromptWrapper);
 
     const globalPropResizer = document.createElement("div");
     globalPropResizer.style.position = "absolute";
@@ -3065,11 +2951,7 @@ class TimelineEditor {
         if (saveTimeout) clearTimeout(saveTimeout);
         saveTimeout = setTimeout(triggerAutoSave, 300);
       }
-      this._updateDialogueDurationDisplay();
     });
-
-    // ── @ Mention Dropdown for segment prompt ──
-    this._setupMentionDropdown(this.promptInput, this.promptWrapper);
 
     // --- Motion Info Area ---
     this.motionInfoArea = document.createElement("div");
@@ -3124,13 +3006,13 @@ class TimelineEditor {
       let D_mouse_start = mouseFrameX - ghost.length / 2;
 
       this._previewSegments = this._applyCenterDragPhysics(
-          this._ghostInitialTimeline,
-          this._ghostSegmentId,
-          D_mouse_start,
-          mouseFrameX,
-          totalFrames,
-          totalFrames,
-          logicalWidth
+        this._ghostInitialTimeline,
+        this._ghostSegmentId,
+        D_mouse_start,
+        mouseFrameX,
+        totalFrames,
+        totalFrames,
+        logicalWidth
       );
 
       for (let ps of this._previewSegments) {
@@ -3148,7 +3030,7 @@ class TimelineEditor {
     this.wrapper.addEventListener("dragleave", (e) => {
       const rect = this.wrapper.getBoundingClientRect();
       if (e.clientX < rect.left || e.clientX >= rect.right ||
-          e.clientY < rect.top || e.clientY >= rect.bottom) {
+        e.clientY < rect.top || e.clientY >= rect.bottom) {
         this.wrapper.classList.remove("drag-active");
         this._ghostSegmentId = null;
         this._ghostTrack = null;
@@ -3187,7 +3069,7 @@ class TimelineEditor {
           const isVideo = file.type.startsWith("video/") || nameLower.match(/\.(mp4|webm|mkv|avi|mov|m4v|flv|wmv)$/);
           const isAudio = file.type.startsWith("audio/") || nameLower.match(/\.(mp3|wav|ogg|flac|m4a|aac)$/);
           const isImage = file.type.startsWith("image/") || nameLower.match(/\.(jpg|jpeg|png|webp|gif|bmp)$/);
-
+          
           if (isVideo) videoFiles.push(file);
           else if (isAudio) audioFiles.push(file);
           else if (isImage) imageFiles.push(file);
@@ -3335,10 +3217,10 @@ class TimelineEditor {
     zoomControls.appendChild(zoomInBtn);
     zoomControls.appendChild(zoomFitBtn);
 
-    // playerControls.appendChild(this.playBtn);
-    // playerControls.appendChild(this.loopBtn);
-    // playerControls.appendChild(this.seekBar);
-    // playerControls.appendChild(zoomControls);
+    playerControls.appendChild(this.playBtn);
+    playerControls.appendChild(this.loopBtn);
+    playerControls.appendChild(this.seekBar);
+    playerControls.appendChild(zoomControls);
 
 
 
@@ -3571,56 +3453,15 @@ class TimelineEditor {
         }
       }
     });
-    const blankEl = document.createElement("div")
-    blankEl.style.cssText = "flex:1"
-
-       // --- Prompt enhance select (per-segment) ---
-    const promptEnhanceSelectGroup = document.createElement("div")
-    const promptEnhanceLabel = document.createElement("span")
-    promptEnhanceLabel.name = "prompt_enhance";
-    promptEnhanceLabel.textContent = "Prompt Enhance: "
-    promptEnhanceLabel.className = "pr-segment-bounds"
-    promptEnhanceSelectGroup.appendChild(promptEnhanceLabel)
-    const promptEnhanceSelect = document.createElement("select");
-    promptEnhanceSelect.name = "prompt_enhance";
-    promptEnhanceSelect.style.cssText = "display:none;padding:2px 4px;border-radius:4px;background-color:#000";
-    const enhanceOptions = [
-      { value: "Default", label: "Default" },
-      { value: "Basic", label: "Basic" },
-      { value: "Enhanced", label: "Enhanced" },
-      { value: "Pre-formatted", label: "Pre-formatted" },
-    ];
-    enhanceOptions.forEach((opt) => {
-      const option = document.createElement("option");
-      option.value = opt.value;
-      option.textContent = opt.label;
-      promptEnhanceSelect.appendChild(option);
-    });
-    promptEnhanceSelect.value = "Default";
-    promptEnhanceSelect.addEventListener("change", () => {
-      if (this.selectedIndex >= 0 && this.selectionType === "image") {
-        const seg = this.timeline.segments[this.selectedIndex];
-        if (seg) {
-          seg.prompt_enhance = promptEnhanceSelect.value === "Default" ? undefined : promptEnhanceSelect.value;
-          this.commitChanges();
-        }
-      }
-    });
-    this.promptEnhanceSelect = promptEnhanceSelect;
-    promptEnhanceSelectGroup.appendChild(promptEnhanceSelect)
 
     this.strengthRow.appendChild(this.timeCodeDisplay);
     this.strengthRow.appendChild(this.segmentBoundsDisplay);
-    this.strengthRow.appendChild(this.dialogueDurationDisplay);
-    // this.strengthRow.appendChild(this.strengthLabel);
-    this.strengthRow.appendChild(blankEl)
-    this.strengthRow.appendChild(promptEnhanceSelectGroup);
-    this.strengthRow.appendChild(zoomControls);
-    // this.strengthRow.appendChild(this.strengthValue);
-    // this.strengthRow.appendChild(this.vidStrLabel);
-    // this.strengthRow.appendChild(this.vidStrValue);
-    // this.strengthRow.appendChild(this.vidAttnLabel);
-    // this.strengthRow.appendChild(this.vidAttnValue);
+    this.strengthRow.appendChild(this.strengthLabel);
+    this.strengthRow.appendChild(this.strengthValue);
+    this.strengthRow.appendChild(this.vidStrLabel);
+    this.strengthRow.appendChild(this.vidStrValue);
+    this.strengthRow.appendChild(this.vidAttnLabel);
+    this.strengthRow.appendChild(this.vidAttnValue);
 
 
 
@@ -3832,15 +3673,15 @@ class TimelineEditor {
       this.render();
     });
     this.motionTrackLabel.appendChild(overrideAudioToggleBtn);
-    
+
     // Initialize motion override states immediately
     overrideAudioToggleBtn.disabled = !this.motionTrackEnabled;
     overrideAudioToggleBtn.style.opacity = this.motionTrackEnabled ? "1.0" : "0.3";
 
 
-    // this.sidebar.appendChild(this.mainTrackLabel);
-    // this.sidebar.appendChild(this.audioTrackLabel);
-    // this.sidebar.appendChild(this.motionTrackLabel);
+    this.sidebar.appendChild(this.mainTrackLabel);
+    this.sidebar.appendChild(this.audioTrackLabel);
+    this.sidebar.appendChild(this.motionTrackLabel);
 
     const setupSidebarLabelResizing = (labelEl, dragType) => {
       labelEl.addEventListener("mousemove", (e) => {
@@ -3887,7 +3728,7 @@ class TimelineEditor {
 
     this.updateSidebarHeights();
 
-    // this.layoutContainer.appendChild(this.sidebar);
+    this.layoutContainer.appendChild(this.sidebar);
 
     // Viewport takes remaining space
     this.viewport.style.flexGrow = "1";
@@ -3902,16 +3743,15 @@ class TimelineEditor {
     controlsGroup.className = "pr-controls-group";
     controlsGroup.appendChild(this.strengthRow);
     controlsGroup.appendChild(playerControls);
-
     this.wrapper.appendChild(controlsGroup);
     this.wrapper.appendChild(propContainer);
-    // this.wrapper.appendChild(this.globalPropContainer);
+    this.wrapper.appendChild(this.globalPropContainer);
 
     this.container.appendChild(this.wrapper);
   }
 
   syncWidgetsAndUI() {
-    console.log("[MiniMaxRefDirector debug] syncWidgetsAndUI() called.");
+    console.log("[LTXDirector debug] syncWidgetsAndUI() called.");
     console.log(`  - mainTrackEnabled: ${this.mainTrackEnabled}`);
     console.log(`  - audioTrackEnabled: ${this.audioTrackEnabled}`);
     console.log(`  - motionTrackEnabled: ${this.motionTrackEnabled}`);
@@ -4200,12 +4040,12 @@ class TimelineEditor {
       if (checkResp.status === 200) {
         const checkResult = await checkResp.json();
         if (checkResult.exists) {
-          console.log(`[MiniMaxRefDirector] File already exists: ${checkResult.name}. Reusing existing file.`);
+          console.log(`[LTXDirector] File already exists: ${checkResult.name}. Reusing existing file.`);
           return checkResult.name;
         }
       }
     } catch (e) {
-      console.warn("[MiniMaxRefDirector] Failed to check for existing file, proceeding with upload", e);
+      console.warn("[LTXDirector] Failed to check for existing file, proceeding with upload", e);
     }
 
     if (file.size > CHUNK_SIZE) {
@@ -4459,7 +4299,7 @@ class TimelineEditor {
               // Background audio extraction (waveform peaks) — runs while user can already work
               const IS_LARGE_FILE = file.size > 100 * 1024 * 1024;
               if (IS_LARGE_FILE) {
-                console.log(`[MiniMaxRefDirector] Large file detected (${(file.size / 1024 / 1024).toFixed(1)} MB). Offloading audio extraction to server.`);
+                console.log(`[LTXDirector] Large file detected (${(file.size / 1024 / 1024).toFixed(1)} MB). Offloading audio extraction to server.`);
               } else {
                 this._extractAudioOnClient(file, audSeg.id, blobUrl);
               }
@@ -4495,48 +4335,48 @@ class TimelineEditor {
                 // Query server for extracted WAV audio file and waveform peaks
                 if (filePath) {
                   api.fetchApi(`/ltx_director_get_audio?filename=${encodeURIComponent(filePath)}`)
-                      .then(r => r.json())
-                      .then(res => {
-                        if (res.audio_file && res.peaks) {
+                    .then(r => r.json())
+                    .then(res => {
+                      if (res.audio_file && res.peaks) {
+                        for (let s of this.timeline.audioSegments) {
+                          if (s.audioFile === filePath || s._blobUrl === blobUrl) {
+                            s.audioFile = res.audio_file;
+                            s.waveformPeaks = res.peaks;
+                            s._decoding = false;
+                            this._preloadAudioSegment(s);
+                          }
+                        }
+                      } else {
+                        // Fallback
+                        if (IS_LARGE_FILE) {
+                          console.warn("[LTXDirector] Server audio extraction failed for large file, skipping.");
                           for (let s of this.timeline.audioSegments) {
                             if (s.audioFile === filePath || s._blobUrl === blobUrl) {
-                              s.audioFile = res.audio_file;
-                              s.waveformPeaks = res.peaks;
                               s._decoding = false;
-                              this._preloadAudioSegment(s);
                             }
                           }
                         } else {
-                          // Fallback
-                          if (IS_LARGE_FILE) {
-                            console.warn("[MiniMaxRefDirector] Server audio extraction failed for large file, skipping.");
-                            for (let s of this.timeline.audioSegments) {
-                              if (s.audioFile === filePath || s._blobUrl === blobUrl) {
-                                s._decoding = false;
-                              }
-                            }
-                          } else {
-                            this._extractAudioOnClient(file, audSeg.id, blobUrl);
-                          }
+                          this._extractAudioOnClient(file, audSeg.id, blobUrl);
                         }
-                        this.commitChanges(true);
-                        this.render();
-                      })
-                      .catch(err => {
-                        console.error("[MiniMaxRefDirector] Server audio extraction query failed:", err);
-                        for (let s of this.timeline.audioSegments) {
-                          if (s.audioFile === filePath || s._blobUrl === blobUrl) {
-                            s._decoding = false;
-                          }
+                      }
+                      this.commitChanges(true);
+                      this.render();
+                    })
+                    .catch(err => {
+                      console.error("[LTXDirector] Server audio extraction query failed:", err);
+                      for (let s of this.timeline.audioSegments) {
+                        if (s.audioFile === filePath || s._blobUrl === blobUrl) {
+                          s._decoding = false;
                         }
-                        this.render();
-                      });
+                      }
+                      this.render();
+                    });
                 } else {
                   this.commitChanges(true);
                   this.render();
                 }
               }).catch(err => {
-                console.error("[MiniMaxRefDirector] Background video upload failed", err);
+                console.error("[LTXDirector] Background video upload failed", err);
                 const currentVidSeg = this.timeline.segments.find(s => s.id === vidSeg.id);
                 if (currentVidSeg) currentVidSeg._uploading = false;
                 const currentAudSeg = this.timeline.audioSegments.find(s => s.id === audSeg.id);
@@ -4817,7 +4657,7 @@ class TimelineEditor {
                 this.commitChanges(true);
                 this.render();
               }).catch(err => {
-                console.error("[MiniMaxRefDirector] Background motion video upload failed", err);
+                console.error("[LTXDirector] Background motion video upload failed", err);
                 const currentSeg = this.timeline.motionSegments.find(s => s.id === seg.id);
                 if (currentSeg) currentSeg._uploading = false;
                 this.render();
@@ -4828,7 +4668,7 @@ class TimelineEditor {
           vid.src = blobUrl;
 
         } catch (err) {
-          console.error("[MiniMaxRefDirector] Motion video processing failed", err);
+          console.error("[LTXDirector] Motion video processing failed", err);
           resolve();
         }
       });
@@ -5428,43 +5268,6 @@ class TimelineEditor {
     return dropSuffix ? Math.round(frames).toString() : Math.round(frames) + " frames";
   }
 
-  _estimateDialogueDuration(text) {
-    if (!text) return 0;
-    const results = [];
-    // English double quotes: "..."
-    const enMatches = text.match(/"([^"]*)"/g);
-    if (enMatches) results.push(...enMatches);
-    // Chinese double quotes: \u201c...\u201d
-    const cnMatches = text.match(/\u201c([^\u201d]*)\u201d/g);
-    if (cnMatches) results.push(...cnMatches);
-    if (!results.length) return 0;
-    let totalSeconds = 0;
-    for (const match of results) {
-      const inner = match.slice(1, -1).trim();
-      if (!inner) continue;
-      const hasChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(inner);
-      if (hasChinese) {
-        const charCount = [...inner].filter(c => !/\s/.test(c)).length;
-        totalSeconds += charCount / 4;
-      } else {
-        const words = inner.split(/\s+/).filter(w => w.length > 0).length;
-        totalSeconds += words / 3;
-      }
-    }
-    return Math.round(totalSeconds);
-  }
-
-  _updateDialogueDurationDisplay() {
-    if (!this.dialogueDurationDisplay) return;
-    const text = this.promptInput ? this.promptInput.value : "";
-    const secs = this._estimateDialogueDuration(text);
-    if (secs > 0) {
-      this.dialogueDurationDisplay.textContent = " | dialogue: " + secs + "s";
-    } else {
-      this.dialogueDurationDisplay.textContent = "";
-    }
-  }
-
   updateWidgetVisibility() {
     const mode = this.displayModeWidget ? this.displayModeWidget.value : "seconds";
     const isSeconds = mode === "seconds";
@@ -5719,7 +5522,6 @@ class TimelineEditor {
       this.promptInput.placeholder = "";
       this.promptInput.style.opacity = "";
     }
-    if (this.promptEnhanceSelect) this.promptEnhanceSelect.style.display = "none";
 
     if (this.retakeMode) {
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
@@ -5825,7 +5627,7 @@ class TimelineEditor {
       if (seg) {
         if (this.selectionType !== "motion") {
           this.promptInput.value = seg.prompt || "";
-          this.promptInput.placeholder = "Enter your storyboard prompt here, type @ to bring up the subject selector.";
+          this.promptInput.placeholder = "Enter prompt for selected segment...";
         }
         this.promptInput.disabled = false;
         this.promptInput.style.opacity = "1.0";
@@ -5835,12 +5637,6 @@ class TimelineEditor {
         this.strengthValue.value = strength.toFixed(2);
         this.strengthValue.disabled = !isImage;
         this.strengthValue.style.opacity = isImage ? "1.0" : "0.35";
-        // Update per-segment prompt_enhance select
-        if (this.promptEnhanceSelect) {
-          this.promptEnhanceSelect.style.display = "";
-          const segEnhance = seg.prompt_enhance || "Default";
-          this.promptEnhanceSelect.value = segEnhance;
-        }
       } else {
         this.promptInput.value = "";
         this.promptInput.placeholder = "No segment selected!";
@@ -5862,7 +5658,6 @@ class TimelineEditor {
         this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
       }
     }
-    this._updateDialogueDurationDisplay();
   }
 
 
@@ -5998,7 +5793,7 @@ class TimelineEditor {
 
     if (this._isDragging && this._dragTargetId) {
       const dragSeg = this.timeline.segments.find(s => s.id === this._dragTargetId) ||
-          (this.timeline.motionSegments && this.timeline.motionSegments.find(s => s.id === this._dragTargetId));
+        (this.timeline.motionSegments && this.timeline.motionSegments.find(s => s.id === this._dragTargetId));
       if (dragSeg && (dragSeg.type === "video" || dragSeg.type === "motion_video")) {
         this._ensureVideoEl(dragSeg);
       }
@@ -6020,9 +5815,9 @@ class TimelineEditor {
     // _ghostTrack is set during HTML file drag-and-drop.
     // During canvas mouse drags, _ghostTrack is null, so fall back to selectionType.
     const previewIsAudio = this._ghostTrack === 'audio' ||
-        (this._previewSegments && this._ghostTrack === null && this.selectionType === 'audio');
+      (this._previewSegments && this._ghostTrack === null && this.selectionType === 'audio');
     const previewIsMotion = this._ghostTrack === 'motion' ||
-        (this._previewSegments && this._ghostTrack === null && this.selectionType === 'motion');
+      (this._previewSegments && this._ghostTrack === null && this.selectionType === 'motion');
     const previewIsImage = !previewIsAudio && !previewIsMotion;
 
     let renderSegments = this.timeline.segments;
@@ -6035,9 +5830,9 @@ class TimelineEditor {
       if (this._multiDragPreviewTimelines.audio) renderAudioSegments = this._multiDragPreviewTimelines.audio;
     } else {
       const previewIsAudio = this._ghostTrack === 'audio' ||
-          (this._previewSegments && this._ghostTrack === null && this.selectionType === 'audio');
+        (this._previewSegments && this._ghostTrack === null && this.selectionType === 'audio');
       const previewIsMotion = this._ghostTrack === 'motion' ||
-          (this._previewSegments && this._ghostTrack === null && this.selectionType === 'motion');
+        (this._previewSegments && this._ghostTrack === null && this.selectionType === 'motion');
       const previewIsImage = !previewIsAudio && !previewIsMotion;
 
       if (this._previewSegments && previewIsImage) renderSegments = this._previewSegments;
@@ -6457,8 +6252,8 @@ class TimelineEditor {
         } else {
           if (seg.type === "video" && seg.thumbnails && seg.thumbnails.length > 0) {
             const targetTime = seg._scrubTargetSec !== undefined
-                ? seg._scrubTargetSec
-                : (isPlayheadOverSeg ? (this.currentFrame - seg.start + seg.trimStart) / this.getFrameRate() : seg.trimStart / this.getFrameRate());
+              ? seg._scrubTargetSec
+              : (isPlayheadOverSeg ? (this.currentFrame - seg.start + seg.trimStart) / this.getFrameRate() : seg.trimStart / this.getFrameRate());
             let nearestImg = seg.thumbnails[0].img;
             let minDiff = Infinity;
             for (const t of seg.thumbnails) {
@@ -6791,8 +6586,8 @@ class TimelineEditor {
           } else {
             if (seg.type === "motion_video" && seg.thumbnails && seg.thumbnails.length > 0) {
               const targetTime = seg._scrubTargetSec !== undefined
-                  ? seg._scrubTargetSec
-                  : (isPlayheadOverSeg ? (this.currentFrame - seg.start + seg.trimStart) / this.getFrameRate() : seg.trimStart / this.getFrameRate());
+                ? seg._scrubTargetSec
+                : (isPlayheadOverSeg ? (this.currentFrame - seg.start + seg.trimStart) / this.getFrameRate() : seg.trimStart / this.getFrameRate());
               let nearestImg = seg.thumbnails[0].img;
               let minDiff = Infinity;
               for (const t of seg.thumbnails) {
@@ -7350,8 +7145,8 @@ class TimelineEditor {
     // The variables width and totalFrames are already declared above.
 
     let sortedSegments = [...trackSegments]
-        .map((s, i) => ({ ...s, originalIndex: i }))
-        .sort((a, b) => a.start - b.start);
+      .map((s, i) => ({ ...s, originalIndex: i }))
+      .sort((a, b) => a.start - b.start);
 
     const HANDLE_CORE = 4;
 
@@ -8213,7 +8008,7 @@ class TimelineEditor {
     }
 
     this.canvas.style.cursor = this._dragType === "center" ? "grabbing" :
-        this._dragType === "joint" ? "col-resize" : "ew-resize";
+      this._dragType === "joint" ? "col-resize" : "ew-resize";
 
     const logicalWidth = this.canvas.offsetWidth;
     const totalFrames = this.getVisualDurationFrames();
@@ -9157,7 +8952,7 @@ class TimelineEditor {
     };
 
     const jsonStr = JSON.stringify(toSave);
-    console.log("[MiniMaxRefDirector debug] commitChanges: saving timelineDataWidget value:", jsonStr);
+    console.log("[LTXDirector debug] commitChanges: saving timelineDataWidget value:", jsonStr);
 
     const updateWidgetValue = (w, val) => {
       if (!w) return;
@@ -9221,9 +9016,9 @@ class TimelineEditor {
         val = imgStrengths.join(",");
       } else {
         const strList = sortedSegments
-            .filter(s => s.type !== "text")
-            .filter(s => s.start + s.length > startFrames && s.start < endFrames)
-            .map(s => (s.guideStrength !== undefined ? s.guideStrength : 1.0).toFixed(2));
+          .filter(s => s.type !== "text")
+          .filter(s => s.start + s.length > startFrames && s.start < endFrames)
+          .map(s => (s.guideStrength !== undefined ? s.guideStrength : 1.0).toFixed(2));
         val = strList.join(",");
       }
       updateWidgetValue(this.guideStrengthWidget, val);
@@ -10088,23 +9883,23 @@ class TimelineEditor {
         }
       };
 
-      // const vidBtn = document.createElement("button");
-      // vidBtn.className = "pr-gap-menu-btn";
-      // vidBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Segment`;
-      // vidBtn.onclick = () => {
-      //   this.dismissContextMenu();
-      //   const fi = document.createElement("input");
-      //   fi.type = "file"; fi.accept = "video/*";
-      //   fi.addEventListener("change", (ev) => {
-      //     if (ev.target.files?.[0]) this.handleVideoUpload([ev.target.files[0]], gap.frameStart);
-      //   });
-      //   fi.click();
-      // };
+      const vidBtn = document.createElement("button");
+      vidBtn.className = "pr-gap-menu-btn";
+      vidBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Segment`;
+      vidBtn.onclick = () => {
+        this.dismissContextMenu();
+        const fi = document.createElement("input");
+        fi.type = "file"; fi.accept = "video/*";
+        fi.addEventListener("change", (ev) => {
+          if (ev.target.files?.[0]) this.handleVideoUpload([ev.target.files[0]], gap.frameStart);
+        });
+        fi.click();
+      };
 
       menu.appendChild(pasteImageBtn);
       menu.appendChild(textBtn);
       menu.appendChild(imgBtn);
-      // menu.appendChild(vidBtn);
+      menu.appendChild(vidBtn);
     } else if (currentTrack === "motion") {
       const pasteImageBtn = document.createElement("button");
       pasteImageBtn.className = "pr-gap-menu-btn";
@@ -11168,9 +10963,9 @@ class TimelineEditor {
     if (this.isPlaying) {
       this.pauseAudio();
     } else {
-      const playMax = this.retakeMode
-          ? (this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || this.getDurationFrames()) : this.getDurationFrames())
-          : this.getVisualDurationFrames();
+      const playMax = this.retakeMode 
+        ? (this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || this.getDurationFrames()) : this.getDurationFrames())
+        : this.getVisualDurationFrames();
       if (this.currentFrame >= playMax) {
         this.currentFrame = 0;
       }
@@ -11547,364 +11342,6 @@ class TimelineEditor {
     }
     this.updatePlayerUI();
   }
-
-  // ── @ Mention Dropdown Setup ──
-  _setupMentionDropdown(textarea, wrapperEl) {
-    if (!textarea) return;
-    console.log("[MiniMaxRefDirector] _setupMentionDropdown called", textarea.className || textarea.tagName, "placeholder:", textarea.placeholder);
-
-    // Create dropdown element (shared across all textareas, appended to body)
-    if (!TimelineEditor._mentionDropdown) {
-      const dd = document.createElement("div");
-      dd.className = "pr-mention-dropdown";
-      document.body.appendChild(dd);
-      TimelineEditor._mentionDropdown = dd;
-      TimelineEditor._mentionActiveIdx = -1;
-      TimelineEditor._mentionActiveTextarea = null;
-      TimelineEditor._mentionQuery = "";
-      TimelineEditor._mentionStartPos = -1;
-    }
-
-    const dd = TimelineEditor._mentionDropdown;
-
-    // Helper: convert an absolute file path to a ComfyUI view API URL
-    const resolveImageUrl = (filePath) => {
-      if (!filePath) return null;
-      // Split by both / and \
-      const parts = filePath.split(/[/\\]/);
-      // Find the "input" segment and take everything after it as relative path
-      const inputIdx = parts.lastIndexOf("input");
-      let relParts;
-      if (inputIdx >= 0 && inputIdx < parts.length - 1) {
-        relParts = parts.slice(inputIdx + 1);
-      } else {
-        // Fallback: just use the last two segments (subfolder/filename)
-        relParts = parts.length >= 2 ? parts.slice(-2) : parts;
-      }
-      const filename = relParts.pop();
-      const subfolder = relParts.join('/');
-      try {
-        return api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
-      } catch (_) {
-        return null;
-      }
-    };
-
-    // Helper: gather available subjects from all MiniMaxRefSubject nodes in the graph
-    const getSubjectsFromGraph = () => {
-      const subjects = [];
-      try {
-        const graphNodes = app.graph?._nodes || [];
-        for (const n of graphNodes) {
-          if (n.type === "MiniMaxRefSubject") {
-            const dataWidget = n.widgets?.find(w => w.name === "subject_data");
-            if (dataWidget && dataWidget.value) {
-              try {
-                const parsed = JSON.parse(dataWidget.value);
-                if (parsed.subjects && Array.isArray(parsed.subjects)) {
-                  for (const s of parsed.subjects) {
-                    if (s.name && !subjects.find(x => x.name === s.name)) {
-                      subjects.push({
-                        name: s.name,
-                        description: s.description || "",
-                        imageFile: s.imageFile || "",
-                        imageB64: s.imageB64 || "",
-                        type: "subject",
-                      });
-                    }
-                  }
-                }
-              } catch (_) { }
-            }
-          }
-        }
-      } catch (_) { }
-      return subjects;
-    };
-
-    const escapeHTML = (str) => {
-      const div = document.createElement("div");
-      div.textContent = str;
-      return div.innerHTML;
-    };
-
-    // Helper: show dropdown at cursor position
-    const showDropdown = (subjects, query) => {
-      // Re-append to body to ensure it's rendered on top of everything
-      if (dd.parentNode) dd.parentNode.removeChild(dd);
-      document.body.appendChild(dd);
-
-      if (subjects.length === 0) {
-        dd.innerHTML = `<div class="pr-mention-no-results">No subjects found. Add a MiniMax Subject node.</div>`;
-      } else {
-        dd.innerHTML = subjects.map((s, i) => {
-          const desc = s.description ? s.description.substring(0, 40) : "";
-          let leftBlock;
-          if (s.type === "audio") {
-            // Audio variant: show speaker icon
-            leftBlock = `<div class="pr-mention-item-audio-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              </svg>
-            </div>`;
-          } else if (s.imageB64) {
-            // Only & needs escaping in URL attribute (api.apiURL() returns controlled URLs)
-            leftBlock = `<img class="pr-mention-item-thumb" src="${s.imageB64.replace(/&/g, '&amp;')}" alt="${escapeHTML(s.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">`;
-            leftBlock += `<div class="pr-mention-item-icon" style="display:none">${escapeHTML(s.name.charAt(0).toUpperCase())}</div>`;
-          } else {
-            leftBlock = `<div class="pr-mention-item-icon">${escapeHTML(s.name.charAt(0).toUpperCase())}</div>`;
-          }
-          return `<div class="pr-mention-item${i === 0 ? ' active' : ''}" data-idx="${i}">
-            ${leftBlock}
-            <div style="display:flex;flex-direction:column;min-width:0;">
-              <span class="pr-mention-item-name">${escapeHTML(s.name)}</span>
-              ${desc ? `<span class="pr-mention-item-desc">${escapeHTML(desc)}</span>` : ""}
-            </div>
-          </div>`;
-        }).join("");
-      }
-      dd.style.display = "flex";
-      TimelineEditor._mentionActiveIdx = subjects.length > 0 ? 0 : -1;
-      positionDropdown(textarea);
-    };
-
-    const hideDropdown = () => {
-      dd.style.display = "none";
-      TimelineEditor._mentionActiveIdx = -1;
-      TimelineEditor._mentionActiveTextarea = null;
-      TimelineEditor._mentionQuery = "";
-      TimelineEditor._mentionStartPos = -1;
-    };
-
-    // Close dropdown when clicking outside (on document)
-    document.addEventListener("mousedown", (e) => {
-      if (dd.style.display !== "flex") return;
-      if (dd.contains(e.target)) return;
-      if (TimelineEditor._mentionActiveTextarea && TimelineEditor._mentionActiveTextarea.contains(e.target)) return;
-      hideDropdown();
-    });
-
-    const positionDropdown = (ta) => {
-      const rect = ta.getBoundingClientRect();
-      const style = window.getComputedStyle(ta);
-      const lineHeight = parseInt(style.lineHeight) || 16;
-      const fontSize = style.fontSize;
-      const fontFamily = style.fontFamily;
-      const paddingLeft = parseInt(style.paddingLeft) || 8;
-      const paddingTop = parseInt(style.paddingTop) || 0;
-
-      // Get approximate cursor position from text metrics
-      const textBeforeCursor = ta.value.substring(0, ta.selectionStart);
-      const lines = textBeforeCursor.split("\n");
-      const currentLine = lines[lines.length - 1];
-
-      // Create a measure element
-      const measure = document.createElement("span");
-      measure.style.visibility = "hidden";
-      measure.style.position = "absolute";
-      measure.style.fontSize = fontSize;
-      measure.style.fontFamily = fontFamily;
-      measure.style.whiteSpace = "pre";
-      measure.textContent = currentLine;
-      document.body.appendChild(measure);
-
-      const lineWidth = measure.offsetWidth;
-      document.body.removeChild(measure);
-
-      const caretX = rect.left + paddingLeft + lineWidth;
-      const caretY = rect.top + paddingTop + (lines.length * lineHeight);
-
-      // Position dropdown, clamping to viewport
-      let left = Math.min(caretX, window.innerWidth - 240);
-      let top = caretY + 4;
-      if (top + 280 > window.innerHeight) {
-        top = rect.top - 280 - 4;
-      }
-
-      dd.style.left = `${Math.max(4, left)}px`;
-      dd.style.top = `${Math.max(4, top)}px`;
-    };
-
-    const updateActiveItem = (activeIdx) => {
-      const items = dd.querySelectorAll(".pr-mention-item");
-      items.forEach((item, i) => {
-        item.classList.toggle("active", i === activeIdx);
-      });
-      if (items[activeIdx]) {
-        items[activeIdx].scrollIntoView({ block: "nearest" });
-      }
-    };
-
-    const insertMention = (ta, name) => {
-      if (!ta) return;
-      const startPos = TimelineEditor._mentionStartPos;
-      const endPos = ta.selectionStart;
-      const val = ta.value;
-
-      const before = val.substring(0, startPos);
-      const after = val.substring(endPos);
-      const newVal = before + "@" + name + " " + after;
-      ta.value = newVal;
-      ta.focus();
-
-      const newCursor = startPos + name.length + 2;
-      ta.setSelectionRange(newCursor, newCursor);
-
-      // Manually trigger input event
-      const inputEvent = new Event("input", { bubbles: true });
-      ta.dispatchEvent(inputEvent);
-
-      // Also manually trigger change event on the textarea for commit
-      const changeEvent = new Event("change", { bubbles: true });
-      ta.dispatchEvent(changeEvent);
-    };
-
-    // ── Keydown handler ──
-    textarea.addEventListener("keydown", (e) => {
-      if (dd.style.display !== "flex" || TimelineEditor._mentionActiveTextarea !== textarea) {
-        // Check if user just typed @
-        if (e.key === "@" && !e.ctrlKey && !e.metaKey) {
-          console.log("[MiniMaxRefDirector] keydown @ detected, key:", e.key, "code:", e.code, "ctrlKey:", e.ctrlKey, "metaKey:", e.metaKey, "altKey:", e.altKey);
-          requestAnimationFrame(() => {
-            const pos = textarea.selectionStart;
-            const val = textarea.value;
-            const atIdx = val.lastIndexOf("@", pos - 1);
-            console.log("[MiniMaxRefDirector] keydown RAF: val=", JSON.stringify(val), "pos:", pos, "atIdx:", atIdx);
-            if (atIdx >= 0) {
-              const subjects = getSubjectsFromGraph();
-              TimelineEditor._mentionActiveTextarea = textarea;
-              TimelineEditor._mentionStartPos = atIdx;
-              TimelineEditor._mentionQuery = "";
-              showDropdown(subjects, "");
-            }
-          });
-        }
-        return;
-      }
-
-      const subjects = getSubjectsFromGraph();
-      const filtered = subjects.filter(s =>
-          s.name.toLowerCase().includes(TimelineEditor._mentionQuery.toLowerCase())
-      );
-
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        if (filtered.length > 0) {
-          TimelineEditor._mentionActiveIdx = (TimelineEditor._mentionActiveIdx + 1) % filtered.length;
-          updateActiveItem(TimelineEditor._mentionActiveIdx);
-        }
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        if (filtered.length > 0) {
-          TimelineEditor._mentionActiveIdx = (TimelineEditor._mentionActiveIdx - 1 + filtered.length) % filtered.length;
-          updateActiveItem(TimelineEditor._mentionActiveIdx);
-        }
-      } else if (e.key === "Enter" || e.key === "Tab") {
-        if (filtered.length > 0 && TimelineEditor._mentionActiveIdx >= 0) {
-          e.preventDefault();
-          const selected = filtered[TimelineEditor._mentionActiveIdx];
-          insertMention(textarea, selected.name);
-          hideDropdown();
-        }
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        hideDropdown();
-      } else if (e.key === "Backspace") {
-        const pos = textarea.selectionStart - 1;
-        console.log("[MiniMaxRefDirector] keydown: Backspace>", pos, '|', TimelineEditor._mentionStartPos);
-        if (pos <= TimelineEditor._mentionStartPos) {
-          hideDropdown();
-        } else {
-          requestAnimationFrame(() => {
-            const newQuery = textarea.value.substring(TimelineEditor._mentionStartPos + 1, textarea.selectionStart);
-            TimelineEditor._mentionQuery = newQuery;
-            const newFiltered = subjects.filter(s =>
-                s.name.toLowerCase().includes(newQuery.toLowerCase())
-            );
-            TimelineEditor._mentionActiveIdx = newFiltered.length > 0 ? 0 : -1;
-            showDropdown(newFiltered, newQuery);
-          });
-        }
-      }
-    });
-
-    // ── Input handler for filtering ──
-    textarea.addEventListener("input", (e) => {
-      if (dd.style.display !== "flex" || TimelineEditor._mentionActiveTextarea !== textarea) {
-        // Dropdown not yet open: check if user just typed "@"
-        const val = textarea.value;
-        const pos = textarea.selectionStart;
-        if (pos > 0 && val.charAt(pos - 1) === "@") {
-          const atIdx = pos - 1;
-          const subjects = getSubjectsFromGraph();
-          console.log("[MiniMaxRefDirector] input: showing dropdown, subjects count:", subjects.length, "names:", subjects.map(s => s.name));
-          TimelineEditor._mentionActiveTextarea = textarea;
-          TimelineEditor._mentionStartPos = atIdx;
-          TimelineEditor._mentionQuery = "";
-          showDropdown(subjects, "");
-        }
-        return;
-      }
-
-      const pos = textarea.selectionStart;
-      const val = textarea.value;
-      const atIdx = TimelineEditor._mentionStartPos;
-
-      if (atIdx < 0 || pos <= atIdx || val.charAt(atIdx) !== "@") {
-        hideDropdown();
-        return;
-      }
-
-      const query = val.substring(atIdx + 1, pos);
-      if (query.includes(" ") || query.includes("\n")) {
-        hideDropdown();
-        return;
-      }
-
-      TimelineEditor._mentionQuery = query;
-      const subjects = getSubjectsFromGraph();
-      const filtered = subjects.filter(s =>
-          s.name.toLowerCase().includes(query.toLowerCase())
-      );
-      TimelineEditor._mentionActiveIdx = filtered.length > 0 ? 0 : -1;
-      showDropdown(filtered, query);
-    });
-
-    // ── Blur handler ──
-    textarea.addEventListener("blur", () => {
-      setTimeout(() => {
-        if (TimelineEditor._mentionActiveTextarea === textarea) {
-          hideDropdown();
-        }
-      }, 150);
-    });
-
-    // ── Click handler on dropdown items ──
-    dd.addEventListener("mousedown", (e) => {
-      const item = e.target.closest(".pr-mention-item");
-      if (item) {
-        e.preventDefault();
-        e.stopPropagation();
-        const idx = parseInt(item.getAttribute("data-idx"));
-        const subjects = getSubjectsFromGraph();
-        const query = TimelineEditor._mentionQuery || "";
-        const filtered = subjects.filter(s =>
-            s.name.toLowerCase().includes(query.toLowerCase())
-        );
-        if (idx >= 0 && idx < filtered.length) {
-          insertMention(TimelineEditor._mentionActiveTextarea, filtered[idx].name);
-          hideDropdown();
-        }
-      } else if (e.target.closest(".pr-mention-no-results")) {
-        // Click the "No subjects found" message to dismiss the dropdown
-        e.preventDefault();
-        hideDropdown();
-      }
-    });
-  }
-
 }
 
 // --- Node Registration Hooks ---
@@ -11915,9 +11352,9 @@ const APPENDED_WIDGET_DEFAULTS = [
 ];
 
 app.registerExtension({
-  name: "MiniMaxRefDirector",
+  name: "LTXDirector",
   async beforeRegisterNodeDef(nodeType, nodeData, app) {
-    if (nodeData.name === "MiniMaxRefDirector") {
+    if (nodeData.name === "LTXDirector") {
 
       const onNodeCreated = nodeType.prototype.onNodeCreated;
       nodeType.prototype.onNodeCreated = function () {
@@ -12071,8 +11508,7 @@ app.registerExtension({
         widget.computeSize = function (width) {
           const canvasH = self._timelineEditor ? self._timelineEditor.canvasHeight : CANVAS_HEIGHT;
           const propH = self._timelineEditor ? (self._timelineEditor.propHeight || 90) : 90;
-          // const globalPropH = self._timelineEditor ? (self._timelineEditor.globalPropHeight || 60) : 60;
-          const globalPropH = 0;
+          const globalPropH = self._timelineEditor ? (self._timelineEditor.globalPropHeight || 60) : 60;
           const nodeWidth = self.size?.[0] || width || 1375;
           return [Math.max(10, nodeWidth - 30), canvasH + propH + globalPropH + 160];
         };
@@ -12110,7 +11546,7 @@ app.registerExtension({
           this.properties = { ...this.properties, ...info.properties };
         }
 
-        console.log("[MiniMaxRefDirector debug] onConfigure called. info.widgets_values:", info.widgets_values ? JSON.stringify(info.widgets_values) : "undefined");
+        console.log("[LTXDirector debug] onConfigure called. info.widgets_values:", info.widgets_values ? JSON.stringify(info.widgets_values) : "undefined");
 
         // Helper to set widget value, sync DOM element, and trigger callbacks safely
         const setWidgetValue = (w, val) => {
@@ -12134,7 +11570,7 @@ app.registerExtension({
 
         // 2. Check if we have serialized properties. If so, restore widgets from properties!
         if (info.properties && info.properties.has_serialized_properties) {
-          console.log("[MiniMaxRefDirector debug] Restoring widgets from properties");
+          console.log("[LTXDirector debug] Restoring widgets from properties");
           if (this.widgets) {
             for (const w of this.widgets) {
               if (w.name && this.properties[w.name] !== undefined) {
@@ -12144,7 +11580,7 @@ app.registerExtension({
           }
         } else if (info.widgets_values) {
           // Fallback to name-based schema mapping for older workflows
-          console.log("[MiniMaxRefDirector debug] Restoring widgets via fallback name-based schema mapping");
+          console.log("[LTXDirector debug] Restoring widgets via fallback name-based schema mapping");
           const SCHEMA_19 = [
             "start_frame", "end_frame", "duration_frames",
             "timeline_data", "use_custom_audio", "use_custom_motion", "inpaint_audio", "local_prompts", "segment_lengths",
@@ -12244,10 +11680,10 @@ app.registerExtension({
 
         setTimeout(() => {
           if (this._timelineEditor) {
-            console.log("[MiniMaxRefDirector debug] setTimeout sync block called.");
-            console.log("[MiniMaxRefDirector debug] setTimeout: timelineDataWidget value:", this._timelineEditor.timelineDataWidget?.value);
+            console.log("[LTXDirector debug] setTimeout sync block called.");
+            console.log("[LTXDirector debug] setTimeout: timelineDataWidget value:", this._timelineEditor.timelineDataWidget?.value);
             const tl = parseInitial(this._timelineEditor.timelineDataWidget?.value);
-            console.log("[MiniMaxRefDirector debug] setTimeout: parsed timeline:", JSON.stringify(tl));
+            console.log("[LTXDirector debug] setTimeout: parsed timeline:", JSON.stringify(tl));
             this._timelineEditor.timeline = tl;
 
             // Sync editor states from the parsed timeline object (the absolute source of truth)
@@ -12285,8 +11721,8 @@ app.registerExtension({
             this._timelineEditor.loadMedia();
             this._timelineEditor.selectionType = "image";
             this._timelineEditor.selectedIndex = clamp(
-                this._timelineEditor.selectedIndex, -1,
-                Math.max(-1, this._timelineEditor.timeline.segments.length - 1)
+              this._timelineEditor.selectedIndex, -1,
+              Math.max(-1, this._timelineEditor.timeline.segments.length - 1)
             );
             this._timelineEditor.updateRetakeUIState();
             this._timelineEditor.updateUIFromSelection();
