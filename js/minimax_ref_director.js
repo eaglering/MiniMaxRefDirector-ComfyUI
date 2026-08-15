@@ -4,7 +4,7 @@
 // 大量实例方法按功能拆分到 js/components/director/ 下的 mixin 模块，
 // 通过 Object.assign 合并到 TimelineEditor.prototype。
 // ============================================================
-import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, CANVAS_HEIGHT, HIDDEN_WIDGET_NAMES, MOTION_TRACK_HEIGHT, RULER_HEIGHT, app, clamp, hideWidget, parseInitial } from "./components/director/shared.js";
+import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, CANVAS_HEIGHT, HIDDEN_WIDGET_NAMES, RULER_HEIGHT, app, clamp, hideWidget, parseInitial } from "./components/director/shared.js";
 import { state } from "./components/director/state.js";
 import { media } from "./components/director/media.js";
 import { dom } from "./components/director/dom.js";
@@ -24,13 +24,12 @@ class TimelineEditor {
     // Track heights (dynamic)
     this.rulerHeight = RULER_HEIGHT;
     this.blockHeight = BLOCK_HEIGHT;
-    this.motionTrackHeight = MOTION_TRACK_HEIGHT;
     this.audioTrackHeight = AUDIO_TRACK_HEIGHT;
     this.canvasHeight = CANVAS_HEIGHT;
 
     // Core data
-    this.timeline = { segments: [], motionSegments: [], audioSegments: [] };
-    this.selectionType = "image"; // "image", "motion", or "audio"
+    this.timeline = { segments: [], audioSegments: [] };
+    this.selectionType = "image"; // "image" or "audio"
     this.selectedSegmentIds = [];
     this._selectedIndex = -1;
     this._audioTrackWasEnabledBeforeOverride = false;
@@ -118,12 +117,10 @@ class TimelineEditor {
     // Treat this.timeline (from timeline_data widget) as the absolute source of truth!
     this.mainTrackEnabled = this.timeline.mainTrackEnabled !== false;
     this.audioTrackEnabled = this.timeline.audioTrackEnabled !== false;
-    this.motionTrackEnabled = this.timeline.motionTrackEnabled !== false;
 
     // Sync the properties dictionary too so they match
     this.node.properties.mainTrackEnabled = this.mainTrackEnabled;
     this.node.properties.audioTrackEnabled = this.audioTrackEnabled;
-    this.node.properties.motionTrackEnabled = this.motionTrackEnabled;
     if (this.timeline.showFilenames !== undefined) {
       this.node.properties.showFilenames = this.timeline.showFilenames;
     }
@@ -456,7 +453,6 @@ class TimelineEditor {
   }
 
   getSegmentArray(trackType) {
-    if (trackType === "motion") return this.timeline.motionSegments;
     if (trackType === "audio") return this.timeline.audioSegments;
     return this.timeline.segments;
   }
@@ -464,7 +460,6 @@ class TimelineEditor {
   getCanonicalTrack(track) {
     if (track === "image" || track === "video" || track === "text") return "image";
     if (track === "audio") return "audio";
-    if (track === "motion" || track === "motion_video") return "motion";
     return track;
   }
 
@@ -517,14 +512,12 @@ app.registerExtension({
           global_prompt: "",
           mainTrackEnabled: true,
           audioTrackEnabled: true,
-          motionTrackEnabled: true,
           audioTrackWasEnabledBeforeOverride: false,
           inpaint_audio: true,
           override_audio: false,
           overrideAudio: false,
           showFilenames: true,
           use_custom_audio: false,
-          use_custom_motion: true,
           frame_rate: 24,
           display_mode: "seconds",
           custom_width: 0,
@@ -598,9 +591,6 @@ app.registerExtension({
                         self._timelineEditor.timeline.global_prompt = val;
                       }
                       self._timelineEditor.globalPromptInput.value = val;
-                      if (self._timelineEditor.selectionType === "motion") {
-                        self._timelineEditor.promptInput.value = val;
-                      }
                       if (self.properties) {
                         self.properties.global_prompt = val;
                       }
@@ -623,9 +613,6 @@ app.registerExtension({
                   self._timelineEditor.timeline.global_prompt = val;
                 }
                 self._timelineEditor.globalPromptInput.value = val;
-                if (self._timelineEditor.selectionType === "motion") {
-                  self._timelineEditor.promptInput.value = val;
-                }
               } else if (self._timelineEditor.globalPromptInput.value !== val) {
                 self._timelineEditor.globalPromptInput.value = val;
               }
@@ -735,31 +722,31 @@ app.registerExtension({
           console.log("[MiniMaxRefDirector debug] Restoring widgets via fallback name-based schema mapping");
           const SCHEMA_19 = [
             "start_frame", "end_frame", "duration_frames",
-            "timeline_data", "use_custom_audio", "use_custom_motion", "inpaint_audio", "local_prompts", "segment_lengths",
+            "timeline_data", "use_custom_audio", "inpaint_audio", "local_prompts", "segment_lengths",
             "epsilon", "frame_rate", "display_mode", "guide_strength", "custom_width", "custom_height",
             "resize_method", "divisible_by", "img_compression", "timeline_ui"
           ];
           const SCHEMA_21_NO_INPAINT = [
             "start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames",
             "timeline_data", "local_prompts", "segment_lengths", "epsilon", "guide_strength",
-            "use_custom_audio", "use_custom_motion", "frame_rate", "display_mode", "custom_width", "custom_height",
+            "use_custom_audio", "frame_rate", "display_mode", "custom_width", "custom_height",
             "resize_method", "divisible_by", "img_compression", "timeline_ui"
           ];
           const SCHEMA_22_NO_INPAINT = [
             "start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames",
             "timeline_data", "local_prompts", "segment_lengths", "epsilon", "guide_strength",
-            "use_custom_audio", "use_custom_motion", "frame_rate", "display_mode", "custom_width", "custom_height",
+            "use_custom_audio", "frame_rate", "display_mode", "custom_width", "custom_height",
             "resize_method", "divisible_by", "img_compression", "override_audio", "timeline_ui"
           ];
           const SCHEMA_22_WITH_INPAINT = [
             "start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames",
-            "timeline_data", "use_custom_audio", "use_custom_motion", "inpaint_audio", "local_prompts", "segment_lengths",
+            "timeline_data", "use_custom_audio", "inpaint_audio", "local_prompts", "segment_lengths",
             "epsilon", "frame_rate", "display_mode", "guide_strength", "custom_width", "custom_height",
             "resize_method", "divisible_by", "img_compression", "timeline_ui"
           ];
           const SCHEMA_23 = [
             "start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames",
-            "timeline_data", "use_custom_audio", "use_custom_motion", "inpaint_audio", "local_prompts", "segment_lengths",
+            "timeline_data", "use_custom_audio", "inpaint_audio", "local_prompts", "segment_lengths",
             "epsilon", "frame_rate", "display_mode", "guide_strength", "custom_width", "custom_height",
             "resize_method", "divisible_by", "img_compression", "override_audio", "timeline_ui"
           ];
@@ -768,7 +755,6 @@ app.registerExtension({
             inpaint_audio: true,
             override_audio: false,
             use_custom_audio: false,
-            use_custom_motion: true,
             frame_rate: 24,
             display_mode: "seconds",
             custom_width: 0,
@@ -841,14 +827,12 @@ app.registerExtension({
             // Sync editor states from the parsed timeline object (the absolute source of truth)
             this._timelineEditor.mainTrackEnabled = tl.mainTrackEnabled !== false;
             this._timelineEditor.audioTrackEnabled = tl.audioTrackEnabled !== false;
-            this._timelineEditor.motionTrackEnabled = tl.motionTrackEnabled !== false;
             this._timelineEditor.retakeMode = tl.retakeMode === true;
             this._timelineEditor._audioTrackWasEnabledBeforeOverride = !!this.properties.audioTrackWasEnabledBeforeOverride;
 
             // Sync properties to match
             this.properties.mainTrackEnabled = this._timelineEditor.mainTrackEnabled;
             this.properties.audioTrackEnabled = this._timelineEditor.audioTrackEnabled;
-            this.properties.motionTrackEnabled = this._timelineEditor.motionTrackEnabled;
             this.properties.retakeMode = this._timelineEditor.retakeMode;
             if (tl.showFilenames !== undefined) {
               this.properties.showFilenames = tl.showFilenames;
@@ -906,7 +890,6 @@ app.registerExtension({
         if (this._timelineEditor) {
           this.properties.mainTrackEnabled = this._timelineEditor.mainTrackEnabled !== false;
           this.properties.audioTrackEnabled = this._timelineEditor.audioTrackEnabled !== false;
-          this.properties.motionTrackEnabled = this._timelineEditor.motionTrackEnabled !== false;
           this.properties.audioTrackWasEnabledBeforeOverride = !!this._timelineEditor._audioTrackWasEnabledBeforeOverride;
         }
 

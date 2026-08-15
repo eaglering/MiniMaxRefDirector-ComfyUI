@@ -149,13 +149,6 @@ export const dom = {
     this.audioFileInput.style.display = "none";
     this.audioFileInput.addEventListener("change", (e) => this.handleAudioUpload(e.target.files));
 
-    this.motionFileInput = document.createElement("input");
-    this.motionFileInput.type = "file";
-    this.motionFileInput.accept = "video/*,image/*";
-    this.motionFileInput.multiple = true;
-    this.motionFileInput.style.display = "none";
-    this.motionFileInput.addEventListener("change", (e) => this.handleMotionUpload(e.target.files));
-
     this.videoFileInput = document.createElement("input");
     this.videoFileInput.type = "file";
     this.videoFileInput.accept = "video/*";
@@ -174,12 +167,6 @@ export const dom = {
     uploadAudioBtn.innerHTML = `${ICONS.audio} Add Audio`;
     uploadAudioBtn.addEventListener("click", () => this.audioFileInput.click());
     this.uploadAudioBtn = uploadAudioBtn;
-
-    const uploadMotionBtn = document.createElement("button");
-    uploadMotionBtn.className = "pr-btn";
-    uploadMotionBtn.innerHTML = `${ICONS.motion} Add IC Video`;
-    uploadMotionBtn.addEventListener("click", () => this.motionFileInput.click());
-    this.uploadMotionBtn = uploadMotionBtn;
 
     const uploadVideoBtn = document.createElement("button");
     uploadVideoBtn.className = "pr-btn";
@@ -201,13 +188,11 @@ export const dom = {
 
     actionGroup.appendChild(this.fileInput);
     actionGroup.appendChild(this.audioFileInput);
-    actionGroup.appendChild(this.motionFileInput);
     actionGroup.appendChild(this.videoFileInput);
     actionGroup.appendChild(uploadBtn);
     actionGroup.appendChild(addTextBtn);
     actionGroup.appendChild(uploadAudioBtn);
     actionGroup.appendChild(uploadVideoBtn);
-    actionGroup.appendChild(uploadMotionBtn);
     actionGroup.appendChild(deleteBtn);
 
     // Retake-mode-only delete button (shown next to Add Video when retakeMode is on)
@@ -319,95 +304,6 @@ export const dom = {
       const inpaintWidget = this.node.widgets?.find(w => w.name === "inpaint_audio");
       if (inpaintWidget) {
         this.updateInpaintToggleStyle(inpaintWidget.value);
-      }
-    }, 100);
-
-    const overrideAudioToggleBtn = document.createElement("button");
-    overrideAudioToggleBtn.className = "pr-btn";
-    overrideAudioToggleBtn.style.padding = "4px 0px";
-    overrideAudioToggleBtn.style.fontSize = "9px";
-    overrideAudioToggleBtn.style.lineHeight = "1";
-    overrideAudioToggleBtn.style.marginRight = "0px";
-    overrideAudioToggleBtn.style.marginTop = "8px"; // Adjust this value to fine-tune spacing between the title and button
-    overrideAudioToggleBtn.style.width = "72px";
-    overrideAudioToggleBtn.style.whiteSpace = "nowrap";
-    overrideAudioToggleBtn.style.textAlign = "center";
-    overrideAudioToggleBtn.style.justifyContent = "center";
-    overrideAudioToggleBtn.style.alignItems = "center";
-    overrideAudioToggleBtn.style.gap = "0px";
-    overrideAudioToggleBtn.style.boxSizing = "border-box";
-    overrideAudioToggleBtn.style.borderRadius = "2px";
-    overrideAudioToggleBtn.textContent = "Audio: OFF";
-    overrideAudioToggleBtn.title = "Override Audio: Use audio from IC-LoRA Video";
-
-    this.updateOverrideAudioToggleStyle = (isOn) => {
-      overrideAudioToggleBtn.textContent = isOn ? "Audio: ON" : "Audio: OFF";
-      if (isOn) {
-        overrideAudioToggleBtn.classList.add("toggle-on");
-      } else {
-        overrideAudioToggleBtn.classList.remove("toggle-on");
-      }
-    };
-
-    overrideAudioToggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (overrideAudioToggleBtn.disabled) return;
-      const widget = this.node.widgets?.find(w => w.name === "override_audio");
-      if (widget) {
-        widget.value = !widget.value;
-        this.node.properties.overrideAudio = widget.value;
-        this.updateOverrideAudioToggleStyle(widget.value);
-
-        if (widget.value) {
-          // When this is toggled on, the audio track will automatically be disabled/muted.
-          this._audioTrackWasEnabledBeforeOverride = this.audioTrackEnabled;
-          this.audioTrackEnabled = false;
-          updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", false);
-
-          const customAudioWidget = this.node.widgets?.find(w => w.name === "use_custom_audio");
-          if (customAudioWidget) {
-            customAudioWidget.value = false;
-            if (this.updateToggleStyle) this.updateToggleStyle(false);
-          }
-
-          inpaintToggleBtn.disabled = true;
-          inpaintToggleBtn.style.opacity = "0.3";
-
-          if (this.timeline.motionSegments) {
-            for (const seg of this.timeline.motionSegments) {
-              if (seg.type === "motion_video") {
-                this._preloadMotionAudioSegment(seg);
-              }
-            }
-          }
-        } else {
-          // When toggled off, restore the audio track status if it was previously enabled
-          if (this._audioTrackWasEnabledBeforeOverride) {
-            this.audioTrackEnabled = true;
-            updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", true);
-
-            const customAudioWidget = this.node.widgets?.find(w => w.name === "use_custom_audio");
-            if (customAudioWidget) {
-              customAudioWidget.value = true;
-              if (this.updateToggleStyle) this.updateToggleStyle(true);
-            }
-
-            inpaintToggleBtn.disabled = false;
-            inpaintToggleBtn.style.opacity = "1.0";
-          }
-          this._audioTrackWasEnabledBeforeOverride = false;
-        }
-
-        this.commitChanges(true);
-        this.render();
-      }
-    });
-
-    // Initial state check (widgets might not be ready immediately)
-    setTimeout(() => {
-      const overrideWidget = this.node.widgets?.find(w => w.name === "override_audio");
-      if (overrideWidget) {
-        this.updateOverrideAudioToggleStyle(overrideWidget.value);
       }
     }, 100);
 
@@ -654,9 +550,6 @@ export const dom = {
     if (this.node.properties.showFilenames === undefined) {
       this.node.properties.showFilenames = (this.timeline.showFilenames !== undefined) ? this.timeline.showFilenames : true;
     }
-    if (this.node.properties.overrideAudio === undefined) {
-      this.node.properties.overrideAudio = (this.timeline.overrideAudio !== undefined) ? this.timeline.overrideAudio : false;
-    }
     if (this.node.properties.propHeight === undefined && this.timeline.propHeight !== undefined) {
       this.node.properties.propHeight = this.timeline.propHeight;
     }
@@ -724,9 +617,6 @@ export const dom = {
       const val = e.target.value;
       this.syncGlobalPrompt(val);
 
-      if (this.selectionType === "motion") {
-        this.promptInput.value = val;
-      }
       this.commitChanges(true);
       this.render();
 
@@ -876,12 +766,6 @@ export const dom = {
       if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
         this.timeline.segments[this.selectedIndex].prompt = this.promptInput.value;
         this.commitChanges();
-      } else if (this.selectionType === "motion") {
-        const val = this.promptInput.value;
-        if (this.globalPromptInput) {
-          this.globalPromptInput.value = val;
-        }
-        this.syncGlobalPrompt(val);
         this.commitChanges(true);
         this.render();
 
@@ -891,16 +775,11 @@ export const dom = {
       }
     });
 
-    // --- Motion Info Area ---
-    this.motionInfoArea = document.createElement("div");
-    this.motionInfoArea.className = "pr-motion-info";
-
     // --- Audio Info Area ---
     this.audioInfoArea = document.createElement("div");
     this.audioInfoArea.className = "pr-audio-info";
 
     propContainer.appendChild(this.promptWrapper);
-    propContainer.appendChild(this.motionInfoArea);
     propContainer.appendChild(this.audioInfoArea);
     propContainer.appendChild(propResizer);
 
@@ -1016,13 +895,7 @@ export const dom = {
         // Let implicit intent handle mixing drops: use the track we hovered over
         // for the first type we process, or fallback.
         if (videoFiles.length > 0) {
-          if (targetTrack === "motion") {
-            this.handleMotionUpload(videoFiles, targetFrameStart);
-          } else {
-            this.handleVideoUpload(videoFiles, targetFrameStart);
-          }
-        } else if (imageFiles.length > 0 && targetTrack === "motion") {
-          this.handleMotionUpload(imageFiles, targetFrameStart);
+          this.handleVideoUpload(videoFiles, targetFrameStart);
         } else if (audioFiles.length > 0 && (targetTrack === "audio" || imageFiles.length === 0)) {
           this.handleAudioUpload(audioFiles, targetFrameStart);
         } else if (imageFiles.length > 0) {
@@ -1177,147 +1050,6 @@ export const dom = {
     this.strengthValue.disabled = true;
     this.strengthValue.style.cursor = "ew-resize";
 
-    this.vidStrLabel = document.createElement("span");
-    this.vidStrLabel.className = "pr-strength-label";
-    this.vidStrLabel.textContent = "Video Strength:";
-    this.vidStrLabel.style.display = "none";
-
-    this.vidStrValue = document.createElement("input");
-    this.vidStrValue.type = "text";
-    this.vidStrValue.className = "pr-strength-input";
-    this.vidStrValue.value = "1.00";
-    this.vidStrValue.style.display = "none";
-    this.vidStrValue.style.width = "40px";
-    this.vidStrValue.style.cursor = "ew-resize";
-
-    this.vidAttnLabel = document.createElement("span");
-    this.vidAttnLabel.className = "pr-strength-label";
-    this.vidAttnLabel.textContent = "Video Attn:";
-    this.vidAttnLabel.style.display = "none";
-    this.vidAttnLabel.style.marginLeft = "10px";
-
-    this.vidAttnValue = document.createElement("input");
-    this.vidAttnValue.type = "text";
-    this.vidAttnValue.className = "pr-strength-input";
-    this.vidAttnValue.value = "0.65";
-    this.vidAttnValue.style.display = "none";
-    this.vidAttnValue.style.width = "40px";
-    this.vidAttnValue.style.cursor = "ew-resize";
-
-    this.vidStrValue.addEventListener("change", (e) => {
-      let val = parseFloat(e.target.value);
-      if (isNaN(val)) val = 1.0;
-      val = Math.max(0, Math.min(1, val));
-      this.vidStrValue.value = val.toFixed(2);
-      if (this.selectionType === "motion" && this.timeline.motionSegments[this.selectedIndex]) {
-        this.timeline.motionSegments[this.selectedIndex].videoStrength = val;
-        this.commitChanges();
-      }
-    });
-
-    this.vidAttnValue.addEventListener("change", (e) => {
-      let val = parseFloat(e.target.value);
-      if (isNaN(val)) val = 0.65;
-      val = Math.max(0, Math.min(1, val));
-      this.vidAttnValue.value = val.toFixed(2);
-      if (this.selectionType === "motion" && this.timeline.motionSegments[this.selectedIndex]) {
-        this.timeline.motionSegments[this.selectedIndex].videoAttentionStrength = val;
-        this.commitChanges();
-      }
-    });
-
-    // Dragging logic for video strength
-    this.vidStrValue.addEventListener("mousedown", (e) => {
-      if (this.vidStrValue.disabled) return;
-      const vStrStartX = e.clientX;
-      const vStrStartVal = parseFloat(this.vidStrValue.value) || 1.0;
-      let vStrHasMoved = false;
-      let vStrIsDragging = false;
-
-      const onMouseMove = (moveEvent) => {
-        const deltaX = moveEvent.clientX - vStrStartX;
-        if (Math.abs(deltaX) > 3) {
-          vStrHasMoved = true;
-          vStrIsDragging = true;
-        }
-
-        if (vStrIsDragging) {
-          moveEvent.preventDefault();
-          const sensitivity = 0.002;
-          let newVal = vStrStartVal + deltaX * sensitivity;
-
-          if (newVal < 0) newVal = 0;
-          if (newVal > 1) newVal = 1;
-
-          this.vidStrValue.value = newVal.toFixed(2);
-
-          if (this.selectionType === "motion" && this.timeline.motionSegments[this.selectedIndex]) {
-            this.timeline.motionSegments[this.selectedIndex].videoStrength = newVal;
-            this.commitChanges();
-          }
-        }
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-
-        if (!vStrHasMoved) {
-          this.vidStrValue.focus();
-          this.vidStrValue.select();
-        }
-      };
-
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    });
-
-    // Dragging logic for video attention strength
-    this.vidAttnValue.addEventListener("mousedown", (e) => {
-      if (this.vidAttnValue.disabled) return;
-      const vAttnStartX = e.clientX;
-      const vAttnStartVal = parseFloat(this.vidAttnValue.value) || 0.65;
-      let vAttnHasMoved = false;
-      let vAttnIsDragging = false;
-
-      const onMouseMove = (moveEvent) => {
-        const deltaX = moveEvent.clientX - vAttnStartX;
-        if (Math.abs(deltaX) > 3) {
-          vAttnHasMoved = true;
-          vAttnIsDragging = true;
-        }
-
-        if (vAttnIsDragging) {
-          moveEvent.preventDefault();
-          const sensitivity = 0.002;
-          let newVal = vAttnStartVal + deltaX * sensitivity;
-
-          if (newVal < 0) newVal = 0;
-          if (newVal > 1) newVal = 1;
-
-          this.vidAttnValue.value = newVal.toFixed(2);
-
-          if (this.selectionType === "motion" && this.timeline.motionSegments[this.selectedIndex]) {
-            this.timeline.motionSegments[this.selectedIndex].videoAttentionStrength = newVal;
-            this.commitChanges();
-          }
-        }
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-
-        if (!vAttnHasMoved) {
-          this.vidAttnValue.focus();
-          this.vidAttnValue.select();
-        }
-      };
-
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    });
-
     // Dragging logic for guide strength
     let isDragging = false;
     let startX = 0;
@@ -1396,10 +1128,6 @@ export const dom = {
     this.strengthRow.appendChild(this.segmentBoundsDisplay);
     this.strengthRow.appendChild(this.strengthLabel);
     this.strengthRow.appendChild(this.strengthValue);
-    this.strengthRow.appendChild(this.vidStrLabel);
-    this.strengthRow.appendChild(this.vidStrValue);
-    this.strengthRow.appendChild(this.vidAttnLabel);
-    this.strengthRow.appendChild(this.vidAttnValue);
 
 
 
@@ -1529,16 +1257,6 @@ export const dom = {
       this.audioTrackEnabled = !this.audioTrackEnabled;
       updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", this.audioTrackEnabled);
 
-      if (this.audioTrackEnabled) {
-        const overrideWidget = this.node.widgets?.find(w => w.name === "override_audio");
-        if (overrideWidget && overrideWidget.value) {
-          overrideWidget.value = false;
-          this.node.properties.overrideAudio = false;
-          if (this.updateOverrideAudioToggleStyle) this.updateOverrideAudioToggleStyle(false);
-        }
-        this._audioTrackWasEnabledBeforeOverride = false;
-      }
-
       // Auto-disable custom audio if track disabled
       const customAudioWidget = this.node.widgets?.find(w => w.name === "use_custom_audio");
       if (customAudioWidget) {
@@ -1566,60 +1284,8 @@ export const dom = {
     inpaintToggleBtn.disabled = !this.audioTrackEnabled;
     inpaintToggleBtn.style.opacity = this.audioTrackEnabled ? "1.0" : "0.3";
 
-    this.motionTrackLabel = createTrackLabel("IC-LoRA Input", "#1e1e1e", "motion", this.motionTrackEnabled, () => {
-      this.motionTrackEnabled = !this.motionTrackEnabled;
-      updateTrackIcon(this.motionTrackLabel._eyeBtn, "motion", this.motionTrackEnabled);
-
-      // Auto-disable custom motion if track disabled
-      const customMotionWidget = this.node.widgets?.find(w => w.name === "use_custom_motion");
-      if (customMotionWidget) {
-        if (!this.motionTrackEnabled) {
-          customMotionWidget.value = false;
-        } else {
-          customMotionWidget.value = true;
-        }
-      }
-
-      overrideAudioToggleBtn.disabled = !this.motionTrackEnabled;
-      overrideAudioToggleBtn.style.opacity = this.motionTrackEnabled ? "1.0" : "0.3";
-      if (!this.motionTrackEnabled) {
-        const overrideWidget = this.node.widgets?.find(w => w.name === "override_audio");
-        if (overrideWidget && overrideWidget.value) {
-          overrideWidget.value = false;
-          this.node.properties.overrideAudio = false;
-          if (this.updateOverrideAudioToggleStyle) this.updateOverrideAudioToggleStyle(false);
-
-          // Restore audio track if it was previously enabled
-          if (this._audioTrackWasEnabledBeforeOverride) {
-            this.audioTrackEnabled = true;
-            updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", true);
-
-            const customAudioWidget = this.node.widgets?.find(w => w.name === "use_custom_audio");
-            if (customAudioWidget) {
-              customAudioWidget.value = true;
-              if (this.updateToggleStyle) this.updateToggleStyle(true);
-            }
-
-            inpaintToggleBtn.disabled = false;
-            inpaintToggleBtn.style.opacity = "1.0";
-          }
-          this._audioTrackWasEnabledBeforeOverride = false;
-        }
-      }
-
-      this.commitChanges(true);
-      this.render();
-    });
-    this.motionTrackLabel.appendChild(overrideAudioToggleBtn);
-
-    // Initialize motion override states immediately
-    overrideAudioToggleBtn.disabled = !this.motionTrackEnabled;
-    overrideAudioToggleBtn.style.opacity = this.motionTrackEnabled ? "1.0" : "0.3";
-
-
     this.sidebar.appendChild(this.mainTrackLabel);
     this.sidebar.appendChild(this.audioTrackLabel);
-    this.sidebar.appendChild(this.motionTrackLabel);
 
     const setupSidebarLabelResizing = (labelEl, dragType) => {
       labelEl.addEventListener("mousemove", (e) => {
@@ -1650,7 +1316,6 @@ export const dom = {
           this._dragType = dragType;
           this._startBlockHeight = this.blockHeight;
           this._startAudioTrackHeight = this.audioTrackHeight;
-          this._startMotionTrackHeight = this.motionTrackHeight;
           this._startY = this.getMousePos(e).y;
           document.body.style.userSelect = "none";
           document.body.style.cursor = "ns-resize";
@@ -1662,7 +1327,6 @@ export const dom = {
 
     setupSidebarLabelResizing(this.mainTrackLabel, "divider");
     setupSidebarLabelResizing(this.audioTrackLabel, "audio_divider");
-    setupSidebarLabelResizing(this.motionTrackLabel, "height_resize");
 
     this.updateSidebarHeights();
 
@@ -1693,18 +1357,12 @@ export const dom = {
     console.log("[LTXDirector debug] syncWidgetsAndUI() called.");
     console.log(`  - mainTrackEnabled: ${this.mainTrackEnabled}`);
     console.log(`  - audioTrackEnabled: ${this.audioTrackEnabled}`);
-    console.log(`  - motionTrackEnabled: ${this.motionTrackEnabled}`);
 
     // 1. Sync the widgets with the loaded track enablement states
     const customAudioWidget = this.node.widgets?.find(w => w.name === "use_custom_audio");
     if (customAudioWidget) {
       customAudioWidget.value = this.audioTrackEnabled;
       console.log(`  - Set use_custom_audio widget value to ${this.audioTrackEnabled}`);
-    }
-    const customMotionWidget = this.node.widgets?.find(w => w.name === "use_custom_motion");
-    if (customMotionWidget) {
-      customMotionWidget.value = this.motionTrackEnabled;
-      console.log(`  - Set use_custom_motion widget value to ${this.motionTrackEnabled}`);
     }
 
     // 2. Sync the track icon buttons
@@ -1715,10 +1373,6 @@ export const dom = {
     if (this.audioTrackLabel?._eyeBtn && this.updateTrackIcon) {
       this.updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", this.audioTrackEnabled);
       console.log("  - Updated audio track eye icon");
-    }
-    if (this.motionTrackLabel?._eyeBtn && this.updateTrackIcon) {
-      this.updateTrackIcon(this.motionTrackLabel._eyeBtn, "motion", this.motionTrackEnabled);
-      console.log("  - Updated motion track eye icon");
     }
 
     // 3. Sync the inpaint button disabled/opacity state
@@ -1737,21 +1391,7 @@ export const dom = {
       }
     }
 
-    // 4. Sync the override audio button disabled/opacity state
-    const overrideAudioToggleBtn = this.motionTrackLabel?.querySelector(".pr-btn");
-    if (overrideAudioToggleBtn) {
-      overrideAudioToggleBtn.disabled = !this.motionTrackEnabled;
-      overrideAudioToggleBtn.style.opacity = this.motionTrackEnabled ? "1.0" : "0.3";
-      console.log(`  - Updated override audio toggle button disabled: ${overrideAudioToggleBtn.disabled}`);
-    }
 
-    if (this.updateOverrideAudioToggleStyle) {
-      const overrideWidget = this.node.widgets?.find(w => w.name === "override_audio");
-      if (overrideWidget) {
-        console.log(`  - calling updateOverrideAudioToggleStyle with ${overrideWidget.value}`);
-        this.updateOverrideAudioToggleStyle(overrideWidget.value);
-      }
-    }
   }
 ,
 

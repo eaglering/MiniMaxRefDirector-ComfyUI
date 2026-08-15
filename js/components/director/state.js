@@ -1,6 +1,6 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: updateSelectionFromBox, syncSelectionTypeAndIndex, growTimelineIfNeeded, syncWidgetsToRetakeDuration, getMaxZoom, getVisualDurationFrames, updateZoomSliderMax, getGlobalPrompt, syncGlobalPrompt, updateUIFromSelection, updateRetakeUIState, updateSidebarHeights
-import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, MOTION_TRACK_HEIGHT, RULER_HEIGHT, app } from "./shared.js";
+import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, RULER_HEIGHT, app } from "./shared.js";
 
 export const state = {
   updateSelectionFromBox() {
@@ -22,7 +22,7 @@ export const state = {
 
     const newSelectedIds = new Set(this._selectBoxInitialSelectedIds || []);
 
-    for (const track of ["image", "motion", "audio"]) {
+    for (const track of ["image", "audio"]) {
       const arr = this.getSegmentArray(track);
       if (!arr) continue;
 
@@ -35,9 +35,6 @@ export const state = {
       } else if (track === "audio") {
         trackTop = RULER_HEIGHT + this.blockHeight;
         trackBottom = RULER_HEIGHT + this.blockHeight + this.audioTrackHeight;
-      } else if (track === "motion") {
-        trackTop = RULER_HEIGHT + this.blockHeight + this.audioTrackHeight;
-        trackBottom = RULER_HEIGHT + this.blockHeight + this.audioTrackHeight + this.motionTrackHeight;
       }
 
       for (const seg of arr) {
@@ -73,7 +70,7 @@ export const state = {
     }
     // Sync single selection (which might be video + audio sibling)
     const firstId = this.selectedSegmentIds[0];
-    for (const track of ["image", "motion", "audio"]) {
+    for (const track of ["image", "audio"]) {
       const arr = this.getSegmentArray(track);
       const idx = arr.findIndex(s => s.id === firstId);
       if (idx !== -1) {
@@ -168,9 +165,6 @@ export const state = {
       furthest = Math.max(furthest, seg.start + seg.length);
     }
     for (const seg of this.timeline.audioSegments) {
-      furthest = Math.max(furthest, seg.start + seg.length);
-    }
-    for (const seg of this.timeline.motionSegments) {
       furthest = Math.max(furthest, seg.start + seg.length);
     }
     const outputDuration = this.getDurationFrames();
@@ -310,21 +304,7 @@ export const state = {
         this.strengthValue.style.opacity = "0.35";
       }
 
-      if (this.vidStrLabel) this.vidStrLabel.style.display = "none";
-      if (this.vidStrValue) {
-        this.vidStrValue.style.display = "none";
-        this.vidStrValue.disabled = true;
-        this.vidStrValue.style.opacity = "0.35";
-      }
-      if (this.vidAttnLabel) this.vidAttnLabel.style.display = "none";
-      if (this.vidAttnValue) {
-        this.vidAttnValue.style.display = "none";
-        this.vidAttnValue.disabled = true;
-        this.vidAttnValue.style.opacity = "0.35";
-      }
-
       if (this.audioInfoArea) this.audioInfoArea.style.display = "none";
-      if (this.motionInfoArea) this.motionInfoArea.style.display = "none";
 
       if (this.segmentBoundsDisplay) {
         this.segmentBoundsDisplay.textContent = "Multiple Segments Selected";
@@ -341,13 +321,6 @@ export const state = {
           const arr = (this._previewSegments && previewIsAudio) ? this._previewSegments : this.timeline.audioSegments;
           seg = arr.find(s => s.id === origSeg.id) || origSeg;
         }
-      } else if (this.selectionType === "motion") {
-        const origSeg = this.timeline.motionSegments[this.selectedIndex];
-        if (origSeg) {
-          const previewIsMotion = this._ghostTrack === 'motion' || (this._previewSegments && this._ghostTrack === null && this.selectionType === 'motion');
-          const arr = (this._previewSegments && previewIsMotion) ? this._previewSegments : this.timeline.motionSegments;
-          seg = arr.find(s => s.id === origSeg.id) || origSeg;
-        }
       } else {
         const origSeg = this.timeline.segments[this.selectedIndex];
         if (origSeg) {
@@ -359,14 +332,6 @@ export const state = {
     }
 
     // Reset default disabled/opacity values
-    if (this.vidStrValue) {
-      this.vidStrValue.disabled = false;
-      this.vidStrValue.style.opacity = "";
-    }
-    if (this.vidAttnValue) {
-      this.vidAttnValue.disabled = false;
-      this.vidAttnValue.style.opacity = "";
-    }
     if (this.strengthValue) {
       this.strengthValue.style.opacity = "";
       this.strengthValue.placeholder = "";
@@ -391,13 +356,7 @@ export const state = {
       this.strengthValue.style.opacity = "0.35";
       this.strengthValue.value = (this.timeline.retakeStrength ?? 1.0).toFixed(2);
 
-      this.vidStrLabel.style.display = "none";
-      this.vidStrValue.style.display = "none";
-      this.vidAttnLabel.style.display = "none";
-      this.vidAttnValue.style.display = "none";
-
       this.audioInfoArea.style.display = "none";
-      this.motionInfoArea.style.display = "none";
 
       if (this.segmentBoundsDisplay) {
         const startStr = this.formatTime(this.timeline.retakeStart, true);
@@ -415,12 +374,7 @@ export const state = {
       this.strengthLabel.style.display = "inline";
       this.strengthLabel.textContent = "Guide Strength:";
       this.strengthValue.style.display = "inline-block";
-      this.vidStrLabel.style.display = "none";
-      this.vidStrValue.style.display = "none";
-      this.vidAttnLabel.style.display = "none";
-      this.vidAttnValue.style.display = "none";
       this.audioInfoArea.style.display = "block";
-      this.motionInfoArea.style.display = "none";
       this.audioInfoArea.innerHTML = `
         File: <span>${seg.fileName || "Unknown"}</span><br>
         Length: <span>${this.formatTime(seg.audioDurationFrames)}</span> Output Length: <span>${this.formatTime(seg.length)}</span><br>
@@ -428,34 +382,6 @@ export const state = {
       `;
       this.strengthValue.value = "1.00";
       this.strengthValue.disabled = true;
-    } else if (this.selectionType === "motion" && seg) {
-      if (this.globalPromptInput) {
-        this.globalPromptInput.disabled = true;
-        this.globalPromptInput.style.opacity = "0.4";
-      }
-      if (this.promptWrapper) this.promptWrapper.style.display = "block";
-      this.promptInput.disabled = false;
-      this.promptInput.style.opacity = "1.0";
-      this.promptInput.placeholder = "Global prompt (syncs across all IC LoRA segments)...";
-      this.promptInput.value = this.getGlobalPrompt();
-      if (this.segmentPromptLabel) {
-        this.segmentPromptLabel.style.display = "block";
-        this.segmentPromptLabel.textContent = "Global Prompt (IC-LoRA)";
-      }
-
-      this.strengthRow.style.display = "flex";
-      this.strengthLabel.style.display = "none";
-      this.strengthValue.style.display = "none";
-      this.vidStrLabel.style.display = "inline";
-      this.vidStrValue.style.display = "inline-block";
-      this.vidAttnLabel.style.display = "inline";
-      this.vidAttnValue.style.display = "inline-block";
-
-      this.vidStrValue.value = (seg.videoStrength ?? 1.0).toFixed(2);
-      this.vidAttnValue.value = (seg.videoAttentionStrength ?? 0.65).toFixed(2);
-
-      this.audioInfoArea.style.display = "none";
-      this.motionInfoArea.style.display = "none";
     } else {
       if (this.segmentPromptLabel) {
         this.segmentPromptLabel.style.display = "block";
@@ -466,22 +392,15 @@ export const state = {
         this.globalPromptInput.style.opacity = "1.0";
       }
       this.audioInfoArea.style.display = "none";
-      this.motionInfoArea.style.display = "none";
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
       this.strengthRow.style.display = "flex";
       this.strengthLabel.style.display = "inline";
       this.strengthLabel.textContent = "Guide Strength:";
       this.strengthValue.style.display = "inline-block";
-      this.vidStrLabel.style.display = "none";
-      this.vidStrValue.style.display = "none";
-      this.vidAttnLabel.style.display = "none";
-      this.vidAttnValue.style.display = "none";
 
       if (seg) {
-        if (this.selectionType !== "motion") {
-          this.promptInput.value = seg.prompt || "";
-          this.promptInput.placeholder = "Enter prompt for selected segment...";
-        }
+        this.promptInput.value = seg.prompt || "";
+        this.promptInput.placeholder = "Enter prompt for selected segment...";
         this.promptInput.disabled = false;
         this.promptInput.style.opacity = "1.0";
 
@@ -529,11 +448,9 @@ export const state = {
       if (this.blockHeight > 0 && this.audioTrackHeight > 0) {
         this._oldBlockHeight = this.blockHeight;
         this._oldAudioTrackHeight = this.audioTrackHeight;
-        this._oldMotionTrackHeight = this.motionTrackHeight;
       }
       this.blockHeight = this.canvasHeight - this.rulerHeight;
       this.audioTrackHeight = 0;
-      this.motionTrackHeight = 0;
       // In retake mode, uploadVideoBtn stays as "Add Video" (same as normal mode)
       if (this.mainTrackLabel) {
         const textSpan = this.mainTrackLabel.querySelector("span");
@@ -541,14 +458,12 @@ export const state = {
         if (this.mainTrackLabel._eyeBtn) this.mainTrackLabel._eyeBtn.style.display = "none";
         this.mainTrackLabel.style.backgroundColor = "#1e1e1e";
         this.audioTrackLabel.style.display = "none";
-        this.motionTrackLabel.style.display = "none";
       }
       if (this.sidebar) this.sidebar.style.backgroundColor = "#1e1e1e";
       if (this.rulerSpacer) this.rulerSpacer.style.backgroundColor = "#1e1e1e";
     } else {
       this.blockHeight = this._oldBlockHeight ?? BLOCK_HEIGHT;
       this.audioTrackHeight = this._oldAudioTrackHeight ?? AUDIO_TRACK_HEIGHT;
-      this.motionTrackHeight = this._oldMotionTrackHeight ?? MOTION_TRACK_HEIGHT;
       if (this.uploadVideoBtn) {
         this.uploadVideoBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Add Video`;
       }
@@ -558,7 +473,6 @@ export const state = {
         if (this.mainTrackLabel._eyeBtn) this.mainTrackLabel._eyeBtn.style.display = "inline-flex";
         this.mainTrackLabel.style.backgroundColor = "#1e1e1e";
         this.audioTrackLabel.style.display = "flex";
-        this.motionTrackLabel.style.display = "flex";
       }
       if (this.sidebar) this.sidebar.style.backgroundColor = "#1e1e1e";
       if (this.rulerSpacer) this.rulerSpacer.style.backgroundColor = "#1e1e1e";
@@ -584,7 +498,6 @@ export const state = {
     if (this.uploadBtn) this.uploadBtn.style.display = isRetake ? "none" : "";
     if (this.addTextBtn) this.addTextBtn.style.display = isRetake ? "none" : "";
     if (this.uploadAudioBtn) this.uploadAudioBtn.style.display = isRetake ? "none" : "";
-    if (this.uploadMotionBtn) this.uploadMotionBtn.style.display = isRetake ? "none" : "";
     if (this.deleteBtn) this.deleteBtn.style.display = isRetake ? "none" : "";
     // deleteRetakeBtn is visible whenever Retake Mode is active
     if (this.deleteRetakeBtn) {
@@ -607,7 +520,6 @@ export const state = {
     if (this.mainTrackLabel) {
       this.mainTrackLabel.style.height = `${this.blockHeight}px`;
       this.audioTrackLabel.style.height = `${this.audioTrackHeight}px`;
-      this.motionTrackLabel.style.height = `${this.motionTrackHeight}px`;
     }
   }
 };

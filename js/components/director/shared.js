@@ -5,13 +5,12 @@ const { api } = window.comfyAPI.api;
 const RULER_HEIGHT = 24;
 const BLOCK_HEIGHT = 160; // Increased to make the image timeline area much taller
 const AUDIO_TRACK_HEIGHT = 80;
-const MOTION_TRACK_HEIGHT = 80; // used as Motion Guide track height
-const CANVAS_HEIGHT = RULER_HEIGHT + BLOCK_HEIGHT + MOTION_TRACK_HEIGHT + AUDIO_TRACK_HEIGHT;
+const CANVAS_HEIGHT = RULER_HEIGHT + BLOCK_HEIGHT + AUDIO_TRACK_HEIGHT;
 const HANDLE_HIT_PX = 14;
 const MIN_SEGMENT_LENGTH = 6;
 const MAX_THUMBNAIL_DIM = 512; // Increased to maintain quality for taller images
 
-const HIDDEN_WIDGET_NAMES = ["timeline_data", "local_prompts", "segment_lengths", "guide_strength", "audio_data", "use_custom_audio", "inpaint_audio", "use_custom_motion", "override_audio"];
+const HIDDEN_WIDGET_NAMES = ["timeline_data", "local_prompts", "segment_lengths", "guide_strength", "audio_data", "use_custom_audio", "inpaint_audio", "override_audio"];
 
 function hideWidget(w) {
   if (!w) return;
@@ -185,20 +184,6 @@ const STYLES = `
   .pr-prompt-area:focus {
     border-color: #888;
   }
-  .pr-motion-info {
-    width: 100%;
-    height: 100%;
-    background: #181818;
-    color: #aaa;
-    border: 1px solid #111;
-    border-radius: 6px;
-    padding: 10px;
-    font-size: 12px;
-    line-height: 1.6;
-    box-sizing: border-box;
-    display: none;
-  }
-  .pr-motion-info span { color: #fff; font-weight: 500; }
   .pr-audio-info {
     width: 100%;
     height: 100%;
@@ -632,7 +617,6 @@ styleEl.textContent = STYLES;
 const ICONS = {
   upload: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>`,
   audio: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`,
-  motion: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`,
   trash: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`,
   text: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>`,
   play: `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`,
@@ -654,13 +638,11 @@ const ICONS = {
 function parseInitial(jsonStr) {
   let parsed = {
     segments: [],
-    motionSegments: [],
     audioSegments: [],
     global_prompt: "",
     retake_global_prompt: "",
     mainTrackEnabled: true,
     audioTrackEnabled: true,
-    motionTrackEnabled: true,
     propHeight: 90,
     globalPropHeight: 60,
     showFilenames: true,
@@ -682,7 +664,6 @@ function parseInitial(jsonStr) {
       if (p.retake_global_prompt !== undefined) parsed.retake_global_prompt = p.retake_global_prompt;
       if (p.mainTrackEnabled !== undefined) parsed.mainTrackEnabled = p.mainTrackEnabled;
       if (p.audioTrackEnabled !== undefined) parsed.audioTrackEnabled = p.audioTrackEnabled;
-      if (p.motionTrackEnabled !== undefined) parsed.motionTrackEnabled = p.motionTrackEnabled;
       if (p.propHeight !== undefined) parsed.propHeight = p.propHeight;
       if (p.globalPropHeight !== undefined) parsed.globalPropHeight = p.globalPropHeight;
       if (p.showFilenames !== undefined) parsed.showFilenames = p.showFilenames;
@@ -699,12 +680,6 @@ function parseInitial(jsonStr) {
       if (Array.isArray(p.segments)) {
         parsed.segments = p.segments.map(s => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
-          return rest;
-        });
-      }
-      if (Array.isArray(p.motionSegments)) {
-        parsed.motionSegments = p.motionSegments.map(s => {
-          const { videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
           return rest;
         });
       }
@@ -732,13 +707,6 @@ function parseInitial(jsonStr) {
     }
   }
 
-  for (let seg of parsed.motionSegments) {
-    if (!seg.id) {
-      seg.id = Date.now().toString() + Math.random().toString(36).substr(2, 5);
-    }
-    if (seg.trimStart === undefined) seg.trimStart = 0;
-  }
-
   for (let seg of parsed.audioSegments) {
     if (!seg.id) {
       seg.id = Date.now().toString() + Math.random().toString(36).substr(2, 5);
@@ -750,4 +718,4 @@ function parseInitial(jsonStr) {
 }
 
 
-export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, MOTION_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, ICONS, parseInitial, STYLES, styleEl };
+export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, ICONS, parseInitial, STYLES, styleEl };

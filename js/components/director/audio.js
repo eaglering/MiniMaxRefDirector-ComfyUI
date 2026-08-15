@@ -92,28 +92,6 @@ export const audio = {
       }
     }
 
-    // 2. Motion Video Segments (only if overrideAudio toggle is ON and NOT in retake mode)
-    const isOverrideAudio = !!(this.node.properties.overrideAudio || this.timeline.overrideAudio);
-    if (isOverrideAudio && !this.retakeMode) {
-      if (this.timeline.motionSegments) {
-        for (let seg of this.timeline.motionSegments) {
-          if (seg.videoFile || seg._blobUrl) {
-            segmentsToPlay.push({
-              type: 'motion',
-              originalSeg: seg,
-              start: seg.start,
-              length: seg.length,
-              trimStart: seg.trimStart || 0,
-              audioFile: seg.videoFile || seg.fileName,
-              audioB64: null,
-              _blobUrl: seg._blobUrl,
-              fileSize: seg.fileSize
-            });
-          }
-        }
-      }
-    }
-
     // Decode and schedule all scheduled segments that happen AT or AFTER currentFrame in the background
     for (let item of segmentsToPlay) {
       const segStartFrame = item.start;
@@ -287,7 +265,7 @@ export const audio = {
           }
         }
         // Pause all other video elements
-        const allSegments = [...(this.timeline.segments || []), ...(this.timeline.motionSegments || [])];
+        const allSegments = [...(this.timeline.segments || [])];
         for (const seg of allSegments) {
           if (seg.videoEl && !seg.videoEl.paused) {
             seg.videoEl.pause();
@@ -314,35 +292,6 @@ export const audio = {
             } else {
               // Only pause if this segment's video element is NOT shared with the currently active segment
               if (seg.videoEl !== activeVideoEl && !seg.videoEl.paused) {
-                seg.videoEl.pause();
-              }
-            }
-          }
-        }
-      }
-
-      // Sync motion playback
-      if (!this.retakeMode) {
-        const activeMotionSegments = (this._isDragging && this._previewSegments && this.selectionType === "motion") ? this._previewSegments : this.timeline.motionSegments;
-        const activeMotionSeg = activeMotionSegments.find(s => s.type === "motion_video" && this.currentFrame >= s.start && this.currentFrame < s.start + s.length);
-        const activeMotionVideoEl = activeMotionSeg ? activeMotionSeg.videoEl : null;
-
-        for (const seg of activeMotionSegments) {
-          if (seg.type === "motion_video" && seg.videoEl) {
-            if (seg === activeMotionSeg) {
-              const expectedSec = (seg.trimStart + (this.currentFrame - seg.start)) / frameRate;
-              if (seg.videoEl.paused && !seg.videoEl.seeking) {
-                // Not playing and no seek in flight — start a fresh seek+play
-                seg.videoEl.currentTime = expectedSec;
-                seg.videoEl.play().catch(e => console.warn("Video play prevented", e));
-              } else if (!seg.videoEl.paused && Math.abs(seg.videoEl.currentTime - expectedSec) > 0.5) {
-                // Already playing but drifted — resync
-                seg.videoEl.currentTime = expectedSec;
-              }
-              // If paused && seeking: a seek+play is already in flight, let it finish
-            } else {
-              // Only pause if this segment's video element is NOT shared with the currently active motion segment
-              if (seg.videoEl !== activeMotionVideoEl && !seg.videoEl.paused) {
                 seg.videoEl.pause();
               }
             }
@@ -387,17 +336,6 @@ export const audio = {
         }
       }
 
-      // Sync motion segments on pause
-      for (const seg of this.timeline.motionSegments) {
-        if (seg.type === "motion_video" && seg.videoEl) {
-          if (!seg.videoEl.paused) {
-            seg.videoEl.pause();
-          }
-          if (this.currentFrame >= seg.start && this.currentFrame < seg.start + seg.length) {
-            seg.videoEl.currentTime = (seg.trimStart + (this.currentFrame - seg.start)) / this.getFrameRate();
-          }
-        }
-      }
     }
 
     for (let node of this.activeAudioNodes) {

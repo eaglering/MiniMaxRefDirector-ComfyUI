@@ -166,7 +166,6 @@ export const settings = {
       this.timeline = parseInitial(this.timelineDataWidget.value);
       this.mainTrackEnabled = this.timeline.mainTrackEnabled !== false;
       this.audioTrackEnabled = this.timeline.audioTrackEnabled !== false;
-      this.motionTrackEnabled = this.timeline.motionTrackEnabled !== false;
       if (this.timeline.showFilenames !== undefined) {
         this.node.properties.showFilenames = this.timeline.showFilenames;
       }
@@ -270,7 +269,6 @@ export const settings = {
       timeline: {
         mainTrackEnabled: this.mainTrackEnabled,
         audioTrackEnabled: this.audioTrackEnabled,
-        motionTrackEnabled: this.motionTrackEnabled,
         showFilenames: !!this.node.properties.showFilenames,
         overrideAudio: !!this.node.properties.overrideAudio,
         inpaint_audio: !!(this.node.widgets?.find(w => w.name === "inpaint_audio")?.value),
@@ -292,10 +290,6 @@ export const settings = {
         normalStartFrame: this.timeline.normalStartFrame,
         normalDurationFrames: this.timeline.normalDurationFrames,
         segments: (this.timeline.segments || []).map(s => {
-          const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
-          return rest;
-        }),
-        motionSegments: (this.timeline.motionSegments || []).map(s => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
           return rest;
         }),

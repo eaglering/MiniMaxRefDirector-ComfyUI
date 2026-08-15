@@ -20,7 +20,6 @@ export const menus = {
 
     const trackHeight = this.blockHeight;
     const isAudioTrack = mouseY >= RULER_HEIGHT + trackHeight && mouseY <= RULER_HEIGHT + trackHeight + this.audioTrackHeight;
-    const isMotionTrack = mouseY >= RULER_HEIGHT + trackHeight + this.audioTrackHeight && mouseY <= RULER_HEIGHT + trackHeight + this.audioTrackHeight + this.motionTrackHeight;
     const isImageTrack = mouseY >= RULER_HEIGHT && mouseY <= RULER_HEIGHT + trackHeight;
 
     const logicalWidth = this.canvas.offsetWidth || 1;
@@ -30,10 +29,7 @@ export const menus = {
     let clickedSeg = null;
     let trackType = "";
 
-    if (isMotionTrack) {
-      clickedSeg = this.timeline.motionSegments.find(s => cursor >= s.start && cursor <= s.start + s.length);
-      trackType = "motion";
-    } else if (isAudioTrack) {
+    if (isAudioTrack) {
       clickedSeg = this.timeline.audioSegments.find(s => cursor >= s.start && cursor <= s.start + s.length);
       trackType = "audio";
     } else if (isImageTrack) {
@@ -43,9 +39,9 @@ export const menus = {
 
     if (clickedSeg) {
       this.showContextMenu(e.clientX, e.clientY, clickedSeg, trackType);
-    } else if (isMotionTrack || isImageTrack || isAudioTrack) {
+    } else if (isImageTrack || isAudioTrack) {
       const gapRegions = this.getGapRegions();
-      const currentTrack = isMotionTrack ? "motion" : (isAudioTrack ? "audio" : "image");
+      const currentTrack = isAudioTrack ? "audio" : "image";
       let gap = gapRegions.find(g => cursor >= g.frameStart && cursor <= g.frameEnd && g.track === currentTrack);
 
       if (!gap) {
@@ -170,7 +166,7 @@ export const menus = {
     menu.style.left = `${clientX + 6}px`;
     menu.style.top = `${clientY - 10}px`;
 
-    const isImage = (trackType === "image" || (trackType === "motion" && seg.isStaticImage)) && seg.imageB64;
+    const isImage = trackType === "image" && seg.imageB64;
 
     const makeDivider = () => {
       const d = document.createElement("div");
@@ -399,10 +395,6 @@ export const menus = {
                 const img = new Image();
                 img.onload = () => {
                   seg.imageFile = imageFile;
-                  if (trackType === "motion") {
-                    seg.videoFile = imageFile;
-                    seg.fileName = file.name;
-                  }
                   seg.imageB64 = imgUrl;
                   seg.imgObj = img;
                   this.commitChanges();
@@ -448,10 +440,6 @@ export const menus = {
               const img = new Image();
               img.onload = () => {
                 seg.imageFile = imageFile;
-                if (trackType === "motion") {
-                  seg.videoFile = imageFile;
-                  seg.fileName = file.name;
-                }
                 seg.imageB64 = imgUrl;
                 seg.imgObj = img;
                 this.commitChanges();
@@ -706,57 +694,6 @@ export const menus = {
       menu.appendChild(textBtn);
       menu.appendChild(imgBtn);
       menu.appendChild(vidBtn);
-    } else if (currentTrack === "motion") {
-      const pasteImageBtn = document.createElement("button");
-      pasteImageBtn.className = "pr-gap-menu-btn";
-      pasteImageBtn.innerHTML = `${ICONS.upload} Paste Image`;
-      this._checkClipboardForImage(pasteImageBtn);
-      pasteImageBtn.onclick = async () => {
-        this.dismissContextMenu();
-        try {
-          const items = await navigator.clipboard.read();
-          for (const item of items) {
-            const imageTypes = item.types.filter(type => type.startsWith("image/"));
-            if (imageTypes.length > 0) {
-              const blob = await item.getType(imageTypes[0]);
-              const file = new File([blob], "clipboard.png", { type: blob.type });
-              const startFrame = Math.round(gap.clickedFrame !== undefined ? gap.clickedFrame : gap.frameStart);
-              await this.handleMotionUpload([file], startFrame);
-              break;
-            }
-          }
-        } catch (err) {
-          console.error("Failed to paste image from clipboard", err);
-        }
-      };
-      menu.appendChild(pasteImageBtn);
-
-      const imgBtn = document.createElement("button");
-      imgBtn.className = "pr-gap-menu-btn";
-      imgBtn.innerHTML = `${ICONS.upload} Image Segment`;
-      imgBtn.onclick = () => {
-        this.dismissContextMenu();
-        const fi = document.createElement("input");
-        fi.type = "file";
-        fi.accept = "image/*";
-        fi.addEventListener("change", (ev) => {
-          if (ev.target.files?.[0]) {
-            const startFrame = Math.round(gap.clickedFrame !== undefined ? gap.clickedFrame : gap.frameStart);
-            this.handleMotionUpload([ev.target.files[0]], startFrame);
-          }
-        });
-        fi.click();
-      };
-      menu.appendChild(imgBtn);
-
-      const vidBtn = document.createElement("button");
-      vidBtn.className = "pr-gap-menu-btn";
-      vidBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Segment`;
-      vidBtn.onclick = () => {
-        this.dismissContextMenu();
-        this.promptAddMotionInGap(gap.frameStart, gap.frameEnd);
-      };
-      menu.appendChild(vidBtn);
     } else if (currentTrack === "audio") {
       const audBtn = document.createElement("button");
       audBtn.className = "pr-gap-menu-btn";
@@ -884,55 +821,6 @@ export const menus = {
       menu.appendChild(pasteImageBtn);
       menu.appendChild(textBtn);
       menu.appendChild(imgBtn);
-      menu.appendChild(vidBtn);
-    } else if (currentTrack === "motion") {
-      const pasteImageBtn = document.createElement("button");
-      pasteImageBtn.className = "pr-gap-menu-btn";
-      pasteImageBtn.innerHTML = `${ICONS.upload} Paste Image`;
-      this._checkClipboardForImage(pasteImageBtn);
-      pasteImageBtn.addEventListener("click", async () => {
-        this.dismissGapMenu();
-        try {
-          const items = await navigator.clipboard.read();
-          for (const item of items) {
-            const imageTypes = item.types.filter(type => type.startsWith("image/"));
-            if (imageTypes.length > 0) {
-              const blob = await item.getType(imageTypes[0]);
-              const file = new File([blob], "clipboard.png", { type: blob.type });
-              await this.handleMotionUpload([file], gap.frameStart);
-              break;
-            }
-          }
-        } catch (err) {
-          console.error("Failed to paste image from clipboard", err);
-        }
-      });
-      menu.appendChild(pasteImageBtn);
-
-      const imgBtn = document.createElement("button");
-      imgBtn.className = "pr-gap-menu-btn";
-      imgBtn.innerHTML = `${ICONS.upload} Image Segment`;
-      imgBtn.addEventListener("click", () => {
-        this.dismissGapMenu();
-        const fi = document.createElement("input");
-        fi.type = "file";
-        fi.accept = "image/*";
-        fi.addEventListener("change", (ev) => {
-          if (ev.target.files?.[0]) {
-            this.handleMotionUpload([ev.target.files[0]], gap.frameStart);
-          }
-        });
-        fi.click();
-      });
-      menu.appendChild(imgBtn);
-
-      const vidBtn = document.createElement("button");
-      vidBtn.className = "pr-gap-menu-btn";
-      vidBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Segment`;
-      vidBtn.addEventListener("click", () => {
-        this.dismissGapMenu();
-        this.promptAddMotionInGap(gap.frameStart, gap.frameEnd);
-      });
       menu.appendChild(vidBtn);
     } else if (currentTrack === "audio") {
       const audBtn = document.createElement("button");

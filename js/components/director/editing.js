@@ -1,5 +1,5 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
-// 方法: markSegment, markCurrentSelection, deleteSelectedSegment, pasteCopiedSegment, pasteSegmentAtFrame, splitSegmentAtPlayhead, commitChanges, _stampSegmentSeconds, _rebaseSegmentsToFPS, getGapRegions, promptAddAudioInGap, promptAddMotionInGap, addSegmentInGap, addTextSegmentFreeSpace
+// 方法: markSegment, markCurrentSelection, deleteSelectedSegment, pasteCopiedSegment, pasteSegmentAtFrame, splitSegmentAtPlayhead, commitChanges, _stampSegmentSeconds, _rebaseSegmentsToFPS, getGapRegions, promptAddAudioInGap, addSegmentInGap, addTextSegmentFreeSpace
 import { RULER_HEIGHT, app } from "./shared.js";
 
 export const editing = {
@@ -17,7 +17,6 @@ export const editing = {
     if (currentStart === newStart && currentEnd === newEnd) {
       const allSegs = [
         ...(this.timeline.segments || []),
-        ...(this.timeline.motionSegments || []),
         ...(this.timeline.audioSegments || [])
       ];
       let lastSegmentEnd = 0;
@@ -73,7 +72,6 @@ export const editing = {
 
     const allSegs = [
       ...(this.timeline.segments || []),
-      ...(this.timeline.motionSegments || []),
       ...(this.timeline.audioSegments || [])
     ];
     let targetSegs = [];
@@ -151,7 +149,6 @@ export const editing = {
       }
 
       this.timeline.segments = this.timeline.segments.filter(s => !idsToDelete.has(s.id));
-      this.timeline.motionSegments = this.timeline.motionSegments.filter(s => !idsToDelete.has(s.id));
       this.timeline.audioSegments = this.timeline.audioSegments.filter(s => !idsToDelete.has(s.id));
 
       this.selectedSegmentIds = [];
@@ -173,11 +170,6 @@ export const editing = {
         if (this.timeline.audioSegments.length === 0 || this.selectedIndex === -1) return;
         delSibling(this.timeline.audioSegments[this.selectedIndex]);
         this.timeline.audioSegments.splice(this.selectedIndex, 1);
-        this.selectedIndex = Math.max(-1, this.selectedIndex - 1);
-      } else if (this.selectionType === "motion") {
-        if (this.timeline.motionSegments.length === 0 || this.selectedIndex === -1) return;
-        delSibling(this.timeline.motionSegments[this.selectedIndex]);
-        this.timeline.motionSegments.splice(this.selectedIndex, 1);
         this.selectedIndex = Math.max(-1, this.selectedIndex - 1);
       } else {
         if (this.timeline.segments.length === 0 || this.selectedIndex === -1) return;
@@ -227,7 +219,7 @@ export const editing = {
     mainSeg.start = startFrame;
     if (sibSeg) sibSeg.start = startFrame;
 
-    const mainArr = isAudio ? [...this.timeline.audioSegments] : (copiedTrack === "motion" ? [...this.timeline.motionSegments] : [...this.timeline.segments]);
+    const mainArr = isAudio ? [...this.timeline.audioSegments] : [...this.timeline.segments];
     mainArr.push(mainSeg);
     mainArr.sort((a, b) => a.start - b.start);
 
@@ -273,8 +265,6 @@ export const editing = {
     if (copiedTrack === "audio") {
       this.timeline.audioSegments = finalMain;
       if (sibSeg) this.timeline.segments = finalSib;
-    } else if (copiedTrack === "motion") {
-      this.timeline.motionSegments = finalMain;
     } else {
       this.timeline.segments = finalMain;
       if (sibSeg) this.timeline.audioSegments = finalSib;
@@ -400,7 +390,7 @@ export const editing = {
         id: leftBase,
         length: leftLen
       };
-      if (seg.type === "video" || seg.type === "motion_video") {
+      if (seg.type === "video") {
         leftSeg.videoEl = null;
         leftSeg._blobUrl = seg._blobUrl || (seg.videoEl ? seg.videoEl.src : null);
         leftSeg.thumbnails = seg.thumbnails ? [...seg.thumbnails] : null;
@@ -432,7 +422,7 @@ export const editing = {
         length: rightLen,
         trimStart: (seg.trimStart || 0) + leftLen
       };
-      if (seg.type === "video" || seg.type === "motion_video") {
+      if (seg.type === "video") {
         rightSeg.videoEl = null;
         rightSeg.imageB64 = rightImageB64;
         rightSeg.imgObj = rightImgObj;
@@ -465,9 +455,6 @@ export const editing = {
     this.timeline.segments = this.timeline.segments.filter((seg, index, self) => index === self.findIndex((s) => s.id === seg.id));
     if (this.timeline.audioSegments) {
       this.timeline.audioSegments = this.timeline.audioSegments.filter((seg, index, self) => index === self.findIndex((s) => s.id === seg.id));
-    }
-    if (this.timeline.motionSegments) {
-      this.timeline.motionSegments = this.timeline.motionSegments.filter((seg, index, self) => index === self.findIndex((s) => s.id === seg.id));
     }
 
     let sortedSegments = [...this.timeline.segments].sort((a, b) => a.start - b.start);
@@ -562,7 +549,6 @@ export const editing = {
     const toSave = {
       mainTrackEnabled: this.mainTrackEnabled,
       audioTrackEnabled: this.audioTrackEnabled,
-      motionTrackEnabled: this.motionTrackEnabled,
       propHeight: this.propHeight,
       globalPropHeight: this.globalPropHeight,
       showFilenames: !!this.node.properties.showFilenames,
@@ -584,10 +570,6 @@ export const editing = {
       normalStartFrame: this.timeline.normalStartFrame,
       normalDurationFrames: this.timeline.normalDurationFrames,
       segments: sortedSegments.map(s => {
-        const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
-        return rest;
-      }),
-      motionSegments: (this.timeline.motionSegments || []).map(s => {
         const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
         return rest;
       }),
@@ -628,7 +610,6 @@ export const editing = {
     if (this.node.properties) {
       this.node.properties.mainTrackEnabled = this.mainTrackEnabled;
       this.node.properties.audioTrackEnabled = this.audioTrackEnabled;
-      this.node.properties.motionTrackEnabled = this.motionTrackEnabled;
       this.node.properties.audioTrackWasEnabledBeforeOverride = !!this._audioTrackWasEnabledBeforeOverride;
 
       if (this.node.widgets) {
@@ -781,23 +762,6 @@ export const editing = {
       gaps.push({ track: 'image', frameStart: cursor, frameEnd: outputFrames, centerX: (x0 + x1) / 2, centerY: RULER_HEIGHT + this.blockHeight / 2, widthPx: x1 - x0 });
     }
 
-    // Motion gaps
-    cursor = 0;
-    const sortedMot = [...this.timeline.motionSegments].sort((a, b) => a.start - b.start);
-    for (const seg of sortedMot) {
-      if (seg.start > cursor) {
-        const x0 = (cursor / totalFrames) * width;
-        const x1 = (seg.start / totalFrames) * width;
-        gaps.push({ track: 'motion', frameStart: cursor, frameEnd: seg.start, centerX: (x0 + x1) / 2, centerY: RULER_HEIGHT + this.blockHeight + this.audioTrackHeight + this.motionTrackHeight / 2, widthPx: x1 - x0 });
-      }
-      cursor = seg.start + seg.length;
-    }
-    if (cursor < outputFrames) {
-      const x0 = (cursor / totalFrames) * width;
-      const x1 = (outputFrames / totalFrames) * width;
-      gaps.push({ track: 'motion', frameStart: cursor, frameEnd: outputFrames, centerX: (x0 + x1) / 2, centerY: RULER_HEIGHT + this.blockHeight + this.audioTrackHeight + this.motionTrackHeight / 2, widthPx: x1 - x0 });
-    }
-
     // Audio gaps
     cursor = 0;
     const sortedAud = [...this.timeline.audioSegments].sort((a, b) => a.start - b.start);
@@ -825,17 +789,6 @@ export const editing = {
     fi.accept = "audio/*";
     fi.addEventListener("change", (ev) => {
       if (ev.target.files?.[0]) this.handleAudioUpload([ev.target.files[0]], frameStart);
-    });
-    fi.click();
-  }
-,
-
-  promptAddMotionInGap(frameStart, frameEnd) {
-    const fi = document.createElement("input");
-    fi.type = "file";
-    fi.accept = "video/*";
-    fi.addEventListener("change", (ev) => {
-      if (ev.target.files?.[0]) this.handleMotionUpload([ev.target.files[0]], frameStart);
     });
     fi.click();
   }

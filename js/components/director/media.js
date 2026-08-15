@@ -1,5 +1,5 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
-// 方法: _ensureThumbnails, _ensureVideoEl, _getOrExtractAudio, _extractAudioOnClient, _isAudioDecodingAllowed, _preloadAudioSegment, _preloadMotionAudioSegment, loadMedia, handleImageUpload, _uploadVideoFile, handleVideoUpload, generateVideoPreviewThumbs, handleMotionUpload, handleAudioUpload
+// 方法: _ensureThumbnails, _ensureVideoEl, _getOrExtractAudio, _extractAudioOnClient, _isAudioDecodingAllowed, _preloadAudioSegment, loadMedia, handleImageUpload, _uploadVideoFile, handleVideoUpload, generateVideoPreviewThumbs, handleAudioUpload
 import { api } from "./shared.js";
 
 export const media = {
@@ -88,7 +88,6 @@ export const media = {
         for (let i = 0; i < numFrames; i++) {
           // Check if the file/segment is still active in the current timeline
           const exists = this.timeline.segments.find(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey) ||
-            this.timeline.motionSegments.find(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey) ||
             (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey));
           if (!exists) break;
 
@@ -111,8 +110,7 @@ export const media = {
 
           // Propagate the partial progress live to all active segments sharing this file
           const matchingSegs = [
-            ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey),
-            ...(this.timeline.motionSegments || []).filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
+            ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
           ];
           if (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey)) {
             matchingSegs.push(this.timeline.retakeVideo);
@@ -145,8 +143,7 @@ export const media = {
       this._thumbnailCache.set(fileKey, thumbs);
 
       const matchingSegs = [
-        ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey),
-        ...(this.timeline.motionSegments || []).filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
+        ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
       ];
       if (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey)) {
         matchingSegs.push(this.timeline.retakeVideo);
@@ -166,8 +163,7 @@ export const media = {
     } catch (err) {
       console.error("Extraction error:", err);
       const matchingSegs = [
-        ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey),
-        ...(this.timeline.motionSegments || []).filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
+        ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
       ];
       if (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey)) {
         matchingSegs.push(this.timeline.retakeVideo);
@@ -225,10 +221,9 @@ export const media = {
 
     const isRetake = seg === this.timeline?.retakeVideo;
     const isVideo = (seg.type === "video" || isRetake) && (seg.imageFile || seg._blobUrl);
-    const isMotionVideo = seg.type === "motion_video" && seg.videoFile;
-    if (!isVideo && !isMotionVideo) return;
+    if (!isVideo) return;
 
-    const fileKey = (seg.type === "video" || isRetake) ? seg.imageFile : seg.videoFile;
+    const fileKey = seg.imageFile;
     let vidUrl = seg._blobUrl;
     if (!vidUrl && fileKey) {
       const fileParts = fileKey.split(/[/\\\\]/);
@@ -471,68 +466,6 @@ export const media = {
   }
 ,
 
-  async _preloadMotionAudioSegment(seg) {
-    if (seg.isStaticImage) return;
-    if (seg._audioBuffer || seg._decodingAudio) return;
-    if (!seg.videoFile && !seg._blobUrl) return;
-
-    seg._decodingAudio = true;
-
-    try {
-      const mockSeg = {
-        audioFile: seg.videoFile || seg.fileName,
-        _blobUrl: seg._blobUrl,
-        fileSize: seg.fileSize
-      };
-
-      await this._getOrExtractAudio(mockSeg);
-
-      if (!this._isAudioDecodingAllowed(mockSeg)) {
-        seg._decodingAudio = false;
-        return;
-      }
-
-      if (!this.audioContext) {
-        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      }
-
-      const parts = (mockSeg.audioFile || "").split(/[/\\\\]/);
-      const filename = parts.pop() || '';
-      const subfolder = parts.join('/');
-      const audioUrl = mockSeg._blobUrl || api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
-
-      this._audioBufferCache = this._audioBufferCache || new Map();
-      this._audioBufferPromises = this._audioBufferPromises || new Map();
-      const cacheKey = mockSeg.audioFile || audioUrl;
-
-      let audioBuffer;
-      if (this._audioBufferCache.has(cacheKey)) {
-        audioBuffer = this._audioBufferCache.get(cacheKey);
-      } else if (this._audioBufferPromises.has(cacheKey)) {
-        audioBuffer = await this._audioBufferPromises.get(cacheKey);
-      } else {
-        const decodePromise = (async () => {
-          const resp = await fetch(audioUrl);
-          const arrayBuffer = await resp.arrayBuffer();
-          return await this.audioContext.decodeAudioData(arrayBuffer);
-        })();
-        this._audioBufferPromises.set(cacheKey, decodePromise);
-        try {
-          audioBuffer = await decodePromise;
-          this._audioBufferCache.set(cacheKey, audioBuffer);
-        } finally {
-          this._audioBufferPromises.delete(cacheKey);
-        }
-      }
-      seg._audioBuffer = audioBuffer;
-    } catch (e) {
-      console.warn("Failed to preload motion audio segment:", e);
-    } finally {
-      seg._decodingAudio = false;
-    }
-  }
-,
-
   loadMedia() {
     for (const seg of this.timeline.segments) {
       if (seg.imageB64 && !seg.imgObj) {
@@ -543,24 +476,6 @@ export const media = {
       if (seg.type === "video") {
         this._ensureVideoEl(seg);
         this._ensureThumbnails(seg);
-      }
-    }
-
-    if (this.timeline.motionSegments) {
-      const isOverrideAudio = !!(this.node.properties.overrideAudio || this.timeline.overrideAudio);
-      for (const seg of this.timeline.motionSegments) {
-        if (seg.imageB64 && !seg.imgObj) {
-          seg.imgObj = new Image();
-          seg.imgObj.onload = () => { if (!this._isDragging) this.render(); };
-          seg.imgObj.src = seg.imageB64;
-        }
-        if (seg.type === "motion_video" && !seg.isStaticImage) {
-          this._ensureVideoEl(seg);
-          this._ensureThumbnails(seg);
-          if (isOverrideAudio) {
-            this._preloadMotionAudioSegment(seg);
-          }
-        }
       }
     }
 
@@ -1115,233 +1030,6 @@ export const media = {
     }
     URL.revokeObjectURL(url);
     return thumbs.filter(Boolean);
-  }
-,
-
-  async handleMotionUpload(files, targetFrameStart = null) {
-    const frameRate = this.getFrameRate();
-
-    for (let file of files) {
-      const nameLower = file.name.toLowerCase();
-      const isVideo = file.type.startsWith("video/") || nameLower.match(/\.(mp4|webm|mkv|avi|mov|m4v|flv|wmv)$/);
-      const isImage = file.type.startsWith("image/") || nameLower.match(/\.(jpg|jpeg|png|webp|gif|bmp)$/);
-      if (!isVideo && !isImage) continue;
-
-      await new Promise(async (resolve) => {
-        try {
-          // Load from local blob immediately — no waiting for server upload
-          const blobUrl = URL.createObjectURL(file);
-
-          if (isImage) {
-            const img = new Image();
-            img.crossOrigin = "Anonymous";
-            img.onload = () => {
-              const currentDuration = this.getVisualDurationFrames();
-              const newLength = Math.max(1, currentDuration);
-              const newStart = targetFrameStart !== null ? targetFrameStart : 0;
-
-              // Generate imageB64 for workflow serialization
-              const canvas = document.createElement('canvas');
-              canvas.width = Math.min(img.width, 512);
-              canvas.height = Math.round((img.height / img.width) * canvas.width);
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              const imageB64 = canvas.toDataURL('image/jpeg', 0.85);
-
-              const seg = {
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-                type: "motion_video",
-                isStaticImage: true,
-                start: newStart,
-                length: newLength,
-                trimStart: 0,
-                videoDurationFrames: newLength,
-                videoFile: "", // filled in after upload
-                fileName: file.name,
-                videoStrength: 1.0,
-                videoAttentionStrength: 0.65,
-                resampleMode: "nearest",
-                imgObj: img,
-                imageB64: imageB64,
-                _uploading: true,
-                _blobUrl: blobUrl,
-                fileSize: file.size
-              };
-
-              this.timeline.motionSegments.push(seg);
-              this.timeline.motionSegments.sort((a, b) => a.start - b.start);
-
-              if (!this.retakeMode) {
-                this.growTimelineIfNeeded(seg.start + seg.length);
-              }
-
-              this.selectionType = "motion";
-              this.selectedIndex = this.timeline.motionSegments.findIndex(s => s.id === seg.id);
-              this.updateUIFromSelection();
-              this.commitChanges(true);
-              this.render();
-              resolve();
-
-              // Upload in background
-              this._uploadVideoFile(file).then(filePath => {
-                const currentSeg = this.timeline.motionSegments.find(s => s.id === seg.id);
-                if (currentSeg) {
-                  currentSeg.videoFile = filePath;
-                  currentSeg._uploading = false;
-                }
-                this.commitChanges(true);
-                this.render();
-              }).catch(e => {
-                console.error("Failed to upload motion image:", e);
-                const currentSeg = this.timeline.motionSegments.find(s => s.id === seg.id);
-                if (currentSeg) currentSeg._uploading = false;
-                this.render();
-              });
-            };
-            img.onerror = (e) => {
-              console.error("Image load error", e);
-              URL.revokeObjectURL(blobUrl);
-              alert("Image Load Error:\n\nFailed to load the reference sheet image preview.");
-              resolve();
-            };
-            img.src = blobUrl;
-            return;
-          }
-
-          const vid = document.createElement('video');
-          vid.crossOrigin = "Anonymous";
-          vid.preload = 'auto';
-          vid.muted = true;
-          vid.onerror = (e) => { console.error("Motion video load error", e); URL.revokeObjectURL(blobUrl); resolve(); };
-
-          vid.onloadeddata = () => {
-            vid.onloadeddata = null; // prevent re-firing if src changes or browser buffers more data
-            const clipDurationSecs = vid.duration || 1;
-            const clipFrames = Math.max(1, Math.ceil(clipDurationSecs * frameRate));
-            let newLength = clipFrames;
-            let newStart = targetFrameStart;
-
-            if (newStart === null) {
-              newStart = 0;
-              this.timeline.motionSegments.sort((a, b) => a.start - b.start);
-              for (let i = 0; i < this.timeline.motionSegments.length; i++) {
-                let s = this.timeline.motionSegments[i];
-                if (newStart + newLength <= s.start) break;
-                newStart = Math.max(newStart, s.start + s.length);
-              }
-            }
-
-            const currentDuration = this.getVisualDurationFrames();
-            if (targetFrameStart !== null) {
-              let tempId = "TEMP_" + Date.now();
-              this.timeline.motionSegments.push({ id: tempId, start: newStart, length: newLength, type: "temp" });
-              let result = this._applyCenterDragPhysics(this.timeline.motionSegments, tempId, newStart, newStart + newLength / 2, currentDuration, currentDuration, 1);
-              for (let shiftedSeg of result) {
-                let original = this.timeline.motionSegments.find(s => s.id === shiftedSeg.id);
-                if (original) original.start = shiftedSeg.resolvedStart !== undefined ? shiftedSeg.resolvedStart : shiftedSeg.start;
-              }
-              let tempSeg = this.timeline.motionSegments.find(s => s.id === tempId);
-              newStart = tempSeg.start;
-              this.timeline.motionSegments = this.timeline.motionSegments.filter(s => s.id !== tempId);
-              targetFrameStart = newStart + newLength;
-            }
-
-            const seg = {
-              id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-              type: "motion_video",
-              start: newStart,
-              length: newLength,
-              trimStart: 0,
-              videoDurationFrames: clipFrames,
-              videoFile: "",  // filled in once background upload completes
-              fileName: file.name,
-              videoStrength: 1.0,
-              videoAttentionStrength: 0.65,
-              resampleMode: "nearest",
-              previewThumbs: [],
-              previewThumbSourceFrames: clipFrames,
-              videoEl: vid,
-              _uploading: true,
-              _blobUrl: blobUrl,
-              fileSize: file.size
-            };
-
-            vid.currentTime = 0.01;
-            vid.onseeked = () => {
-              vid.onseeked = null;
-              const canvas = document.createElement('canvas');
-              canvas.width = Math.min(vid.videoWidth, 512);
-              canvas.height = Math.round((vid.videoHeight / vid.videoWidth) * canvas.width);
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-              seg.imageB64 = canvas.toDataURL('image/jpeg');
-
-              const imgObj = new Image();
-              imgObj.onload = () => { seg.imgObj = imgObj; this.render(); };
-              imgObj.src = seg.imageB64;
-
-              // Add to timeline immediately
-              this.timeline.motionSegments.push(seg);
-              this.timeline.motionSegments.sort((a, b) => a.start - b.start);
-
-              if (!this.retakeMode) {
-                this.growTimelineIfNeeded(seg.start + seg.length);
-              }
-
-              this.selectionType = "motion";
-              this.selectedIndex = this.timeline.motionSegments.findIndex(s => s.id === seg.id);
-              this.updateUIFromSelection();
-              this.commitChanges(true);
-              resolve(); // resolve immediately — don't block on upload
-              this._ensureThumbnails(seg);
-
-              // Background upload — runs while the user can already work.
-              // We intentionally do NOT change vid.src after upload — the blob URL
-              // works perfectly for local playback. Only videoFile needs updating
-              // so Python can find the file at generation time.
-              this._uploadVideoFile(file).then(filePath => {
-                for (let s of this.timeline.motionSegments) {
-                  if (s._blobUrl === blobUrl || s.id === seg.id) {
-                    s.videoFile = filePath;
-                    s._uploading = false;
-                  }
-                }
-                if (blobUrl && filePath) {
-                  this._thumbnailCache = this._thumbnailCache || new Map();
-                  this._thumbnailPromises = this._thumbnailPromises || new Map();
-                  if (this._thumbnailCache.has(blobUrl)) {
-                    this._thumbnailCache.set(filePath, this._thumbnailCache.get(blobUrl));
-                  }
-                  if (this._thumbnailPromises.has(blobUrl)) {
-                    this._thumbnailPromises.set(filePath, this._thumbnailPromises.get(blobUrl));
-                  }
-                }
-                const isOverrideAudio = !!(this.node.properties.overrideAudio || this.timeline.overrideAudio);
-                if (isOverrideAudio) {
-                  const s = this.timeline.motionSegments.find(s => s.id === seg.id);
-                  if (s) {
-                    this._preloadMotionAudioSegment(s);
-                  }
-                }
-                this.commitChanges(true);
-                this.render();
-              }).catch(err => {
-                console.error("[LTXDirector] Background motion video upload failed", err);
-                const currentSeg = this.timeline.motionSegments.find(s => s.id === seg.id);
-                if (currentSeg) currentSeg._uploading = false;
-                this.render();
-              });
-            };
-          };
-
-          vid.src = blobUrl;
-
-        } catch (err) {
-          console.error("[LTXDirector] Motion video processing failed", err);
-          resolve();
-        }
-      });
-    }
   }
 ,
 

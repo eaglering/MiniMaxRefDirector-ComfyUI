@@ -13,31 +13,25 @@ export const render = {
 
     this.ctx.clearRect(0, 0, width, height);
 
-    // Lazy load active video/motion segments
+    // Lazy load active video segments
     const targetFrame = this.currentFrame;
     if (this.retakeMode && this.timeline.retakeVideo) {
       this._ensureVideoEl(this.timeline.retakeVideo);
     } else {
       const activeSeg = this.timeline.segments.find(s => s.type === "video" && targetFrame >= s.start && targetFrame < s.start + s.length);
       if (activeSeg) this._ensureVideoEl(activeSeg);
-
-      if (this.timeline.motionSegments) {
-        const activeMotionSeg = this.timeline.motionSegments.find(s => s.type === "motion_video" && targetFrame >= s.start && targetFrame < s.start + s.length);
-        if (activeMotionSeg) this._ensureVideoEl(activeMotionSeg);
-      }
     }
 
     if (this.selectedIndex !== -1) {
       const selSeg = this.getSegmentArray(this.selectionType)[this.selectedIndex];
-      if (selSeg && (selSeg.type === "video" || selSeg.type === "motion_video")) {
+      if (selSeg && selSeg.type === "video") {
         this._ensureVideoEl(selSeg);
       }
     }
 
     if (this._isDragging && this._dragTargetId) {
-      const dragSeg = this.timeline.segments.find(s => s.id === this._dragTargetId) ||
-        (this.timeline.motionSegments && this.timeline.motionSegments.find(s => s.id === this._dragTargetId));
-      if (dragSeg && (dragSeg.type === "video" || dragSeg.type === "motion_video")) {
+      const dragSeg = this.timeline.segments.find(s => s.id === this._dragTargetId);
+      if (dragSeg && dragSeg.type === "video") {
         this._ensureVideoEl(dragSeg);
       }
     }
@@ -49,51 +43,32 @@ export const render = {
     this.ctx.fillStyle = "#141414"; // Audio track bg
     this.ctx.fillRect(0, RULER_HEIGHT + this.blockHeight, width, this.audioTrackHeight);
 
-    this.ctx.fillStyle = "#121212"; // Motion track bg
-    this.ctx.fillRect(0, RULER_HEIGHT + this.blockHeight + this.audioTrackHeight, width, this.motionTrackHeight);
-
-
-
     // Determine which track the preview belongs to.
     // _ghostTrack is set during HTML file drag-and-drop.
     // During canvas mouse drags, _ghostTrack is null, so fall back to selectionType.
     const previewIsAudio = this._ghostTrack === 'audio' ||
       (this._previewSegments && this._ghostTrack === null && this.selectionType === 'audio');
-    const previewIsMotion = this._ghostTrack === 'motion' ||
-      (this._previewSegments && this._ghostTrack === null && this.selectionType === 'motion');
-    const previewIsImage = !previewIsAudio && !previewIsMotion;
+    const previewIsImage = !previewIsAudio;
 
     let renderSegments = this.timeline.segments;
     let renderAudioSegments = this.timeline.audioSegments;
-    let renderMotionSegments = this.timeline.motionSegments;
 
     if (this._isDragging && this._multiDragPreviewTimelines) {
       if (this._multiDragPreviewTimelines.image) renderSegments = this._multiDragPreviewTimelines.image;
-      if (this._multiDragPreviewTimelines.motion) renderMotionSegments = this._multiDragPreviewTimelines.motion;
       if (this._multiDragPreviewTimelines.audio) renderAudioSegments = this._multiDragPreviewTimelines.audio;
     } else {
       const previewIsAudio = this._ghostTrack === 'audio' ||
         (this._previewSegments && this._ghostTrack === null && this.selectionType === 'audio');
-      const previewIsMotion = this._ghostTrack === 'motion' ||
-        (this._previewSegments && this._ghostTrack === null && this.selectionType === 'motion');
-      const previewIsImage = !previewIsAudio && !previewIsMotion;
+      const previewIsImage = !previewIsAudio;
 
       if (this._previewSegments && previewIsImage) renderSegments = this._previewSegments;
       else if (this._previewSiblingSegments && previewIsAudio) renderSegments = this._previewSiblingSegments;
 
       if (this._previewSegments && previewIsAudio) renderAudioSegments = this._previewSegments;
       else if (this._previewSiblingSegments && previewIsImage) renderAudioSegments = this._previewSiblingSegments;
-
-      if (this._previewSegments && previewIsMotion) renderMotionSegments = this._previewSegments;
     }
 
     const sortedSegments = [...renderSegments].sort((a, b) => {
-      const aSel = this.selectedSegmentIds.includes(a.id) ? 1 : 0;
-      const bSel = this.selectedSegmentIds.includes(b.id) ? 1 : 0;
-      return aSel - bSel;
-    });
-
-    const sortedMotionSegments = [...renderMotionSegments].sort((a, b) => {
       const aSel = this.selectedSegmentIds.includes(a.id) ? 1 : 0;
       const bSel = this.selectedSegmentIds.includes(b.id) ? 1 : 0;
       return aSel - bSel;
@@ -783,227 +758,6 @@ export const render = {
         this.ctx.globalAlpha = 1.0;
       }
 
-      // --- Draw Motion Segments ---
-      for (let i = 0; i < sortedMotionSegments.length; i++) {
-        const seg = sortedMotionSegments[i];
-        const startX = Math.floor((seg.start / totalFrames) * width);
-        const rawEndX = ((seg.start + seg.length) / totalFrames) * width;
-        const pxWidth = Math.max(1, Math.floor(rawEndX) - startX);
-        const isSelected = this.selectedSegmentIds.includes(seg.id);
-        const trackY = RULER_HEIGHT + this.blockHeight + this.audioTrackHeight;
-
-        if ((this._isDragging && this.selectionType === "motion" && seg.id === this._dragTargetId) || (this._ghostSegmentId && seg.id === this._ghostSegmentId)) {
-          this.ctx.globalAlpha = 0.65;
-        } else {
-          this.ctx.globalAlpha = 1.0;
-        }
-
-        if (seg.type === "ghost") {
-          this.ctx.fillStyle = "#1a1a1a";
-          this.ctx.fillRect(startX, trackY, pxWidth, this.motionTrackHeight);
-          this.ctx.strokeStyle = "#555";
-          this.ctx.lineWidth = 2;
-          this.ctx.setLineDash([5, 5]);
-          this.ctx.strokeRect(startX, trackY, pxWidth, this.motionTrackHeight);
-          this.ctx.setLineDash([]);
-          this.ctx.fillStyle = "#888";
-          this.ctx.textAlign = "center";
-          this.ctx.textBaseline = "middle";
-          this.ctx.font = "bold 12px sans-serif";
-          this.ctx.fillText("Drop Motion", startX + pxWidth / 2, trackY + this.motionTrackHeight / 2);
-        } else {
-          this.ctx.fillStyle = "#000";
-          this.ctx.fillRect(startX, trackY + 1, pxWidth, this.motionTrackHeight - 2);
-
-          const originalSeg = this.timeline.motionSegments.find(s => s.id === seg.id);
-          const imgObj = originalSeg ? originalSeg.imgObj : seg.imgObj;
-          const videoEl = originalSeg ? originalSeg.videoEl : seg.videoEl;
-
-          const isPlayheadOverSeg = (this.currentFrame >= seg.start && this.currentFrame < seg.start + seg.length);
-          const isScrubbingThis = this._isDragging && (this._dragTargetId === seg.id || this._dragTargetIdRight === seg.id);
-          const isLiveActive = this.isPlaying && isPlayheadOverSeg;
-
-          let drawSource = null;
-          if (isLiveActive && videoEl && videoEl.readyState >= 2) {
-            drawSource = videoEl;
-          } else {
-            if (seg.type === "motion_video" && seg.thumbnails && seg.thumbnails.length > 0) {
-              const targetTime = seg._scrubTargetSec !== undefined
-                ? seg._scrubTargetSec
-                : (isPlayheadOverSeg ? (this.currentFrame - seg.start + seg.trimStart) / this.getFrameRate() : seg.trimStart / this.getFrameRate());
-              let nearestImg = seg.thumbnails[0].img;
-              let minDiff = Infinity;
-              for (const t of seg.thumbnails) {
-                const diff = Math.abs(t.time - targetTime);
-                if (diff < minDiff) {
-                  minDiff = diff;
-                  nearestImg = t.img;
-                }
-              }
-              drawSource = nearestImg;
-            } else {
-              drawSource = imgObj && imgObj.complete ? imgObj : null;
-            }
-          }
-
-          if (drawSource && seg.type !== "ghost") {
-            const natW = drawSource.videoWidth || drawSource.naturalWidth;
-            const natH = drawSource.videoHeight || drawSource.naturalHeight;
-
-            if (natW > 0) {
-              const imgRatio = natW / natH;
-              const boxRatio = pxWidth / this.motionTrackHeight;
-              let drawW, drawH, drawX, drawY;
-              if (imgRatio > boxRatio) {
-                drawW = pxWidth; drawH = pxWidth / imgRatio;
-                drawX = startX; drawY = trackY + (this.motionTrackHeight - drawH) / 2;
-              } else {
-                drawH = this.motionTrackHeight; drawW = this.motionTrackHeight * imgRatio;
-                drawY = trackY; drawX = startX + (pxWidth - drawW) / 2;
-              }
-
-              this.ctx.save();
-              this.ctx.beginPath();
-              this.ctx.rect(startX, trackY + 1, pxWidth, this.motionTrackHeight - 2);
-              this.ctx.clip();
-
-              if (imgRatio > boxRatio) {
-                this.ctx.drawImage(drawSource, drawX, drawY, drawW, drawH);
-              } else {
-                this.ctx.drawImage(drawSource, drawX, drawY, drawW, drawH);
-                let leftX = drawX - drawW;
-                while (leftX + drawW > startX) {
-                  this.ctx.drawImage(drawSource, leftX, drawY, drawW, drawH);
-                  leftX -= drawW;
-                }
-                let rightX = drawX + drawW;
-                while (rightX < startX + pxWidth) {
-                  this.ctx.drawImage(drawSource, rightX, drawY, drawW, drawH);
-                  rightX += drawW;
-                }
-              }
-              this.ctx.restore();
-            }
-          }
-
-          if (pxWidth > 0 && seg.type !== "ghost") {
-            this.ctx.save();
-            this.ctx.beginPath();
-            this.ctx.rect(startX, trackY, pxWidth, this.motionTrackHeight);
-            this.ctx.clip();
-            this.ctx.fillStyle = "rgba(0, 0, 0, 0.60)";
-            this.ctx.fillRect(startX, trackY + 1, 75, 16);
-            this.ctx.fillStyle = "#fff";
-            this.ctx.font = "bold 10px sans-serif";
-            this.ctx.textAlign = "center";
-            this.ctx.textBaseline = "middle";
-            const label = seg.isStaticImage ? "IC-LoRA Image" : "IC-LoRA Video";
-            this.ctx.fillText(label, startX + 37, trackY + 9);
-            this.ctx.restore();
-
-            // Uploading / Loading indicator badge (bottom-left corner)
-            if ((seg._uploading || seg._extractingThumbs) && pxWidth > 60) {
-              this.ctx.save();
-              this.ctx.beginPath();
-              this.ctx.rect(startX, trackY, pxWidth, this.motionTrackHeight);
-              this.ctx.clip();
-              this.ctx.font = "bold 9px sans-serif";
-              const upText = seg._extractingThumbs ? "Loading..." : "Uploading...";
-              const upW = this.ctx.measureText(upText).width + 10;
-              this.ctx.fillStyle = "rgba(0, 14, 37, 0.7)";
-              this.ctx.fillRect(startX + 1, trackY + this.motionTrackHeight - 17, upW, 16);
-              this.ctx.fillStyle = "#fff";
-              this.ctx.textAlign = "center";
-              this.ctx.textBaseline = "middle";
-              this.ctx.fillText(upText, startX + 1 + upW / 2, trackY + this.motionTrackHeight - 9);
-              this.ctx.restore();
-            }
-
-            // Filename next to IC-LoRA Video tag
-            if (this.node.properties.showFilenames && pxWidth > 80) {
-              this.ctx.save();
-              this.ctx.beginPath();
-              this.ctx.rect(startX, trackY, pxWidth, this.motionTrackHeight);
-              this.ctx.clip();
-              let rawPath = seg.videoFile || "";
-              let fname = rawPath.split(/[/\\]/).pop() || "";
-              this.ctx.font = "9px sans-serif";
-              this.ctx.textAlign = "left";
-              this.ctx.textBaseline = "middle";
-              const maxFileTextW = pxWidth - 75 - 10;
-              if (this.ctx.measureText(fname).width > maxFileTextW) {
-                while (fname.length > 0 && this.ctx.measureText(fname + "…").width > maxFileTextW) {
-                  fname = fname.slice(0, -1);
-                }
-                fname += "…";
-              }
-              const textW = this.ctx.measureText(fname).width;
-              this.ctx.fillStyle = "rgba(0, 0, 0, 0.50)";
-              this.ctx.fillRect(startX + 76, trackY + 1, textW + 8, 16);
-              this.ctx.fillStyle = "#fff";
-              this.ctx.fillText(fname, startX + 80, trackY + 9);
-              this.ctx.restore();
-            }
-          }
-
-          // --- Global Prompt subtitle overlay ---
-          const globalPromptStr = this.getGlobalPrompt();
-          if (globalPromptStr && seg.type !== "ghost" && pxWidth > 24) {
-            const overlayH = Math.round(this.motionTrackHeight * 0.25);
-            const overlayY = trackY + this.motionTrackHeight - overlayH;
-
-            this.ctx.save();
-            this.ctx.beginPath();
-            this.ctx.rect(startX, overlayY, pxWidth, overlayH);
-            this.ctx.clip();
-
-            // Translucent background
-            this.ctx.fillStyle = "rgba(0, 0, 0, 0.60)";
-            this.ctx.fillRect(startX, overlayY, pxWidth, overlayH);
-
-            // Text
-            const fontSize = Math.min(11, overlayH * 0.58);
-            this.ctx.font = `${fontSize}px sans-serif`;
-            this.ctx.fillStyle = "#e0e3ed";
-            this.ctx.textAlign = "center";
-            this.ctx.textBaseline = "middle";
-
-            // Measure and truncate to single line
-            const maxTextW = pxWidth - 10;
-            let label = globalPromptStr;
-            if (this.ctx.measureText(label).width > maxTextW) {
-              while (label.length > 0 && this.ctx.measureText(label + "…").width > maxTextW) {
-                label = label.slice(0, -1);
-              }
-              label += "…";
-            }
-
-            this.ctx.fillText(label, startX + pxWidth / 2, overlayY + overlayH / 2);
-            this.ctx.restore();
-          }
-
-          if (isSelected) {
-            this.ctx.strokeStyle = "#fff";
-            this.ctx.lineWidth = 2;
-            this.ctx.strokeRect(startX, trackY + 1, pxWidth, this.motionTrackHeight - 2);
-            if (!this.isMultiSelectActive()) {
-              this.ctx.fillStyle = "#fff";
-              this.ctx.beginPath();
-              this.ctx.roundRect(startX, trackY + this.motionTrackHeight / 2 - 12, 4, 24, 2);
-              this.ctx.fill();
-              this.ctx.beginPath();
-              this.ctx.roundRect(startX + pxWidth - 4, trackY + this.motionTrackHeight / 2 - 12, 4, 24, 2);
-              this.ctx.fill();
-            }
-          } else {
-            this.ctx.strokeStyle = "#000";
-            this.ctx.lineWidth = 1.5;
-            this.ctx.strokeRect(startX, trackY + 1, pxWidth, this.motionTrackHeight - 2);
-          }
-        }
-        this.ctx.globalAlpha = 1.0;
-      }
-
       // --- Draw Audio Segments ---
       for (let i = 0; i < sortedAudioSegments.length; i++) {
         const seg = sortedAudioSegments[i];
@@ -1049,9 +803,6 @@ export const render = {
       }
       if (!this.audioTrackEnabled) {
         this.ctx.fillRect(0, RULER_HEIGHT + this.blockHeight, width, this.audioTrackHeight);
-      }
-      if (!this.motionTrackEnabled) {
-        this.ctx.fillRect(0, RULER_HEIGHT + this.blockHeight + this.audioTrackHeight, width, this.motionTrackHeight);
       }
     }
 
@@ -1176,7 +927,7 @@ export const render = {
       if (startFrames > 0) {
         const startX = (startFrames / totalFrames) * width;
         this.ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-        this.ctx.fillRect(0, RULER_HEIGHT, startX, this.blockHeight + this.motionTrackHeight + this.audioTrackHeight);
+        this.ctx.fillRect(0, RULER_HEIGHT, startX, this.blockHeight + this.audioTrackHeight);
         this.ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
         this.ctx.fillRect(0, 0, startX, RULER_HEIGHT);
       }
@@ -1185,7 +936,7 @@ export const render = {
         const cutoffX = (outputFrames / totalFrames) * width;
         // Semi-transparent black overlay on both tracks
         this.ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-        this.ctx.fillRect(cutoffX, RULER_HEIGHT, width - cutoffX, this.blockHeight + this.motionTrackHeight + this.audioTrackHeight);
+        this.ctx.fillRect(cutoffX, RULER_HEIGHT, width - cutoffX, this.blockHeight + this.audioTrackHeight);
         // Subtle tinted ruler overlay
         this.ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
         this.ctx.fillRect(cutoffX, 0, width - cutoffX, RULER_HEIGHT);
@@ -1217,7 +968,7 @@ export const render = {
     const grabBarW = 4;
     const grabBarH = 50;
     const grabBarX = this.viewport.scrollLeft + this.viewport.clientWidth - grabBarW - 3;
-    const grabBarY = RULER_HEIGHT + (this.blockHeight + this.motionTrackHeight + this.audioTrackHeight - grabBarH) / 2;
+    const grabBarY = RULER_HEIGHT + (this.blockHeight + this.audioTrackHeight - grabBarH) / 2;
 
     this.ctx.fillStyle = "rgba(40, 40, 40, 0.6)";
     this.ctx.beginPath();

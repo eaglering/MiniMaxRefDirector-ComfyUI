@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
+import random
 import traceback
 
 from aiohttp import web
+from lib.image import load_image_tensor
+from lib.prompt import generate_h3_prompt, image_analysis
+from lib.utils import parse_generated_json
 from server import PromptServer
 
 from .api_config import api_config_manager
-
+from .lib.llm import generate_prompt_with_llama
 
 API_PREFIX = "/minimax_ref/api"
 
@@ -50,6 +54,46 @@ async def unload_llama_models(request: web.Request) -> web.Response:
 
         _unload()
         return web.json_response({"success": True, "unloaded": True})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+async def generate_image_analysis(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+        image_path = data.get("image_path", "")
+        prompt = data.get("prompt", "")
+        gguf_path = data.get("gguf_path", "")
+        mmproj_path = data.get("mmproj_path", "")
+        seed = data.get("seed", 42)
+        if not prompt:
+            return web.json_response({"success": False, "error": "prompt is required"}, status=400)
+        if not gguf_path:
+            return web.json_response({"success": False, "error": "gguf_path is required"}, status=400)
+        if not mmproj_path:
+            return web.json_response({"success": False, "error": "mmproj_path is required"}, status=400)
+        prompt_data = image_analysis(gguf_path, mmproj_path, prompt, image_path, seed)
+        return web.json_response({"success": True, "prompt_data": prompt_data})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+async def generate_prompt_json(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+        image_path = data.get("image_path", "")
+        prompt = data.get("prompt", "")
+        gguf_path = data.get("gguf_path", "")
+        mmproj_path = data.get("mmproj_path", "")
+        seed = data.get("seed", 42)
+        if not prompt:
+            return web.json_response({"success": False, "error": "prompt is required"}, status=400)
+        if not gguf_path:
+            return web.json_response({"success": False, "error": "gguf_path is required"}, status=400)
+        if not mmproj_path:
+            return web.json_response({"success": False, "error": "mmproj_path is required"}, status=400)
+        json_data = generate_h3_prompt(gguf_path, mmproj_path, prompt, image_path, seed)
+        return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)

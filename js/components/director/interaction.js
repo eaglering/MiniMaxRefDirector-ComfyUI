@@ -4,7 +4,7 @@ import { HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, RULER_HEIGHT, app, clamp } from "./s
 
 export const interaction = {
   _liveScrubVideo(seg, edge) {
-    if (!seg || (seg.type !== "video" && seg.type !== "motion_video")) return;
+    if (!seg || seg.type !== "video") return;
     this._ensureVideoEl(seg);
     if (!seg.videoEl) return;
     const targetSec = edge === "end"
@@ -12,7 +12,8 @@ export const interaction = {
       : seg.trimStart / this.getFrameRate();
 
     seg._scrubTargetSec = targetSec;
-  },
+  }
+,
 
   _liveScrubPlayhead() {
     const targetFrame = this.currentFrame;
@@ -34,16 +35,8 @@ export const interaction = {
         seg._scrubTargetSec = targetSec;
       }
     }
-
-    const motionSeg = this.timeline.motionSegments.find(s => s.type === "motion_video" && targetFrame >= s.start && targetFrame < s.start + s.length);
-    if (motionSeg) {
-      this._ensureVideoEl(motionSeg);
-      if (motionSeg.videoEl) {
-        const targetSec = (motionSeg.trimStart + (targetFrame - motionSeg.start)) / this.getFrameRate();
-        motionSeg._scrubTargetSec = targetSec;
-      }
-    }
-  },
+  }
+,
 
   getSnappedPlayhead(mouseFrameX, logicalWidth) {
     if (!this.isSnapping) return mouseFrameX;
@@ -73,7 +66,6 @@ export const interaction = {
 
     const allTracks = [
       this.timeline.segments || [],
-      this.timeline.motionSegments || [],
       this.timeline.audioSegments || []
     ];
     for (const track of allTracks) {
@@ -93,13 +85,14 @@ export const interaction = {
       }
     }
     return bestFrame;
-  },
+  }
+,
 
   getTrackFromY(y) {
-    if (y > RULER_HEIGHT + this.blockHeight + this.audioTrackHeight) return "motion";
     if (y > RULER_HEIGHT + this.blockHeight) return "audio";
     return "image";
-  },
+  }
+,
 
   getHitTest(mouseX, mouseY) {
     const width = this.canvas.offsetWidth;
@@ -204,7 +197,8 @@ export const interaction = {
     }
 
     return null;
-  },
+  }
+,
 
   onMouseDown(e) {
     if (e.button === 2 && this.retakeMode) {
@@ -256,18 +250,10 @@ export const interaction = {
     // Track height dividers only apply in normal timeline mode.
     if (!this.retakeMode) {
       const isOverDivider = Math.abs(y - (RULER_HEIGHT + this.blockHeight)) <= 8;
-      const isOverAudioDivider = Math.abs(y - (RULER_HEIGHT + this.blockHeight + this.audioTrackHeight)) <= 8;
       if (isOverDivider) {
         this._isDragging = true;
         this._dragType = "divider";
         this._startBlockHeight = this.blockHeight;
-        this._startAudioTrackHeight = this.audioTrackHeight;
-        this._startY = y;
-        return;
-      } else if (isOverAudioDivider) {
-        this._isDragging = true;
-        this._dragType = "audio_divider";
-        this._startMotionTrackHeight = this.motionTrackHeight;
         this._startAudioTrackHeight = this.audioTrackHeight;
         this._startY = y;
         return;
@@ -469,7 +455,6 @@ export const interaction = {
       this._isMultiDraggingAndMoved = false;
       this._multiDragInitialSegments = {
         image: this.timeline.segments.map(s => ({ ...s })),
-        motion: this.timeline.motionSegments.map(s => ({ ...s })),
         audio: this.timeline.audioSegments.map(s => ({ ...s }))
       };
       this._multiDragPreviewTimelines = null;
@@ -495,7 +480,7 @@ export const interaction = {
       this._previewSiblingSegments = null;
       this._dragStartX = x;
       this._dragInitialTimeline = targetArray.map(s => ({ ...s }));
-      this._dragInitialSiblingTimeline = this.selectionType === "motion" ? null : (this.selectionType === "audio" ? this.timeline.segments : this.timeline.audioSegments).map(s => ({ ...s }));
+      this._dragInitialSiblingTimeline = (this.selectionType === "audio" ? this.timeline.segments : this.timeline.audioSegments).map(s => ({ ...s }));
 
       if (hit.type !== "joint") {
         this._dragTargetId = targetArray[hit.index].id;
@@ -507,7 +492,8 @@ export const interaction = {
     }
 
     this.render();
-  },
+  }
+,
 
   onMouseMove(e) {
     const { x: mouseX, y: mouseY } = this.getMousePos(e);
@@ -576,13 +562,12 @@ export const interaction = {
       }
 
       const isOverDivider = Math.abs(mouseY - (RULER_HEIGHT + this.blockHeight)) <= 8;
-      const isOverAudioDivider = Math.abs(mouseY - (RULER_HEIGHT + this.blockHeight + this.audioTrackHeight)) <= 8;
       const visibleBottom = Math.min(this.canvasHeight, this.viewport.scrollTop + this.viewport.clientHeight);
       const isAtBottom = Math.abs(mouseY - visibleBottom) <= 15;
       const viewRect = this.viewport.getBoundingClientRect();
       const isAtRightEdge = Math.abs(e.clientX - viewRect.right) <= 20;
       const hit = this.getHitTest(mouseX, mouseY);
-      if (isOverDivider || isOverAudioDivider || isAtBottom) {
+      if (isOverDivider || isAtBottom) {
         this.canvas.style.cursor = "ns-resize";
       } else if (isAtRightEdge) {
         this.canvas.style.cursor = "ew-resize";
@@ -785,40 +770,12 @@ export const interaction = {
       return;
     }
 
-    if (this._dragType === "audio_divider") {
-      this.canvas.style.cursor = "ns-resize";
-      const deltaY = mouseY - this._startY;
-
-      const minMotionH = 50;
-      const minAudioH = 50;
-
-      // Divider moves down: audio gets bigger, motion gets smaller
-      let newAudioTrackHeight = this._startAudioTrackHeight + deltaY;
-      let newMotionTrackHeight = this._startMotionTrackHeight - deltaY;
-
-      if (newAudioTrackHeight < minAudioH) {
-        newAudioTrackHeight = minAudioH;
-        newMotionTrackHeight = this._startAudioTrackHeight + this._startMotionTrackHeight - minAudioH;
-      }
-      if (newMotionTrackHeight < minMotionH) {
-        newMotionTrackHeight = minMotionH;
-        newAudioTrackHeight = this._startAudioTrackHeight + this._startMotionTrackHeight - minMotionH;
-      }
-
-      this.motionTrackHeight = newMotionTrackHeight;
-      this.audioTrackHeight = newAudioTrackHeight;
-
-      this.updateSidebarHeights();
-      this.render();
-      return;
-    }
-
     if (this._dragType === "height_resize") {
       this.canvas.style.cursor = "ns-resize";
       const deltaY = mouseY - this._startY;
 
       this.blockHeight = Math.max(100, this._startBlockHeight + deltaY);
-      this.canvasHeight = this.rulerHeight + this.blockHeight + this.motionTrackHeight + this.audioTrackHeight;
+      this.canvasHeight = this.rulerHeight + this.blockHeight + this.audioTrackHeight;
 
       this.canvas.style.height = `${this.canvasHeight}px`;
 
@@ -878,7 +835,7 @@ export const interaction = {
       let maxLeftShift = Infinity;
       let maxRightShift = Infinity;
 
-      for (const track of ["image", "motion", "audio"]) {
+      for (const track of ["image", "audio"]) {
         const allTrackSegs = this._multiDragInitialSegments[track];
         if (!allTrackSegs) continue;
         const selectedOnTrack = allTrackSegs.filter(s => selectedIds.includes(s.id));
@@ -924,7 +881,7 @@ export const interaction = {
           snapCandidates.push(parseInt(this.endFramesWidget.value, 10));
         }
 
-        for (const track of ["image", "motion", "audio"]) {
+        for (const track of ["image", "audio"]) {
           const allTrackSegs = this._multiDragInitialSegments[track];
           if (!allTrackSegs) continue;
           const nonSelectedOnTrack = allTrackSegs.filter(s => !selectedIds.includes(s.id));
@@ -935,7 +892,7 @@ export const interaction = {
         }
 
         // Test all selected segments against candidates
-        for (const track of ["image", "motion", "audio"]) {
+        for (const track of ["image", "audio"]) {
           const allTrackSegs = this._multiDragInitialSegments[track];
           if (!allTrackSegs) continue;
           const selectedOnTrack = allTrackSegs.filter(s => selectedIds.includes(s.id));
@@ -976,12 +933,6 @@ export const interaction = {
           }
           return s;
         }),
-        motion: this._multiDragInitialSegments.motion.map(s => {
-          if (selectedIds.includes(s.id)) {
-            return { ...s, start: s.start + clampedDragDelta };
-          }
-          return s;
-        }),
         audio: this._multiDragInitialSegments.audio.map(s => {
           if (selectedIds.includes(s.id)) {
             return { ...s, start: s.start + clampedDragDelta };
@@ -991,12 +942,10 @@ export const interaction = {
       };
 
       // Scrub support for video segments being moved
-      for (const track of ["image", "motion"]) {
-        const prevSegs = this._multiDragPreviewTimelines[track];
-        for (const s of prevSegs) {
-          if (selectedIds.includes(s.id) && (s.type === "video" || s.type === "motion_video")) {
-            this._liveScrubVideo(s, "start");
-          }
+      const prevSegs = this._multiDragPreviewTimelines.image;
+      for (const s of prevSegs) {
+        if (selectedIds.includes(s.id) && s.type === "video") {
+          this._liveScrubVideo(s, "start");
         }
       }
 
@@ -1053,7 +1002,6 @@ export const interaction = {
           }
           const allTracks = [
             this.timeline.segments || [],
-            this.timeline.motionSegments || [],
             this.timeline.audioSegments || []
           ];
           const ignoreIds = [String(this._dragTargetId), String(this._dragTargetIdRight)];
@@ -1107,7 +1055,6 @@ export const interaction = {
           }
           const allTracks = [
             this.timeline.segments || [],
-            this.timeline.motionSegments || [],
             this.timeline.audioSegments || []
           ];
           const ignoreSegmentIds = [String(this._dragTargetId)];
@@ -1154,7 +1101,7 @@ export const interaction = {
           }
         }
 
-        if ((this.selectionType === "audio" || t[targetIdx].type === "video" || t[targetIdx].type === "motion_video") && !t[targetIdx].isStaticImage) {
+        if ((this.selectionType === "audio" || t[targetIdx].type === "video") && !t[targetIdx].isStaticImage) {
           const origDur = t[targetIdx].audioDurationFrames || t[targetIdx].videoDurationFrames || t[targetIdx].length;
           maxPossibleLength = Math.min(maxPossibleLength, origDur - (t[targetIdx].trimStart || 0));
         }
@@ -1176,7 +1123,6 @@ export const interaction = {
           }
           const allTracks = [
             this.timeline.segments || [],
-            this.timeline.motionSegments || [],
             this.timeline.audioSegments || []
           ];
           const ignoreSegmentIds = [String(this._dragTargetId)];
@@ -1223,7 +1169,7 @@ export const interaction = {
           }
         }
 
-        if ((this.selectionType === "audio" || t[targetIdx].type === "video" || t[targetIdx].type === "motion_video") && !t[targetIdx].isStaticImage) {
+        if ((this.selectionType === "audio" || t[targetIdx].type === "video") && !t[targetIdx].isStaticImage) {
           minPossibleStart = Math.max(minPossibleStart, t[targetIdx].start - (t[targetIdx].trimStart || 0));
         }
 
@@ -1233,7 +1179,7 @@ export const interaction = {
         let diff = newStart - t[targetIdx].start;
         t[targetIdx].start = newStart;
         t[targetIdx].length -= diff;
-        if ((this.selectionType === "audio" || t[targetIdx].type === "video" || t[targetIdx].type === "motion_video") && !t[targetIdx].isStaticImage) {
+        if ((this.selectionType === "audio" || t[targetIdx].type === "video") && !t[targetIdx].isStaticImage) {
           t[targetIdx].trimStart += diff;
         }
 
@@ -1259,7 +1205,6 @@ export const interaction = {
           }
           const allTracks = [
             this.timeline.segments || [],
-            this.timeline.motionSegments || [],
             this.timeline.audioSegments || []
           ];
           const ignoreSegmentIds = [String(this._dragTargetId)];
@@ -1382,7 +1327,8 @@ export const interaction = {
 
     this.updateUIFromSelection(); // Live update of trim values
     this.render();
-  },
+  }
+,
 
   _applyCenterDragPhysics(initT, D_id, D_mouse_start, mouseFrameX, durationFrames, totalFrames, logicalWidth, forceStart = false) {
     let t_copy = initT.map(s => ({ ...s }));
@@ -1463,7 +1409,8 @@ export const interaction = {
     }
 
     return result;
-  },
+  }
+,
 
   _resolveGlobalPhysics(activeTimeline, siblingTimeline, durationFrames, activeInitial, siblingInitial) {
     if (!siblingTimeline) return;
@@ -1572,7 +1519,8 @@ export const interaction = {
         sweepTrack(siblingTimeline, syncedSiblingIndices);
       }
     }
-  },
+  }
+,
 
   _restoreTransientProperties(copiedSegs, originalSegs) {
     if (!copiedSegs || !originalSegs) return;
@@ -1589,7 +1537,8 @@ export const interaction = {
         if (orig._extractingThumbs !== undefined) ps._extractingThumbs = orig._extractingThumbs;
       }
     }
-  },
+  }
+,
 
   onMouseUp(e) {
     document.body.style.userSelect = "";
@@ -1638,12 +1587,10 @@ export const interaction = {
     };
 
     commitScrub(this.timeline.segments);
-    commitScrub(this.timeline.motionSegments);
     commitScrub(this._previewSegments);
     commitScrub(this._previewSiblingSegments);
     if (this._multiDragPreviewTimelines) {
       commitScrub(this._multiDragPreviewTimelines.image);
-      commitScrub(this._multiDragPreviewTimelines.motion);
     }
 
     if (this._isDragging) {
@@ -1664,22 +1611,6 @@ export const interaction = {
         if (this._multiDragPreviewTimelines.image) {
           this.timeline.segments = this._multiDragPreviewTimelines.image.map(ps => {
             const orig = this.timeline.segments.find(s => s.id === ps.id);
-            if (orig) {
-              if (orig.imgObj) ps.imgObj = orig.imgObj;
-              if (orig.videoEl) ps.videoEl = orig.videoEl;
-              if (orig.thumbnails) ps.thumbnails = orig.thumbnails;
-              if (orig._extractingThumbs !== undefined) ps._extractingThumbs = orig._extractingThumbs;
-              if (orig._uploading !== undefined) ps._uploading = orig._uploading;
-              if (orig._decoding !== undefined) ps._decoding = orig._decoding;
-              if (orig._blobUrl !== undefined) ps._blobUrl = orig._blobUrl;
-              if (orig._audioBuffer !== undefined) ps._audioBuffer = orig._audioBuffer;
-            }
-            return ps;
-          });
-        }
-        if (this._multiDragPreviewTimelines.motion) {
-          this.timeline.motionSegments = this._multiDragPreviewTimelines.motion.map(ps => {
-            const orig = this.timeline.motionSegments.find(s => s.id === ps.id);
             if (orig) {
               if (orig.imgObj) ps.imgObj = orig.imgObj;
               if (orig.videoEl) ps.videoEl = orig.videoEl;
@@ -1734,9 +1665,6 @@ export const interaction = {
         if (this.selectionType === "audio") {
           this.timeline.audioSegments = mappedArray;
           if (this._dragTargetId) this.selectedIndex = this.timeline.audioSegments.findIndex(s => s.id === this._dragTargetId);
-        } else if (this.selectionType === "motion") {
-          this.timeline.motionSegments = mappedArray;
-          if (this._dragTargetId) this.selectedIndex = this.timeline.motionSegments.findIndex(s => s.id === this._dragTargetId);
         } else {
           this.timeline.segments = mappedArray;
           if (this._dragTargetId) this.selectedIndex = this.timeline.segments.findIndex(s => s.id === this._dragTargetId);
@@ -1780,7 +1708,7 @@ export const interaction = {
 
         let foundIdx = -1;
         let foundTrack = "image";
-        for (const track of ["image", "motion", "audio"]) {
+        for (const track of ["image", "audio"]) {
           const arr = this.getSegmentArray(track);
           const idx = arr.findIndex(s => s.id === clickedId);
           if (idx !== -1) {
