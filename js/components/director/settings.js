@@ -371,302 +371,176 @@ export const settings = {
     const menu = document.createElement("div");
     menu.className = "pr-settings-menu";
 
+    // --- 闭包辅助（配置驱动构建，替代重复的 DOM 样板） ---
+    const fire = (w, val) => {
+      w.value = val;
+      if (w.callback) { try { w.callback(val, app.canvas, this.node, null, null); } catch (e) { } }
+      if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
+    };
+    const divider = () => { const d = document.createElement("div"); d.className = "pr-settings-divider"; return d; };
+    const btn = (text, onClick, style) => {
+      const b = document.createElement("button");
+      b.className = "pr-settings-toggle-btn";
+      b.textContent = text;
+      if (style) Object.assign(b.style, style);
+      b.addEventListener("click", onClick);
+      return b;
+    };
+    const segmented = (options, value, onChange) => {
+      const ctrl = document.createElement("div");
+      ctrl.className = "pr-segmented-control";
+      const segs = {};
+      for (const opt of options) {
+        const s = document.createElement("div");
+        s.className = "pr-segment" + (String(opt.value) === String(value) ? " active" : "");
+        s.textContent = opt.label;
+        s.addEventListener("click", () => {
+          for (const k in segs) segs[k].classList.toggle("active", k === opt.value);
+          onChange(opt.value);
+        });
+        ctrl.appendChild(s);
+        segs[opt.value] = s;
+      }
+      return ctrl;
+    };
+    const scrub = (w, step, min, max, isFloat) => {
+      const container = document.createElement("div");
+      container.className = "pr-number-control";
+      const mkBtn = (label, act) => {
+        const b = document.createElement("button");
+        b.className = "pr-number-btn";
+        b.textContent = label;
+        b.addEventListener("click", act);
+        container.appendChild(b);
+        return b;
+      };
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.className = "pr-settings-input";
+      inp.value = w.value;
+      inp.step = String(step);
+      inp.min = String(min);
+      inp.max = String(max);
+      const commit = (val) => {
+        inp.value = isFloat ? val.toFixed(4) : Math.round(val);
+        fire(w, parseFloat(inp.value));
+      };
+      const nudge = (d) => commit(Math.min(max, Math.max(min, parseFloat(inp.value) + d * step)));
+      mkBtn("-", () => nudge(-1));
+      container.appendChild(inp);
+      mkBtn("+", () => nudge(1));
+      inp.addEventListener("change", () => {
+        let val = parseFloat(inp.value);
+        if (isNaN(val)) val = w.value;
+        commit(Math.min(max, Math.max(min, val)));
+      });
+      inp.style.cursor = "ew-resize";
+      inp.addEventListener("mousedown", (e) => {
+        const startX = e.clientX;
+        const startVal = parseFloat(inp.value);
+        let dragging = false, moved = false;
+        const onMove = (me) => {
+          const dx = me.clientX - startX;
+          if (Math.abs(dx) > 3) { moved = true; dragging = true; }
+          if (dragging) {
+            me.preventDefault();
+            commit(Math.min(max, Math.max(min, startVal + dx * (isFloat ? 0.001 : 0.5))));
+          }
+        };
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+          if (!moved) { inp.focus(); inp.select(); }
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+      return container;
+    };
+
     // Title & Close Button Container
     const titleContainer = document.createElement("div");
     titleContainer.className = "pr-settings-title";
     titleContainer.style.display = "flex";
     titleContainer.style.justifyContent = "space-between";
     titleContainer.style.alignItems = "center";
-
     const titleText = document.createElement("span");
     titleText.textContent = "Timeline Settings";
     titleContainer.appendChild(titleText);
-
     const closeBtn = document.createElement("button");
     closeBtn.className = "pr-settings-close-btn";
     closeBtn.innerHTML = ICONS.close;
     closeBtn.title = "Close Settings";
     closeBtn.addEventListener("click", () => this.dismissSettingsMenu());
     titleContainer.appendChild(closeBtn);
-
     menu.appendChild(titleContainer);
 
-    // --- Save / Load / Show Widgets Grid (2x2) ---
-    const gridContainer = document.createElement("div");
-    gridContainer.style.display = "grid";
-    gridContainer.style.gridTemplateColumns = "repeat(2, 1fr)";
-    gridContainer.style.gap = "6px";
-    gridContainer.style.marginBottom = "4px";
-
-    const btnSave = document.createElement("button");
-    btnSave.className = "pr-settings-toggle-btn";
-    btnSave.textContent = "Save Timeline";
-    btnSave.addEventListener("click", () => this.handleSaveTimeline());
-    gridContainer.appendChild(btnSave);
-
-    const btnSaveAs = document.createElement("button");
-    btnSaveAs.className = "pr-settings-toggle-btn";
-    btnSaveAs.textContent = "Save Timeline As";
-    btnSaveAs.addEventListener("click", () => this.handleSaveTimelineAs());
-    gridContainer.appendChild(btnSaveAs);
-
-    const btnLoad = document.createElement("button");
-    btnLoad.className = "pr-settings-toggle-btn";
-    btnLoad.textContent = "Load Timeline";
-    btnLoad.addEventListener("click", () => this.handleLoadTimeline());
-    gridContainer.appendChild(btnLoad);
-
-    // --- Show/Hide on Node Toggle ---
-    const toggleBtn = document.createElement("button");
-    toggleBtn.className = "pr-settings-toggle-btn";
-    const widgetsVisible = !!(this.node.widgets?.find(w => w.name === "display_mode" && !(w.options && w.options.hidden)));
-    toggleBtn.textContent = widgetsVisible ? "Hide Widgets" : "Show Widgets";
-    toggleBtn.addEventListener("click", () => {
-      const nowVisible = !!(this.node.widgets?.find(w => w.name === "display_mode" && !(w.options && w.options.hidden)));
-      if (nowVisible) {
+    // Save / Load / Toggle Widgets grid (2x2)
+    const grid = document.createElement("div");
+    grid.style.display = "grid";
+    grid.style.gridTemplateColumns = "repeat(2, 1fr)";
+    grid.style.gap = "6px";
+    grid.style.marginBottom = "4px";
+    for (const { text, onClick } of [
+      { text: "Save Timeline", onClick: () => this.handleSaveTimeline() },
+      { text: "Save Timeline As", onClick: () => this.handleSaveTimelineAs() },
+      { text: "Load Timeline", onClick: () => this.handleLoadTimeline() },
+    ]) grid.appendChild(btn(text, onClick));
+    const widgetsVisible = () => !!(this.node.widgets?.find(w => w.name === "display_mode" && !(w.options && w.options.hidden)));
+    const toggleBtn = btn(widgetsVisible() ? "Hide Widgets" : "Show Widgets", () => {
+      if (widgetsVisible()) {
         this.hideSettingsWidgets();
-        const stillVisible = !!(this.node.widgets?.find(w => w.name === "display_mode" && !(w.options && w.options.hidden)));
-        toggleBtn.textContent = stillVisible ? "Hide Widgets" : "Show Widgets";
       } else {
         this.showSettingsWidgets();
-        toggleBtn.textContent = "Hide Widgets";
       }
+      toggleBtn.textContent = widgetsVisible() ? "Hide Widgets" : "Show Widgets";
     });
-    gridContainer.appendChild(toggleBtn);
+    grid.appendChild(toggleBtn);
+    menu.appendChild(grid);
+    menu.appendChild(divider());
 
-    menu.appendChild(gridContainer);
-
-    const div2 = document.createElement("hr");
-    div2.className = "pr-settings-divider";
-    menu.appendChild(div2);
-
-    // Helper: fire a widget's callback safely
-    const fireCallback = (w, val) => {
-      w.value = val;
-      if (w.callback) {
-        try { w.callback(val, app.canvas, this.node, null, null); } catch (e) { }
-      }
-      if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
-    };
-
-    // --- Display Mode ---
+    // Display Mode segmented control
     const dmWidget = this.node.widgets?.find(w => w.name === "display_mode");
     if (dmWidget) {
-      const ctrl = document.createElement("div");
-      ctrl.className = "pr-segmented-control";
-
-      const framesSeg = document.createElement("div");
-      framesSeg.className = "pr-segment";
-      framesSeg.textContent = "Frames";
-
-      const secondsSeg = document.createElement("div");
-      secondsSeg.className = "pr-segment";
-      secondsSeg.textContent = "Seconds";
-
-      const updateActive = (val) => {
-        if (val === "frames") {
-          framesSeg.classList.add("active");
-          secondsSeg.classList.remove("active");
-        } else {
-          secondsSeg.classList.add("active");
-          framesSeg.classList.remove("active");
+      menu.appendChild(this._makeSettingRow("Display Mode", segmented(
+        [{ value: "seconds", label: "Seconds" }, { value: "frames", label: "Frames" }],
+        dmWidget.value,
+        (val) => {
+          fire(dmWidget, val);
+          if (this.updateWidgetVisibility) this.updateWidgetVisibility();
+          if (this.updateUIFromSelection) this.updateUIFromSelection();
+          this.render();
         }
-      };
+      )));
+    }
 
-      updateActive(dmWidget.value);
-
-      const onSegClick = (val) => {
-        fireCallback(dmWidget, val);
-        updateActive(val);
-        // Update ruler/timecode immediately
-        if (this.updateWidgetVisibility) this.updateWidgetVisibility();
-        if (this.updateUIFromSelection) this.updateUIFromSelection();
+    // Show Filenames segmented control
+    menu.appendChild(this._makeSettingRow("Show Filenames", segmented(
+      [{ value: "true", label: "On" }, { value: "false", label: "Off" }],
+      !!this.node.properties.showFilenames,
+      (val) => {
+        this.node.properties.showFilenames = val === "true";
         this.render();
-      };
-
-      framesSeg.addEventListener("click", () => onSegClick("frames"));
-      secondsSeg.addEventListener("click", () => onSegClick("seconds"));
-
-      ctrl.appendChild(secondsSeg);
-      ctrl.appendChild(framesSeg);
-
-      menu.appendChild(this._makeSettingRow("Display Mode", ctrl));
-    }
-
-
-
-    // --- Show Filenames Toggle ---
-    const showFnameCtrl = document.createElement("div");
-    showFnameCtrl.className = "pr-segmented-control";
-
-    const offSeg = document.createElement("div");
-    offSeg.className = "pr-segment";
-    offSeg.textContent = "Off";
-
-    const onSeg = document.createElement("div");
-    onSeg.className = "pr-segment";
-    onSeg.textContent = "On";
-
-    const updateFnameActive = (isEnabled) => {
-      if (isEnabled) {
-        onSeg.classList.add("active");
-        offSeg.classList.remove("active");
-      } else {
-        offSeg.classList.add("active");
-        onSeg.classList.remove("active");
+        this.commitChanges(true);
       }
-    };
+    )));
 
-    updateFnameActive(!!this.node.properties.showFilenames);
+    menu.appendChild(divider());
 
-    const onFnameSegClick = (isEnabled) => {
-      this.node.properties.showFilenames = isEnabled;
-      updateFnameActive(isEnabled);
-      this.render();
-      this.commitChanges(true);
-    };
-
-    offSeg.addEventListener("click", () => onFnameSegClick(false));
-    onSeg.addEventListener("click", () => onFnameSegClick(true));
-
-    showFnameCtrl.appendChild(onSeg);
-    showFnameCtrl.appendChild(offSeg);
-
-    menu.appendChild(this._makeSettingRow("Show Filenames", showFnameCtrl));
-
-    const divider2 = document.createElement("div");
-    divider2.className = "pr-settings-divider";
-    menu.appendChild(divider2);
-
-    // Helper to create scrubbable number control with horizontal buttons
-    const createScrubbableNumberControl = (w, step, min, max, isFloat = false) => {
-      const container = document.createElement("div");
-      container.className = "pr-number-control";
-
-      const decBtn = document.createElement("button");
-      decBtn.className = "pr-number-btn";
-      decBtn.textContent = "-";
-
-      const inp = document.createElement("input");
-      inp.type = "number";
-      inp.className = "pr-settings-input";
-      inp.value = w.value;
-      inp.step = step.toString();
-      inp.min = min.toString();
-      inp.max = max.toString();
-
-      const incBtn = document.createElement("button");
-      incBtn.className = "pr-number-btn";
-      incBtn.textContent = "+";
-
-      decBtn.addEventListener("click", () => {
-        let val = parseFloat(inp.value) - step;
-        if (val < min) val = min;
-        inp.value = isFloat ? val.toFixed(4) : Math.round(val);
-        fireCallback(w, parseFloat(inp.value));
-      });
-
-      incBtn.addEventListener("click", () => {
-        let val = parseFloat(inp.value) + step;
-        if (val > max) val = max;
-        inp.value = isFloat ? val.toFixed(4) : Math.round(val);
-        fireCallback(w, parseFloat(inp.value));
-      });
-
-      inp.addEventListener("change", () => {
-        let val = parseFloat(inp.value);
-        if (isNaN(val)) val = w.value;
-        if (val < min) val = min;
-        if (val > max) val = max;
-        inp.value = isFloat ? val.toFixed(4) : Math.round(val);
-        fireCallback(w, parseFloat(inp.value));
-      });
-
-      // Dragging logic
-      let isDragging = false;
-      let startX = 0;
-      let startVal = 0;
-      let hasMoved = false;
-
-      inp.style.cursor = "ew-resize";
-
-      inp.addEventListener("mousedown", (e) => {
-        startX = e.clientX;
-        startVal = parseFloat(inp.value);
-        hasMoved = false;
-
-        const onMouseMove = (moveEvent) => {
-          const deltaX = moveEvent.clientX - startX;
-          if (Math.abs(deltaX) > 3) {
-            hasMoved = true;
-            isDragging = true;
-          }
-
-          if (isDragging) {
-            moveEvent.preventDefault();
-            const sensitivity = isFloat ? 0.001 : 0.5;
-            let newVal = startVal + deltaX * sensitivity;
-
-            if (newVal < min) newVal = min;
-            if (newVal > max) newVal = max;
-
-            inp.value = isFloat ? newVal.toFixed(4) : Math.round(newVal);
-            fireCallback(w, parseFloat(inp.value));
-          }
-        };
-
-        const onMouseUp = () => {
-          document.removeEventListener("mousemove", onMouseMove);
-          document.removeEventListener("mouseup", onMouseUp);
-
-          if (!hasMoved) {
-            inp.focus();
-            inp.select();
-          }
-          isDragging = false;
-        };
-
-        document.addEventListener("mousemove", onMouseMove);
-        document.addEventListener("mouseup", onMouseUp);
-      });
-
-      container.appendChild(decBtn);
-      container.appendChild(inp);
-      container.appendChild(incBtn);
-
-      return container;
-    };
-
-    // --- Epsilon ---
-    const epsWidget = this.node.widgets?.find(w => w.name === "epsilon");
-    if (epsWidget) {
-      menu.appendChild(this._makeSettingRow("Epsilon", createScrubbableNumberControl(epsWidget, 0.0001, 0.0001, 0.99, true)));
+    // Numeric scrub controls (Epsilon / Divisible By / Img Compression)
+    for (const [label, name, step, min, max, isFloat] of [
+      ["Epsilon", "epsilon", 0.0001, 0.0001, 0.99, true],
+      ["Divisible By", "divisible_by", 1, 1, 256, false],
+      ["Img Compression", "img_compression", 1, 0, 100, false],
+    ]) {
+      const w = this.node.widgets?.find(x => x.name === name);
+      if (w) menu.appendChild(this._makeSettingRow(label, scrub(w, step, min, max, isFloat)));
     }
 
-    // --- Divisible By ---
-    const divByWidget = this.node.widgets?.find(w => w.name === "divisible_by");
-    if (divByWidget) {
-      menu.appendChild(this._makeSettingRow("Divisible By", createScrubbableNumberControl(divByWidget, 1, 1, 256, false)));
-    }
+    menu.appendChild(divider());
 
-    // --- Img Compression ---
-    const compWidget = this.node.widgets?.find(w => w.name === "img_compression");
-    if (compWidget) {
-      menu.appendChild(this._makeSettingRow("Img Compression", createScrubbableNumberControl(compWidget, 1, 0, 100, false)));
-    }
-
-    // --- Divider ---
-    const folderDivider = document.createElement("div");
-    folderDivider.className = "pr-settings-divider";
-    menu.appendChild(folderDivider);
-
-    // --- Workspace Folder Button ---
-    const btnOpenFolder = document.createElement("button");
-    btnOpenFolder.className = "pr-settings-toggle-btn";
-    btnOpenFolder.textContent = "Open";
-    btnOpenFolder.style.width = "98px";
-    btnOpenFolder.style.margin = "0";
-    btnOpenFolder.addEventListener("click", async () => {
+    // Workspace Folder button
+    const btnOpenFolder = btn("Open", async () => {
       try {
         const response = await api.fetchApi("/ltx_director_open_folder");
         const data = await response.json();
@@ -678,15 +552,8 @@ export const settings = {
         console.error("Error opening workspace folder:", err);
         alert("Error opening workspace folder: " + err.message);
       }
-    });
-
+    }, { width: "98px", margin: "0" });
     menu.appendChild(this._makeSettingRow("Workspace Folder", btnOpenFolder));
-
-
-
-
-
-
 
     // Position the menu below the anchor button (pop down)
     document.body.appendChild(menu);

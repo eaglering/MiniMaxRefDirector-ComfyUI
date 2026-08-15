@@ -7,10 +7,10 @@
 // 等字段通信（外壳无感知降级）。
 //
 // 功能：
-//  1. 左 textarea（原始 prompt） + 中间方向按钮 + 右 textarea（生成结果）
-//  2. 点击 ←：右侧只读，以左侧为源请求 /llm/generate_prompt_json，
-//     结果展示在右侧 textarea
-//  3. 点击 →：左侧只读，以右侧为源请求同一接口，结果展示在右侧
+//  1. 左 textarea（原始 prompt） + 中间列（→ 按钮 + 可拖拽分割条） + 右 textarea（生成结果）
+//  2. 点击 →：右侧只读，以左侧为源请求 /llm/generate_prompt_json，
+//     结果展示在右侧 textarea（可重复点击重新生成）
+//  3. 分割条：鼠标滑过显示左右箭头光标（col-resize），左右拖动调节两个 textarea 的宽度
 //  4. 左侧输入 @、右侧输入 @ / # → 弹出主体选择器；
 //     选择后转换：@主体 → <@主体>；#主体 → <#主体:[Chinese]对话内容>
 //  5. 右侧内容 debounce 500ms 解析资源引用（首帧 / 尾帧 / 主体），
@@ -19,35 +19,55 @@
 import { h, render } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
-import { api, app } from "./shared.js";
+import { api, app, clamp, viewUrl } from "./shared.js";
 
 const html = htm.bind(h);
 
 // ---------- 工具函数 ----------
 
+function normalizeSubjects(list) {
+  return list.map(s => ({
+    name: s?.name || "",
+    description: s?.description || "",
+    type: s?.type || "Subject",
+    relationship: s?.relationship || "fully_preserved",
+    imageFile: s?.imageFile || "",
+    imageB64: s?.imageB64 || "",
+    audioFile: s?.audioFile || "",
+  }));
+}
+
 function getSubjectsFromGraph() {
+  // 1) 优先取主体节点发布到 window 的缓存（数据加载时机不受图解析/挂载顺序影响）
+  const cached = window.__refSubjects;
+  if (Array.isArray(cached) && cached.length) return cached;
+
+  // 2) 从图中主体节点的 subject_data widget 读取（兼容 name/comfyClass 与对象值）
   try {
     const nodes = app.graph?._nodes || [];
     for (const n of nodes) {
-      if (n.type !== "MiniMaxRefSubject") continue;
-      for (const w of n.widgets || []) {
-        if (!w.value || typeof w.value !== "string") continue;
-        try {
-          const parsed = JSON.parse(w.value);
-          if (parsed && Array.isArray(parsed.subjects)) return parsed.subjects;
-        } catch { /* 尝试下一个 widget */ }
+      if (!n) continue;
+      if (n.type !== "MiniMaxRefSubject" && n.comfyClass !== "MiniMaxRefSubject") continue;
+      const w = (n.widgets || []).find(x => x.name === "subject_data");
+      if (!w) continue;
+      let raw = w.value;
+      if (typeof raw === "string") {
+        try { raw = JSON.parse(raw); } catch { continue; }
+      }
+      if (raw && Array.isArray(raw.subjects)) {
+        return normalizeSubjects(raw.subjects);
       }
     }
   } catch (e) {
     console.warn("[Transfer] getSubjectsFromGraph failed:", e);
   }
-  return [];
+  return Array.isArray(cached) ? cached : [];
 }
 
 function subjectImgSrc(s) {
   if (s.imageB64) return s.imageB64;
   if (s.imageFile && api) {
-    return api.apiURL(`/view?filename=${encodeURIComponent(s.imageFile)}&type=input&subfolder=${encodeURIComponent("minimaxrefdirector")}`);
+    return viewUrl(s.imageFile, "minimaxrefdirector");
   }
   return "";
 }
@@ -66,13 +86,19 @@ const S = {
     padding: "6px", fontFamily: "monospace", fontSize: "12px", lineHeight: "1.5", outline: "none",
   },
   areaReadonly: { opacity: 0.65 },
-  actions: { display: "flex", flexDirection: "column", justifyContent: "center", gap: "8px" },
+  actions: { display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" },
   btn: {
-    width: "36px", height: "36px", borderRadius: "6px", border: "1px solid #666",
+    width: "32px", height: "32px", flex: "0 0 auto", borderRadius: "6px", border: "1px solid #666",
     background: "#3a3a3a", color: "#ddd", fontSize: "16px", cursor: "pointer",
     userSelect: "none", lineHeight: "1",
   },
   btnDisabled: { opacity: 0.4, cursor: "not-allowed" },
+  divider: {
+    flex: 1, minHeight: "24px", width: "10px", cursor: "col-resize", borderRadius: "3px",
+    background: "transparent", transition: "background 0.15s",
+    display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none",
+  },
+  dividerBar: { width: "3px", height: "70%", borderRadius: "2px", background: "#444", transition: "background 0.15s" },
   resources: {
     display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
     gap: "8px", padding: "4px 0", minHeight: "60px", borderTop: "1px solid #333",
@@ -114,25 +140,57 @@ export function TransferPanel({ director }) {
   const [subjects, setSubjects] = useState([]);
   const [menu, setMenu] = useState(null); // { side, trigger, caret, x, y }
   const [resources, setResources] = useState([]);
+  const [leftWidth, setLeftWidth] = useState(null); // 左侧 textarea 宽度(px)，null 表示默认平分
+  const [divHover, setDivHover] = useState(false);
 
+  const rowRef = useRef(null);
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const debounceRef = useRef(null);
   const aliveRef = useRef(true);
 
-  // 挂载：读主体列表，向外壳注册左侧同步通道
+  // 挂载：读主体列表，监听主体变更事件，向外壳注册左侧同步通道
   useEffect(() => {
     aliveRef.current = true;
-    setSubjects(getSubjectsFromGraph());
+    const refresh = () => { if (aliveRef.current) setSubjects(getSubjectsFromGraph()); };
+    refresh();
+    window.addEventListener("ref:subjects-changed", refresh);
     if (director) director._transferSetLeft = setLeftText;
     return () => {
       aliveRef.current = false;
       clearTimeout(debounceRef.current);
+      window.removeEventListener("ref:subjects-changed", refresh);
       if (director && director._transferSetLeft === setLeftText) {
         director._transferSetLeft = null;
       }
     };
   }, [director]);
+
+  // 分割条拖拽：调节左右两个 textarea 的宽度
+  function startDrag(e) {
+    e.preventDefault();
+    const row = rowRef.current;
+    const left = leftRef.current;
+    if (!row || !left) return;
+    const startX = e.clientX;
+    const startW = left.getBoundingClientRect().width;
+    const rowW = row.getBoundingClientRect().width;
+    const onMove = (ev) => {
+      if (!aliveRef.current) return;
+      const w = clamp(startW + (ev.clientX - startX), 80, Math.max(81, rowW - 140));
+      setLeftWidth(w);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
 
   // 点击外部关闭 mention 菜单
   useEffect(() => {
@@ -187,6 +245,17 @@ export function TransferPanel({ director }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        // 非 2xx：优先取 JSON 错误信息，否则显示 HTTP 状态码（便于排查 404/405 等路由问题）
+        let detail = "";
+        try {
+          const j = await res.json();
+          detail = j?.error || JSON.stringify(j);
+        } catch {
+          detail = (await res.text()).slice(0, 200);
+        }
+        throw new Error(`HTTP ${res.status} ${res.statusText}${detail ? " - " + detail : ""}`);
+      }
       const data = await res.json();
       console.log("[Transfer] generate_prompt_json ->", data);
       if (data.success) {
@@ -306,13 +375,7 @@ export function TransferPanel({ director }) {
         <div style=${S.actions}>
           <button
             style=${Object.assign({}, S.btn, busy ? S.btnDisabled : null)}
-            title="以左侧为源生成到右侧（右侧只读）"
-            disabled=${busy}
-            onClick=${() => { setLocked("right"); runGenerate(leftText); }}
-          >←</button>
-          <button
-            style=${Object.assign({}, S.btn, busy ? S.btnDisabled : null)}
-            title="以右侧为源生成（左侧只读）"
+            title="Change to Minimax H3 prompt"
             disabled=${busy}
             onClick=${() => { setLocked("left"); runGenerate(rightText); }}
           >→</button>

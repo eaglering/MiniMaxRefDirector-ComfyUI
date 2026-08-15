@@ -1,6 +1,6 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: markSegment, markCurrentSelection, deleteSelectedSegment, pasteCopiedSegment, pasteSegmentAtFrame, splitSegmentAtPlayhead, commitChanges, _stampSegmentSeconds, _rebaseSegmentsToFPS, getGapRegions, promptAddAudioInGap, addSegmentInGap, addTextSegmentFreeSpace
-import { RULER_HEIGHT, app } from "./shared.js";
+import { RULER_HEIGHT, app, genId } from "./shared.js";
 
 export const editing = {
   markSegment(seg) {
@@ -196,7 +196,7 @@ export const editing = {
   pasteSegmentAtFrame(copiedSegData, copiedTrack, siblingSegData, startFrame) {
     const isAudio = copiedTrack === "audio";
 
-    const randId = () => Date.now().toString() + Math.random().toString(36).substr(2, 5);
+    const randId = () => genId();
     const baseId = randId();
 
     let mainSeg = { ...copiedSegData };
@@ -302,7 +302,7 @@ export const editing = {
       sibling = this.timeline.segments.find(s => s.id === seg.id.slice(0, -2) + "_v");
     }
 
-    const randId = () => Date.now().toString() + Math.random().toString(36).substr(2, 5);
+    const randId = () => genId();
     const leftBase = randId();
     const rightBase = randId();
 
@@ -796,7 +796,7 @@ export const editing = {
 
   addSegmentInGap(frameStart, frameEnd, type = "text") {
     const seg = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      id: genId(),
       start: frameStart, length: frameEnd - frameStart,
       prompt: "", type,
     };
@@ -826,7 +826,7 @@ export const editing = {
     // Place the segment at the first free slot in the visual timeline (no output duration change).
     const durationFrames = this.getVisualDurationFrames();
     const seg = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      id: genId(),
       start: newStart, length: Math.min(newLength, Math.max(newLength, durationFrames - newStart)),
       prompt: "", type: "text",
     };

@@ -1,6 +1,6 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: updateSeekBarBackground, updatePlayerUI, togglePlay, toggleLoop, playAudio, pauseAudio
-import { ICONS, api } from "./shared.js";
+import { ICONS, api, viewUrl } from "./shared.js";
 
 export const audio = {
   updateSeekBarBackground() {
@@ -130,7 +130,7 @@ export const audio = {
               const parts = (mockSeg.audioFile || "").split(/[/\\\\]/);
               const filename = parts.pop() || '';
               const subfolder = parts.join('/');
-              const audioUrl = mockSeg._blobUrl || api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+              const audioUrl = mockSeg._blobUrl || viewUrl(filename, subfolder);
 
               this._audioBufferCache = this._audioBufferCache || new Map();
               this._audioBufferPromises = this._audioBufferPromises || new Map();

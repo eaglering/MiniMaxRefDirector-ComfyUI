@@ -4,6 +4,122 @@ import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget, showWidget 
 import { render } from "../../vendor/preact.module.js";
 import { mountTransfer } from "./transfer.js";
 
+// --- DOM 工厂辅助（createDOM 内样板去重）---
+const iconBtn = (icon, title, onClick) => {
+  const b = document.createElement("button");
+  b.className = "pr-btn";
+  Object.assign(b.style, {
+    padding: "6px", display: "flex", alignItems: "center", justifyContent: "center",
+    width: "28px", height: "28px", boxSizing: "border-box"
+  });
+  b.innerHTML = icon;
+  b.title = title;
+  b.addEventListener("click", (e) => { e.stopPropagation(); onClick(e); });
+  return b;
+};
+
+const miniIconBtn = (icon, title, onClick, extraStyle) => {
+  const b = document.createElement("button");
+  b.className = "pr-icon-btn";
+  b.style.padding = "4px";
+  if (extraStyle) Object.assign(b.style, extraStyle);
+  b.innerHTML = icon;
+  b.title = title;
+  b.addEventListener("click", onClick);
+  return b;
+};
+
+const toolBtn = (html, onClick, opts = {}) => {
+  const b = document.createElement("button");
+  b.className = "pr-btn" + (opts.danger ? " pr-btn-danger" : "");
+  b.innerHTML = html;
+  if (opts.title) b.title = opts.title;
+  if (opts.style) Object.assign(b.style, opts.style);
+  b.addEventListener("click", onClick);
+  return b;
+};
+
+const makeFileInput = (accept, multiple, onChange) => {
+  const i = document.createElement("input");
+  i.type = "file";
+  i.accept = accept;
+  i.multiple = multiple;
+  i.style.display = "none";
+  i.addEventListener("change", onChange);
+  return i;
+};
+
+const makeResizer = (minH, getH, setH) => {
+  const r = document.createElement("div");
+  Object.assign(r.style, {
+    position: "absolute", bottom: "0px", left: "0px", width: "100%", height: "12px",
+    cursor: "ns-resize", display: "flex", justifyContent: "center",
+    alignItems: "flex-end", paddingBottom: "4px"
+  });
+  r.innerHTML = `<div style="width: 40px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px;"></div>`;
+  r.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const startY = ev.clientY;
+    const startH = getH();
+    const doDrag = (mv) => {
+      if (mv.buttons === 0) { stopDrag(); return; }
+      setH(Math.max(minH, startH + (mv.clientY - startY)));
+    };
+    const stopDrag = () => {
+      window.removeEventListener("mousemove", doDrag, true);
+      window.removeEventListener("mouseup", stopDrag, true);
+      document.body.style.cursor = "default";
+    };
+    document.body.style.cursor = "ns-resize";
+    window.addEventListener("mousemove", doDrag, true);
+    window.addEventListener("mouseup", stopDrag, true);
+  });
+  return r;
+};
+
+const updateNodeHeight = (editor, key, container, newH) => {
+  editor[key] = newH;
+  editor.node.properties[key] = newH;
+  container.style.height = `${newH}px`;
+  if (editor.node && editor.node.computeSize) {
+    const sz = editor.node.computeSize();
+    editor.node.size[1] = sz[1];
+    if (window.app && window.app.graph) {
+      window.app.graph.setDirtyCanvas(true, true);
+    }
+  }
+};
+
+const makePromptArea = (editor, labelText, placeholder, opts = {}) => {
+  const wrapper = document.createElement("div");
+  wrapper.className = "pr-prompt-wrapper";
+  Object.assign(wrapper.style, { width: "100%", height: "100%" });
+  if (opts.hidden) wrapper.style.display = "none";
+
+  const label = document.createElement("div");
+  label.className = "pr-prompt-label";
+  label.textContent = labelText;
+  wrapper.appendChild(label);
+
+  const input = document.createElement("textarea");
+  input.className = "pr-prompt-area";
+  input.placeholder = placeholder;
+  input.spellcheck = false;
+  if (opts.opacity) input.style.opacity = opts.opacity;
+  wrapper.appendChild(input);
+
+  input.addEventListener("focus", () => {
+    wrapper.classList.add("focus-active");
+    editor.wrapper.classList.add("has-focus");
+  });
+  input.addEventListener("blur", () => {
+    wrapper.classList.remove("focus-active");
+    editor.wrapper.classList.remove("has-focus");
+  });
+  return { wrapper, label, input };
+};
+
 export const dom = {
   createDOM() {
     this.wrapper = document.createElement("div");
@@ -137,77 +253,30 @@ export const dom = {
     const actionGroup = document.createElement("div");
     actionGroup.className = "pr-actions";
 
-    this.fileInput = document.createElement("input");
-    this.fileInput.type = "file";
-    this.fileInput.accept = "image/*";
-    this.fileInput.multiple = true;
-    this.fileInput.style.display = "none";
-    this.fileInput.addEventListener("change", (e) => this.handleImageUpload(e.target.files));
+    this.fileInput = makeFileInput("image/*", true, (e) => this.handleImageUpload(e.target.files));
+    this.audioFileInput = makeFileInput("audio/*", true, (e) => this.handleAudioUpload(e.target.files));
+    this.videoFileInput = makeFileInput("video/*", true, (e) => this.handleVideoUpload(e.target.files));
 
-    this.audioFileInput = document.createElement("input");
-    this.audioFileInput.type = "file";
-    this.audioFileInput.accept = "audio/*";
-    this.audioFileInput.multiple = true;
-    this.audioFileInput.style.display = "none";
-    this.audioFileInput.addEventListener("change", (e) => this.handleAudioUpload(e.target.files));
-
-    this.videoFileInput = document.createElement("input");
-    this.videoFileInput.type = "file";
-    this.videoFileInput.accept = "video/*";
-    this.videoFileInput.multiple = true;
-    this.videoFileInput.style.display = "none";
-    this.videoFileInput.addEventListener("change", (e) => this.handleVideoUpload(e.target.files));
-
-    const uploadBtn = document.createElement("button");
-    uploadBtn.className = "pr-btn";
-    uploadBtn.innerHTML = `${ICONS.upload} Add Image`;
-    uploadBtn.addEventListener("click", () => this.fileInput.click());
-    this.uploadBtn = uploadBtn;
-
-    const uploadAudioBtn = document.createElement("button");
-    uploadAudioBtn.className = "pr-btn";
-    uploadAudioBtn.innerHTML = `${ICONS.audio} Add Audio`;
-    uploadAudioBtn.addEventListener("click", () => this.audioFileInput.click());
-    this.uploadAudioBtn = uploadAudioBtn;
-
-    const uploadVideoBtn = document.createElement("button");
-    uploadVideoBtn.className = "pr-btn";
-    uploadVideoBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Add Video`;
-    uploadVideoBtn.addEventListener("click", () => this.videoFileInput.click());
-    this.uploadVideoBtn = uploadVideoBtn;
-
-    const addTextBtn = document.createElement("button");
-    addTextBtn.className = "pr-btn";
-    addTextBtn.innerHTML = `${ICONS.text} Add Text`;
-    addTextBtn.addEventListener("click", () => this.addTextSegmentFreeSpace());
-    this.addTextBtn = addTextBtn;
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "pr-btn pr-btn-danger";
-    deleteBtn.innerHTML = `${ICONS.trash} Delete`;
-    deleteBtn.addEventListener("click", () => this.deleteSelectedSegment());
-    this.deleteBtn = deleteBtn;
+    this.uploadBtn = toolBtn(`${ICONS.upload} Add Image`, () => this.fileInput.click());
+    this.uploadAudioBtn = toolBtn(`${ICONS.audio} Add Audio`, () => this.audioFileInput.click());
+    this.uploadVideoBtn = toolBtn(`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Add Video`, () => this.videoFileInput.click());
+    this.addTextBtn = toolBtn(`${ICONS.text} Add Text`, () => this.addTextSegmentFreeSpace());
+    this.deleteBtn = toolBtn(`${ICONS.trash} Delete`, () => this.deleteSelectedSegment(), { danger: true });
 
     actionGroup.appendChild(this.fileInput);
     actionGroup.appendChild(this.audioFileInput);
     actionGroup.appendChild(this.videoFileInput);
-    actionGroup.appendChild(uploadBtn);
-    actionGroup.appendChild(addTextBtn);
-    actionGroup.appendChild(uploadAudioBtn);
-    actionGroup.appendChild(uploadVideoBtn);
-    actionGroup.appendChild(deleteBtn);
+    actionGroup.appendChild(this.uploadBtn);
+    actionGroup.appendChild(this.addTextBtn);
+    actionGroup.appendChild(this.uploadAudioBtn);
+    actionGroup.appendChild(this.uploadVideoBtn);
+    actionGroup.appendChild(this.deleteBtn);
 
     // Retake-mode-only delete button (shown next to Add Video when retakeMode is on)
-    const deleteRetakeBtn = document.createElement("button");
-    deleteRetakeBtn.className = "pr-btn pr-btn-danger";
-    deleteRetakeBtn.innerHTML = `${ICONS.trash} Delete`;
-    deleteRetakeBtn.title = "Remove retake video";
-    deleteRetakeBtn.style.display = "none"; // hidden until retakeMode + video loaded
-    deleteRetakeBtn.addEventListener("click", () => {
-      this._deleteRetakeVideo();
+    this.deleteRetakeBtn = toolBtn(`${ICONS.trash} Delete`, () => this._deleteRetakeVideo(), {
+      danger: true, title: "Remove retake video", style: { display: "none" } // hidden until retakeMode + video loaded
     });
-    this.deleteRetakeBtn = deleteRetakeBtn;
-    actionGroup.appendChild(deleteRetakeBtn);
+    actionGroup.appendChild(this.deleteRetakeBtn);
 
     toolbar.appendChild(actionGroup);
 
@@ -222,19 +291,7 @@ export const dom = {
     this.timeCodeDisplay.className = "pr-timecode";
     this.timeCodeDisplay.textContent = this.formatTime(0);
 
-    const settingsBtn = document.createElement("button");
-    settingsBtn.className = "pr-btn";
-    settingsBtn.style.padding = "6px";
-    settingsBtn.style.display = "flex";
-    settingsBtn.style.alignItems = "center";
-    settingsBtn.style.justifyContent = "center";
-    settingsBtn.style.width = "28px";
-    settingsBtn.style.height = "28px";
-    settingsBtn.style.boxSizing = "border-box";
-    settingsBtn.innerHTML = ICONS.gear;
-    settingsBtn.title = "Settings";
-    settingsBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    const settingsBtn = iconBtn(ICONS.gear, "Settings", () => {
       if (this._settingsMenu) {
         this.dismissSettingsMenu();
       } else {
@@ -309,34 +366,19 @@ export const dom = {
       }
     }, 100);
 
-    const helpBtn = document.createElement("button");
-    helpBtn.className = "pr-btn";
-    helpBtn.style.padding = "6px";
-    helpBtn.style.display = "flex";
-    helpBtn.style.alignItems = "center";
-    helpBtn.style.justifyContent = "center";
-    helpBtn.style.width = "28px";
-    helpBtn.style.height = "28px";
-    helpBtn.style.boxSizing = "border-box";
-    helpBtn.innerHTML = ICONS.help;
-    helpBtn.title = "Help / Documentation";
-    helpBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    const helpBtn = iconBtn(ICONS.help, "Help / Documentation", () => {
       window.open("https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI", "_blank");
     });
 
     this.isSnapping = this.node.properties.isSnapping !== false;
 
-    const snapBtn = document.createElement("button");
-    snapBtn.className = "pr-btn";
-    snapBtn.style.padding = "6px";
-    snapBtn.style.display = "flex";
-    snapBtn.style.alignItems = "center";
-    snapBtn.style.justifyContent = "center";
-    snapBtn.style.width = "28px";
-    snapBtn.style.height = "28px";
-    snapBtn.style.boxSizing = "border-box";
-    snapBtn.innerHTML = ICONS.magnet;
+    const snapBtn = iconBtn(ICONS.magnet, "Enable Snapping (Magnet)", () => {
+      this.isSnapping = !this.isSnapping;
+      this.node.properties.isSnapping = this.isSnapping;
+      this.updateSnapStyle();
+      this.commitChanges();
+      this.render();
+    });
 
     const updateSnapStyle = () => {
       snapBtn.title = this.isSnapping ? "Disable Snapping (Magnet)" : "Enable Snapping (Magnet)";
@@ -349,28 +391,7 @@ export const dom = {
     this.updateSnapStyle = updateSnapStyle;
     updateSnapStyle();
 
-    snapBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.isSnapping = !this.isSnapping;
-      this.node.properties.isSnapping = this.isSnapping;
-      updateSnapStyle();
-      this.commitChanges();
-      this.render();
-    });
-
-    const startBtn = document.createElement("button");
-    startBtn.className = "pr-btn";
-    startBtn.style.padding = "6px";
-    startBtn.style.display = "flex";
-    startBtn.style.alignItems = "center";
-    startBtn.style.justifyContent = "center";
-    startBtn.style.width = "28px";
-    startBtn.style.height = "28px";
-    startBtn.style.boxSizing = "border-box";
-    startBtn.innerHTML = ICONS.start;
-    startBtn.title = "Set Start Frame";
-    startBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    const startBtn = iconBtn(ICONS.start, "Set Start Frame", () => {
       if (this.retakeMode) return;
       if (this.startFramesWidget) {
         this.startFramesWidget.value = this.currentFrame;
@@ -382,19 +403,7 @@ export const dom = {
       }
     });
 
-    const endBtn = document.createElement("button");
-    endBtn.className = "pr-btn";
-    endBtn.style.padding = "6px";
-    endBtn.style.display = "flex";
-    endBtn.style.alignItems = "center";
-    endBtn.style.justifyContent = "center";
-    endBtn.style.width = "28px";
-    endBtn.style.height = "28px";
-    endBtn.style.boxSizing = "border-box";
-    endBtn.innerHTML = ICONS.end;
-    endBtn.title = "Set End Frame";
-    endBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    const endBtn = iconBtn(ICONS.end, "Set End Frame", () => {
       if (this.retakeMode) return;
       if (this.endFramesWidget) {
         this.endFramesWidget.value = this.currentFrame;
@@ -406,19 +415,7 @@ export const dom = {
       }
     });
 
-    const markBtn = document.createElement("button");
-    markBtn.className = "pr-btn";
-    markBtn.style.padding = "6px";
-    markBtn.style.display = "flex";
-    markBtn.style.alignItems = "center";
-    markBtn.style.justifyContent = "center";
-    markBtn.style.width = "28px";
-    markBtn.style.height = "28px";
-    markBtn.style.boxSizing = "border-box";
-    markBtn.innerHTML = ICONS.mark;
-    markBtn.title = "Mark Selection (X)";
-    markBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    const markBtn = iconBtn(ICONS.mark, "Mark Selection (X)", () => {
       if (this.retakeMode) return;
       this.markCurrentSelection();
     });
@@ -579,30 +576,10 @@ export const dom = {
     globalPropContainer.style.height = `${this.globalPropHeight}px`;
     this.globalPropContainer = globalPropContainer;
 
-    const globalPromptWrapper = document.createElement("div");
-    globalPromptWrapper.className = "pr-prompt-wrapper";
-    globalPromptWrapper.style.width = "100%";
-    globalPromptWrapper.style.height = "100%";
-
-    this.globalPromptLabel = document.createElement("div");
-    this.globalPromptLabel.className = "pr-prompt-label";
-    this.globalPromptLabel.textContent = "Global Prompt";
-    globalPromptWrapper.appendChild(this.globalPromptLabel);
-
-    this.globalPromptInput = document.createElement("textarea");
-    this.globalPromptInput.className = "pr-prompt-area";
-    this.globalPromptInput.placeholder = "Enter global prompt here...";
-    this.globalPromptInput.spellcheck = false;
-    globalPromptWrapper.appendChild(this.globalPromptInput);
-
-    this.globalPromptInput.addEventListener("focus", () => {
-      globalPromptWrapper.classList.add("focus-active");
-      this.wrapper.classList.add("has-focus");
-    });
-    this.globalPromptInput.addEventListener("blur", () => {
-      globalPromptWrapper.classList.remove("focus-active");
-      this.wrapper.classList.remove("has-focus");
-    });
+    const globalPrompt = makePromptArea(this, "Global Prompt", "Enter global prompt here...");
+    const globalPromptWrapper = globalPrompt.wrapper;
+    this.globalPromptLabel = globalPrompt.label;
+    this.globalPromptInput = globalPrompt.input;
     let saveTimeout = null;
     const triggerAutoSave = () => {
       try {
@@ -632,132 +609,22 @@ export const dom = {
       triggerAutoSave();
     });
 
-    const globalPropResizer = document.createElement("div");
-    globalPropResizer.style.position = "absolute";
-    globalPropResizer.style.bottom = "0px";
-    globalPropResizer.style.left = "0px";
-    globalPropResizer.style.width = "100%";
-    globalPropResizer.style.height = "12px"; // Hit area
-    globalPropResizer.style.cursor = "ns-resize";
-    globalPropResizer.style.display = "flex";
-    globalPropResizer.style.justifyContent = "center";
-    globalPropResizer.style.alignItems = "flex-end";
-    globalPropResizer.style.paddingBottom = "4px";
-    globalPropResizer.style.zIndex = "10";
-    globalPropResizer.innerHTML = `<div style="width: 40px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px;"></div>`;
-
-    let isGlobalResizing = false;
-    let startGlobalY = 0;
-    let startGlobalH = 0;
-
-    globalPropResizer.addEventListener("mousedown", (ev) => {
-      isGlobalResizing = true;
-      startGlobalY = ev.clientY;
-      startGlobalH = this.globalPropHeight;
-      ev.stopPropagation();
-      ev.preventDefault();
-    });
-
-    document.addEventListener("mousemove", (ev) => {
-      if (isGlobalResizing) {
-        const newH = Math.max(60, startGlobalH + (ev.clientY - startGlobalY));
-        this.globalPropHeight = newH;
-        this.node.properties.globalPropHeight = newH;
-        globalPropContainer.style.height = `${newH}px`;
-
-        if (this.node && this.node.computeSize) {
-          const sz = this.node.computeSize();
-          this.node.size[1] = sz[1];
-          if (window.app && window.app.graph) {
-            window.app.graph.setDirtyCanvas(true, true);
-          }
-        }
-      }
-    });
-
-    document.addEventListener("mouseup", () => {
-      if (isGlobalResizing) {
-        isGlobalResizing = false;
-      }
+    const globalPropResizer = makeResizer(60, () => this.globalPropHeight, (h) => {
+      updateNodeHeight(this, "globalPropHeight", globalPropContainer, h);
     });
 
     globalPropContainer.appendChild(globalPromptWrapper);
     globalPropContainer.appendChild(globalPropResizer);
 
-    const propResizer = document.createElement("div");
-    propResizer.style.position = "absolute";
-    propResizer.style.bottom = "0px";
-    propResizer.style.left = "0px";
-    propResizer.style.width = "100%";
-    propResizer.style.height = "12px"; // Hit area
-    propResizer.style.cursor = "ns-resize";
-    propResizer.style.display = "flex";
-    propResizer.style.justifyContent = "center";
-    propResizer.style.alignItems = "flex-end";
-    propResizer.style.paddingBottom = "4px";
-    propResizer.innerHTML = `<div style="width: 40px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px;"></div>`;
-
-    propResizer.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      const startY = e.clientY;
-      const startH = this.propHeight;
-
-      const doDrag = (ev) => {
-        if (ev.buttons === 0) {
-          stopDrag();
-          return;
-        }
-        const newH = Math.max(90, startH + (ev.clientY - startY));
-        this.propHeight = newH;
-        this.node.properties.propHeight = newH;
-        propContainer.style.height = `${newH}px`;
-
-        if (this.node && this.node.computeSize) {
-          const sz = this.node.computeSize();
-          this.node.size[1] = sz[1];
-          if (window.app && window.app.graph) {
-            window.app.graph.setDirtyCanvas(true, true);
-          }
-        }
-      };
-
-      const stopDrag = () => {
-        window.removeEventListener("mousemove", doDrag, true);
-        window.removeEventListener("mouseup", stopDrag, true);
-        document.body.style.cursor = "default";
-      };
-
-      document.body.style.cursor = "ns-resize";
-      window.addEventListener("mousemove", doDrag, true);
-      window.addEventListener("mouseup", stopDrag, true);
+    const propResizer = makeResizer(90, () => this.propHeight, (h) => {
+      updateNodeHeight(this, "propHeight", propContainer, h);
     });
 
     // --- Text Area (Image/Text) ---
-    this.promptWrapper = document.createElement("div");
-    this.promptWrapper.className = "pr-prompt-wrapper";
-    this.promptWrapper.style.width = "100%";
-    this.promptWrapper.style.height = "100%";
-    this.promptWrapper.style.display = "none";
-
-    this.segmentPromptLabel = document.createElement("div");
-    this.segmentPromptLabel.className = "pr-prompt-label";
-    this.segmentPromptLabel.textContent = "Segment Prompt";
-    this.promptWrapper.appendChild(this.segmentPromptLabel);
-
-    this.promptInput = document.createElement("textarea");
-    this.promptInput.className = "pr-prompt-area";
-    this.promptInput.placeholder = "No segment selected!";
-    this.promptInput.style.opacity = "0.4";
-    this.promptWrapper.appendChild(this.promptInput);
-
-    this.promptInput.addEventListener("focus", () => {
-      this.promptWrapper.classList.add("focus-active");
-      this.wrapper.classList.add("has-focus");
-    });
-    this.promptInput.addEventListener("blur", () => {
-      this.promptWrapper.classList.remove("focus-active");
-      this.wrapper.classList.remove("has-focus");
-    });
+    const promptArea = makePromptArea(this, "Segment Prompt", "No segment selected!", { hidden: true, opacity: "0.4" });
+    this.promptWrapper = promptArea.wrapper;
+    this.segmentPromptLabel = promptArea.label;
+    this.promptInput = promptArea.input;
 
     this.promptInput.addEventListener("input", () => {
       if (this.retakeMode) {
@@ -923,19 +790,8 @@ export const dom = {
     const playerControls = document.createElement("div");
     playerControls.className = "pr-player-controls";
 
-    this.playBtn = document.createElement("button");
-    this.playBtn.className = "pr-icon-btn";
-    this.playBtn.style.padding = "4px";
-    this.playBtn.innerHTML = ICONS.play;
-    this.playBtn.title = "Play/Pause Audio";
-    this.playBtn.addEventListener("click", () => this.togglePlay());
-
-    this.loopBtn = document.createElement("button");
-    this.loopBtn.className = "pr-icon-btn";
-    this.loopBtn.style.padding = "4px";
-    this.loopBtn.innerHTML = ICONS.loop;
-    this.loopBtn.title = "Toggle Loop";
-    this.loopBtn.addEventListener("click", () => this.toggleLoop());
+    this.playBtn = miniIconBtn(ICONS.play, "Play/Pause Audio", () => this.togglePlay());
+    this.loopBtn = miniIconBtn(ICONS.loop, "Toggle Loop", () => this.toggleLoop());
 
     this.seekBar = document.createElement("input");
     this.seekBar.type = "range";
@@ -964,12 +820,7 @@ export const dom = {
     const zoomControls = document.createElement("div");
     zoomControls.className = "pr-zoom-controls";
 
-    const zoomOutBtn = document.createElement("button");
-    zoomOutBtn.className = "pr-icon-btn";
-    zoomOutBtn.style.padding = "4px";
-    zoomOutBtn.innerHTML = ICONS.minus;
-    zoomOutBtn.title = "Zoom Out";
-    zoomOutBtn.addEventListener("click", () => {
+    const zoomOutBtn = miniIconBtn(ICONS.minus, "Zoom Out", () => {
       const currentZoom = parseFloat(this.zoomSlider.value);
       this.zoomSlider.value = Math.max(1, currentZoom - 0.5);
       this.zoomSlider.dispatchEvent(new Event("input"));
@@ -1004,24 +855,13 @@ export const dom = {
       else if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
     });
 
-    const zoomInBtn = document.createElement("button");
-    zoomInBtn.className = "pr-icon-btn";
-    zoomInBtn.style.padding = "4px";
-    zoomInBtn.innerHTML = ICONS.plus;
-    zoomInBtn.title = "Zoom In";
-    zoomInBtn.addEventListener("click", () => {
+    const zoomInBtn = miniIconBtn(ICONS.plus, "Zoom In", () => {
       const currentZoom = parseFloat(this.zoomSlider.value);
       this.zoomSlider.value = Math.min(this.getMaxZoom(), currentZoom + 0.5);
       this.zoomSlider.dispatchEvent(new Event("input"));
     });
 
-    const zoomFitBtn = document.createElement("button");
-    zoomFitBtn.className = "pr-icon-btn";
-    zoomFitBtn.style.padding = "4px";
-    zoomFitBtn.style.marginLeft = "4px";
-    zoomFitBtn.innerHTML = ICONS.fit;
-    zoomFitBtn.title = "Zoom to Fit (show full timeline)";
-    zoomFitBtn.addEventListener("click", () => {
+    const zoomFitBtn = miniIconBtn(ICONS.fit, "Zoom to Fit (show full timeline)", () => {
       this.zoomLevel = 1;
       this.zoomSlider.value = 1;
       const viewportWidth = this.viewport.clientWidth;
@@ -1033,7 +873,7 @@ export const dom = {
 
       if (this.node) this.node.setDirtyCanvas?.(true, true);
       else if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
-    });
+    }, { marginLeft: "4px" });
 
     zoomControls.appendChild(zoomOutBtn);
     zoomControls.appendChild(this.zoomSlider);

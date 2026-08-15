@@ -1,6 +1,6 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: _ensureThumbnails, _ensureVideoEl, _getOrExtractAudio, _extractAudioOnClient, _isAudioDecodingAllowed, _preloadAudioSegment, loadMedia, handleImageUpload, _uploadVideoFile, handleVideoUpload, generateVideoPreviewThumbs, handleAudioUpload
-import { api } from "./shared.js";
+import { api, genId, uploadImage, viewUrl } from "./shared.js";
 
 export const media = {
   async _ensureThumbnails(seg) {
@@ -43,7 +43,7 @@ export const media = {
       const parts = fileKey.split(/[/\\\\]/);
       const filename = parts.pop() || '';
       const subfolder = parts.join('/');
-      const vidUrl = seg._blobUrl || (seg.videoEl ? seg.videoEl.src : null) || api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+      const vidUrl = seg._blobUrl || (seg.videoEl ? seg.videoEl.src : null) || viewUrl(filename, subfolder);
 
       const bgVid = document.createElement('video');
       bgVid.crossOrigin = "Anonymous";
@@ -229,7 +229,7 @@ export const media = {
       const fileParts = fileKey.split(/[/\\\\]/);
       const justName = fileParts.pop() || '';
       const subfolder = fileParts.join('/');
-      vidUrl = api.apiURL(`/view?filename=${encodeURIComponent(justName)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+      vidUrl = viewUrl(justName, subfolder);
     }
     if (!vidUrl) return;
 
@@ -426,7 +426,7 @@ export const media = {
       const parts = (seg.audioFile || "").split(/[/\\\\]/);
       const filename = parts.pop() || '';
       const subfolder = parts.join('/');
-      const audioUrl = seg._blobUrl || api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+      const audioUrl = seg._blobUrl || viewUrl(filename, subfolder);
 
       this._audioBufferCache = this._audioBufferCache || new Map();
       this._audioBufferPromises = this._audioBufferPromises || new Map();
@@ -505,17 +505,9 @@ export const media = {
 
       await new Promise(async (resolve) => {
         try {
-          const body = new FormData();
-          body.append("image", file);
-          body.append("subfolder", "whatdreamscost");
-          const resp = await api.fetchApi("/upload/image", { method: "POST", body });
-          if (resp.status !== 200) { resolve(); return; }
-
-          const data = await resp.json();
-          const filename = data.name;
-          const subfolder = data.subfolder || "";
-          const imageFile = subfolder ? subfolder + "/" + filename : filename;
-          const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+          const up = await uploadImage(file, "whatdreamscost");
+          if (!up) { resolve(); return; }
+          const { imageFile, imgUrl } = up;
 
           const img = new Image();
           img.onload = () => {
@@ -572,7 +564,7 @@ export const media = {
             let constrainedLength = newLength;
 
             const seg = {
-              id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+              id: genId(),
               start: newStart,
               length: constrainedLength,
               prompt: "",
@@ -647,14 +639,9 @@ export const media = {
       return safeName; // filename (no subfolder) in the input dir
     } else {
       // --- Single-shot path (small file) ---
-      const body = new FormData();
-      body.append("image", file);
-      body.append("subfolder", "whatdreamscost");
-      const resp = await api.fetchApi("/upload/image", { method: "POST", body });
-      if (resp.status !== 200) throw new Error(`LTX Director video upload failed: ${resp.statusText}`);
-      const data = await resp.json();
-      const subfolder = data.subfolder || "";
-      return subfolder ? subfolder + "/" + data.name : data.name;
+      const up = await uploadImage(file, "whatdreamscost");
+      if (!up) throw new Error("LTX Director video upload failed");
+      return up.imageFile;
     }
   }
 ,
@@ -813,7 +800,7 @@ export const media = {
               targetFrameStart = newStart + newLength;
             }
 
-            const sharedId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+            const sharedId = genId();
 
             const vidSeg = {
               id: sharedId + "_v",
@@ -1043,16 +1030,9 @@ export const media = {
 
       await new Promise(async (resolve) => {
         try {
-          const body = new FormData();
-          body.append("image", file);
-          body.append("subfolder", "whatdreamscost");
-          const resp = await api.fetchApi("/upload/image", { method: "POST", body });
-          if (resp.status !== 200) { resolve(); return; }
-
-          const data = await resp.json();
-          const filename = data.name;
-          const subfolder = data.subfolder || "";
-          const audioFile = subfolder ? subfolder + "/" + filename : filename;
+          const up = await uploadImage(file, "whatdreamscost");
+          if (!up) { resolve(); return; }
+          const audioFile = up.imageFile;
 
           const arrayBuffer = await file.arrayBuffer();
           const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1123,7 +1103,7 @@ export const media = {
           let constrainedLength = newLength;
 
           const seg = {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+            id: genId(),
             type: "audio",
             start: newStart,
             length: constrainedLength,

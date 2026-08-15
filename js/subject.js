@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { viewUrl } from "./components/director/shared.js";
 import { api } from "../../scripts/api.js";
 
 function hideWidget(w) {
@@ -359,6 +360,21 @@ app.registerExtension({
                     // }
                 };
 
+                // 将当前主体列表发布到全局缓存并通知外部（如 Transfer mention 菜单刷新）
+                function publishSubjects() {
+                    try {
+                        window.__refSubjects = subjects.map(s => ({
+                            name: s.name || "",
+                            description: s.description || "",
+                            type: s.type || "Subject",
+                            relationship: s.relationship || "fully_preserved",
+                            imageFile: s.imageFile || "",
+                            audioFile: s.audioFile || "",
+                        }));
+                        window.dispatchEvent(new CustomEvent("ref:subjects-changed"));
+                    } catch (e) { /* 事件派发失败忽略 */ }
+                }
+
                 function loadStateFromWidget() {
                     subjects.length = 0;
                     try {
@@ -373,7 +389,7 @@ app.registerExtension({
                                         type: s.type || "Subject",
                                         relationship: s.relationship || "fully_preserved",
                                         imageFile: s.imageFile || "",
-                                        imageB64: s.imageB64 || api.apiURL(`/view?filename=${encodeURIComponent(s.imageFile)}&type=input&subfolder=${encodeURIComponent("minimaxrefdirector")}`),
+                                        imageB64: s.imageB64 || viewUrl(s.imageFile, "minimaxrefdirector"),
                                         audioFile: s.audioFile || "",
                                     });
                                 });
@@ -391,6 +407,7 @@ app.registerExtension({
                     } else {
                         subjectCount = subjects.length;
                     }
+                    publishSubjects();
                 }
 
                 // Initial load (may be overwritten on page reload by onConfigure below)
@@ -418,7 +435,7 @@ app.registerExtension({
                             const filename = data.name;
                             const subfolder = data.subfolder || "";
                             const imageFile = subfolder ? subfolder + "/" + filename : filename;
-                            const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+                            const imgUrl = viewUrl(filename, subfolder);
                             callback(imageFile, imgUrl);
                         } else {
                             console.error("[MiniMaxRefSubject] Upload failed:", resp.status);
@@ -488,7 +505,7 @@ app.registerExtension({
                         const parts = audioFile.replace(/\\/g, "/").split("/");
                         const filename = parts.pop();
                         const subfolder = parts.join("/");
-                        url = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+                        url = viewUrl(filename, subfolder);
                     }
                     _audioEl = new Audio(url);
                     _audioPlayBtn = btnEl;
@@ -534,6 +551,7 @@ app.registerExtension({
                     if (app.graph) {
                         app.graph.setDirtyCanvas(true, false);
                     }
+                    publishSubjects();
                 }
 
                 function renderSubjects() {

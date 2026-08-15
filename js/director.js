@@ -75,8 +75,8 @@ class TimelineEditor {
     this._ghostInitialTimeline = null;
 
     // Attach to Python widgets
-    this._gapMenu = null;         // Active gap popup menu element
-    this._gapMenuDismisser = null;
+    this._menu = null;            // Active floating menu (context/gap) element
+    this._menuDismisser = null;
 
     // Attach to Python widgets
     this.startFramesWidget = this.node.widgets.find(w => w.name === "start_frame");
