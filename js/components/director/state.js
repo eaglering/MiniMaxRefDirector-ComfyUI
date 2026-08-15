@@ -287,6 +287,7 @@ export const state = {
         this.promptInput.placeholder = "(Multiple Segments Selected)";
         this.promptInput.disabled = true;
         this.promptInput.style.opacity = "0.35";
+        if (this._transferSetLeft) this._transferSetLeft("");
       }
 
       if (this.segmentPromptLabel) {
@@ -347,6 +348,7 @@ export const state = {
       this.promptInput.style.opacity = "1.0";
       this.promptInput.placeholder = "Enter prompt for retake region...";
       this.promptInput.value = this.timeline.retakePrompt || "";
+      if (this._transferSetLeft) this._transferSetLeft(this.promptInput.value);
 
       this.strengthRow.style.display = "flex";
       this.strengthLabel.style.display = "inline";
@@ -400,6 +402,7 @@ export const state = {
 
       if (seg) {
         this.promptInput.value = seg.prompt || "";
+        if (this._transferSetLeft) this._transferSetLeft(this.promptInput.value);
         this.promptInput.placeholder = "Enter prompt for selected segment...";
         this.promptInput.disabled = false;
         this.promptInput.style.opacity = "1.0";
@@ -411,6 +414,7 @@ export const state = {
         this.strengthValue.style.opacity = isImage ? "1.0" : "0.35";
       } else {
         this.promptInput.value = "";
+        if (this._transferSetLeft) this._transferSetLeft("");
         this.promptInput.placeholder = "No segment selected!";
         this.promptInput.disabled = true;
         this.promptInput.style.opacity = "0.4";

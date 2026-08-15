@@ -1,6 +1,8 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: createDOM, syncWidgetsAndUI, checkResize, syncLayoutToNode, getRenderScale, resizeCanvas, getMousePos, updateWidgetVisibility
 import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget, showWidget } from "./shared.js";
+import { render } from "../../vendor/preact.module.js";
+import { mountTransfer } from "./transfer.js";
 
 export const dom = {
   createDOM() {
@@ -553,7 +555,7 @@ export const dom = {
     if (this.node.properties.propHeight === undefined && this.timeline.propHeight !== undefined) {
       this.node.properties.propHeight = this.timeline.propHeight;
     }
-    this.initialPropHeight = this.node.properties.propHeight || 90;
+    this.initialPropHeight = this.node.properties.propHeight || 200;
     this.propHeight = this.initialPropHeight;
 
     const propContainer = document.createElement("div");
@@ -779,7 +781,17 @@ export const dom = {
     this.audioInfoArea = document.createElement("div");
     this.audioInfoArea.className = "pr-audio-info";
 
-    propContainer.appendChild(this.promptWrapper);
+    // --- Transfer 窗体（Preact 内层，替代原 promptWrapper 的可视区）---
+    // promptInput 引用保留在 this 上，transfer 左输入与它双向同步，
+    // 继续复用原有 commitChanges 链路。
+    this.transferMount = document.createElement("div");
+    this.transferMount.className = "pr-transfer-mount";
+    this.transferMount.style.boxSizing = "border-box";
+    this.transferMount.style.width = "100%";
+    this.transferMount.style.height = "100%";
+    propContainer.appendChild(this.transferMount);
+    mountTransfer(this, this.transferMount);
+
     propContainer.appendChild(this.audioInfoArea);
     propContainer.appendChild(propResizer);
 
