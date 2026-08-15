@@ -374,17 +374,20 @@ export const menus = {
       items.push(this._menuDivider());
     }
 
-    // Group 5: Convert to End Frame (image segments only)
-    if (trackType === "image" && seg.type === "image") {
-      const isEnd = seg.isEndFrame;
-      items.push(this._menuBtn(isEnd ? "Convert to Start Frame" : "Convert to End Frame", {
-        onClick: () => {
-          seg.isEndFrame = !isEnd;
-          this.commitChanges();
-          this.render();
-          this.dismissMenu();
-        }
-      }));
+    // Group 5: Convert to another node type (main track: text / image / video)
+    if (trackType !== "audio" && (seg.type === "text" || seg.type === "image" || seg.type === "video")) {
+      const convertTargets = seg.type === "text" ? ["image", "video"]
+        : seg.type === "image" ? ["text", "video"]
+        : ["text", "image"];
+      for (const target of convertTargets) {
+        const label = "Convert to " + (target === "text" ? "Text" : target === "image" ? "Image" : "Video");
+        items.push(this._menuBtn(label, {
+          onClick: () => {
+            this._convertSegmentType(seg, trackType, target);
+            this.dismissMenu();
+          }
+        }));
+      }
       items.push(this._menuDivider());
     }
 
@@ -428,6 +431,64 @@ export const menus = {
     }));
 
     this.openMenu(clientX, clientY, menu => { items.forEach(it => menu.appendChild(it)); });
+  },
+
+  // 转换主轨道 segment 节点类型（text / image / video），视频节点转文字/图片时同步移除关联音频兄弟
+  _convertSegmentType(seg, trackType, newType) {
+    if (!seg || seg.type === newType) return;
+    const wasVideo = seg.type === "video";
+
+    // 清理旧类型专属字段
+    if (wasVideo) {
+      if (seg.videoEl) { try { seg.videoEl.pause(); } catch (_) {} }
+      delete seg.videoFile;
+      delete seg.videoEl;
+      delete seg.videoDurationFrames;
+      delete seg.thumbnails;
+      // if (newType == "image") {
+      //   const fi = document.createElement("input");
+      //     fi.type = "file";
+      //     fi.accept = "image/*";
+      //     fi.addEventListener("change", (ev) => {
+      //       if (ev.target.files?.[0]) this.handleImageUpload([ev.target.files[0]], gap.frameStart, gapLength);
+      //     });
+      //     fi.click();
+      // }
+    }
+    if (seg.type === "image") {
+      delete seg.imageFile;
+      delete seg.imageB64;
+      delete seg.imgObj;
+    }
+    if (seg.type === "text") {
+      delete seg.imageFile; delete seg.imageB64; delete seg.imgObj;
+      delete seg.videoFile; delete seg.videoEl; delete seg.thumbnails;
+    }
+
+    seg.type = newType;
+
+    // 视频节点转文字/图片时，删除关联的音频兄弟节点
+    if (wasVideo && newType !== "video" && seg.id && seg.id.endsWith("_v")) {
+      const sibId = seg.id.slice(0, -2) + "_a";
+      if (this.timeline.audioSegments) {
+        this.timeline.audioSegments = this.timeline.audioSegments.filter(s => s.id !== sibId);
+      }
+    }
+
+    this.commitChanges();
+
+    // 若被转换的节点正处于选中状态，刷新 UI（transfer 面板按钮可见性依赖 seg.type）
+    const arr = this.getSegmentArray(trackType);
+    const idx = arr.findIndex(s => s.id === seg.id);
+    if (idx !== -1 && this.selectionType === trackType && this.selectedIndex === idx) {
+      this.updateUIFromSelection();
+    }
+    // 若被移除的音频兄弟节点正处于选中状态，清空选择
+    if (this.selectionType === "audio" && this.selectedIndex >= (this.timeline.audioSegments?.length || 0)) {
+      this.selectedIndex = -1;
+      this.selectionType = "";
+      this.updateUIFromSelection();
+    }
   },
 
   // 合并原 showGapContextMenu 与 showGapMenu（差异仅为 dismiss 目标与起始帧计算）

@@ -57,7 +57,8 @@ export const state = {
 
     this.selectedSegmentIds = Array.from(newSelectedIds);
     this.syncSelectionTypeAndIndex();
-  },
+  }
+,
 
   syncSelectionTypeAndIndex() {
     if (!this.selectedSegmentIds || this.selectedSegmentIds.length === 0) {
@@ -79,7 +80,8 @@ export const state = {
         break;
       }
     }
-  },
+  }
+,
 
   growTimelineIfNeeded(requiredFrames) {
     const current = this.getDurationFrames();
@@ -96,7 +98,8 @@ export const state = {
     if (window.app && window.app.graph) {
       window.app.graph.setDirtyCanvas(true, true);
     }
-  },
+  }
+,
 
   syncWidgetsToRetakeDuration(durationFrames) {
     if (durationFrames <= 0) return;
@@ -134,7 +137,8 @@ export const state = {
     }
 
     this._suppressCommit = wasSuppressing;
-  },
+  }
+,
 
   getMaxZoom() {
     const visualDurationSecs = this.getVisualDurationFrames() / this.getFrameRate();
@@ -146,7 +150,8 @@ export const state = {
     const limitMaxZoom = MAX_CANVAS_WIDTH / Math.max(1, viewportWidth);
 
     return Math.max(1, Math.min(baseMaxZoom, limitMaxZoom));
-  },
+  }
+,
 
   getVisualDurationFrames() {
     if (this.retakeMode) {
@@ -170,7 +175,8 @@ export const state = {
     const outputDuration = this.getDurationFrames();
     if (furthest <= 0) return outputDuration;
     return Math.max(outputDuration, Math.ceil(furthest * 1.30));
-  },
+  }
+,
 
   updateZoomSliderMax() {
     if (!this.zoomSlider) return;
@@ -187,7 +193,8 @@ export const state = {
         this.resizeCanvas(newCanvasWidth);
       }
     }
-  },
+  }
+,
 
   getGlobalPrompt() {
     if (this.globalPromptInput) {
@@ -214,7 +221,8 @@ export const state = {
       }
     }
     return val;
-  },
+  }
+,
 
   syncGlobalPrompt(val) {
     if (this.node.properties) {
@@ -273,7 +281,8 @@ export const state = {
       if (window.app.graph.onNodeChanged) window.app.graph.onNodeChanged(this.node);
       if (window.app.graph.onStateChanged) window.app.graph.onStateChanged();
     }
-  },
+  }
+,
 
   updateUIFromSelection() {
     if (this.selectedSegmentIds && this.isMultiSelectActive()) {
@@ -310,6 +319,7 @@ export const state = {
       if (this.segmentBoundsDisplay) {
         this.segmentBoundsDisplay.textContent = "Multiple Segments Selected";
       }
+      if (this._transferSetSeg) this._transferSetSeg(null);
       return;
     }
 
@@ -434,7 +444,10 @@ export const state = {
         this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
       }
     }
-  },
+
+    if (this._transferSetSeg) this._transferSetSeg(seg);
+  }
+,
 
   updateRetakeUIState() {
     const isRetake = this.retakeMode;
@@ -518,7 +531,8 @@ export const state = {
 
     // 5. Update UI selection inputs
     this.updateUIFromSelection();
-  },
+  }
+,
 
   updateSidebarHeights() {
     if (this.mainTrackLabel) {

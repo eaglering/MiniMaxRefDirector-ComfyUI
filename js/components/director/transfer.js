@@ -65,6 +65,8 @@ const DEFAULT_PROMPT_JSON = {
 // 规则：
 //   detailed_description:
 //   [Shot 1]{shot1_description}
+//   [Shot 2]{shot2_description}（如果存在）
+//   ...
 //   {detailed_description}
 //   overall_soundscape:
 //   {overall_soundscape}或者N/A
@@ -74,15 +76,62 @@ function formatPromptJson(data) {
   const d = data && typeof data === "object" ? data : {};
   const val = (v) => (v != null && String(v).trim() !== "" ? String(v) : "N/A");
   const plain = (v) => (v != null ? String(v) : "");
-  return [
-    "detailed_description:",
-    "[Shot 1]" + plain(d.shot1_description),
-    plain(d.detailed_description),
-    "overall_soundscape:",
-    val(d.overall_soundscape),
-    "non_diegetic_music:",
-    val(d.non_diegetic_music),
-  ].join("\n");
+  const lines = ["detailed_description:"];
+  lines.push("[Shot 1]" + plain(d.shot1_description));
+  for (let i = 2; i <= 32; i++) {
+    const key = "shot" + i + "_description";
+    if (d[key] !== undefined && d[key] !== null && String(d[key]).trim() !== "") {
+      lines.push("[Shot " + i + "]" + plain(d[key]));
+    }
+  }
+  lines.push(plain(d.detailed_description));
+  lines.push("overall_soundscape:");
+  lines.push(val(d.overall_soundscape));
+  lines.push("non_diegetic_music:");
+  lines.push(val(d.non_diegetic_music));
+  return lines.join("\n");
+}
+
+// 将右侧 textarea 的展示文本反向解析回 JSON 对象
+// （与 formatPromptJson 的规则对称，便于按钮增删 shotX_description）
+function parsePromptText(text) {
+  const obj = { detailed_description: "", overall_soundscape: "", non_diegetic_music: "" };
+  const lines = (text || "").split("\n");
+  let section = "detail"; // detail | overall | music
+  const detailLines = [];
+  for (const line of lines) {
+    if (line.startsWith("detailed_description:")) { section = "detail"; continue; }
+    if (line.startsWith("overall_soundscape:")) { section = "overall"; continue; }
+    if (line.startsWith("non_diegetic_music:")) { section = "music"; continue; }
+    if (section === "detail") {
+      const m = line.match(/^\[Shot\s*(\d+)\](.*)$/);
+      if (m) {
+        obj["shot" + m[1] + "_description"] = m[2];
+      } else {
+        detailLines.push(line);
+      }
+    } else if (section === "overall") {
+      if (line.trim() !== "" && line.trim() !== "N/A") obj.overall_soundscape = line;
+    } else if (section === "music") {
+      if (line.trim() !== "" && line.trim() !== "N/A") obj.non_diegetic_music = line;
+    }
+  }
+  obj.detailed_description = detailLines.join("\n");
+  return obj;
+}
+
+// 更新右侧文本中某个字段（如 shotX_description）
+function updateShotField(text, key, value) {
+  const obj = parsePromptText(text);
+  obj[key] = value;
+  return formatPromptJson(obj);
+}
+
+// 从右侧文本中删除某个字段（如 shotX_description）
+function removeShotField(text, key) {
+  const obj = parsePromptText(text);
+  delete obj[key];
+  return formatPromptJson(obj);
 }
 
 // ---------- 样式 ----------
@@ -152,6 +201,9 @@ export function TransferPanel({ director }) {
   const [resources, setResources] = useState([]);
   const [leftWidth, setLeftWidth] = useState(null); // 左侧宽度(px)，null 表示默认平分
   const [midHover, setMidHover] = useState(false);
+  const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
+  const [motionCtxOn, setMotionCtxOn] = useState(false); // Motion Context 开关
+  const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
 
   const rowRef = useRef(null);
   const leftRef = useRef(null);
@@ -159,16 +211,31 @@ export function TransferPanel({ director }) {
   const debounceRef = useRef(null);
   const aliveRef = useRef(true);
 
-  // 挂载：读主体列表，向外壳注册左侧同步通道
+  // 挂载：读主体列表，向外壳注册左侧同步通道 + 当前选中 segment 通道
   useEffect(() => {
     aliveRef.current = true;
     setSubjects(getSubjectsFromGraph());
-    if (director) director._transferSetLeft = setLeftText;
+    if (director) {
+      director._transferSetLeft = setLeftText;
+      director._transferSetSeg = (seg) => {
+        setCurSeg(seg);
+        setMotionCtxOn(!!(seg && seg.motionContext));
+        setAutoEndOn(!!(seg && seg.autoEndFrame));
+      };
+      // 挂载时主动同步一次当前选中 segment（director 可能早已有选择）
+      const initSeg = director.selectionType === "audio"
+        ? (director.timeline?.audioSegments?.[director.selectedIndex] || null)
+        : (director.timeline?.segments?.[director.selectedIndex] || null);
+      if (initSeg && director._transferSetSeg) director._transferSetSeg(initSeg);
+    }
     return () => {
       aliveRef.current = false;
       clearTimeout(debounceRef.current);
       if (director && director._transferSetLeft === setLeftText) {
         director._transferSetLeft = null;
+      }
+      if (director && director._transferSetSeg) {
+        director._transferSetSeg = null;
       }
     };
   }, [director]);
@@ -235,6 +302,138 @@ export function TransferPanel({ director }) {
     const first = [...segs].sort((a, b) => (a.start || 0) - (b.start || 0))[0];
     return first.imageFile || first.videoFile || "";
   };
+
+  // 当前 segment 在时间轴上的序号（第几个 shot，从 1 开始）
+  const shotNumber = (seg) => {
+    const segs = (director?.timeline?.segments || []).slice().sort((a, b) => (a.start || 0) - (b.start || 0));
+    const idx = segs.findIndex((s) => s.id === seg.id);
+    return idx >= 0 ? idx + 1 : 1;
+  };
+
+  // 生成首帧：调用后端 /h3/generate_first_frame（后端接口待实现，先写好前端调用）
+  // 成功后：将节点转为图片节点并更新 imageFile
+  async function generateFirstFrame(seg) {
+    if (!seg || busy || !director) return;
+    setBusy(true);
+    setError("");
+    try {
+      const body = {
+        segment_id: seg.id,
+        prompt: seg.prompt || "",
+        image_path: seg.imageFile || seg.imageB64 || "",
+        vlm_mode: wVal("vlm_mode") || "llama-cpp",
+        seed: wVal("seed") ?? 42,
+        gguf_path: wVal("gguf_path") || "",
+        mmproj_path: wVal("mmproj_path") || "",
+        provider: wVal("provider") || "GLM",
+        api_key: wVal("api_key") || "",
+      };
+      const res = await api.fetchApi("/minimax_ref/api/h3/generate_first_frame", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      console.log("[Transfer] generate_first_frame ->", data);
+      if (data && data.success) {
+        // 将节点转图片节点并更新 imageFile
+        seg.type = "image";
+        seg.imageFile = data.image_file || data.imageFile || data.image_path || "";
+        director.commitChanges();
+        if (director._transferSetSeg) director._transferSetSeg(seg);
+      } else {
+        setError((data && data.error) || "生成首帧失败");
+      }
+    } catch (e) {
+      console.error("[Transfer] generateFirstFrame failed:", e);
+      setError(String(e?.message || e));
+    } finally {
+      if (aliveRef.current) setBusy(false);
+    }
+  }
+
+  // Motion Context 开关：更新 timeline_data 对应字段，并按节点类型处理右侧 json 的 shot1_description
+  function toggleMotionContext() {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    const on = !motionCtxOn;
+    setMotionCtxOn(on);
+    seg.motionContext = on; // 更新 timeline_data 对应字段
+    if (on) {
+      if (seg.type === "image") {
+        // 图片节点：调用后端接口生成 shot1_description 并加入 json
+        analyzeImageForShot1(seg);
+      } else if (seg.type === "video") {
+        // 文字和图片节点：更新 [Shot 1]
+        setRightText(updateShotField(rightText, "shot1_description", seg.prompt || ""));
+      } else {
+        // 文字节点：去除 shot1_description
+        setRightText(removeShotField(rightText, "shot1_description"));
+      }
+    } else {
+      // 取消选中：去除 shot1_description
+      setRightText(removeShotField(rightText, "shot1_description"));
+    }
+    director.commitChanges();
+  }
+
+  // 图片节点：调用 /llm/generate_image_analysis 生成 shot1_description 加入 json
+  async function analyzeImageForShot1(seg) {
+    if (!seg || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const body = {
+        image_path: seg.imageFile || seg.imageB64 || "",
+        prompt: seg.prompt || "",
+        vlm_mode: wVal("vlm_mode") || "llama-cpp",
+        seed: wVal("seed") ?? 42,
+        gguf_path: wVal("gguf_path") || "",
+        mmproj_path: wVal("mmproj_path") || "",
+        provider: wVal("provider") || "GLM",
+        api_key: wVal("api_key") || "",
+      };
+      const res = await api.fetchApi("/minimax_ref/api/llm/generate_image_analysis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      console.log("[Transfer] generate_image_analysis ->", data);
+      if (data && data.success) {
+        const pd = data.prompt_data;
+        const desc = pd && typeof pd === "object"
+          ? (pd.shot1_description || pd.detailed_description || JSON.stringify(pd))
+          : String(pd || "");
+        setRightText(updateShotField(rightText, "shot1_description", desc));
+      } else {
+        setError((data && data.error) || "图像分析失败");
+      }
+    } catch (e) {
+      console.error("[Transfer] analyzeImageForShot1 failed:", e);
+      setError(String(e?.message || e));
+    } finally {
+      if (aliveRef.current) setBusy(false);
+    }
+  }
+
+  // 自动尾帧开关：更新 timeline_data 对应字段；开启将 shotX_description 放入 json，取消删除
+  function toggleAutoEndFrame() {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    const on = !autoEndOn;
+    setAutoEndOn(on);
+    seg.autoEndFrame = on; // 更新 timeline_data 对应字段
+    const key = "shot" + shotNumber(seg) + "_description";
+    if (on) {
+      // 开启：将 shotX_description 放入 json
+      setRightText(updateShotField(rightText, key, seg.prompt || ""));
+    } else {
+      // 取消：删除 shotX_description
+      setRightText(removeShotField(rightText, key));
+    }
+    director.commitChanges();
+  }
 
   async function runGenerate(source) {
     if (!source || busy) return;
@@ -395,10 +594,44 @@ export function TransferPanel({ director }) {
           >→</button>
         </div>
         <div class="pr-prompt-wrapper" style=${S.col}>
-          <div class="pr-prompt-label">Minimax H3 Prompt</div>
+          <div class="pr-prompt-label" style=${{ position: "static", margin: "6px 0 0 8px" }}>Minimax H3 Prompt</div>
+          <div style=${{ display: "flex", gap: "6px", padding: "2px 8px", flexWrap: "wrap", alignItems: "center" }}>
+            ${
+              curSeg && (curSeg.type === "text" || curSeg.type === "image")
+                ? html`<button
+                    class="pr-btn"
+                    style=${{ padding: "4px 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", height: "28px", boxSizing: "border-box", fontSize: "11px", lineHeight: "1", whiteSpace: "nowrap" }}
+                    title="Generate the first frame from the selected segment"
+                    disabled=${busy}
+                    onClick=${() => generateFirstFrame(curSeg)}
+                  >Generate First Frame</button>`
+                : null
+            }
+            ${
+              curSeg && (curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video")
+                ? html`<button
+                    class=${"pr-btn" + (motionCtxOn ? " toggle-on" : "")}
+                    style=${{ padding: "4px 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", height: "28px", boxSizing: "border-box", fontSize: "11px", lineHeight: "1", whiteSpace: "nowrap" }}
+                    title="Toggle Motion Context for the selected segment"
+                    onClick=${toggleMotionContext}
+                  >Motion Context</button>`
+                : null
+            }
+            ${
+              curSeg && curSeg.type !== "audio"
+                ? html`<button
+                    class=${"pr-btn" + (autoEndOn ? " toggle-on" : "")}
+                    style=${{ padding: "4px 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", height: "28px", boxSizing: "border-box", fontSize: "11px", lineHeight: "1", whiteSpace: "nowrap" }}
+                    title="Toggle Auto End Frame for the selected segment"
+                    onClick=${toggleAutoEndFrame}
+                  >Auto End Frame</button>`
+                : null
+            }
+          </div>
           <textarea
             ref=${rightRef}
             class="pr-prompt-area"
+            style=${{ position: "static", flex: "1", minHeight: "0", height: "auto" }}
             value=${rightText}
             placeholder="生成结果（输入 @ 或 # 引用主体）"
             spellcheck=${false}
