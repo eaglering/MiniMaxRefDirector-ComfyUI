@@ -7,13 +7,14 @@
 // 等字段通信（外壳无感知降级）。
 //
 // 功能：
-//  1. 左 textarea（原始 prompt） + 中间列（→ 按钮 + 可拖拽分割条） + 右 textarea（生成结果）
-//  2. 点击 →：右侧只读，以左侧为源请求 /llm/generate_prompt_json，
-//     结果展示在右侧 textarea（可重复点击重新生成）
-//  3. 分割条：鼠标滑过显示左右箭头光标（col-resize），左右拖动调节两个 textarea 的宽度
-//  4. 左侧输入 @、右侧输入 @ / # → 弹出主体选择器；
+//  1. 左 textarea（Segment Prompt，原始 prompt）+ 中间列（生成按钮）+ 右 textarea（Minimax H3 Prompt）
+//  2. 两个 textarea 均可自由编辑
+//  3. 中间列：→ 按钮垂直居中；按住中间列（按钮除外）左右拖动可调节两个 textarea 的宽度
+//  4. 点击 →：以左侧为源请求 /llm/generate_prompt_json，
+//     返回的 JSON 按展示规则格式化后写入右侧 textarea（替代默认 JSON）
+//  5. 左侧输入 @、右侧输入 @ / # → 弹出主体选择器；
 //     选择后转换：@主体 → <@主体>；#主体 → <#主体:[Chinese]对话内容>
-//  5. 右侧内容 debounce 500ms 解析资源引用（首帧 / 尾帧 / 主体），
+//  6. 右侧内容 debounce 500ms 解析资源引用（首帧 / 尾帧 / 主体），
 //     在下方横排展示资源预览条（不换行，x 轴滑动）
 // ============================================================
 import { h, render } from "../../vendor/preact.module.js";
@@ -25,43 +26,23 @@ const html = htm.bind(h);
 
 // ---------- 工具函数 ----------
 
-function normalizeSubjects(list) {
-  return list.map(s => ({
-    name: s?.name || "",
-    description: s?.description || "",
-    type: s?.type || "Subject",
-    relationship: s?.relationship || "fully_preserved",
-    imageFile: s?.imageFile || "",
-    imageB64: s?.imageB64 || "",
-    audioFile: s?.audioFile || "",
-  }));
-}
-
 function getSubjectsFromGraph() {
-  // 1) 优先取主体节点发布到 window 的缓存（数据加载时机不受图解析/挂载顺序影响）
-  const cached = window.__refSubjects;
-  if (Array.isArray(cached) && cached.length) return cached;
-
-  // 2) 从图中主体节点的 subject_data widget 读取（兼容 name/comfyClass 与对象值）
   try {
     const nodes = app.graph?._nodes || [];
     for (const n of nodes) {
-      if (!n) continue;
-      if (n.type !== "MiniMaxRefSubject" && n.comfyClass !== "MiniMaxRefSubject") continue;
-      const w = (n.widgets || []).find(x => x.name === "subject_data");
-      if (!w) continue;
-      let raw = w.value;
-      if (typeof raw === "string") {
-        try { raw = JSON.parse(raw); } catch { continue; }
-      }
-      if (raw && Array.isArray(raw.subjects)) {
-        return normalizeSubjects(raw.subjects);
+      if (n.type !== "MiniMaxRefSubject") continue;
+      for (const w of n.widgets || []) {
+        if (!w.value || typeof w.value !== "string") continue;
+        try {
+          const parsed = JSON.parse(w.value);
+          if (parsed && Array.isArray(parsed.subjects)) return parsed.subjects;
+        } catch { /* 尝试下一个 widget */ }
       }
     }
   } catch (e) {
     console.warn("[Transfer] getSubjectsFromGraph failed:", e);
   }
-  return Array.isArray(cached) ? cached : [];
+  return [];
 }
 
 function subjectImgSrc(s) {
@@ -72,33 +53,63 @@ function subjectImgSrc(s) {
   return "";
 }
 
+// 右侧 textarea 默认 JSON 数据结构（→ 生成结果会替代它）
+const DEFAULT_PROMPT_JSON = {
+  detailed_description: "",
+  overall_soundscape: "",
+  non_diegetic_music: "",
+  shot1_description: "",
+};
+
+// 将 prompt JSON 按展示规则格式化为 textarea 文本
+// 规则：
+//   detailed_description:
+//   [Shot 1]{shot1_description}
+//   {detailed_description}
+//   overall_soundscape:
+//   {overall_soundscape}或者N/A
+//   non_diegetic_music:
+//   {non_diegetic_music}N/A
+function formatPromptJson(data) {
+  const d = data && typeof data === "object" ? data : {};
+  const val = (v) => (v != null && String(v).trim() !== "" ? String(v) : "N/A");
+  const plain = (v) => (v != null ? String(v) : "");
+  return [
+    "detailed_description:",
+    "[Shot 1]" + plain(d.shot1_description),
+    plain(d.detailed_description),
+    "overall_soundscape:",
+    val(d.overall_soundscape),
+    "non_diegetic_music:",
+    val(d.non_diegetic_music),
+  ].join("\n");
+}
+
 // ---------- 样式 ----------
 const S = {
   panel: {
     boxSizing: "border-box", width: "100%", height: "100%",
     display: "flex", flexDirection: "column", gap: "4px",
-    padding: "6px 8px", fontFamily: "inherit",
+    fontFamily: "inherit",
   },
   row: { display: "flex", gap: "6px", flex: 1, minHeight: 0 },
   area: {
-    flex: 1, resize: "none", boxSizing: "border-box", width: "100%", height: "100%", minHeight: 0,
+    flex: 1, resize: "none", boxSizing: "border-box", width: "100%", minHeight: 0,
     background: "#1e1e1e", color: "#ccc", border: "1px solid #444", borderRadius: "4px",
     padding: "6px", fontFamily: "monospace", fontSize: "12px", lineHeight: "1.5", outline: "none",
   },
-  areaReadonly: { opacity: 0.65 },
-  actions: { display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" },
+  col: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
+  actions: {
+    display: "flex", flexDirection: "column", justifyContent: "center",
+    alignItems: "center", cursor: "col-resize", touchAction: "none",
+    userSelect: "none", borderRadius: "4px", transition: "background 0.15s",
+  },
   btn: {
-    width: "32px", height: "32px", flex: "0 0 auto", borderRadius: "6px", border: "1px solid #666",
+    width: "36px", height: "36px", borderRadius: "6px", border: "1px solid #666",
     background: "#3a3a3a", color: "#ddd", fontSize: "16px", cursor: "pointer",
     userSelect: "none", lineHeight: "1",
   },
   btnDisabled: { opacity: 0.4, cursor: "not-allowed" },
-  divider: {
-    flex: 1, minHeight: "24px", width: "10px", cursor: "col-resize", borderRadius: "3px",
-    background: "transparent", transition: "background 0.15s",
-    display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none",
-  },
-  dividerBar: { width: "3px", height: "70%", borderRadius: "2px", background: "#444", transition: "background 0.15s" },
   resources: {
     display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
     gap: "8px", padding: "4px 0", minHeight: "60px", borderTop: "1px solid #333",
@@ -133,15 +144,14 @@ const S = {
 
 export function TransferPanel({ director }) {
   const [leftText, setLeftText] = useState(() => director?.promptInput?.value || "");
-  const [rightText, setRightText] = useState("");
-  const [locked, setLocked] = useState("right"); // "right": 右只读 | "left": 左只读
+  const [rightText, setRightText] = useState(() => formatPromptJson(DEFAULT_PROMPT_JSON));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [subjects, setSubjects] = useState([]);
   const [menu, setMenu] = useState(null); // { side, trigger, caret, x, y }
   const [resources, setResources] = useState([]);
-  const [leftWidth, setLeftWidth] = useState(null); // 左侧 textarea 宽度(px)，null 表示默认平分
-  const [divHover, setDivHover] = useState(false);
+  const [leftWidth, setLeftWidth] = useState(null); // 左侧宽度(px)，null 表示默认平分
+  const [midHover, setMidHover] = useState(false);
 
   const rowRef = useRef(null);
   const leftRef = useRef(null);
@@ -149,45 +159,46 @@ export function TransferPanel({ director }) {
   const debounceRef = useRef(null);
   const aliveRef = useRef(true);
 
-  // 挂载：读主体列表，监听主体变更事件，向外壳注册左侧同步通道
+  // 挂载：读主体列表，向外壳注册左侧同步通道
   useEffect(() => {
     aliveRef.current = true;
-    const refresh = () => { if (aliveRef.current) setSubjects(getSubjectsFromGraph()); };
-    refresh();
-    window.addEventListener("ref:subjects-changed", refresh);
+    setSubjects(getSubjectsFromGraph());
     if (director) director._transferSetLeft = setLeftText;
     return () => {
       aliveRef.current = false;
       clearTimeout(debounceRef.current);
-      window.removeEventListener("ref:subjects-changed", refresh);
       if (director && director._transferSetLeft === setLeftText) {
         director._transferSetLeft = null;
       }
     };
   }, [director]);
 
-  // 分割条拖拽：调节左右两个 textarea 的宽度
+  // 中间列拖拽：按住中间列（按钮除外）左右拖动调节两个 textarea 的宽度
   function startDrag(e) {
+    if (e.target.closest && e.target.closest("button")) return; // 点击按钮不触发拖拽
     e.preventDefault();
     const row = rowRef.current;
     const left = leftRef.current;
     if (!row || !left) return;
     const startX = e.clientX;
-    const startW = left.getBoundingClientRect().width;
-    const rowW = row.getBoundingClientRect().width;
+    const startW = left.getBoundingClientRect().width; // 左列当前宽度
+    const actionsW = e.currentTarget.getBoundingClientRect().width;
+    const minW = 80; // 左右两列各保留的最小宽度
+    const maxW = Math.max(minW + 1, row.getBoundingClientRect().width - actionsW - minW);
     const onMove = (ev) => {
       if (!aliveRef.current) return;
-      const w = clamp(startW + (ev.clientX - startX), 80, Math.max(81, rowW - 140));
-      setLeftWidth(w);
+      setLeftWidth(clamp(startW + (ev.clientX - startX), minW, maxW));
     };
     const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
   }
@@ -245,24 +256,19 @@ export function TransferPanel({ director }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        // 非 2xx：优先取 JSON 错误信息，否则显示 HTTP 状态码（便于排查 404/405 等路由问题）
-        let detail = "";
-        try {
-          const j = await res.json();
-          detail = j?.error || JSON.stringify(j);
-        } catch {
-          detail = (await res.text()).slice(0, 200);
-        }
-        throw new Error(`HTTP ${res.status} ${res.statusText}${detail ? " - " + detail : ""}`);
-      }
       const data = await res.json();
       console.log("[Transfer] generate_prompt_json ->", data);
       if (data.success) {
+        let obj = data.json_data;
+        if (typeof obj === "string") {
+          try { obj = JSON.parse(obj); } catch { /* 保留原始字符串 */ }
+        }
         setRightText(
-          typeof data.json_data === "string"
-            ? data.json_data
-            : JSON.stringify(data.json_data, null, 2)
+          obj && typeof obj === "object"
+            ? formatPromptJson(obj)
+            : typeof data.json_data === "string"
+              ? data.json_data
+              : JSON.stringify(data.json_data, null, 2)
         );
       } else {
         setError(data.error || "生成失败");
@@ -362,33 +368,43 @@ export function TransferPanel({ director }) {
 
   return html`
     <div class="tr-panel" style=${S.panel}>
-      <div style=${S.row}>
-        <textarea
-          ref=${leftRef}
-          style=${Object.assign({}, S.area, locked === "left" ? S.areaReadonly : null)}
-          value=${leftText}
-          readonly=${locked === "left"}
-          placeholder="原始 prompt（输入 @ 引用主体）"
-          spellcheck=${false}
-          onInput=${(e) => { setLeftText(e.target.value); handleInput(e, "left"); }}
-        ></textarea>
-        <div style=${S.actions}>
+      <div ref=${rowRef} style=${S.row}>
+        <div class="pr-prompt-wrapper" style=${leftWidth ? Object.assign({}, S.col, { flex: "0 0 auto", width: leftWidth + "px" }) : S.col}>
+          <div class="pr-prompt-label">Segment Prompt</div>
+          <textarea
+            ref=${leftRef}
+            class="pr-prompt-area"
+            value=${leftText}
+            placeholder="原始 prompt（输入 @ 引用主体）"
+            spellcheck=${false}
+            onInput=${(e) => { setLeftText(e.target.value); handleInput(e, "left"); }}
+          ></textarea>
+        </div>
+        <div
+          style=${Object.assign({}, S.actions)}
+          title="拖动调节左右宽度"
+          onPointerDown=${startDrag}
+          onPointerEnter=${() => setMidHover(true)}
+          onPointerLeave=${() => setMidHover(false)}
+        >
           <button
             style=${Object.assign({}, S.btn, busy ? S.btnDisabled : null)}
-            title="Change to Minimax H3 prompt"
+            title="以左侧为源生成 H3 Prompt，结果展示在右侧"
             disabled=${busy}
-            onClick=${() => { setLocked("left"); runGenerate(rightText); }}
+            onClick=${() => runGenerate(leftText)}
           >→</button>
         </div>
-        <textarea
-          ref=${rightRef}
-          style=${Object.assign({}, S.area, locked === "right" ? S.areaReadonly : null)}
-          value=${rightText}
-          readonly=${locked === "right"}
-          placeholder="生成结果（输入 @ 或 # 引用主体）"
-          spellcheck=${false}
-          onInput=${(e) => { setRightText(e.target.value); handleInput(e, "right"); }}
-        ></textarea>
+        <div class="pr-prompt-wrapper" style=${S.col}>
+          <div class="pr-prompt-label">Minimax H3 Prompt</div>
+          <textarea
+            ref=${rightRef}
+            class="pr-prompt-area"
+            value=${rightText}
+            placeholder="生成结果（输入 @ 或 # 引用主体）"
+            spellcheck=${false}
+            onInput=${(e) => { setRightText(e.target.value); handleInput(e, "right"); }}
+          ></textarea>
+        </div>
       </div>
 
       ${

@@ -7,6 +7,7 @@ from .lib.path import resolve_input_path
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")
+SubjectConfig = io.Custom("SUBJECT_CONFIG")
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +86,27 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "resolution configuration, and prompt templates into a unified guide_data output."
             ),
             inputs=[
-                SubjectData.Input("subject_data"),
+                io.Model.Input(
+                    "model", optional=True,
+                    tooltip="Diffusion model to pass through to the generation node.",
+                ),
+                io.Clip.Input(
+                    "clip", optional=True,
+                    tooltip="CLIP model to pass through to the generation node.",
+                ),
+                io.Vae.Input(
+                    "video_vae", optional=True,
+                    tooltip="Video VAE to pass through to the generation node.",
+                ),
+                io.Vae.Input(
+                    "audio_vae", optional=True,
+                    tooltip="Audio VAE to pass through to the generation node.",
+                ),
+                SubjectConfig.Input(
+                    "config", optional=True,
+                    tooltip="Unified config from MiniMax Reference Subject (VLM opts + subject data).",
+                ),
+                SubjectData.Input("subject_data", optional=True),
                 io.String.Input(
                     "global_prompt", multiline=True, default="", force_input=True, optional=True,
                     tooltip="Conditions the entire video. Anchors persistent characters, objects, and scene context.",
@@ -156,12 +177,18 @@ class MiniMaxRefDirector(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, subject_data=None, global_prompt="", start_second=0.0, end_second=5.0,
+    def execute(cls, model=None, clip=None, video_vae=None, audio_vae=None, config=None,
+                subject_data=None, global_prompt="", start_second=0.0, end_second=5.0,
                 duration_seconds=5.0, start_frame=0, end_frame=120, duration_frames=120,
                 prompt_template="", timeline_data="", local_prompts="", segment_lengths="",
                 frame_rate=24, display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
+        # Subject data may arrive either via the dedicated subject_data socket or embedded
+        # inside the unified config output from MiniMax Reference Subject.
+        subjects_source = config.get("subject_data", {}) if config else {}
         subject = subject_data.get("subjects", []) if subject_data else []
+        if not subject:
+            subject = subjects_source.get("subjects", []) if isinstance(subjects_source, dict) else []
 
         if not timeline_data or not timeline_data.strip():
             raise ValueError("[MiniMaxRefDirector] timeline_data is required and must not be empty.")
@@ -239,6 +266,11 @@ class MiniMaxRefDirector(io.ComfyNode):
             "frame_rate": float(frame_rate),
             "subject_data": subject,
             "timeline_data": guide_timeline,
+            "model": model,
+            "clip": clip,
+            "video_vae": video_vae,
+            "audio_vae": audio_vae,
+            "config": config,
         }
 
         log.info(
