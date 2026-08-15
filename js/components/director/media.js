@@ -87,8 +87,7 @@ export const media = {
 
         for (let i = 0; i < numFrames; i++) {
           // Check if the file/segment is still active in the current timeline
-          const exists = this.timeline.segments.find(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey) ||
-            (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey));
+          const exists = this.timeline.segments.find(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey);
           if (!exists) break;
 
           const time = (i / numFrames) * duration;
@@ -112,9 +111,6 @@ export const media = {
           const matchingSegs = [
             ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
           ];
-          if (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey)) {
-            matchingSegs.push(this.timeline.retakeVideo);
-          }
           for (const ms of matchingSegs) {
             ms.thumbnails = thumbs;
           }
@@ -145,9 +141,6 @@ export const media = {
       const matchingSegs = [
         ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
       ];
-      if (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey)) {
-        matchingSegs.push(this.timeline.retakeVideo);
-      }
       for (const ms of matchingSegs) {
         ms.thumbnails = thumbs;
         ms._extractingThumbs = false;
@@ -165,9 +158,6 @@ export const media = {
       const matchingSegs = [
         ...this.timeline.segments.filter(s => s.imageFile === fileKey || s.videoFile === fileKey || s._blobUrl === fileKey)
       ];
-      if (this.timeline.retakeVideo && (this.timeline.retakeVideo.imageFile === fileKey || this.timeline.retakeVideo._blobUrl === fileKey)) {
-        matchingSegs.push(this.timeline.retakeVideo);
-      }
       for (const ms of matchingSegs) {
         ms._extractingThumbs = false;
       }
@@ -187,11 +177,7 @@ export const media = {
         const frameRate = this.getFrameRate();
         seg.videoDurationFrames = Math.max(1, Math.ceil(seg.videoEl.duration * frameRate));
       }
-      if (this.retakeMode && seg === this.timeline.retakeVideo && seg.videoDurationFrames) {
-        this.syncWidgetsToRetakeDuration(seg.videoDurationFrames);
-        this.updateZoomSliderMax();
-        this.commitChanges(true);
-      }
+
       return;
     }
 
@@ -210,17 +196,12 @@ export const media = {
         const frameRate = this.getFrameRate();
         seg.videoDurationFrames = Math.max(1, Math.ceil(seg.videoEl.duration * frameRate));
       }
-      if (this.retakeMode && seg === this.timeline.retakeVideo && seg.videoDurationFrames) {
-        this.syncWidgetsToRetakeDuration(seg.videoDurationFrames);
-        this.updateZoomSliderMax();
-        this.commitChanges(true);
-      }
+
       this._ensureThumbnails(seg);
       return;
     }
 
-    const isRetake = seg === this.timeline?.retakeVideo;
-    const isVideo = (seg.type === "video" || isRetake) && (seg.imageFile || seg._blobUrl);
+    const isVideo = seg.type === "video" && (seg.imageFile || seg._blobUrl);
     if (!isVideo) return;
 
     const fileKey = seg.imageFile;
@@ -274,11 +255,6 @@ export const media = {
         const frameRate = this.getFrameRate();
         const clipFrames = Math.max(1, Math.ceil(vid.duration * frameRate));
         seg.videoDurationFrames = clipFrames;
-        if (this.retakeMode && seg === this.timeline.retakeVideo) {
-          this.syncWidgetsToRetakeDuration(clipFrames);
-          this.updateZoomSliderMax();
-          this.commitChanges(true);
-        }
       }
 
       vid.addEventListener('seeked', onSeekedHandler);
@@ -487,14 +463,10 @@ export const media = {
       }
     }
 
-    if (this.timeline.retakeVideo) {
-      this._ensureVideoEl(this.timeline.retakeVideo);
-      this._ensureThumbnails(this.timeline.retakeVideo);
-    }
   }
 ,
 
-  async handleImageUpload(files, targetFrameStart = null, explicitLength = null) {
+  async handleImageUpload(files, targetFrameStart = null, explicitLength = null, seg = null) {
     const frameRate = this.getFrameRate();
     const durationFrames = this.getDurationFrames();
     const newLength = explicitLength !== null ? explicitLength : frameRate * 1; // Default to 1 second long
@@ -511,85 +483,93 @@ export const media = {
 
           const img = new Image();
           img.onload = () => {
+            if (!seg) {
+              let newStart = targetFrameStart;
+              if (newStart === null) {
+                // Fallback: find the first free slot, or append past the end
+                newStart = 0;
+                this.timeline.segments.sort((a, b) => a.start - b.start);
+                for (let i = 0; i < this.timeline.segments.length; i++) {
+                  let seg = this.timeline.segments[i];
+                  if (newStart + newLength <= seg.start) break;
+                  newStart = Math.max(newStart, seg.start + seg.length);
+                }
+              }
 
-            let newStart = targetFrameStart;
-            if (newStart === null) {
-              // Fallback: find the first free slot, or append past the end
-              newStart = 0;
+              // Use the visual timeline as the physics bound so segments can
+              // land anywhere in the padded visual area without touching duration_frames.
+              const currentDuration = this.getVisualDurationFrames();
+
+              if (targetFrameStart !== null) {
+                // Resolve physics to push existing segments
+                let tempId = "TEMP_" + Date.now();
+                this.timeline.segments.push({ id: tempId, start: newStart, length: newLength, type: "temp" });
+                let physicsCenter = newStart + this.getFrameRate() / 2;
+                let result = this._applyCenterDragPhysics(this.timeline.segments, tempId, newStart, physicsCenter, currentDuration, currentDuration, 1);
+
+                let siblingPhysics = (this.timeline.audioSegments || []).map(s => ({ ...s }));
+
+                this._resolveGlobalPhysics(result, siblingPhysics, currentDuration, this.timeline.segments, this.timeline.audioSegments);
+
+                // Update original segments with resolved physics to preserve imgObj
+                for (let shiftedSeg of result) {
+                  let original = this.timeline.segments.find(s => s.id === shiftedSeg.id);
+                  if (original) {
+                    original.start = shiftedSeg.resolvedStart !== undefined ? shiftedSeg.resolvedStart : shiftedSeg.start;
+                  }
+                }
+
+                for (let shiftedSib of siblingPhysics) {
+                  let originalSib = this.timeline.audioSegments.find(s => s.id === shiftedSib.id);
+                  if (originalSib) {
+                    originalSib.start = shiftedSib.start;
+                  }
+                }
+
+                let tempSeg = this.timeline.segments.find(s => s.id === tempId);
+                newStart = tempSeg.start;
+                this.timeline.segments = this.timeline.segments.filter(s => s.id !== tempId);
+                targetFrameStart = newStart + newLength; // For the next file in batch
+              }
+
+              // Use the full intended length — the timeline has already been grown to fit.
+              let constrainedLength = newLength;
+
+              seg = {
+                id: genId(),
+                start: newStart,
+                length: constrainedLength,
+                prompt: "",
+                type: "image",
+                imageFile: imageFile,
+                imageB64: imgUrl
+              };
+              const displayImg = new Image();
+              displayImg.onload = () => {
+                seg.imgObj = displayImg;
+                this.render();
+                resolve(); // Resolve promise letting next image process
+              };
+              displayImg.src = imgUrl;
+              this.timeline.segments.push(seg);
               this.timeline.segments.sort((a, b) => a.start - b.start);
-              for (let i = 0; i < this.timeline.segments.length; i++) {
-                let seg = this.timeline.segments[i];
-                if (newStart + newLength <= seg.start) break;
-                newStart = Math.max(newStart, seg.start + seg.length);
-              }
-            }
+              this.selectionType = "image";
+              this.selectedIndex = this.timeline.segments.findIndex(s => s.id === seg.id);
 
-            // Use the visual timeline as the physics bound so segments can
-            // land anywhere in the padded visual area without touching duration_frames.
-            const currentDuration = this.getVisualDurationFrames();
-
-            if (targetFrameStart !== null) {
-              // Resolve physics to push existing segments
-              let tempId = "TEMP_" + Date.now();
-              this.timeline.segments.push({ id: tempId, start: newStart, length: newLength, type: "temp" });
-              let physicsCenter = newStart + this.getFrameRate() / 2;
-              let result = this._applyCenterDragPhysics(this.timeline.segments, tempId, newStart, physicsCenter, currentDuration, currentDuration, 1);
-
-              let siblingPhysics = (this.timeline.audioSegments || []).map(s => ({ ...s }));
-
-              this._resolveGlobalPhysics(result, siblingPhysics, currentDuration, this.timeline.segments, this.timeline.audioSegments);
-
-              // Update original segments with resolved physics to preserve imgObj
-              for (let shiftedSeg of result) {
-                let original = this.timeline.segments.find(s => s.id === shiftedSeg.id);
-                if (original) {
-                  original.start = shiftedSeg.resolvedStart !== undefined ? shiftedSeg.resolvedStart : shiftedSeg.start;
-                }
-              }
-
-              for (let shiftedSib of siblingPhysics) {
-                let originalSib = this.timeline.audioSegments.find(s => s.id === shiftedSib.id);
-                if (originalSib) {
-                  originalSib.start = shiftedSib.start;
-                }
-              }
-
-              let tempSeg = this.timeline.segments.find(s => s.id === tempId);
-              newStart = tempSeg.start;
-              this.timeline.segments = this.timeline.segments.filter(s => s.id !== tempId);
-              targetFrameStart = newStart + newLength; // For the next file in batch
-            }
-
-            // Use the full intended length — the timeline has already been grown to fit.
-            let constrainedLength = newLength;
-
-            const seg = {
-              id: genId(),
-              start: newStart,
-              length: constrainedLength,
-              prompt: "",
-              type: "image",
-              imageFile: imageFile,
-              imageB64: imgUrl
-            };
-
-            const displayImg = new Image();
-            displayImg.onload = () => {
-              seg.imgObj = displayImg;
-              this.render();
-              resolve(); // Resolve promise letting next image process
-            };
-            displayImg.src = imgUrl;
-
-            this.timeline.segments.push(seg);
-            this.timeline.segments.sort((a, b) => a.start - b.start);
-            this.selectionType = "image";
-            this.selectedIndex = this.timeline.segments.findIndex(s => s.id === seg.id);
-
-            if (!this.retakeMode) {
               this.growTimelineIfNeeded(seg.start + seg.length);
+            } else {
+              seg.type = "image";
+              seg.imageFile = imageFile;
+              seg.imageB64 = imgUrl;
+              const displayImg = new Image();
+              displayImg.onload = () => {
+                seg.imgObj = displayImg;
+                this.render();
+                resolve(); // Resolve promise letting next image process
+              };
+              displayImg.src = imgUrl;
+              this.selectionType = "image";
             }
-
             this.updateUIFromSelection();
             this.commitChanges(true);
           };

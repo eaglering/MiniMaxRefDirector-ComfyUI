@@ -1,8 +1,8 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: createDOM, syncWidgetsAndUI, checkResize, syncLayoutToNode, getRenderScale, resizeCanvas, getMousePos, updateWidgetVisibility
-import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget, showWidget } from "./shared.js";
-import { render } from "../../vendor/preact.module.js";
-import { mountTransfer } from "./transfer.js";
+import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget } from "./shared.js";
+import { h, render } from "../../vendor/preact.module.js";
+import { GlobalParamsPanel, mountTransfer } from "./transfer.js";
 
 // --- DOM 工厂辅助（createDOM 内样板去重）---
 const iconBtn = (icon, title, onClick) => {
@@ -272,12 +272,6 @@ export const dom = {
     actionGroup.appendChild(this.uploadVideoBtn);
     actionGroup.appendChild(this.deleteBtn);
 
-    // Retake-mode-only delete button (shown next to Add Video when retakeMode is on)
-    this.deleteRetakeBtn = toolBtn(`${ICONS.trash} Delete`, () => this._deleteRetakeVideo(), {
-      danger: true, title: "Remove retake video", style: { display: "none" } // hidden until retakeMode + video loaded
-    });
-    actionGroup.appendChild(this.deleteRetakeBtn);
-
     toolbar.appendChild(actionGroup);
 
     const rightGroup = document.createElement("div");
@@ -392,7 +386,6 @@ export const dom = {
     updateSnapStyle();
 
     const startBtn = iconBtn(ICONS.start, "Set Start Frame", () => {
-      if (this.retakeMode) return;
       if (this.startFramesWidget) {
         this.startFramesWidget.value = this.currentFrame;
         if (this.startFramesWidget.callback) {
@@ -404,7 +397,6 @@ export const dom = {
     });
 
     const endBtn = iconBtn(ICONS.end, "Set End Frame", () => {
-      if (this.retakeMode) return;
       if (this.endFramesWidget) {
         this.endFramesWidget.value = this.currentFrame;
         if (this.endFramesWidget.callback) {
@@ -416,87 +408,13 @@ export const dom = {
     });
 
     const markBtn = iconBtn(ICONS.mark, "Mark Selection (X)", () => {
-      if (this.retakeMode) return;
       this.markCurrentSelection();
-    });
-
-    const retakeToggleBtn = document.createElement("button");
-    retakeToggleBtn.className = "pr-btn";
-    retakeToggleBtn.style.padding = "4px 8px";
-    retakeToggleBtn.style.display = "flex";
-    retakeToggleBtn.style.alignItems = "center";
-    retakeToggleBtn.style.justifyContent = "center";
-    retakeToggleBtn.style.gap = "6px";
-    retakeToggleBtn.style.height = "28px";
-    retakeToggleBtn.style.boxSizing = "border-box";
-    retakeToggleBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> <span>Retake Mode (BETA)</span>`;
-
-    const updateRetakeStyle = () => {
-      retakeToggleBtn.title = this.retakeMode ? "Switch to Multi-Clip Timeline" : "Switch to Retake Tab";
-      if (this.retakeMode) {
-        retakeToggleBtn.classList.add("toggle-on");
-      } else {
-        retakeToggleBtn.classList.remove("toggle-on");
-      }
-    };
-    this.updateRetakeStyle = updateRetakeStyle;
-    updateRetakeStyle();
-
-    retakeToggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      
-      // Stop and mute any active playback first
-      this.pauseAudio();
-      
-      // Save current input value to the mode we are EXITING
-      if (this.retakeMode) {
-        this.timeline.retake_global_prompt = this.globalPromptInput ? this.globalPromptInput.value : "";
-      } else {
-        this.timeline.global_prompt = this.globalPromptInput ? this.globalPromptInput.value : "";
-        // Backup normal mode values before entering Retake Mode
-        this.timeline.normalStartFrame = this.getStartFrames();
-        this.timeline.normalDurationFrames = this.getDurationFrames();
-      }
-
-      this.retakeMode = !this.retakeMode;
-      this.timeline.retakeMode = this.retakeMode;
-      if (this.node.properties) {
-        this.node.properties.retakeMode = this.retakeMode;
-      }
-
-      // Adjust widgets for the new mode
-      if (this.retakeMode) {
-        if (this.timeline.retakeVideo && this.timeline.retakeVideo.videoDurationFrames) {
-          this.syncWidgetsToRetakeDuration(this.timeline.retakeVideo.videoDurationFrames);
-        }
-      } else {
-        // Restore normal mode backup
-        this._suppressCommit = true;
-        if (this.timeline.normalStartFrame !== undefined && this.startFramesWidget) {
-          this.startFramesWidget.value = this.timeline.normalStartFrame;
-          if (this.startFramesWidget.callback) {
-            try { this.startFramesWidget.callback(this.timeline.normalStartFrame); } catch (_) {}
-          }
-        }
-        if (this.timeline.normalDurationFrames !== undefined && this.durationFramesWidget) {
-          this.durationFramesWidget.value = this.timeline.normalDurationFrames;
-          if (this.durationFramesWidget.callback) {
-            try { this.durationFramesWidget.callback(this.timeline.normalDurationFrames); } catch (_) {}
-          }
-        }
-        this._suppressCommit = false;
-      }
-
-      this.updateRetakeUIState();
-      this.commitChanges();
-      this.render();
     });
 
     const btnGroup = document.createElement("div");
     btnGroup.style.display = "flex";
     btnGroup.style.gap = "6px";
     btnGroup.style.alignItems = "center";
-    btnGroup.appendChild(retakeToggleBtn);
     btnGroup.appendChild(snapBtn);
     btnGroup.appendChild(startBtn);
     btnGroup.appendChild(endBtn);
@@ -563,59 +481,6 @@ export const dom = {
     propContainer.style.marginBottom = "5px"; // Add some spacing between the two prompt boxes
     this.propContainer = propContainer;
 
-    if (this.node.properties.globalPropHeight === undefined && this.timeline.globalPropHeight !== undefined) {
-      this.node.properties.globalPropHeight = this.timeline.globalPropHeight;
-    }
-    if (!this.node.properties.globalPropHeight) this.node.properties.globalPropHeight = 60;
-    this.globalPropHeight = this.node.properties.globalPropHeight;
-
-    const globalPropContainer = document.createElement("div");
-    globalPropContainer.className = "pr-prop-container";
-    globalPropContainer.style.position = "relative";
-    globalPropContainer.style.flex = "none";
-    globalPropContainer.style.height = `${this.globalPropHeight}px`;
-    this.globalPropContainer = globalPropContainer;
-
-    const globalPrompt = makePromptArea(this, "Global Prompt", "Enter global prompt here...");
-    const globalPromptWrapper = globalPrompt.wrapper;
-    this.globalPromptLabel = globalPrompt.label;
-    this.globalPromptInput = globalPrompt.input;
-    let saveTimeout = null;
-    const triggerAutoSave = () => {
-      try {
-        const canvasEl = app.canvasEl || app.canvas?.canvas;
-        if (canvasEl) {
-          canvasEl.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
-        }
-        if (app.canvas && app.canvas.checkState) app.canvas.checkState();
-        if (app.canvas && app.canvas.captureCanvasState) app.canvas.captureCanvasState();
-      } catch (_) { }
-    };
-
-    this.globalPromptInput.addEventListener("input", (e) => {
-      const val = e.target.value;
-      this.syncGlobalPrompt(val);
-
-      this.commitChanges(true);
-      this.render();
-
-      // Debounce ComfyUI auto-save by 300ms to avoid lag while typing
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(triggerAutoSave, 300);
-    });
-
-    this.globalPromptInput.addEventListener("blur", () => {
-      if (saveTimeout) clearTimeout(saveTimeout);
-      triggerAutoSave();
-    });
-
-    const globalPropResizer = makeResizer(60, () => this.globalPropHeight, (h) => {
-      updateNodeHeight(this, "globalPropHeight", globalPropContainer, h);
-    });
-
-    globalPropContainer.appendChild(globalPromptWrapper);
-    globalPropContainer.appendChild(globalPropResizer);
-
     const propResizer = makeResizer(90, () => this.propHeight, (h) => {
       updateNodeHeight(this, "propHeight", propContainer, h);
     });
@@ -627,11 +492,6 @@ export const dom = {
     this.promptInput = promptArea.input;
 
     this.promptInput.addEventListener("input", () => {
-      if (this.retakeMode) {
-        this.timeline.retakePrompt = this.promptInput.value;
-        this.commitChanges();
-        return;
-      }
       if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
         this.timeline.segments[this.selectedIndex].prompt = this.promptInput.value;
         this.commitChanges();
@@ -665,10 +525,6 @@ export const dom = {
     this.wrapper.addEventListener("dragover", (e) => {
       e.preventDefault();
       this.wrapper.classList.add("drag-active");
-
-      if (this.retakeMode) {
-        return; // Skip ghost segments rendering when in retakeMode
-      }
 
       const { x, y } = this.getMousePos(e);
       const logicalWidth = this.canvas.offsetWidth;
@@ -801,13 +657,6 @@ export const dom = {
     this.seekBar.style.flex = "1"; // take up remaining space
     this.seekBar.addEventListener("input", (e) => {
       let val = parseInt(e.target.value, 10);
-      if (this.retakeMode && this.timeline.retakeVideo) {
-        const baseVideoDur = this.timeline.retakeVideo.videoDurationFrames || 0;
-        if (val > baseVideoDur) {
-          val = baseVideoDur;
-          this.seekBar.value = val;
-        }
-      }
       this.currentFrame = val;
       this.updateSeekBarBackground();
       this.render();
@@ -931,10 +780,7 @@ export const dom = {
 
           this.strengthValue.value = newVal.toFixed(2);
 
-          if (this.retakeMode) {
-            this.timeline.retakeStrength = newVal;
-            this.commitChanges();
-          } else if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
+          if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
             const seg = this.timeline.segments[this.selectedIndex];
             if (seg.type !== "text") {
               seg.guideStrength = newVal;
@@ -964,10 +810,7 @@ export const dom = {
       if (isNaN(val)) val = 1;
       val = Math.max(0, Math.min(1, val));
       this.strengthValue.value = val.toFixed(2);
-      if (this.retakeMode) {
-        this.timeline.retakeStrength = val;
-        this.commitChanges();
-      } else if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
+      if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
         const seg = this.timeline.segments[this.selectedIndex];
         if (seg.type !== "text") {
           seg.guideStrength = val;
@@ -1141,10 +984,6 @@ export const dom = {
 
     const setupSidebarLabelResizing = (labelEl, dragType) => {
       labelEl.addEventListener("mousemove", (e) => {
-        if (this.retakeMode) {
-          labelEl.style.cursor = "default";
-          return;
-        }
         if (this._isDragging) return;
         const rect = labelEl.getBoundingClientRect();
         const y = e.clientY - rect.top;
@@ -1156,7 +995,6 @@ export const dom = {
       });
 
       labelEl.addEventListener("mousedown", (e) => {
-        if (this.retakeMode) return;
         if (e.button !== 0) return;
         if (e.target.closest("svg") || e.target.style.cursor === "pointer" || window.getComputedStyle(e.target).cursor === "pointer") {
           return;
@@ -1189,6 +1027,12 @@ export const dom = {
     this.viewport.style.minWidth = "0";
     this.layoutContainer.appendChild(this.viewport);
 
+    // 全局参数分组：渲染在 .pr-toolbar 之上（preact inline 输入框）
+    this.globalParamsMount = document.createElement("div");
+    this.globalParamsMount.className = "pr-gp-mount";
+    this.wrapper.appendChild(this.globalParamsMount);
+    render(h(GlobalParamsPanel, { director: this }), this.globalParamsMount);
+
     this.wrapper.appendChild(toolbar);
     this.wrapper.appendChild(this.layoutContainer);
 
@@ -1199,7 +1043,6 @@ export const dom = {
     controlsGroup.appendChild(playerControls);
     this.wrapper.appendChild(controlsGroup);
     this.wrapper.appendChild(propContainer);
-    this.wrapper.appendChild(this.globalPropContainer);
 
     this.container.appendChild(this.wrapper);
   }
@@ -1345,63 +1188,23 @@ export const dom = {
 ,
 
   updateWidgetVisibility() {
-    const mode = this.displayModeWidget ? this.displayModeWidget.value : "seconds";
-    const isSeconds = mode === "seconds";
-
+    // 全局参数（秒/帧两组共 6 个）已全部加入 HIDDEN_WIDGET_NAMES，
+    // 由 GlobalParamsPanel 面板按 display_mode 动态展示对应单位，始终隐藏原生 widget
     const isLiteGraph = !window.LiteGraph || !window.LiteGraph.vueNodesMode;
 
-    if (isSeconds) {
-      if (this.startFramesWidget) hideWidget(this.startFramesWidget);
-      if (this.endFramesWidget) hideWidget(this.endFramesWidget);
-      if (this.durationFramesWidget) hideWidget(this.durationFramesWidget);
-      if (this.startSecondsWidget) showWidget(this.startSecondsWidget);
-      if (this.endSecondsWidget) showWidget(this.endSecondsWidget);
-      if (this.durationSecondsWidget) showWidget(this.durationSecondsWidget);
+    for (const w of [
+      this.startSecondsWidget, this.endSecondsWidget, this.durationSecondsWidget,
+      this.startFramesWidget, this.endFramesWidget, this.durationFramesWidget,
+    ]) {
+      if (w) hideWidget(w);
+    }
 
-      // LiteGraph: remove frame input slots, restore second input slots
-      if (isLiteGraph && this.node.inputs) {
-        for (const name of ["start_frame", "end_frame", "duration_frames"]) {
-          const idx = this.node.inputs.findIndex(i => i.name === name);
-          if (idx !== -1 && this.node.inputs[idx].link == null) {
-            this.node.removeInput(idx);
-          }
-        }
-        for (const [name, type] of [["start_second", "FLOAT"], ["end_second", "FLOAT"], ["duration_seconds", "FLOAT"]]) {
-          if (!this.node.inputs.find(i => i.name === name)) {
-            const w = this.node.widgets?.find(w => w.name === name);
-            const slot = this.node.addInput(name, type);
-            // keep the slot linked to its widget
-            if (w && slot != null) {
-              const inp = this.node.inputs[this.node.inputs.length - 1];
-              if (inp) inp.widget = { name };
-            }
-          }
-        }
-      }
-    } else {
-      if (this.startSecondsWidget) hideWidget(this.startSecondsWidget);
-      if (this.endSecondsWidget) hideWidget(this.endSecondsWidget);
-      if (this.durationSecondsWidget) hideWidget(this.durationSecondsWidget);
-      if (this.startFramesWidget) showWidget(this.startFramesWidget);
-      if (this.endFramesWidget) showWidget(this.endFramesWidget);
-      if (this.durationFramesWidget) showWidget(this.durationFramesWidget);
-
-      // LiteGraph: remove second input slots, restore frame input slots
-      if (isLiteGraph && this.node.inputs) {
-        for (const name of ["start_second", "end_second", "duration_seconds"]) {
-          const idx = this.node.inputs.findIndex(i => i.name === name);
-          if (idx !== -1 && this.node.inputs[idx].link == null) {
-            this.node.removeInput(idx);
-          }
-        }
-        for (const [name, type] of [["start_frame", "INT"], ["end_frame", "INT"], ["duration_frames", "INT"]]) {
-          if (!this.node.inputs.find(i => i.name === name)) {
-            const slot = this.node.addInput(name, type);
-            if (slot != null) {
-              const inp = this.node.inputs[this.node.inputs.length - 1];
-              if (inp) inp.widget = { name };
-            }
-          }
+    // LiteGraph: 移除无链接的全局参数输入槽（隐藏的 widget 不再恢复输入槽）
+    if (isLiteGraph && this.node.inputs) {
+      for (const name of ["start_second", "end_second", "duration_seconds", "start_frame", "end_frame", "duration_frames"]) {
+        const idx = this.node.inputs.findIndex(i => i.name === name);
+        if (idx !== -1 && this.node.inputs[idx].link == null) {
+          this.node.removeInput(idx);
         }
       }
     }

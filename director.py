@@ -59,19 +59,6 @@ def _calc_resolution(preset: str, million_pixels: float, divide_by=32) -> tuple[
     return int(w), int(h)
 
 
-def _read_template_file(path: str) -> str:
-    search_path = resolve_input_path(path) if path else _DEFAULT_TEMPLATE
-    if not search_path:
-        return "{user_prompt}"
-    try:
-        if os.path.isfile(search_path):
-            with open(search_path, "r", encoding="utf-8") as f:
-                result = f.read()
-                return result if result.find("{user_prompt}") != -1 else "{user_prompt}"
-    except Exception:
-        log.error("[MiniMaxRefDirector] Failed to read prompt_template file.")
-    return "{user_prompt}"
-
 class MiniMaxRefDirector(io.ComfyNode):
     """Timeline director with resolution config and guide_data output for MiniMax pipelines."""
 
@@ -106,11 +93,6 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "config", optional=True,
                     tooltip="Unified config from MiniMax Reference Subject (VLM opts + subject data).",
                 ),
-                SubjectData.Input("subject_data", optional=True),
-                io.String.Input(
-                    "global_prompt", multiline=True, default="", force_input=True, optional=True,
-                    tooltip="Conditions the entire video. Anchors persistent characters, objects, and scene context.",
-                ),
                 io.Float.Input(
                     "start_second", default=0.0, min=0.0, max=1000.0, step=0.01,
                     tooltip="Start time in seconds of the timeline generation.",
@@ -134,10 +116,6 @@ class MiniMaxRefDirector(io.ComfyNode):
                 io.Int.Input(
                     "duration_frames", default=120, min=1, max=10000, step=1,
                     tooltip="Total timeline length in pixel-space frames. Used by the editor for visual scale only.",
-                ),
-                io.String.Input(
-                    "prompt_template", default="",
-                    tooltip="Path to a prompt template file. Defaults to prompt/minimax_ref2v_template.txt if empty. Use {user_prompt} placeholder where the assembled prompt should be inserted.",
                 ),
                 io.String.Input(
                     "timeline_data", default="",
@@ -178,23 +156,19 @@ class MiniMaxRefDirector(io.ComfyNode):
 
     @classmethod
     def execute(cls, model=None, clip=None, video_vae=None, audio_vae=None, config=None,
-                subject_data=None, global_prompt="", start_second=0.0, end_second=5.0,
-                duration_seconds=5.0, start_frame=0, end_frame=120, duration_frames=120,
-                prompt_template="", timeline_data="", local_prompts="", segment_lengths="",
-                frame_rate=24, display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
+                start_second=0.0, end_second=5.0, duration_seconds=5.0, 
+                start_frame=0, end_frame=120, duration_frames=120, timeline_data="", 
+                local_prompts="", segment_lengths="", frame_rate=24, 
+                display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
-        # Subject data may arrive either via the dedicated subject_data socket or embedded
-        # inside the unified config output from MiniMax Reference Subject.
-        subjects_source = config.get("subject_data", {}) if config else {}
+        global_prompt = config.get("global_prompt", "")
+        subject_data = config.get("subject_data", {}) if config else {}
         subject = subject_data.get("subjects", []) if subject_data else []
         if not subject:
-            subject = subjects_source.get("subjects", []) if isinstance(subjects_source, dict) else []
+            subject = subject_data.get("subjects", []) if isinstance(subject_data, dict) else []
 
         if not timeline_data or not timeline_data.strip():
             raise ValueError("[MiniMaxRefDirector] timeline_data is required and must not be empty.")
-
-        # --- Read prompt_template file ---
-        template_content = _read_template_file(prompt_template)
 
         # --- Parse timeline segments ---
         tdata = {}
@@ -243,7 +217,6 @@ class MiniMaxRefDirector(io.ComfyNode):
                 continue
             first_frame = seg.get("imageFile", "") if seg.get("type", "text") == "image" else ""
             prompt = seg.get("prompt", "").replace("@", "")
-            prompt = template_content.replace("{user_prompt}", prompt)
             guide_timeline.append({
                 "prompt": prompt,
                 "prev_prompt": prev_prompt,
@@ -270,13 +243,12 @@ class MiniMaxRefDirector(io.ComfyNode):
             "clip": clip,
             "video_vae": video_vae,
             "audio_vae": audio_vae,
-            "config": config,
         }
 
         log.info(
             f"[MiniMaxRefDirector] {segment_count} segments | timeline: {timeline_data} "
             f"{out_w}×{out_h} ({outpu_resolution}, {million_pixels}MP) | "
-            f"{len(subject)} subjects | template: {len(template_content)} chars"
+            f"{len(subject)} subjects"
         )
 
         return io.NodeOutput(

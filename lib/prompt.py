@@ -104,18 +104,19 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     [Chinese] or [English] before the dialogue text. No mapping is returned.
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
-    image = load_image_tensor(opts["image_path"]) if opts.get("image_path") else None
+    # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
+    image = load_image_tensor(image_path) if image_path else None
     skills = _load_h3_skills_template()
     full_prompt = _build_h3_prompt(skills, prompt, image is not None)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
         image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
-        api_key=opts.get("api_key", ""), seed=opts.get("seed", 42),
+        api_key=opts.get("api_key", ""), seed=seed,
     )
     elif vlm_mode == "llama-cpp":
         generate_text = generate_prompt_with_llama(
             image=image,prompt=full_prompt, gguf_path=opts["gguf_path"], 
-            mmproj_path=opts["mmproj_path"], seed=opts.get("seed", 42),
+            mmproj_path=opts["mmproj_path"], seed=seed,
     )
     return parse_generated_json(generate_text)
 

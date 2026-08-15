@@ -1,0 +1,277 @@
+{
+  "id": "9e7cf849-0a2e-4055-8b1d-4eb56f17280c",
+  "revision": 0,
+  "last_node_id": 15,
+  "last_link_id": 21,
+  "nodes": [
+    {
+      "id": 13,
+      "type": "MiniMaxRefSubject",
+      "pos": [
+        2729.246946489033,
+        3374.528082704319
+      ],
+      "size": [
+        400,
+        553
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": null
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": null
+        },
+        {
+          "name": "video_vae",
+          "type": "VAE",
+          "link": null
+        },
+        {
+          "name": "audio_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            17
+          ]
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            18
+          ]
+        },
+        {
+          "name": "video_vae",
+          "type": "VAE",
+          "links": [
+            19
+          ]
+        },
+        {
+          "name": "audio_vae",
+          "type": "VAE",
+          "links": [
+            20
+          ]
+        },
+        {
+          "name": "config",
+          "type": "SUBJECT_CONFIG",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "93b09916d2dd6a99db44d37ae3594c3f88bd753f",
+        "Node name for S&R": "MiniMaxRefSubject"
+      },
+      "widgets_values": [
+        "llama-cpp",
+        "Qwen3-VL-8B-Instruct-Q4_K_M.gguf",
+        "mmproj-BF16.gguf",
+        "{\"subjects\":[{\"name\":\"琼娜\",\"description\":\"这个是主体描述\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/琼娜.png\",\"audioFile\":\"minimaxrefdirector/薇菈-配音.flac\"}]}",
+        1,
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 11,
+      "type": "MiniMaxRefDirector",
+      "pos": [
+        3275.7350552305356,
+        3366.868867856368
+      ],
+      "size": [
+        1329.626973859271,
+        1017
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 17
+        },
+        {
+          "name": "clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 18
+        },
+        {
+          "name": "video_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 19
+        },
+        {
+          "name": "audio_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 20
+        },
+        {
+          "name": "config",
+          "shape": 7,
+          "type": "SUBJECT_CONFIG",
+          "link": 21
+        },
+        {
+          "name": "global_prompt",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "guide_data",
+          "type": "GUIDE_DATA",
+          "links": null
+        },
+        {
+          "name": "segment_count",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "93b09916d2dd6a99db44d37ae3594c3f88bd753f",
+        "Node name for S&R": "MiniMaxRefDirector",
+        "mainTrackEnabled": true,
+        "audioTrackEnabled": true,
+        "audioTrackWasEnabledBeforeOverride": false,
+        "inpaint_audio": false,
+        "override_audio": false,
+        "overrideAudio": false,
+        "showFilenames": true,
+        "use_custom_audio": false,
+        "frame_rate": 24,
+        "display_mode": "frames",
+        "custom_width": 0,
+        "custom_height": 0,
+        "resize_method": "maintain aspect ratio",
+        "divisible_by": 32,
+        "img_compression": 18,
+        "guide_strength": "",
+        "local_prompts": "<@琼娜>说着不切实 |  |  |  |  |  | <@琼娜>说你好还星星",
+        "segment_lengths": "81,35,36,34,24,24,6",
+        "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":455,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":0,\"normalDurationFrames\":240,\"segments\":[{\"id\":\"17868080094962xdhq\",\"start\":0,\"length\":81,\"prompt\":\"<@琼娜>说着不切实\",\"type\":\"text\",\"autoEndFrame\":false,\"motionContext\":false},{\"id\":\"17868096043531c0vh\",\"start\":81,\"length\":31,\"prompt\":\"\",\"type\":\"text\",\"autoEndFrame\":true,\"motionContext\":true},{\"id\":\"1786810033310sqx8u\",\"start\":116,\"length\":24,\"prompt\":\"\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/动画剧情概述.png\",\"imageB64\":\"/api/view?filename=%E5%8A%A8%E7%94%BB%E5%89%A7%E6%83%85%E6%A6%82%E8%BF%B0.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1786810042980y7y61\",\"start\":152,\"length\":24,\"prompt\":\"\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/精灵.png\",\"imageB64\":\"/api/view?filename=%E7%B2%BE%E7%81%B5.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1786810052706nz8m4\",\"start\":186,\"length\":24,\"prompt\":\"\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/教廷审判官.png\",\"imageB64\":\"/api/view?filename=%E6%95%99%E5%BB%B7%E5%AE%A1%E5%88%A4%E5%AE%98.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1786810110425eosqa\",\"start\":210,\"length\":24,\"prompt\":\"\",\"type\":\"text\"},{\"id\":\"1786836438933nkm74\",\"start\":234,\"length\":17,\"prompt\":\"<@琼娜>说你好还星星\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/树人.png\",\"imageB64\":\"/api/view?filename=%E6%A0%91%E4%BA%BA.png&type=input&subfolder=whatdreamscost\",\"motionContext\":true,\"autoEndFrame\":true}],\"audioSegments\":[]}",
+        "epsilon": 0.001,
+        "start_second": 0,
+        "end_second": 10,
+        "duration_seconds": 10,
+        "start_frame": 0,
+        "end_frame": 240,
+        "duration_frames": 240,
+        "global_prompt": "",
+        "propHeight": 455,
+        "globalPropHeight": 60,
+        "prompt_template": "",
+        "outpu_resolution": "16:9横屏",
+        "million_pixels": 0.6,
+        "timeline_ui": "",
+        "has_serialized_properties": true,
+        "isSnapping": true
+      },
+      "widgets_values": [
+        0,
+        10,
+        10,
+        0,
+        240,
+        240,
+        "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":455,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":0,\"normalDurationFrames\":240,\"segments\":[{\"id\":\"17868080094962xdhq\",\"start\":0,\"length\":81,\"prompt\":\"<@琼娜>说着不切实\",\"type\":\"text\",\"autoEndFrame\":false,\"motionContext\":false},{\"id\":\"17868096043531c0vh\",\"start\":81,\"length\":31,\"prompt\":\"\",\"type\":\"text\",\"autoEndFrame\":true,\"motionContext\":true},{\"id\":\"1786810033310sqx8u\",\"start\":116,\"length\":24,\"prompt\":\"\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/动画剧情概述.png\",\"imageB64\":\"/api/view?filename=%E5%8A%A8%E7%94%BB%E5%89%A7%E6%83%85%E6%A6%82%E8%BF%B0.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1786810042980y7y61\",\"start\":152,\"length\":24,\"prompt\":\"\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/精灵.png\",\"imageB64\":\"/api/view?filename=%E7%B2%BE%E7%81%B5.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1786810052706nz8m4\",\"start\":186,\"length\":24,\"prompt\":\"\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/教廷审判官.png\",\"imageB64\":\"/api/view?filename=%E6%95%99%E5%BB%B7%E5%AE%A1%E5%88%A4%E5%AE%98.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1786810110425eosqa\",\"start\":210,\"length\":24,\"prompt\":\"\",\"type\":\"text\"},{\"id\":\"1786836438933nkm74\",\"start\":234,\"length\":17,\"prompt\":\"<@琼娜>说你好还星星\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/树人.png\",\"imageB64\":\"/api/view?filename=%E6%A0%91%E4%BA%BA.png&type=input&subfolder=whatdreamscost\",\"motionContext\":true,\"autoEndFrame\":true}],\"audioSegments\":[]}",
+        "<@琼娜>说着不切实 |  |  |  |  |  | <@琼娜>说你好还星星",
+        "81,35,36,34,24,24,6",
+        24,
+        "frames",
+        "16:9横屏",
+        0.6,
+        ""
+      ]
+    }
+  ],
+  "links": [
+    [
+      17,
+      13,
+      0,
+      11,
+      0,
+      "MODEL"
+    ],
+    [
+      18,
+      13,
+      1,
+      11,
+      1,
+      "CLIP"
+    ],
+    [
+      19,
+      13,
+      2,
+      11,
+      2,
+      "VAE"
+    ],
+    [
+      20,
+      13,
+      3,
+      11,
+      3,
+      "VAE"
+    ],
+    [
+      21,
+      13,
+      4,
+      11,
+      4,
+      "SUBJECT_CONFIG"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.8419032903276098,
+      "offset": [
+        -3048.3520819249393,
+        -3607.7880773986776
+      ]
+    },
+    "frontendVersion": "1.47.12",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

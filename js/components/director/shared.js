@@ -10,7 +10,15 @@ const HANDLE_HIT_PX = 14;
 const MIN_SEGMENT_LENGTH = 6;
 const MAX_THUMBNAIL_DIM = 512; // Increased to maintain quality for taller images
 
-const HIDDEN_WIDGET_NAMES = ["timeline_data", "local_prompts", "segment_lengths", "guide_strength", "audio_data", "use_custom_audio", "inpaint_audio", "override_audio"];
+const HIDDEN_WIDGET_NAMES = [
+  "timeline_data", "local_prompts", "segment_lengths", "guide_strength",
+  "audio_data", "use_custom_audio", "inpaint_audio", "override_audio",
+  // 全局参数：改由 transfer 面板 GlobalParamsPanel inline 编辑
+  // （秒/帧两组均由面板按 display_mode 动态展示对应单位）
+  "start_second", "end_second", "duration_seconds",
+  "start_frame", "end_frame", "duration_frames",
+  "frame_rate", "outpu_resolution", "million_pixels",
+];
 
 function hideWidget(w) {
   if (!w) return;
@@ -92,6 +100,7 @@ const uploadImage = async (file, subfolder = "minimaxrefdirector") => {
 // --- Modern Dark/Grey UI CSS (ComfyUI Match), compact single-line rules ---
 const STYLES = `
 .pr-wrapper{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;display:flex;flex-direction:column;gap:8px;width:100%;height:100%;box-sizing:border-box;padding-bottom:4px}
+.pr-gp-mount{width:100%;box-sizing:border-box;padding:6px 0 0;flex-shrink:0}
 .pr-wrapper.drag-active{outline:2px dashed #888;background:rgba(255,255,255,0.05);border-radius:6px}
 .pr-toolbar{display:flex;justify-content:space-between;align-items:center;padding:2px 0px;flex-wrap:wrap;gap:6px}
 .pr-actions{display:flex;gap:6px;flex-wrap:wrap}
@@ -110,7 +119,7 @@ const STYLES = `
 .pr-prompt-area:focus{border-color:#888}
 .pr-audio-info{width:100%;height:100%;background:#181818;color:#aaa;border:1px solid #111;border-radius:6px;padding:10px;font-size:12px;line-height:1.6;box-sizing:border-box;display:none}
 .pr-audio-info span{color:#fff;font-weight:500}
-.pr-controls-group{background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:6px 10px;display:flex;flex-direction:column;gap:4px;margin-bottom:4px;box-sizing:border-box;width:100%}
+.pr-controls-group{background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:6px 10px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box;width:100%}
 .pr-strength-row{display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box}
 .pr-height-resizer{height:6px;background:#2a2a2a;cursor:ns-resize;border-radius:3px;margin:2px 0;transition:background 0.15s;border:1px solid #1e1e1e}
 .pr-height-resizer:hover{background:#444;border-color:#555}
@@ -161,6 +170,19 @@ const STYLES = `
 .pr-segmented-control{display:flex;background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:2px;width:110px;height:25px;align-items:center;box-sizing:border-box}
 .pr-segment{flex:1;text-align:center;font-size:10px;font-weight:500;display:flex;align-items:center;justify-content:center;height:100%;cursor:pointer;border-radius:4px;color:#888;transition:all 0.15s ease}
 .pr-segment.active{background:#333;color:#fff}
+.tr-gp{display:flex;flex-direction:column;gap:6px;width:100%;box-sizing:border-box;margin-top:2px}
+.tr-gp-head{font-size:11px;font-weight:700;color:#cfcfcf;text-transform:uppercase;letter-spacing:0.06em;padding-bottom:5px;border-bottom:1px solid #3a3a3a;display:flex;align-items:center;gap:6px}
+.tr-gp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:6px}
+.tr-gp-item{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tr-gp-label{font-size:10px;color:#8a8a8a;white-space:nowrap;user-select:none;-webkit-user-select:none}
+.tr-gp-input{background:#222;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:4px;padding:3px 6px;font-size:11px;font-family:monospace;width:100%;box-sizing:border-box;outline:none;transition:border-color 0.15s ease}
+.tr-gp-input:hover{border-color:#555}
+.tr-gp-input:focus{border-color:#888}
+.tr-gp-input::-webkit-outer-spin-button,.tr-gp-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.tr-gp-input[type=number]{-moz-appearance:textfield}
+.tr-gp-select{background:#222;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:4px;padding:3px 6px;font-size:11px;width:100%;box-sizing:border-box;outline:none;cursor:pointer}
+.tr-gp-select:hover{border-color:#555}
+.tr-gp-select:focus{border-color:#888}
 `;
 
 let styleEl = document.getElementById("prompt-relay-styles");
@@ -197,42 +219,24 @@ function parseInitial(jsonStr) {
   let parsed = {
     segments: [],
     audioSegments: [],
-    global_prompt: "",
-    retake_global_prompt: "",
     mainTrackEnabled: true,
     audioTrackEnabled: true,
     propHeight: 90,
-    globalPropHeight: 60,
     showFilenames: true,
     overrideAudio: false,
     inpaint_audio: true,
-    retakeMode: false,
-    retakeStart: 24,
-    retakeLength: 48,
-    retakePrompt: "",
-    retakeStrength: 1.0,
-    retakeVideo: null,
     normalStartFrame: 0,
     normalDurationFrames: 120
   };
   try {
     if (jsonStr) {
       const p = JSON.parse(jsonStr);
-      if (p.global_prompt !== undefined) parsed.global_prompt = p.global_prompt;
-      if (p.retake_global_prompt !== undefined) parsed.retake_global_prompt = p.retake_global_prompt;
       if (p.mainTrackEnabled !== undefined) parsed.mainTrackEnabled = p.mainTrackEnabled;
       if (p.audioTrackEnabled !== undefined) parsed.audioTrackEnabled = p.audioTrackEnabled;
       if (p.propHeight !== undefined) parsed.propHeight = p.propHeight;
-      if (p.globalPropHeight !== undefined) parsed.globalPropHeight = p.globalPropHeight;
       if (p.showFilenames !== undefined) parsed.showFilenames = p.showFilenames;
       if (p.overrideAudio !== undefined) parsed.overrideAudio = p.overrideAudio;
       if (p.inpaint_audio !== undefined) parsed.inpaint_audio = p.inpaint_audio;
-      if (p.retakeMode !== undefined) parsed.retakeMode = p.retakeMode;
-      if (p.retakeStart !== undefined) parsed.retakeStart = p.retakeStart;
-      if (p.retakeLength !== undefined) parsed.retakeLength = p.retakeLength;
-      if (p.retakePrompt !== undefined) parsed.retakePrompt = p.retakePrompt;
-      if (p.retakeStrength !== undefined) parsed.retakeStrength = p.retakeStrength;
-      if (p.retakeVideo !== undefined) parsed.retakeVideo = p.retakeVideo;
       if (p.normalStartFrame !== undefined) parsed.normalStartFrame = p.normalStartFrame;
       if (p.normalDurationFrames !== undefined) parsed.normalDurationFrames = p.normalDurationFrames;
       if (Array.isArray(p.segments)) {
@@ -259,9 +263,6 @@ function parseInitial(jsonStr) {
     // Guarantee ID assignment to prevent node loading drag breaks
     if (!seg.id) {
       seg.id = genId();
-    }
-    if (seg.isEndFrame === undefined) {
-      seg.isEndFrame = false;
     }
   }
 

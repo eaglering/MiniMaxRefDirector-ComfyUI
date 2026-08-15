@@ -27,7 +27,6 @@ export function registerNode(TimelineEditor) {
 
           if (!this.properties) this.properties = {};
           const DEFAULTS = {
-            global_prompt: "",
             mainTrackEnabled: true,
             audioTrackEnabled: true,
             audioTrackWasEnabledBeforeOverride: false,
@@ -89,71 +88,6 @@ export function registerNode(TimelineEditor) {
           }
 
           const self = this;
-          this._syncGlobalPromptFromLink = function () {
-            const globalInput = self.inputs?.find(i => i.name === "global_prompt");
-            if (globalInput && globalInput.link !== null && globalInput.link !== undefined) {
-              const link = app.graph.links[globalInput.link];
-              if (link) {
-                const originNode = app.graph.getNodeById(link.origin_id);
-                if (originNode) {
-                  // Usually string values are in widgets[0] for primitives
-                  if (originNode.widgets && originNode.widgets.length > 0) {
-                    const val = originNode.widgets[0].value;
-                    if (self._timelineEditor && self._timelineEditor.globalPromptInput) {
-                      const isRetake = self._timelineEditor.retakeMode;
-                      const currentValInEditor = isRetake ? (self._timelineEditor.timeline.retake_global_prompt || "") : (self._timelineEditor.timeline.global_prompt || "");
-                      if (val !== currentValInEditor) {
-                        if (isRetake) {
-                          self._timelineEditor.timeline.retake_global_prompt = val;
-                        } else {
-                          self._timelineEditor.timeline.global_prompt = val;
-                        }
-                        self._timelineEditor.globalPromptInput.value = val;
-                        if (self.properties) {
-                          self.properties.global_prompt = val;
-                        }
-                      } else if (self._timelineEditor.globalPromptInput.value !== val) {
-                        self._timelineEditor.globalPromptInput.value = val;
-                      }
-                    }
-                  }
-                }
-              }
-            } else {
-              if (self.properties && self._timelineEditor && self._timelineEditor.globalPromptInput) {
-                const val = self.properties.global_prompt || "";
-                const isRetake = self._timelineEditor.retakeMode;
-                const currentValInEditor = isRetake ? (self._timelineEditor.timeline.retake_global_prompt || "") : (self._timelineEditor.timeline.global_prompt || "");
-                if (val !== currentValInEditor) {
-                  if (isRetake) {
-                    self._timelineEditor.timeline.retake_global_prompt = val;
-                  } else {
-                    self._timelineEditor.timeline.global_prompt = val;
-                  }
-                  self._timelineEditor.globalPromptInput.value = val;
-                } else if (self._timelineEditor.globalPromptInput.value !== val) {
-                  self._timelineEditor.globalPromptInput.value = val;
-                }
-              }
-            }
-          };
-
-          const origOnConnectionsChange = this.onConnectionsChange;
-          this.onConnectionsChange = function (type, index, connected, link_info) {
-            if (origOnConnectionsChange) {
-              origOnConnectionsChange.apply(this, arguments);
-            }
-            self._syncGlobalPromptFromLink();
-          };
-
-          const origOnDrawForeground = this.onDrawForeground;
-          this.onDrawForeground = function (ctx) {
-            if (origOnDrawForeground) {
-              origOnDrawForeground.apply(this, arguments);
-            }
-            self._syncGlobalPromptFromLink();
-          };
-
           const container = document.createElement("div");
 
           container.style.boxSizing = "border-box";
@@ -165,9 +99,8 @@ export function registerNode(TimelineEditor) {
           widget.computeSize = function (width) {
             const canvasH = self._timelineEditor ? self._timelineEditor.canvasHeight : CANVAS_HEIGHT;
             const propH = self._timelineEditor ? (self._timelineEditor.propHeight || 90) : 90;
-            const globalPropH = self._timelineEditor ? (self._timelineEditor.globalPropHeight || 60) : 60;
             const nodeWidth = self.size?.[0] || width || 1375;
-            return [Math.max(10, nodeWidth - 30), canvasH + propH + globalPropH + 160];
+            return [Math.max(10, nodeWidth - 30), canvasH + propH + 160];
           };
 
           setTimeout(() => {
@@ -345,13 +278,11 @@ export function registerNode(TimelineEditor) {
               // Sync editor states from the parsed timeline object (the absolute source of truth)
               this._timelineEditor.mainTrackEnabled = tl.mainTrackEnabled !== false;
               this._timelineEditor.audioTrackEnabled = tl.audioTrackEnabled !== false;
-              this._timelineEditor.retakeMode = tl.retakeMode === true;
               this._timelineEditor._audioTrackWasEnabledBeforeOverride = !!this.properties.audioTrackWasEnabledBeforeOverride;
 
               // Sync properties to match
               this.properties.mainTrackEnabled = this._timelineEditor.mainTrackEnabled;
               this.properties.audioTrackEnabled = this._timelineEditor.audioTrackEnabled;
-              this.properties.retakeMode = this._timelineEditor.retakeMode;
               if (tl.showFilenames !== undefined) {
                 this.properties.showFilenames = tl.showFilenames;
               }
@@ -378,7 +309,6 @@ export function registerNode(TimelineEditor) {
                 this._timelineEditor.selectedIndex, -1,
                 Math.max(-1, this._timelineEditor.timeline.segments.length - 1)
               );
-              this._timelineEditor.updateRetakeUIState();
               this._timelineEditor.updateUIFromSelection();
               this._timelineEditor.syncWidgetsAndUI();
               this._timelineEditor.syncLayoutToNode();

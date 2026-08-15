@@ -127,14 +127,6 @@ export const settings = {
       const data = JSON.parse(jsonStr);
 
       // Load settings if present
-      if (data.global_prompt !== undefined) {
-        if (data.retake_global_prompt !== undefined) {
-          this.timeline.global_prompt = data.global_prompt;
-          this.timeline.retake_global_prompt = data.retake_global_prompt;
-        } else {
-          this.syncGlobalPrompt(data.global_prompt);
-        }
-      }
       if (data.settings) {
         for (const [key, value] of Object.entries(data.settings)) {
           // Handle legacy keys for backward compatibility
@@ -182,36 +174,10 @@ export const settings = {
           this.propContainer.style.height = `${this.propHeight}px`;
         }
       }
-      if (this.timeline.globalPropHeight !== undefined) {
-        this.node.properties.globalPropHeight = this.timeline.globalPropHeight;
-        this.globalPropHeight = this.timeline.globalPropHeight;
-        if (this.globalPropContainer) {
-          this.globalPropContainer.style.height = `${this.globalPropHeight}px`;
-        }
-      }
       this.currentFileHandle = fileHandle;
-      this.retakeMode = this.timeline.retakeMode === true;
 
       this.loadMedia();
 
-      if (!this.retakeMode) {
-        this._suppressCommit = true;
-        if (this.timeline.normalStartFrame !== undefined && this.startFramesWidget) {
-          this.startFramesWidget.value = this.timeline.normalStartFrame;
-          if (this.startFramesWidget.callback) {
-            try { this.startFramesWidget.callback(this.timeline.normalStartFrame); } catch (_) {}
-          }
-        }
-        if (this.timeline.normalDurationFrames !== undefined && this.durationFramesWidget) {
-          this.durationFramesWidget.value = this.timeline.normalDurationFrames;
-          if (this.durationFramesWidget.callback) {
-            try { this.durationFramesWidget.callback(this.timeline.normalDurationFrames); } catch (_) {}
-          }
-        }
-        this._suppressCommit = false;
-      }
-
-      this.updateRetakeUIState();
       this.updateUIFromSelection();
       this.syncWidgetsAndUI();
       this.commitChanges(true); // forces sync to UI and other widgets
@@ -250,7 +216,7 @@ export const settings = {
 
   _getTimelineSavePayload() {
     const allSettings = {};
-    const skipWidgets = ["timeline_data", "local_prompts", "segment_lengths", "guide_strength", "timeline_ui", "global_prompt"];
+    const skipWidgets = ["timeline_data", "local_prompts", "segment_lengths", "guide_strength", "timeline_ui"];
 
     for (const w of this.node.widgets || []) {
       if (!skipWidgets.includes(w.name) && w.value !== undefined) {
@@ -258,14 +224,9 @@ export const settings = {
       }
     }
 
-    const normPrompt = this.retakeMode ? (this.timeline.global_prompt || "") : (this.globalPromptInput ? this.globalPromptInput.value : "");
-    const retPrompt = this.retakeMode ? (this.globalPromptInput ? this.globalPromptInput.value : "") : (this.timeline.retake_global_prompt || "");
-
     return JSON.stringify({
       version: 1,
       settings: allSettings,
-      global_prompt: normPrompt,
-      retake_global_prompt: retPrompt,
       timeline: {
         mainTrackEnabled: this.mainTrackEnabled,
         audioTrackEnabled: this.audioTrackEnabled,
@@ -273,20 +234,6 @@ export const settings = {
         overrideAudio: !!this.node.properties.overrideAudio,
         inpaint_audio: !!(this.node.widgets?.find(w => w.name === "inpaint_audio")?.value),
         propHeight: this.propHeight,
-        globalPropHeight: this.globalPropHeight,
-        global_prompt: normPrompt,
-        retake_global_prompt: retPrompt,
-        retakeMode: this.retakeMode,
-        retakeStart: this.timeline.retakeStart,
-        retakeLength: this.timeline.retakeLength,
-        retakePrompt: this.timeline.retakePrompt,
-        retakeStrength: this.timeline.retakeStrength,
-        retakeVideo: this.timeline.retakeVideo ? {
-          fileName: this.timeline.retakeVideo.fileName,
-          imageFile: this.timeline.retakeVideo.imageFile,
-          videoDurationFrames: this.timeline.retakeVideo.videoDurationFrames,
-          fileSize: this.timeline.retakeVideo.fileSize,
-        } : null,
         normalStartFrame: this.timeline.normalStartFrame,
         normalDurationFrames: this.timeline.normalDurationFrames,
         segments: (this.timeline.segments || []).map(s => {

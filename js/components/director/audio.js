@@ -33,9 +33,7 @@ export const audio = {
     if (this.isPlaying) {
       this.pauseAudio();
     } else {
-      const playMax = this.retakeMode 
-        ? (this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || this.getDurationFrames()) : this.getDurationFrames())
-        : this.getVisualDurationFrames();
+      const playMax = this.getVisualDurationFrames();
       if (this.currentFrame >= playMax) {
         this.currentFrame = 0;
       }
@@ -73,8 +71,8 @@ export const audio = {
     // Build the list of active segments to play
     const segmentsToPlay = [];
 
-    // 1. Standard Audio Segments on the audio track (only if the track is enabled and NOT in retake mode)
-    if (this.audioTrackEnabled && !this.retakeMode) {
+    // 1. Standard Audio Segments on the audio track (only if the track is enabled)
+    if (this.audioTrackEnabled) {
       if (this.timeline.audioSegments) {
         for (let seg of this.timeline.audioSegments) {
           segmentsToPlay.push({
@@ -224,14 +222,8 @@ export const audio = {
       const durationFrames = this.getDurationFrames();
 
       let loopBound, stopBound;
-      if (this.retakeMode) {
-        const retakeLimit = this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || durationFrames) : durationFrames;
-        loopBound = retakeLimit;
-        stopBound = retakeLimit;
-      } else {
-        loopBound = (this.playbackStartFrame >= durationFrames) ? visualDurationFrames : durationFrames;
-        stopBound = visualDurationFrames;
-      }
+      loopBound = (this.playbackStartFrame >= durationFrames) ? visualDurationFrames : durationFrames;
+      stopBound = visualDurationFrames;
 
       if (this.isLooping) {
         if (this.currentFrame >= loopBound) {
@@ -249,51 +241,27 @@ export const audio = {
       }
 
       // Sync video playback
-      if (this.retakeMode) {
-        if (this.timeline.retakeVideo) {
-          const retakeVid = this.timeline.retakeVideo;
-          this._ensureVideoEl(retakeVid);
-          if (retakeVid.videoEl) {
-            const expectedSec = this.currentFrame / frameRate;
-            if (retakeVid.videoEl.paused && !retakeVid.videoEl.seeking) {
-              retakeVid.videoEl.currentTime = expectedSec;
-              retakeVid.videoEl.muted = false;
-              retakeVid.videoEl.play().catch(e => console.warn("Retake video play prevented", e));
-            } else if (!retakeVid.videoEl.paused && Math.abs(retakeVid.videoEl.currentTime - expectedSec) > 0.5) {
-              retakeVid.videoEl.currentTime = expectedSec;
-            }
-          }
-        }
-        // Pause all other video elements
-        const allSegments = [...(this.timeline.segments || [])];
-        for (const seg of allSegments) {
-          if (seg.videoEl && !seg.videoEl.paused) {
-            seg.videoEl.pause();
-          }
-        }
-      } else {
-        const activeSegments = (this._isDragging && this._previewSegments && this.selectionType !== "audio") ? this._previewSegments : this.timeline.segments;
-        const activeSeg = activeSegments.find(s => s.type === "video" && this.currentFrame >= s.start && this.currentFrame < s.start + s.length);
-        const activeVideoEl = activeSeg ? activeSeg.videoEl : null;
+      const activeSegments = (this._isDragging && this._previewSegments && this.selectionType !== "audio") ? this._previewSegments : this.timeline.segments;
+      const activeSeg = activeSegments.find(s => s.type === "video" && this.currentFrame >= s.start && this.currentFrame < s.start + s.length);
+      const activeVideoEl = activeSeg ? activeSeg.videoEl : null;
 
-        for (const seg of activeSegments) {
-          if (seg.type === "video" && seg.videoEl) {
-            if (seg === activeSeg) {
-              const expectedSec = (seg.trimStart + (this.currentFrame - seg.start)) / frameRate;
-              if (seg.videoEl.paused && !seg.videoEl.seeking) {
-                // Not playing and no seek in flight — start a fresh seek+play
-                seg.videoEl.currentTime = expectedSec;
-                seg.videoEl.play().catch(e => console.warn("Video play prevented", e));
-              } else if (!seg.videoEl.paused && Math.abs(seg.videoEl.currentTime - expectedSec) > 0.5) {
-                // Already playing but drifted — resync
-                seg.videoEl.currentTime = expectedSec;
-              }
-              // If paused && seeking: a seek+play is already in flight, let it finish
-            } else {
-              // Only pause if this segment's video element is NOT shared with the currently active segment
-              if (seg.videoEl !== activeVideoEl && !seg.videoEl.paused) {
-                seg.videoEl.pause();
-              }
+      for (const seg of activeSegments) {
+        if (seg.type === "video" && seg.videoEl) {
+          if (seg === activeSeg) {
+            const expectedSec = (seg.trimStart + (this.currentFrame - seg.start)) / frameRate;
+            if (seg.videoEl.paused && !seg.videoEl.seeking) {
+              // Not playing and no seek in flight — start a fresh seek+play
+              seg.videoEl.currentTime = expectedSec;
+              seg.videoEl.play().catch(e => console.warn("Video play prevented", e));
+            } else if (!seg.videoEl.paused && Math.abs(seg.videoEl.currentTime - expectedSec) > 0.5) {
+              // Already playing but drifted — resync
+              seg.videoEl.currentTime = expectedSec;
+            }
+            // If paused && seeking: a seek+play is already in flight, let it finish
+          } else {
+            // Only pause if this segment's video element is NOT shared with the currently active segment
+            if (seg.videoEl !== activeVideoEl && !seg.videoEl.paused) {
+              seg.videoEl.pause();
             }
           }
         }
@@ -314,28 +282,16 @@ export const audio = {
       try { this.audioContext.suspend(); } catch (e) { }
     }
 
-    if (this.retakeMode && this.timeline.retakeVideo) {
-      const retakeVid = this.timeline.retakeVideo;
-      if (retakeVid.videoEl) {
-        if (!retakeVid.videoEl.paused) {
-          retakeVid.videoEl.pause();
+    // Sync video segments on pause
+    for (const seg of this.timeline.segments) {
+      if (seg.type === "video" && seg.videoEl) {
+        if (!seg.videoEl.paused) {
+          seg.videoEl.pause();
         }
-        retakeVid.videoEl.muted = true; // Mute again on pause/stop to prevent transient audio bursts
-        retakeVid.videoEl.currentTime = this.currentFrame / this.getFrameRate();
-      }
-    } else {
-      // Sync video segments on pause
-      for (const seg of this.timeline.segments) {
-        if (seg.type === "video" && seg.videoEl) {
-          if (!seg.videoEl.paused) {
-            seg.videoEl.pause();
-          }
-          if (this.currentFrame >= seg.start && this.currentFrame < seg.start + seg.length) {
-            seg.videoEl.currentTime = (seg.trimStart + (this.currentFrame - seg.start)) / this.getFrameRate();
-          }
+        if (this.currentFrame >= seg.start && this.currentFrame < seg.start + seg.length) {
+          seg.videoEl.currentTime = (seg.trimStart + (this.currentFrame - seg.start)) / this.getFrameRate();
         }
       }
-
     }
 
     for (let node of this.activeAudioNodes) {

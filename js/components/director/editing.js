@@ -48,28 +48,6 @@ export const editing = {
 ,
 
   markCurrentSelection() {
-    if (this.retakeMode) {
-      if (this.timeline.retakeVideo) {
-        const baseVideoDur = this.timeline.retakeVideo.videoDurationFrames || 24;
-        const targetStart = 0;
-        const targetEnd = baseVideoDur;
-
-        if (this.startFramesWidget && this.endFramesWidget) {
-          this.startFramesWidget.value = targetStart;
-          this.endFramesWidget.value = targetEnd;
-          if (this.startFramesWidget.callback) {
-            this.startFramesWidget.callback(targetStart);
-          }
-          if (this.endFramesWidget.callback) {
-            this.endFramesWidget.callback(targetEnd);
-          }
-          this.commitChanges();
-          this.render();
-        }
-      }
-      return;
-    }
-
     const allSegs = [
       ...(this.timeline.segments || []),
       ...(this.timeline.audioSegments || [])
@@ -273,9 +251,7 @@ export const editing = {
     this.selectionType = copiedTrack;
     this.selectedIndex = this.getSegmentArray(copiedTrack).findIndex(s => s.id === mainSeg.id);
 
-    if (!this.retakeMode) {
-      this.growTimelineIfNeeded(mainSeg.start + mainSeg.length);
-    }
+    this.growTimelineIfNeeded(mainSeg.start + mainSeg.length);
 
     this.updateUIFromSelection();
     this.commitChanges();
@@ -464,109 +440,53 @@ export const editing = {
 
     const startFrames = this.getStartFrames();
     const durationFrames = this.getDurationFrames();
-    if (!this.retakeMode) {
-      this.timeline.normalStartFrame = startFrames;
-      this.timeline.normalDurationFrames = durationFrames;
-    }
+    this.timeline.normalStartFrame = startFrames;
+    this.timeline.normalDurationFrames = durationFrames;
     const endFrames = startFrames + durationFrames;
     let currentCursor = startFrames;
 
-    if (this.retakeMode) {
-      const totalFrames = this.getVisualDurationFrames();
-      const retakeStart = this.timeline.retakeStart ?? 0;
-      const retakeLength = this.timeline.retakeLength ?? totalFrames;
-      const retakeEnd = retakeStart + retakeLength;
-      const retakePrompt = this.timeline.retakePrompt || "";
-      const retakeStrength = this.timeline.retakeStrength ?? 1.0;
-      const globalPrompt = this.globalPromptInput ? this.globalPromptInput.value : (this.node.properties?.global_prompt || "");
+    // Build segment lengths clipped at the duration cutoff.
+    // - Gaps before the first segment, or between segments, are absorbed into the adjacent
+    //   segment's length (same as before), but are also clipped at endFrames.
+    // - Segments completely before startFrames or after endFrames are excluded entirely.
+    // - Segments that cross the boundaries are trimmed.
+    let pendingGap = 0;
+    for (let seg of sortedSegments) {
+      if (seg.start + seg.length <= startFrames) continue;
+      if (seg.start >= endFrames) break;
 
-      // 1. Preserved before
-      const pBeforeStart = startFrames;
-      const pBeforeEnd = Math.min(endFrames, retakeStart);
-      const pBeforeLen = pBeforeEnd - pBeforeStart;
-      if (pBeforeLen > 0) {
-        contiguousLengths.push(pBeforeLen);
-        contiguousPrompts.push(globalPrompt || "video");
-        imgStrengths.push("0.00");
-      }
+      const effectiveStart = Math.max(seg.start, startFrames);
 
-      // 2. Retake region
-      const rStart = Math.max(startFrames, retakeStart);
-      const rEnd = Math.min(endFrames, retakeEnd);
-      const rLen = rEnd - rStart;
-      if (rLen > 0) {
-        contiguousLengths.push(rLen);
-        contiguousPrompts.push(retakePrompt || "video");
-        imgStrengths.push(retakeStrength.toFixed(2));
-      }
-
-      // 3. Preserved after
-      const pAfterStart = Math.max(startFrames, retakeEnd);
-      const pAfterEnd = endFrames;
-      const pAfterLen = pAfterEnd - pAfterStart;
-      if (pAfterLen > 0) {
-        contiguousLengths.push(pAfterLen);
-        contiguousPrompts.push(globalPrompt || "video");
-        imgStrengths.push("0.00");
-      }
-    } else {
-      // Build segment lengths clipped at the duration cutoff.
-      // - Gaps before the first segment, or between segments, are absorbed into the adjacent
-      //   segment's length (same as before), but are also clipped at endFrames.
-      // - Segments completely before startFrames or after endFrames are excluded entirely.
-      // - Segments that cross the boundaries are trimmed.
-      let pendingGap = 0;
-      for (let seg of sortedSegments) {
-        if (seg.start + seg.length <= startFrames) continue;
-        if (seg.start >= endFrames) break;
-
-        const effectiveStart = Math.max(seg.start, startFrames);
-
-        if (effectiveStart > currentCursor) {
-          const gapLength = Math.min(effectiveStart, endFrames) - currentCursor;
-          if (contiguousLengths.length > 0) {
-            contiguousLengths[contiguousLengths.length - 1] += gapLength;
-          } else {
-            pendingGap += gapLength;
-          }
+      if (effectiveStart > currentCursor) {
+        const gapLength = Math.min(effectiveStart, endFrames) - currentCursor;
+        if (contiguousLengths.length > 0) {
+          contiguousLengths[contiguousLengths.length - 1] += gapLength;
+        } else {
+          pendingGap += gapLength;
         }
-
-        const clippedEnd = Math.min(seg.start + seg.length, endFrames);
-        const clippedLength = clippedEnd - effectiveStart;
-
-        contiguousLengths.push(clippedLength + pendingGap);
-        contiguousPrompts.push(seg.prompt || "");
-        pendingGap = 0;
-        currentCursor = Math.max(currentCursor, seg.start + seg.length);
       }
 
-      const clampedCursor = Math.min(currentCursor, endFrames);
-      if (contiguousLengths.length > 0 && clampedCursor < endFrames) {
-        contiguousLengths[contiguousLengths.length - 1] += endFrames - clampedCursor;
-      }
+      const clippedEnd = Math.min(seg.start + seg.length, endFrames);
+      const clippedLength = clippedEnd - effectiveStart;
+
+      contiguousLengths.push(clippedLength + pendingGap);
+      contiguousPrompts.push(seg.prompt || "");
+      pendingGap = 0;
+      currentCursor = Math.max(currentCursor, seg.start + seg.length);
+    }
+
+    const clampedCursor = Math.min(currentCursor, endFrames);
+    if (contiguousLengths.length > 0 && clampedCursor < endFrames) {
+      contiguousLengths[contiguousLengths.length - 1] += endFrames - clampedCursor;
     }
 
     const toSave = {
       mainTrackEnabled: this.mainTrackEnabled,
       audioTrackEnabled: this.audioTrackEnabled,
       propHeight: this.propHeight,
-      globalPropHeight: this.globalPropHeight,
       showFilenames: !!this.node.properties.showFilenames,
       overrideAudio: !!this.node.properties.overrideAudio,
       inpaint_audio: !!(this.node.widgets?.find(w => w.name === "inpaint_audio")?.value),
-      global_prompt: this.retakeMode ? (this.timeline.global_prompt || "") : (this.globalPromptInput ? this.globalPromptInput.value : ""),
-      retake_global_prompt: this.retakeMode ? (this.globalPromptInput ? this.globalPromptInput.value : "") : (this.timeline.retake_global_prompt || ""),
-      retakeMode: this.retakeMode,
-      retakeStart: this.timeline.retakeStart,
-      retakeLength: this.timeline.retakeLength,
-      retakePrompt: this.timeline.retakePrompt,
-      retakeStrength: this.timeline.retakeStrength,
-      retakeVideo: this.timeline.retakeVideo ? {
-        fileName: this.timeline.retakeVideo.fileName,
-        imageFile: this.timeline.retakeVideo.imageFile,
-        videoDurationFrames: this.timeline.retakeVideo.videoDurationFrames,
-        fileSize: this.timeline.retakeVideo.fileSize,
-      } : null,
       normalStartFrame: this.timeline.normalStartFrame,
       normalDurationFrames: this.timeline.normalDurationFrames,
       segments: sortedSegments.map(s => {
@@ -638,17 +558,11 @@ export const editing = {
     }
 
     if (this.guideStrengthWidget) {
-      let val = "";
-      if (this.retakeMode) {
-        val = imgStrengths.join(",");
-      } else {
-        const strList = sortedSegments
-          .filter(s => s.type !== "text")
-          .filter(s => s.start + s.length > startFrames && s.start < endFrames)
-          .map(s => (s.guideStrength !== undefined ? s.guideStrength : 1.0).toFixed(2));
-        val = strList.join(",");
-      }
-      updateWidgetValue(this.guideStrengthWidget, val);
+      const strList = sortedSegments
+        .filter(s => s.type !== "text")
+        .filter(s => s.start + s.length > startFrames && s.start < endFrames)
+        .map(s => (s.guideStrength !== undefined ? s.guideStrength : 1.0).toFixed(2));
+      updateWidgetValue(this.guideStrengthWidget, strList.join(","));
     }
 
     // Keep zoom slider max in sync with the current timeline duration.
@@ -803,9 +717,7 @@ export const editing = {
     this.timeline.segments.push(seg);
     this.timeline.segments.sort((a, b) => a.start - b.start);
 
-    if (!this.retakeMode) {
-      this.growTimelineIfNeeded(seg.start + seg.length);
-    }
+    this.growTimelineIfNeeded(seg.start + seg.length);
 
     this.selectionType = "image";
     this.selectedIndex = this.timeline.segments.findIndex(s => s.id === seg.id);
@@ -833,9 +745,7 @@ export const editing = {
     this.timeline.segments.push(seg);
     this.timeline.segments.sort((a, b) => a.start - b.start);
 
-    if (!this.retakeMode) {
-      this.growTimelineIfNeeded(seg.start + seg.length);
-    }
+    this.growTimelineIfNeeded(seg.start + seg.length);
 
     this.selectionType = "image";
     this.selectedIndex = this.timeline.segments.findIndex(s => s.id === seg.id);

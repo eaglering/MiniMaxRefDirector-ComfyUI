@@ -101,18 +101,6 @@ class TimelineEditor {
 
     console.log("[MiniMaxRefDirector debug] Constructor: timelineDataWidget value:", this.timelineDataWidget?.value);
     this.timeline = parseInitial(this.timelineDataWidget?.value);
-    this.retakeMode = this.timeline.retakeMode === true;
-    if (this.retakeMode) {
-      if (this.timeline.retake_global_prompt) {
-        if (!this.node.properties) this.node.properties = {};
-        this.node.properties.global_prompt = this.timeline.retake_global_prompt;
-      }
-    } else {
-      if (this.timeline.global_prompt) {
-        if (!this.node.properties) this.node.properties = {};
-        this.node.properties.global_prompt = this.timeline.global_prompt;
-      }
-    }
     console.log("[MiniMaxRefDirector debug] Constructor: parsed timeline:", JSON.stringify(this.timeline));
 
     // Treat this.timeline (from timeline_data widget) as the absolute source of truth!
@@ -146,7 +134,6 @@ class TimelineEditor {
     this.loadMedia();
 
     this.createDOM();
-    this.updateRetakeUIState();
     if (this.timeline.segments.length > 0) {
       this.selectedIndex = 0;
     }
@@ -388,6 +375,10 @@ class TimelineEditor {
         this.updateWidgetVisibility();
         this.updateUIFromSelection();
         this.render();
+        // 通知 GlobalParamsPanel 切换 Start/End/Duration 单位（秒 <-> 帧）
+        if (typeof this._onDisplayModeChange === "function") {
+          this._onDisplayModeChange(this.displayModeWidget.value);
+        }
       };
       this.updateWidgetVisibility(); // Initial trigger
     }

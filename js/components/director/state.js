@@ -1,5 +1,5 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
-// 方法: updateSelectionFromBox, syncSelectionTypeAndIndex, growTimelineIfNeeded, syncWidgetsToRetakeDuration, getMaxZoom, getVisualDurationFrames, updateZoomSliderMax, getGlobalPrompt, syncGlobalPrompt, updateUIFromSelection, updateRetakeUIState, updateSidebarHeights
+// 方法: updateSelectionFromBox, syncSelectionTypeAndIndex, growTimelineIfNeeded, getMaxZoom, getVisualDurationFrames, updateZoomSliderMax, updateUIFromSelection, updateSidebarHeights
 import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, RULER_HEIGHT, app } from "./shared.js";
 
 export const state = {
@@ -101,44 +101,7 @@ export const state = {
   }
 ,
 
-  syncWidgetsToRetakeDuration(durationFrames) {
-    if (durationFrames <= 0) return;
-    const rate = this.getFrameRate();
-    const durationSeconds = parseFloat((durationFrames / rate).toFixed(3));
 
-    const wasSuppressing = this._suppressCommit;
-    this._suppressCommit = true;
-
-    if (this.startFramesWidget) {
-      this.startFramesWidget.value = 0;
-      if (this.startFramesWidget.callback) {
-        try { this.startFramesWidget.callback(0); } catch (_) {}
-      }
-    }
-    if (this.startSecondsWidget) {
-      this.startSecondsWidget.value = 0;
-    }
-
-    if (this.durationFramesWidget) {
-      this.durationFramesWidget.value = durationFrames;
-      if (this.durationFramesWidget.callback) {
-        try { this.durationFramesWidget.callback(durationFrames); } catch (_) {}
-      }
-    }
-    if (this.durationSecondsWidget) {
-      this.durationSecondsWidget.value = durationSeconds;
-    }
-
-    if (this.endFramesWidget) {
-      this.endFramesWidget.value = durationFrames;
-    }
-    if (this.endSecondsWidget) {
-      this.endSecondsWidget.value = durationSeconds;
-    }
-
-    this._suppressCommit = wasSuppressing;
-  }
-,
 
   getMaxZoom() {
     const visualDurationSecs = this.getVisualDurationFrames() / this.getFrameRate();
@@ -154,17 +117,6 @@ export const state = {
 ,
 
   getVisualDurationFrames() {
-    if (this.retakeMode) {
-      if (this.timeline.retakeVideo) {
-        const baseVideoDur = this.timeline.retakeVideo.videoDurationFrames || 0;
-        // Add 15% visual buffer duration on the right to prevent the video segment
-        // from being cut off by the DOM clipping (right ~9% of the viewport is clipped by ComfyUI).
-        return Math.max(24, Math.ceil(baseVideoDur * 1.15));
-      } else {
-        return 24;
-      }
-    }
-
     let furthest = 0;
     for (const seg of this.timeline.segments) {
       furthest = Math.max(furthest, seg.start + seg.length);
@@ -196,100 +148,8 @@ export const state = {
   }
 ,
 
-  getGlobalPrompt() {
-    if (this.globalPromptInput) {
-      return this.globalPromptInput.value || "";
-    }
-    let val = "";
-    if (this.node) {
-      const globalInput = this.node.inputs?.find(i => i.name === "global_prompt");
-      if (globalInput && globalInput.link !== null && globalInput.link !== undefined) {
-        const link = window.app.graph?.links?.[globalInput.link];
-        if (link) {
-          const originNode = window.app.graph.getNodeById(link.origin_id);
-          if (originNode && originNode.widgets && originNode.widgets.length > 0) {
-            val = originNode.widgets[0].value || "";
-          }
-        }
-      } else {
-        const w = this.node.widgets?.find(x => x.name === "global_prompt");
-        if (w) {
-          val = w.value || "";
-        } else {
-          val = this.node.properties?.global_prompt || "";
-        }
-      }
-    }
-    return val;
-  }
-,
-
-  syncGlobalPrompt(val) {
-    if (this.node.properties) {
-      this.node.properties.global_prompt = val;
-    }
-    if (this.retakeMode) {
-      this.timeline.retake_global_prompt = val;
-    } else {
-      this.timeline.global_prompt = val;
-    }
-    const globalInput = this.node.inputs?.find(i => i.name === "global_prompt");
-    let synced = false;
-    if (globalInput && globalInput.link !== null && globalInput.link !== undefined) {
-      const link = window.app.graph?.links?.[globalInput.link];
-      if (link) {
-        const originNode = window.app.graph.getNodeById(link.origin_id);
-        if (originNode && originNode.widgets && originNode.widgets.length > 0) {
-          const w = originNode.widgets[0];
-          const oldVal = w.value;
-          w.value = val;
-          if (originNode.onWidgetChanged) {
-            originNode.onWidgetChanged(w.name, val, oldVal, w);
-          }
-          if (w.callback) {
-            try {
-              originNode.widgets[0].callback(val);
-            } catch (err) { }
-          }
-          synced = true;
-        }
-      }
-    }
-    if (!synced) {
-      const w = this.node.widgets?.find(x => x.name === "global_prompt");
-      if (w) {
-        const oldVal = w.value;
-        w.value = val;
-        if (this.node.onWidgetChanged) {
-          this.node.onWidgetChanged(w.name, val, oldVal, w);
-        }
-        if (w.callback) {
-          try {
-            w.callback(val);
-          } catch (err) { }
-        }
-      }
-    }
-    if (this.globalPromptInput && this.globalPromptInput.value !== val) {
-      this.globalPromptInput.value = val;
-    }
-    if (this.node) {
-      this.node.setDirtyCanvas(true, false);
-    }
-    if (window.app?.graph) {
-      if (window.app.graph.change) window.app.graph.change();
-      if (window.app.graph.onNodeChanged) window.app.graph.onNodeChanged(this.node);
-      if (window.app.graph.onStateChanged) window.app.graph.onStateChanged();
-    }
-  }
-,
-
   updateUIFromSelection() {
     if (this.selectedSegmentIds && this.isMultiSelectActive()) {
-      if (this.globalPromptInput) {
-        this.globalPromptInput.disabled = true;
-        this.globalPromptInput.style.opacity = "0.35";
-      }
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
       if (this.promptInput) {
         this.promptInput.value = "";
@@ -352,35 +212,7 @@ export const state = {
       this.promptInput.style.opacity = "";
     }
 
-    if (this.retakeMode) {
-      if (this.promptWrapper) this.promptWrapper.style.display = "block";
-      this.promptInput.disabled = false;
-      this.promptInput.style.opacity = "1.0";
-      this.promptInput.placeholder = "Enter prompt for retake region...";
-      this.promptInput.value = this.timeline.retakePrompt || "";
-      if (this._transferSetLeft) this._transferSetLeft(this.promptInput.value);
-
-      this.strengthRow.style.display = "flex";
-      this.strengthLabel.style.display = "inline";
-      this.strengthLabel.textContent = "Guide Strength:";
-      this.strengthValue.style.display = "inline-block";
-      this.strengthValue.disabled = true;
-      this.strengthValue.style.opacity = "0.35";
-      this.strengthValue.value = (this.timeline.retakeStrength ?? 1.0).toFixed(2);
-
-      this.audioInfoArea.style.display = "none";
-
-      if (this.segmentBoundsDisplay) {
-        const startStr = this.formatTime(this.timeline.retakeStart, true);
-        const endStr = this.formatTime(this.timeline.retakeStart + this.timeline.retakeLength, true);
-        const lengthStr = this.formatTime(this.timeline.retakeLength, true);
-        this.segmentBoundsDisplay.textContent = `Start: ${startStr} | End: ${endStr} | Length: ${lengthStr}`;
-      }
-    } else if (this.selectionType === "audio" && seg) {
-      if (this.globalPromptInput) {
-        this.globalPromptInput.disabled = false;
-        this.globalPromptInput.style.opacity = "1.0";
-      }
+    if (this.selectionType === "audio" && seg) {
       if (this.promptWrapper) this.promptWrapper.style.display = "none";
       this.strengthRow.style.display = "flex";
       this.strengthLabel.style.display = "inline";
@@ -398,10 +230,6 @@ export const state = {
       if (this.segmentPromptLabel) {
         this.segmentPromptLabel.style.display = "block";
         this.segmentPromptLabel.textContent = "Segment Prompt";
-      }
-      if (this.globalPromptInput) {
-        this.globalPromptInput.disabled = false;
-        this.globalPromptInput.style.opacity = "1.0";
       }
       this.audioInfoArea.style.display = "none";
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
@@ -434,7 +262,7 @@ export const state = {
       }
     }
 
-    if (this.segmentBoundsDisplay && !this.retakeMode) {
+    if (this.segmentBoundsDisplay) {
       if (seg) {
         const startStr = this.formatTime(seg.start, true);
         const endStr = this.formatTime(seg.start + seg.length, true);
@@ -446,91 +274,6 @@ export const state = {
     }
 
     if (this._transferSetSeg) this._transferSetSeg(seg);
-  }
-,
-
-  updateRetakeUIState() {
-    const isRetake = this.retakeMode;
-
-    if (this.globalPromptInput) {
-      const p = isRetake ? (this.timeline.retake_global_prompt || "") : (this.timeline.global_prompt || "");
-      if (this.globalPromptInput.value !== p) {
-        this.globalPromptInput.value = p;
-        this.syncGlobalPrompt(p);
-      }
-    }
-
-    // 1. Set track heights
-    if (isRetake) {
-      if (this.blockHeight > 0 && this.audioTrackHeight > 0) {
-        this._oldBlockHeight = this.blockHeight;
-        this._oldAudioTrackHeight = this.audioTrackHeight;
-      }
-      this.blockHeight = this.canvasHeight - this.rulerHeight;
-      this.audioTrackHeight = 0;
-      // In retake mode, uploadVideoBtn stays as "Add Video" (same as normal mode)
-      if (this.mainTrackLabel) {
-        const textSpan = this.mainTrackLabel.querySelector("span");
-        if (textSpan) textSpan.textContent = "VIDEO";
-        if (this.mainTrackLabel._eyeBtn) this.mainTrackLabel._eyeBtn.style.display = "none";
-        this.mainTrackLabel.style.backgroundColor = "#1e1e1e";
-        this.audioTrackLabel.style.display = "none";
-      }
-      if (this.sidebar) this.sidebar.style.backgroundColor = "#1e1e1e";
-      if (this.rulerSpacer) this.rulerSpacer.style.backgroundColor = "#1e1e1e";
-    } else {
-      this.blockHeight = this._oldBlockHeight ?? BLOCK_HEIGHT;
-      this.audioTrackHeight = this._oldAudioTrackHeight ?? AUDIO_TRACK_HEIGHT;
-      if (this.uploadVideoBtn) {
-        this.uploadVideoBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Add Video`;
-      }
-      if (this.mainTrackLabel) {
-        const textSpan = this.mainTrackLabel.querySelector("span");
-        if (textSpan) textSpan.textContent = "MAIN";
-        if (this.mainTrackLabel._eyeBtn) this.mainTrackLabel._eyeBtn.style.display = "inline-flex";
-        this.mainTrackLabel.style.backgroundColor = "#1e1e1e";
-        this.audioTrackLabel.style.display = "flex";
-      }
-      if (this.sidebar) this.sidebar.style.backgroundColor = "#1e1e1e";
-      if (this.rulerSpacer) this.rulerSpacer.style.backgroundColor = "#1e1e1e";
-    }
-
-    this.updateSidebarHeights();
-
-    // Reset zoom to fit viewport when entering retake mode so full video is visible
-    if (isRetake) {
-      this.zoomLevel = 1;
-      if (this.zoomSlider) this.zoomSlider.value = 1;
-      this.updateZoomSliderMax();
-      const vw = this.viewport ? this.viewport.clientWidth : 0;
-      if (vw > 0) {
-        this.resizeCanvas(vw);
-        this._lastWidth = vw;
-        this._lastZoom = 1;
-        if (this.viewport) this.viewport.scrollLeft = 0;
-      }
-    }
-
-    // 2. Hide/show toolbar action buttons
-    if (this.uploadBtn) this.uploadBtn.style.display = isRetake ? "none" : "";
-    if (this.addTextBtn) this.addTextBtn.style.display = isRetake ? "none" : "";
-    if (this.uploadAudioBtn) this.uploadAudioBtn.style.display = isRetake ? "none" : "";
-    if (this.deleteBtn) this.deleteBtn.style.display = isRetake ? "none" : "";
-    // deleteRetakeBtn is visible whenever Retake Mode is active
-    if (this.deleteRetakeBtn) {
-      this.deleteRetakeBtn.style.display = isRetake ? "" : "none";
-    }
-
-    // 3. Update the toggle button class/title
-    if (this.updateRetakeStyle) this.updateRetakeStyle();
-
-    // 4. Update the prompt labels
-    if (this.segmentPromptLabel) {
-      this.segmentPromptLabel.textContent = isRetake ? "Retake Prompt" : "Local Prompt";
-    }
-
-    // 5. Update UI selection inputs
-    this.updateUIFromSelection();
   }
 ,
 

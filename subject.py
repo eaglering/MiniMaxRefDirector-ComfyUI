@@ -110,6 +110,10 @@ class MiniMaxRefSubject(io.ComfyNode):
                     tooltip="How the H3 prompt is generated: locally with llama-cpp (GGUF) or via a cloud API.",
                 ),
                 io.String.Input(
+                    "global_prompt", multiline=True, default="", optional=True,
+                    tooltip="Conditions the entire video. Anchors persistent characters, objects, and scene context.",
+                ),
+                io.String.Input(
                     "subject_data", default="", multiline=True,
                     tooltip="JSON state of all subjects (auto-managed by the UI; do not edit by hand).",
                 ),
@@ -129,7 +133,7 @@ class MiniMaxRefSubject(io.ComfyNode):
 
     @classmethod
     def execute(cls, model=None, clip=None, video_vae=None, audio_vae=None, vlm_mode=None,
-                subject_data="", subject_count=1) -> io.NodeOutput:
+                global_prompt="", subject_data="", subject_count=1) -> io.NodeOutput:
         # VLM mode: llama-cpp (local GGUF) or api (cloud provider).
         # DynamicCombo passes a dict, e.g. {"vlm_mode": "llama-cpp", "gguf_name": ..., "mmproj_path": ...}
         mode = "llama-cpp"
@@ -206,6 +210,8 @@ class MiniMaxRefSubject(io.ComfyNode):
         config = {
             "opts": opts,
             "subject_data": output,
+            "global_prompt": global_prompt,
+            "subject_count": subject_count,
         }
 
         return io.NodeOutput(

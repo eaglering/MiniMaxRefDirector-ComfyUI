@@ -17,16 +17,6 @@ export const interaction = {
 
   _liveScrubPlayhead() {
     const targetFrame = this.currentFrame;
-    if (this.retakeMode && this.timeline.retakeVideo) {
-      const retakeVid = this.timeline.retakeVideo;
-      this._ensureVideoEl(retakeVid);
-      if (retakeVid.videoEl) {
-        const targetSec = targetFrame / this.getFrameRate();
-        retakeVid._scrubTargetSec = targetSec;
-      }
-      return;
-    }
-
     const seg = this.timeline.segments.find(s => s.type === "video" && targetFrame >= s.start && targetFrame < s.start + s.length);
     if (seg) {
       this._ensureVideoEl(seg);
@@ -49,19 +39,6 @@ export const interaction = {
     snapCandidates.push(this.getStartFrames());
     if (this.endFramesWidget && this.endFramesWidget.value !== undefined) {
       snapCandidates.push(parseInt(this.endFramesWidget.value, 10));
-    }
-
-    if (this.retakeMode) {
-      if (this.timeline.retakeVideo) {
-        const baseVideoDur = this.timeline.retakeVideo.videoDurationFrames || 0;
-        snapCandidates.push(baseVideoDur);
-      }
-      if (this.timeline.retakeStart !== undefined) {
-        snapCandidates.push(this.timeline.retakeStart);
-        if (this.timeline.retakeLength !== undefined) {
-          snapCandidates.push(this.timeline.retakeStart + this.timeline.retakeLength);
-        }
-      }
     }
 
     const allTracks = [
@@ -201,16 +178,10 @@ export const interaction = {
 ,
 
   onMouseDown(e) {
-    if (e.button === 2 && this.retakeMode) {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
     if (e.button !== 0) return;
     const { x, y } = this.getMousePos(e);
 
-    // In retake mode: block box selection — no multi-segment operations allowed
-    if (e.shiftKey && !this.retakeMode) {
+    if (e.shiftKey) {
       this._isSelectingBox = true;
       this._isDragging = true;
       this._dragType = "box_select";
@@ -248,105 +219,13 @@ export const interaction = {
     }
 
     // Track height dividers only apply in normal timeline mode.
-    if (!this.retakeMode) {
-      const isOverDivider = Math.abs(y - (RULER_HEIGHT + this.blockHeight)) <= 8;
-      if (isOverDivider) {
-        this._isDragging = true;
-        this._dragType = "divider";
-        this._startBlockHeight = this.blockHeight;
-        this._startAudioTrackHeight = this.audioTrackHeight;
-        this._startY = y;
-        return;
-      }
-    }
-
-    if (this.retakeMode) {
-      // If no video is loaded on the retake timeline, clicking in the timeline opens the file explorer
-      if (y >= RULER_HEIGHT && y <= RULER_HEIGHT + this.blockHeight) {
-        if (!this.timeline.retakeVideo) {
-          if (this.videoFileInput) {
-            this.videoFileInput.click();
-          }
-          return;
-        }
-      }
-
-      if (y < RULER_HEIGHT) {
-        this._isDragging = true;
-        this._dragType = "playhead";
-        const logicalWidth = this.canvas.offsetWidth;
-        const totalFrames = this.getVisualDurationFrames();
-        let mouseFrameX = x * (totalFrames / logicalWidth);
-        mouseFrameX = this.getSnappedPlayhead(mouseFrameX, logicalWidth);
-        const clampMax = this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || totalFrames) : totalFrames;
-        this.currentFrame = clamp(mouseFrameX, 0, clampMax);
-        // Pause only the RAF playback loop so we can seek the video directly during scrub.
-        // The video element itself keeps playing; we'll resume the loop on mouseup.
-        this._retakeScrubWasPlaying = this.isPlaying;
-        if (this.isPlaying) {
-          this.isPlaying = false;
-          this._currentPlayId = null;
-        }
-        if (this.timeline.retakeVideo && this.timeline.retakeVideo.videoEl) {
-          this.timeline.retakeVideo.videoEl.currentTime = this.currentFrame / this.getFrameRate();
-        }
-        this.render();
-        return;
-      }
-
-      if (y >= RULER_HEIGHT && y <= RULER_HEIGHT + this.blockHeight) {
-        const logicalWidth = this.canvas.offsetWidth;
-        const totalFrames = this.getVisualDurationFrames();
-        const retakeStart = this.timeline.retakeStart ?? 0;
-        const baseVideoDur = this.timeline.retakeVideo?.videoDurationFrames ?? totalFrames;
-        const retakeLength = this.timeline.retakeLength ?? baseVideoDur;
-
-        const x1 = (retakeStart / totalFrames) * logicalWidth;
-        const x2 = ((retakeStart + retakeLength) / totalFrames) * logicalWidth;
-        const threshold = HANDLE_HIT_PX;
-
-        if (this.timeline.retakeVideo && Math.abs(x - x1) <= threshold) {
-          this._isDragging = true;
-          this._dragType = "retake_left";
-          this._dragStartX = x;
-          this._dragStartRetakeStart = retakeStart;
-          this._dragStartRetakeLength = retakeLength;
-          return;
-        } else if (this.timeline.retakeVideo && Math.abs(x - x2) <= threshold) {
-          this._isDragging = true;
-          this._dragType = "retake_right";
-          this._dragStartX = x;
-          this._dragStartRetakeStart = retakeStart;
-          this._dragStartRetakeLength = retakeLength;
-          return;
-        } else if (this.timeline.retakeVideo && x > x1 && x < x2) {
-          this._isDragging = true;
-          this._dragType = "retake_center";
-          this._dragStartX = x;
-          this._dragStartRetakeStart = retakeStart;
-          this._dragStartRetakeLength = retakeLength;
-          return;
-        } else {
-          this._isDragging = true;
-          this._dragType = "playhead";
-          let mouseFrameX = x * (totalFrames / logicalWidth);
-          mouseFrameX = this.getSnappedPlayhead(mouseFrameX, logicalWidth);
-          const clampMax = this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || totalFrames) : totalFrames;
-          this.currentFrame = clamp(mouseFrameX, 0, clampMax);
-          // Pause only the RAF playback loop so we can seek the video directly during scrub.
-          this._retakeScrubWasPlaying = this.isPlaying;
-          if (this.isPlaying) {
-            this.isPlaying = false;
-            this._currentPlayId = null;
-          }
-          if (this.timeline.retakeVideo && this.timeline.retakeVideo.videoEl) {
-            this.timeline.retakeVideo.videoEl.currentTime = this.currentFrame / this.getFrameRate();
-          }
-          this.render();
-          return;
-        }
-      }
-      // Retake mode consumed the interaction — do NOT fall through to normal timeline
+    const isOverDivider = Math.abs(y - (RULER_HEIGHT + this.blockHeight)) <= 8;
+    if (isOverDivider) {
+      this._isDragging = true;
+      this._dragType = "divider";
+      this._startBlockHeight = this.blockHeight;
+      this._startAudioTrackHeight = this.audioTrackHeight;
+      this._startY = y;
       return;
     }
 
@@ -506,46 +385,6 @@ export const interaction = {
       return;
     }
 
-    if (this.retakeMode && !this._isDragging) {
-      const visibleBottom = Math.min(this.canvasHeight, this.viewport.scrollTop + this.viewport.clientHeight);
-      const isAtBottom = Math.abs(mouseY - visibleBottom) <= 15;
-      const viewRect = this.viewport.getBoundingClientRect();
-      const isAtRightEdge = Math.abs(e.clientX - viewRect.right) <= 20;
-
-      if (isAtBottom) {
-        this.canvas.style.cursor = "ns-resize";
-        return;
-      } else if (isAtRightEdge) {
-        this.canvas.style.cursor = "ew-resize";
-        return;
-      }
-
-      if (mouseY >= RULER_HEIGHT && mouseY <= RULER_HEIGHT + this.blockHeight) {
-        const logicalWidth = this.canvas.offsetWidth;
-        const totalFrames = this.getVisualDurationFrames();
-        const retakeStart = this.timeline.retakeStart ?? 0;
-        const baseVideoDur = this.timeline.retakeVideo?.videoDurationFrames ?? totalFrames;
-        const retakeLength = this.timeline.retakeLength ?? baseVideoDur;
-
-        const x1 = (retakeStart / totalFrames) * logicalWidth;
-        const x2 = ((retakeStart + retakeLength) / totalFrames) * logicalWidth;
-        const threshold = HANDLE_HIT_PX;
-
-        if (Math.abs(mouseX - x1) <= threshold || Math.abs(mouseX - x2) <= threshold) {
-          this.canvas.style.cursor = "ew-resize";
-        } else if (mouseX > x1 && mouseX < x2) {
-          this.canvas.style.cursor = "move";
-        } else {
-          this.canvas.style.cursor = "default";
-        }
-      } else if (mouseY < RULER_HEIGHT) {
-        this.canvas.style.cursor = "ew-resize";
-      } else {
-        this.canvas.style.cursor = "default";
-      }
-      return;
-    }
-
     if (!this._isDragging) {
       let newHoveredGapIdx = -1;
       const BTN_R = 12;
@@ -585,162 +424,6 @@ export const interaction = {
         this.canvas.style.cursor = "default";
       }
       return;
-    }
-
-    if (this.retakeMode && this._isDragging) {
-      const totalFrames = this.getVisualDurationFrames();
-      const logicalWidth = this.canvas.offsetWidth;
-      const deltaX = mouseX - this._dragStartX;
-      const deltaFrames = Math.round(deltaX * (totalFrames / logicalWidth));
-
-      const frameRate = this.getFrameRate();
-
-      // Handle playhead drag in retakeMode — the RAF loop is paused, so seek directly
-      if (this._dragType === "playhead") {
-        this.canvas.style.cursor = "ew-resize";
-        let mouseFrameX = mouseX * (totalFrames / logicalWidth);
-        mouseFrameX = this.getSnappedPlayhead(mouseFrameX, logicalWidth);
-        const clampMax = this.timeline.retakeVideo ? (this.timeline.retakeVideo.videoDurationFrames || totalFrames) : totalFrames;
-        this.currentFrame = clamp(mouseFrameX, 0, clampMax);
-        if (this.timeline.retakeVideo && this.timeline.retakeVideo.videoEl) {
-          this.timeline.retakeVideo.videoEl.currentTime = this.currentFrame / frameRate;
-        }
-        this.render();
-        return;
-      }
-
-      if (this._dragType === "retake_left") {
-        this.canvas.style.cursor = "ew-resize";
-        let newStart = this._dragStartRetakeStart + deltaFrames;
-        let newLength = this._dragStartRetakeLength - deltaFrames;
-
-        if (this.isSnapping) {
-          const thresholdFrames = (15 / logicalWidth) * totalFrames;
-          const baseVideoDur = this.timeline.retakeVideo?.videoDurationFrames ?? totalFrames;
-          const candidates = [0, this.currentFrame, baseVideoDur];
-          let bestStart = newStart;
-          let minDiff = thresholdFrames;
-          for (const c of candidates) {
-            const diff = Math.abs(newStart - c);
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestStart = c;
-            }
-          }
-          if (bestStart !== newStart) {
-            newStart = bestStart;
-            newLength = this._dragStartRetakeStart + this._dragStartRetakeLength - newStart;
-          }
-        }
-
-        if (newStart < 0) {
-          newStart = 0;
-          newLength = this._dragStartRetakeStart + this._dragStartRetakeLength;
-        }
-        if (newLength < MIN_SEGMENT_LENGTH) {
-          newLength = MIN_SEGMENT_LENGTH;
-          newStart = this._dragStartRetakeStart + this._dragStartRetakeLength - MIN_SEGMENT_LENGTH;
-        }
-
-        this.timeline.retakeStart = newStart;
-        this.timeline.retakeLength = newLength;
-
-        if (this.timeline.retakeVideo && this.timeline.retakeVideo.videoEl) {
-          this.timeline.retakeVideo.videoEl.currentTime = newStart / frameRate;
-        }
-
-        this.render();
-        this.updateUIFromSelection();
-        return;
-      }
-
-      if (this._dragType === "retake_right") {
-        this.canvas.style.cursor = "ew-resize";
-        let newLength = this._dragStartRetakeLength + deltaFrames;
-
-        const baseVideoDur = this.timeline.retakeVideo?.videoDurationFrames ?? totalFrames;
-        let newEnd = this._dragStartRetakeStart + newLength;
-
-        if (this.isSnapping) {
-          const thresholdFrames = (15 / logicalWidth) * totalFrames;
-          const candidates = [0, this.currentFrame, baseVideoDur];
-          let bestEnd = newEnd;
-          let minDiff = thresholdFrames;
-          for (const c of candidates) {
-            const diff = Math.abs(newEnd - c);
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestEnd = c;
-            }
-          }
-          if (bestEnd !== newEnd) {
-            newEnd = bestEnd;
-            newLength = newEnd - this._dragStartRetakeStart;
-          }
-        }
-
-        if (this._dragStartRetakeStart + newLength > baseVideoDur) {
-          newLength = baseVideoDur - this._dragStartRetakeStart;
-        }
-        if (newLength < MIN_SEGMENT_LENGTH) {
-          newLength = MIN_SEGMENT_LENGTH;
-        }
-
-        this.timeline.retakeLength = newLength;
-
-        if (this.timeline.retakeVideo && this.timeline.retakeVideo.videoEl) {
-          this.timeline.retakeVideo.videoEl.currentTime = (this.timeline.retakeStart + newLength) / frameRate;
-        }
-
-        this.render();
-        this.updateUIFromSelection();
-        return;
-      }
-
-      if (this._dragType === "retake_center") {
-        this.canvas.style.cursor = "grabbing";
-        let newStart = this._dragStartRetakeStart + deltaFrames;
-
-        if (this.isSnapping) {
-          const thresholdFrames = (15 / logicalWidth) * totalFrames;
-          const baseVideoDur = this.timeline.retakeVideo?.videoDurationFrames ?? totalFrames;
-          const candidates = [0, this.currentFrame, baseVideoDur];
-          let bestStart = newStart;
-          let minDiff = thresholdFrames;
-
-          for (const c of candidates) {
-            const diffLeft = Math.abs(newStart - c);
-            if (diffLeft < minDiff) {
-              minDiff = diffLeft;
-              bestStart = c;
-            }
-            const diffRight = Math.abs((newStart + this._dragStartRetakeLength) - c);
-            if (diffRight < minDiff) {
-              minDiff = diffRight;
-              bestStart = c - this._dragStartRetakeLength;
-            }
-          }
-          newStart = bestStart;
-        }
-
-        if (newStart < 0) {
-          newStart = 0;
-        }
-        const baseVideoDur = this.timeline.retakeVideo?.videoDurationFrames ?? totalFrames;
-        if (newStart + this._dragStartRetakeLength > baseVideoDur) {
-          newStart = baseVideoDur - this._dragStartRetakeLength;
-        }
-
-        this.timeline.retakeStart = newStart;
-
-        if (this.timeline.retakeVideo && this.timeline.retakeVideo.videoEl) {
-          this.timeline.retakeVideo.videoEl.currentTime = newStart / frameRate;
-        }
-
-        this.render();
-        this.updateUIFromSelection();
-        return;
-      }
     }
 
     if (this._dragType === "divider") {
@@ -1543,37 +1226,6 @@ export const interaction = {
   onMouseUp(e) {
     document.body.style.userSelect = "";
     document.body.style.cursor = "";
-
-    if (e.button === 2 && this.retakeMode) {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
-
-    if (this.retakeMode) {
-      if (this._isDragging) {
-        const wasPlayheadDrag = this._dragType === "playhead";
-        const wasPlaying = this._retakeScrubWasPlaying;
-        this._retakeScrubWasPlaying = false;
-        if (this.timeline.retakeVideo && this.timeline.retakeVideo._scrubTargetSec !== undefined) {
-          if (this.timeline.retakeVideo.videoEl) {
-            this.timeline.retakeVideo.videoEl.currentTime = this.timeline.retakeVideo._scrubTargetSec;
-          }
-          delete this.timeline.retakeVideo._scrubTargetSec;
-        }
-        this._isDragging = false;
-        this._dragType = null;
-        this.canvas.style.cursor = "default";
-        this.commitChanges();
-        // If playback was active before the scrub, resume from the new scrub position
-        if (wasPlayheadDrag && wasPlaying) {
-          this.playAudio();
-        } else {
-          this.render();
-        }
-      }
-      return;
-    }
 
     // Commit scrub target to actual video element so it's ready for playback
     const commitScrub = (segs) => {

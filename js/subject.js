@@ -166,6 +166,38 @@ const MSCSS = `
 .ref-ms-textarea:focus {
     border-color: #888;
 }
+/* --- Global Prompt area --- */
+.ref-ms-global-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+.ref-ms-global-prompt-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.ref-ms-global-prompt-input {
+    width: 100%;
+    background: transparent;
+    color: #e0e0e0;
+    border: none;
+    resize: none;
+    font-size: 12px;
+    line-height: 1.4;
+    box-sizing: border-box;
+    outline: none;
+}
+.ref-ms-global-prompt-input:focus {
+    border-color: #888;
+}
 /* --- Media box styles (attached to desc row, right-aligned image & audio) --- */
 .ref-ms-media-box {
     width: 56px;
@@ -314,12 +346,26 @@ app.registerExtension({
                 // Hide default widgets
                 const subjectDataWidget = node.widgets.find(w => w.name === "subject_data");
                 const subjectCountWidget = node.widgets.find(w => w.name === "subject_count");
+                const globalPromptWidget = node.widgets.find(w => w.name === "global_prompt");
                 if (subjectDataWidget) hideWidget(subjectDataWidget);
                 if (subjectCountWidget) hideWidget(subjectCountWidget);
+                if (globalPromptWidget) hideWidget(globalPromptWidget);
 
                 // --- Build Custom UI ---
                 const wrapper = document.createElement("div");
                 wrapper.className = "ref-ms-wrapper";
+
+                const globalPromptBox = document.createElement("div");
+                globalPromptBox.className = "ref-ms-global-prompt";
+                const globalPromptLabel = document.createElement("div");
+                globalPromptLabel.className = "ref-ms-global-prompt-label";
+                globalPromptLabel.textContent = "Global Prompt";
+                const globalPromptInput = document.createElement("textarea");
+                globalPromptInput.className = "ref-ms-global-prompt-input";
+                globalPromptInput.placeholder = "Conditions the entire video (anchors persistent characters, objects, scene context)...";
+                globalPromptInput.spellcheck = false;
+                globalPromptBox.appendChild(globalPromptLabel);
+                globalPromptBox.appendChild(globalPromptInput);
 
                 const subjectList = document.createElement("div");
                 subjectList.className = "ref-ms-subject-list";
@@ -332,6 +378,7 @@ app.registerExtension({
                 footer.className = "ref-ms-footer";
                 footer.textContent = "Up 9 subjects，3 audios per shot";
 
+                wrapper.appendChild(globalPromptBox);
                 wrapper.appendChild(subjectList);
                 wrapper.appendChild(addBtn);
                 wrapper.appendChild(footer);
@@ -345,7 +392,7 @@ app.registerExtension({
                 domWidget.computeSize = function (width) {
                     const nodeWidth = node.size?.[0] || 475;
                     const estCardHeight = 165; // per subject card (compact layout)
-                    const extras = 128; // add button + footer + gaps
+                    const extras = 206; // global prompt area + add button + footer + gaps
                     const total = subjects.length * estCardHeight + extras;
                     const height = Math.max(estCardHeight + extras, total);
                     return [Math.max(10, nodeWidth - 30), height];
@@ -396,6 +443,11 @@ app.registerExtension({
                             }
                         }
                     } catch (_) { }
+
+                    // Sync global prompt from widget
+                    if (globalPromptWidget && globalPromptInput) {
+                        globalPromptInput.value = globalPromptWidget.value || "";
+                    }
 
                     const countVal = subjectCountWidget ? parseInt(subjectCountWidget.value) || 1 : 1;
                     subjectCount = Math.max(1, countVal);
@@ -807,6 +859,28 @@ app.registerExtension({
                         app.graph.setDirtyCanvas(true, true);
                     }
                 }
+
+                // Global Prompt input → widget sync
+                let gpSaveTimeout = null;
+                globalPromptInput.addEventListener("input", () => {
+                    const val = globalPromptInput.value;
+                    if (globalPromptWidget) {
+                        globalPromptWidget.value = val;
+                        if (globalPromptWidget.callback) {
+                            globalPromptWidget.callback(val);
+                        }
+                    }
+                    if (app.graph) {
+                        app.graph.setDirtyCanvas(true, false);
+                    }
+                    if (gpSaveTimeout) clearTimeout(gpSaveTimeout);
+                    gpSaveTimeout = setTimeout(() => {
+                        if (app.graph && app.graph.change) app.graph.change();
+                        if (window.LiteGraph && window.LiteGraph.fireEvent) {
+                            window.LiteGraph.fireEvent("onSaveState");
+                        }
+                    }, 300);
+                });
 
                 addBtn.addEventListener("click", () => {
                     subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", imageFile: "", audioFile: "" });

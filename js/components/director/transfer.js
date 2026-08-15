@@ -45,6 +45,39 @@ function getSubjectsFromGraph() {
   return [];
 }
 
+function getSubjectVlmSettings() {
+  // 从 graph 中的 MiniMaxRefSubject 节点读取 vlm_mode / gguf_name / mmproj_path /
+  // provider / api_key widget 值（director 节点自身无这些 widget，配置在 subject 上）
+  try {
+    const nodes = app.graph?._nodes || [];
+    for (const n of nodes) {
+      if (n.type !== "MiniMaxRefSubject") continue;
+      const widgets = n.widgets || [];
+      const findW = (name) => widgets.find((x) => x.name === name);
+      const clean = (s) => (s === "None" ? "" : s || "");
+      const v = findW("vlm_mode")?.value;
+      const out = { vlm_mode: "api", gguf_name: "", mmproj_path: "", provider: "GLM", api_key: "" };
+      if (v && typeof v === "object") {
+        out.vlm_mode = v.vlm_mode || out.vlm_mode;
+        out.gguf_name = clean(v.gguf_name);
+        out.mmproj_path = clean(v.mmproj_path);
+        out.provider = v.provider || out.provider;
+        out.api_key = clean(v.api_key);
+      } else {
+        out.vlm_mode = v || out.vlm_mode;
+        out.gguf_name = clean(findW("gguf_name")?.value);
+        out.mmproj_path = clean(findW("mmproj_path")?.value);
+        out.provider = findW("provider")?.value || out.provider;
+        out.api_key = clean(findW("api_key")?.value);
+      }
+      return out;
+    }
+  } catch (e) {
+    console.warn("[Transfer] getSubjectVlmSettings failed:", e);
+  }
+  return null;
+}
+
 function subjectImgSrc(s) {
   if (s.imageB64) return s.imageB64;
   if (s.imageFile && api) {
@@ -148,17 +181,12 @@ const S = {
     padding: "6px", fontFamily: "monospace", fontSize: "12px", lineHeight: "1.5", outline: "none",
   },
   col: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
+  buttons: { display: "flex", gap: "6px", padding: "4px 0" },
   actions: {
     display: "flex", flexDirection: "column", justifyContent: "center",
     alignItems: "center", cursor: "col-resize", touchAction: "none",
     userSelect: "none", borderRadius: "4px", transition: "background 0.15s",
   },
-  btn: {
-    width: "36px", height: "36px", borderRadius: "6px", border: "1px solid #666",
-    background: "#3a3a3a", color: "#ddd", fontSize: "16px", cursor: "pointer",
-    userSelect: "none", lineHeight: "1",
-  },
-  btnDisabled: { opacity: 0.4, cursor: "not-allowed" },
   resources: {
     display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
     gap: "8px", padding: "4px 0", minHeight: "60px", borderTop: "1px solid #333",
@@ -181,13 +209,35 @@ const S = {
     borderRadius: "6px", maxHeight: "200px", overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.5)",
     padding: "4px", minWidth: "170px",
   },
-  menuItem: {
-    display: "block", width: "100%", textAlign: "left", background: "transparent",
-    border: "none", color: "#ddd", padding: "6px 10px", cursor: "pointer", borderRadius: "4px",
-    fontSize: "12px",
-  },
   audioIcon: { fontSize: "10px", color: "#ffb74d" },
 };
+
+// ---------- 全局参数 ----------
+
+const RESOLUTION_OPTIONS = ["1:1方形", "9:16竖屏", "16:9横屏", "3:2横屏", "2:3竖屏", "4:3横屏", "3:4竖屏", "21:9超宽"];
+
+// 全局参数 widget 名（已加入 HIDDEN_WIDGET_NAMES 在节点上隐藏，改由本面板 inline 编辑）
+// Start/End/Duration 按 display_mode 动态切换单位：
+//   seconds -> start_second/end_second/duration_seconds（Start(s)/End(s)/Duration(s)）
+//   frames  -> start_frame/end_frame/duration_frames（Start(f)/End(f)/Duration(f)）
+const TIME_PARAM_DEFS = {
+  seconds: [
+    { name: "start_second", label: "Start(s)", type: "number", fallback: 0, min: 0, max: 1000, step: 0.01 },
+    { name: "end_second", label: "End(s)", type: "number", fallback: 5, min: 0, max: 1000, step: 0.01 },
+    { name: "duration_seconds", label: "Duration(s)", type: "number", fallback: 5, min: 0.1, max: 1000, step: 0.01 },
+  ],
+  frames: [
+    { name: "start_frame", label: "Start(f)", type: "number", fallback: 0, min: 0, max: 100000, step: 1 },
+    { name: "end_frame", label: "End(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1 },
+    { name: "duration_frames", label: "Duration(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1 },
+  ],
+};
+
+const OTHER_GLOBAL_DEFS = [
+  { name: "frame_rate", label: "FPS", type: "number", fallback: 24, min: 1, max: 240, step: 1 },
+  { name: "outpu_resolution", label: "Ratio", type: "select", fallback: "16:9横屏", options: RESOLUTION_OPTIONS },
+  { name: "million_pixels", label: "MP", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1 },
+];
 
 // ---------- Preact 组件 ----------
 
@@ -296,6 +346,21 @@ export function TransferPanel({ director }) {
     director?.node?.widgets?.find(w => w.name === name)?.value ??
     director?.node?.properties?.[name];
 
+  // 统一构造 VLM 生成请求体：优先读取连接的 Subject 节点配置（vlm_mode 等），
+  // 兜底默认 api 模式（回落 API 管理器配置的 key）
+  const vlmBody = (extra) => {
+    const v = getSubjectVlmSettings() || {};
+    return {
+      vlm_mode: v.vlm_mode || "api",
+      seed: wVal("seed") ?? 42,
+      gguf_path: v.gguf_name || "",
+      mmproj_path: v.mmproj_path || "",
+      provider: v.provider || "GLM",
+      api_key: v.api_key || "",
+      ...extra,
+    };
+  };
+
   const firstFramePath = () => {
     const segs = director?.timeline?.segments || [];
     if (!segs.length) return "";
@@ -317,17 +382,11 @@ export function TransferPanel({ director }) {
     setBusy(true);
     setError("");
     try {
-      const body = {
+      const body = vlmBody({
         segment_id: seg.id,
         prompt: seg.prompt || "",
         image_path: seg.imageFile || seg.imageB64 || "",
-        vlm_mode: wVal("vlm_mode") || "llama-cpp",
-        seed: wVal("seed") ?? 42,
-        gguf_path: wVal("gguf_path") || "",
-        mmproj_path: wVal("mmproj_path") || "",
-        provider: wVal("provider") || "GLM",
-        api_key: wVal("api_key") || "",
-      };
+      });
       const res = await api.fetchApi("/minimax_ref/api/h3/generate_first_frame", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -383,16 +442,10 @@ export function TransferPanel({ director }) {
     setBusy(true);
     setError("");
     try {
-      const body = {
+      const body = vlmBody({
         image_path: seg.imageFile || seg.imageB64 || "",
         prompt: seg.prompt || "",
-        vlm_mode: wVal("vlm_mode") || "llama-cpp",
-        seed: wVal("seed") ?? 42,
-        gguf_path: wVal("gguf_path") || "",
-        mmproj_path: wVal("mmproj_path") || "",
-        provider: wVal("provider") || "GLM",
-        api_key: wVal("api_key") || "",
-      };
+      });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_image_analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -436,20 +489,18 @@ export function TransferPanel({ director }) {
   }
 
   async function runGenerate(source) {
-    if (!source || busy) return;
+    if (busy) return;
+    if (!source) {
+      setError("请输入左侧 Segment Prompt 后再生成");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const body = {
+      const body = vlmBody({
         prompt: source,
         image_path: firstFramePath(),
-        vlm_mode: wVal("vlm_mode") || "llama-cpp",
-        seed: wVal("seed") ?? 42,
-        gguf_path: wVal("gguf_path") || "",
-        mmproj_path: wVal("mmproj_path") || "",
-        provider: wVal("provider") || "GLM",
-        api_key: wVal("api_key") || "",
-      };
+      });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -567,6 +618,40 @@ export function TransferPanel({ director }) {
 
   return html`
     <div class="tr-panel" style=${S.panel}>
+    ${
+        curSeg && curSeg.type !== "audio"
+          ? html`<div style=${S.buttons}>
+              ${
+                curSeg.type === "text" || curSeg.type === "image"
+                  ? html`<button
+                      class="pr-btn"
+                      title="Generate the first frame from the selected segment"
+                      disabled=${busy}
+                      onClick=${() => generateFirstFrame(curSeg)}
+                    >Generate First Frame</button>`
+                  : null
+              }
+              ${
+                curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video"
+                  ? html`<button
+                      class=${motionCtxOn ? "pr-btn toggle-on" : "pr-btn"}
+                      title="Toggle Motion Context for the selected segment"
+                      onClick=${toggleMotionContext}
+                    >Motion Context</button>`
+                  : null
+              }
+              ${
+                curSeg.type !== "audio"
+                  ? html`<button
+                      class=${autoEndOn ? "pr-btn toggle-on" : "pr-btn"}
+                      title="Toggle Auto End Frame for the selected segment"
+                      onClick=${toggleAutoEndFrame}
+                    >Auto End Frame</button>`
+                  : null
+              }
+            </div>`
+          : null
+      }
       <div ref=${rowRef} style=${S.row}>
         <div class="pr-prompt-wrapper" style=${leftWidth ? Object.assign({}, S.col, { flex: "0 0 auto", width: leftWidth + "px" }) : S.col}>
           <div class="pr-prompt-label">Segment Prompt</div>
@@ -587,51 +672,18 @@ export function TransferPanel({ director }) {
           onPointerLeave=${() => setMidHover(false)}
         >
           <button
-            style=${Object.assign({}, S.btn, busy ? S.btnDisabled : null)}
+            class="pr-btn"
             title="以左侧为源生成 H3 Prompt，结果展示在右侧"
             disabled=${busy}
             onClick=${() => runGenerate(leftText)}
           >→</button>
         </div>
         <div class="pr-prompt-wrapper" style=${S.col}>
-          <div class="pr-prompt-label" style=${{ position: "static", margin: "6px 0 0 8px" }}>Minimax H3 Prompt</div>
-          <div style=${{ display: "flex", gap: "6px", padding: "2px 8px", flexWrap: "wrap", alignItems: "center" }}>
-            ${
-              curSeg && (curSeg.type === "text" || curSeg.type === "image")
-                ? html`<button
-                    class="pr-btn"
-                    style=${{ padding: "4px 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", height: "28px", boxSizing: "border-box", fontSize: "11px", lineHeight: "1", whiteSpace: "nowrap" }}
-                    title="Generate the first frame from the selected segment"
-                    disabled=${busy}
-                    onClick=${() => generateFirstFrame(curSeg)}
-                  >Generate First Frame</button>`
-                : null
-            }
-            ${
-              curSeg && (curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video")
-                ? html`<button
-                    class=${"pr-btn" + (motionCtxOn ? " toggle-on" : "")}
-                    style=${{ padding: "4px 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", height: "28px", boxSizing: "border-box", fontSize: "11px", lineHeight: "1", whiteSpace: "nowrap" }}
-                    title="Toggle Motion Context for the selected segment"
-                    onClick=${toggleMotionContext}
-                  >Motion Context</button>`
-                : null
-            }
-            ${
-              curSeg && curSeg.type !== "audio"
-                ? html`<button
-                    class=${"pr-btn" + (autoEndOn ? " toggle-on" : "")}
-                    style=${{ padding: "4px 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", height: "28px", boxSizing: "border-box", fontSize: "11px", lineHeight: "1", whiteSpace: "nowrap" }}
-                    title="Toggle Auto End Frame for the selected segment"
-                    onClick=${toggleAutoEndFrame}
-                  >Auto End Frame</button>`
-                : null
-            }
-          </div>
+          <div class="pr-prompt-label" style=${{ position: "static", flexShrink: 0, margin: "6px 0 2px 8px" }}>Minimax H3 Prompt</div>
           <textarea
             ref=${rightRef}
             class="pr-prompt-area"
-            style=${{ position: "static", flex: "1", minHeight: "0", height: "auto" }}
+            style=${{ position: "static", flex: "1", minHeight: "0", height: "auto", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" }}
             value=${rightText}
             placeholder="生成结果（输入 @ 或 # 引用主体）"
             spellcheck=${false}
@@ -671,7 +723,7 @@ export function TransferPanel({ director }) {
                   ? html`<div style=${{ padding: "6px 10px", color: "#888", fontSize: "12px" }}>没有可用主体（请先在主体节点中添加）</div>`
                   : subjects.map(s => html`
                       <button
-                        style=${S.menuItem}
+                        class="pr-btn"
                         key=${s.name}
                         onMouseDown=${(e) => e.preventDefault()}
                         onClick=${() => pickSubject(s)}
@@ -682,6 +734,79 @@ export function TransferPanel({ director }) {
           `
           : null
       }
+    </div>
+  `;
+}
+
+// ---------- 全局参数分组（渲染在 .pr-wrapper 中 .pr-toolbar 之上） ----------
+
+export function GlobalParamsPanel({ director }) {
+  // 根据 display_mode 决定 Start/End/Duration 使用秒还是帧单位
+  const getMode = () => (director?.displayModeWidget?.value === "frames" ? "frames" : "seconds");
+  // 从 director 节点 widget 读取全局参数当前值（与节点真实状态保持一致）
+  const readGlobal = () => {
+    const val = (name, fb) =>
+      director?.node?.widgets?.find(w => w.name === name)?.value ?? fb;
+    const gp = {};
+    for (const def of TIME_PARAM_DEFS[getMode()] || TIME_PARAM_DEFS.seconds) {
+      gp[def.name] = val(def.name, def.fallback);
+    }
+    for (const def of OTHER_GLOBAL_DEFS) {
+      gp[def.name] = val(def.name, def.fallback);
+    }
+    return gp;
+  };
+  const [gp, setGp] = useState(readGlobal);
+  const mode = getMode();
+  const defs = [...(TIME_PARAM_DEFS[mode] || TIME_PARAM_DEFS.seconds), ...OTHER_GLOBAL_DEFS];
+
+  // 监听 display_mode 变化刷新面板（由 director.js 的 displayModeWidget callback 触发）
+  useEffect(() => {
+    director._onDisplayModeChange = () => setGp(readGlobal());
+    return () => {
+      if (director._onDisplayModeChange) director._onDisplayModeChange = null;
+    };
+  }, [director]);
+
+  // 写入全局参数 widget 值并触发其 callback（director 的帧/秒联动逻辑），随后刷新本地 state
+  const setGlobal = (name, value) => {
+    const wd = director?.node?.widgets?.find(w => w.name === name);
+    if (wd) {
+      wd.value = value;
+      if (typeof wd.callback === "function") wd.callback(value);
+    }
+    setGp(readGlobal());
+  };
+
+  return html`
+    <div class="tr-gp">
+      <div class="tr-gp-head">全局参数</div>
+      <div class="tr-gp-grid">
+        ${
+          defs.map(def => html`
+            <label class="tr-gp-item" key=${def.name}>
+              <span class="tr-gp-label">${def.label}</span>
+              ${
+                def.type === "select"
+                  ? html`<select
+                      class="tr-gp-select"
+                      value=${gp[def.name]}
+                      onChange=${(e) => setGlobal(def.name, e.target.value)}
+                    >${def.options.map(o => html`<option value=${o}>${o}</option>`)}</select>`
+                  : html`<input
+                      class="tr-gp-input"
+                      type="number"
+                      min=${def.min}
+                      max=${def.max}
+                      step=${def.step}
+                      value=${gp[def.name]}
+                      onInput=${(e) => setGlobal(def.name, parseFloat(e.target.value) || def.fallback)}
+                    />`
+              }
+            </label>
+          `)
+        }
+      </div>
     </div>
   `;
 }

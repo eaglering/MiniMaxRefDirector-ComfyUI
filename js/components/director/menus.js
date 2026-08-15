@@ -1,6 +1,6 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
-// 方法: onContextMenu, _deleteRetakeVideo, _showRetakeContextMenu, _checkClipboardForImage,
-//       _checkClipboardForText, showContextMenu, showGapMenu, showGapContextMenu, dismissMenu
+// 方法: onContextMenu, _checkClipboardForImage, _checkClipboardForText, showContextMenu,
+//       showGapMenu, showGapContextMenu, dismissMenu
 // 重构: 统一浮动菜单壳 openMenu/dismissMenu，合并原 showGapContextMenu 与 showGapMenu，
 //       showContextMenu 改用配置数组式构建，公共逻辑提取为 _menuBtn/_menuDivider/_copySegment/_applyUploadedImage。
 import { ICONS, RULER_HEIGHT, genId, viewUrl, uploadImage } from "./shared.js";
@@ -11,15 +11,6 @@ export const menus = {
   onContextMenu(e) {
     e.preventDefault();
     e.stopPropagation();
-
-    // In retake mode: suppress the normal timeline context menu entirely.
-    // If a retake video is loaded, show a minimal retake-specific menu instead.
-    if (this.retakeMode) {
-      if (this.timeline.retakeVideo) {
-        this._showRetakeContextMenu(e.clientX, e.clientY);
-      }
-      return;
-    }
 
     const { x: mouseX, y: mouseY } = this.getMousePos(e);
 
@@ -61,31 +52,6 @@ export const menus = {
 
       this.showGapMenu(e.clientX, e.clientY, gap);
     }
-  },
-
-  _deleteRetakeVideo() {
-    if (!this.timeline.retakeVideo) return;
-    // Clean up the video element
-    const vid = this.timeline.retakeVideo;
-    if (vid.videoEl) {
-      vid.videoEl.pause();
-      vid.videoEl.src = "";
-      vid.videoEl.load();
-    }
-    if (vid._blobUrl) {
-      URL.revokeObjectURL(vid._blobUrl);
-    }
-    this.timeline.retakeVideo = null;
-    this.timeline.retakeStart = 0;
-    this.timeline.retakeLength = this.getDurationFrames();
-    this.commitChanges();
-    this.render();
-  },
-
-  _showRetakeContextMenu(clientX, clientY) {
-    this.openMenu(clientX, clientY, menu => {
-      menu.appendChild(this._menuBtn(`${ICONS.trash} Delete`, { color: "#ffaaaa", onClick: () => this._deleteRetakeVideo() }));
-    });
   },
 
   async _checkClipboardForImage(btn) {
@@ -376,9 +342,8 @@ export const menus = {
 
     // Group 5: Convert to another node type (main track: text / image / video)
     if (trackType !== "audio" && (seg.type === "text" || seg.type === "image" || seg.type === "video")) {
-      const convertTargets = seg.type === "text" ? ["image", "video"]
-        : seg.type === "image" ? ["text", "video"]
-        : ["text", "image"];
+      const convertTargets = seg.type === "text" ? ["image"]
+        : ["text"];
       for (const target of convertTargets) {
         const label = "Convert to " + (target === "text" ? "Text" : target === "image" ? "Image" : "Video");
         items.push(this._menuBtn(label, {
@@ -436,42 +401,49 @@ export const menus = {
   // 转换主轨道 segment 节点类型（text / image / video），视频节点转文字/图片时同步移除关联音频兄弟
   _convertSegmentType(seg, trackType, newType) {
     if (!seg || seg.type === newType) return;
-    const wasVideo = seg.type === "video";
 
     // 清理旧类型专属字段
-    if (wasVideo) {
+    if (seg.type === "video") {
       if (seg.videoEl) { try { seg.videoEl.pause(); } catch (_) {} }
       delete seg.videoFile;
       delete seg.videoEl;
       delete seg.videoDurationFrames;
       delete seg.thumbnails;
-      // if (newType == "image") {
-      //   const fi = document.createElement("input");
-      //     fi.type = "file";
-      //     fi.accept = "image/*";
-      //     fi.addEventListener("change", (ev) => {
-      //       if (ev.target.files?.[0]) this.handleImageUpload([ev.target.files[0]], gap.frameStart, gapLength);
-      //     });
-      //     fi.click();
-      // }
-    }
-    if (seg.type === "image") {
+      delete seg.imageFile;
+      delete seg.imageB64;
+      delete seg.fileName;
+      delete seg.fileSize;
+      delete seg.trimStart;
+      delete seg.imgObj;
+      // 视频节点转文字/图片时，删除关联的音频兄弟节点
+      if (seg.id && seg.id.endsWith("_v")) {
+        const sibId = seg.id.slice(0, -2) + "_a";
+        if (this.timeline.audioSegments) {
+          this.timeline.audioSegments = this.timeline.audioSegments.filter(s => s.id !== sibId);
+        }
+      }
+      seg.id = seg.id.slice(0, -2)
+      seg.type = newType;
+      seg.motionContext = true;
+      seg.autoEndFrame = true;
+    } else if (seg.type === "image") {
       delete seg.imageFile;
       delete seg.imageB64;
       delete seg.imgObj;
-    }
-    if (seg.type === "text") {
+      seg.type = newType;
+      seg.motionContext = true;
+      seg.autoEndFrame = true;
+    } else if (seg.type === "text") {
       delete seg.imageFile; delete seg.imageB64; delete seg.imgObj;
       delete seg.videoFile; delete seg.videoEl; delete seg.thumbnails;
-    }
-
-    seg.type = newType;
-
-    // 视频节点转文字/图片时，删除关联的音频兄弟节点
-    if (wasVideo && newType !== "video" && seg.id && seg.id.endsWith("_v")) {
-      const sibId = seg.id.slice(0, -2) + "_a";
-      if (this.timeline.audioSegments) {
-        this.timeline.audioSegments = this.timeline.audioSegments.filter(s => s.id !== sibId);
+      if (newType === "image") {
+          const fi = document.createElement("input");
+          fi.type = "file";
+          fi.accept = "image/*";
+          fi.addEventListener("change", (ev) => {
+            if (ev.target.files?.[0]) this.handleImageUpload([ev.target.files[0]], null, null, seg);
+          });
+          fi.click();
       }
     }
 
