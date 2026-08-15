@@ -17,7 +17,7 @@ from typing import Any, Optional
 from comfy.utils import ProgressBar
 from comfy_api.latest import Input, InputImpl, Types, io, UI
 
-from lib.audio import merge_two_audio, save_audio_to_temp_wav
+from .audio import merge_two_audio, save_audio_to_temp_wav
 
 logger = logging.getLogger(__name__)
 

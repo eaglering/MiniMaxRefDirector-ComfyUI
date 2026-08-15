@@ -47,10 +47,10 @@ const MSCSS = `
     background: #1e1e1e;
     border: 1px solid #333;
     border-radius: 6px;
-    padding: 10px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     transition: border-color 0.2s;
 }
 .ref-ms-subject-card:hover {
@@ -100,6 +100,14 @@ const MSCSS = `
     min-width: 60px;
     flex-shrink: 0;
 }
+.ref-ms-label-sm {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    min-width: 38px;
+    flex-shrink: 0;
+}
 .ref-ms-input {
     flex: 1;
     background: #2a2a2a;
@@ -116,34 +124,51 @@ const MSCSS = `
 .ref-ms-input:focus {
     border-color: #888;
 }
-.ref-ms-textarea {
+.ref-ms-select {
     flex: 1;
+    min-width: 0;
     background: #2a2a2a;
     border: 1px solid #444;
     border-radius: 4px;
     color: #e0e0e0;
-    padding: 4px 8px;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+.ref-ms-select:focus {
+    border-color: #888;
+}
+.ref-ms-select option {
+    background: #1e1e1e;
+    color: #e0e0e0;
+}
+.ref-ms-textarea {
+    flex: 1;
+    min-width: 0;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    padding: 3px 8px;
     font-size: 11px;
     font-family: inherit;
     outline: none;
     resize: vertical;
-    min-height: 40px;
+    min-height: 30px;
     box-sizing: border-box;
     transition: border-color 0.2s;
 }
 .ref-ms-textarea:focus {
     border-color: #888;
 }
-/* --- Media box styles (right-aligned image & audio) --- */
-.ref-ms-media-row {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: 4px;
-}
+/* --- Media box styles (attached to desc row, right-aligned image & audio) --- */
 .ref-ms-media-box {
-    width: 72px;
-    height: 72px;
+    width: 56px;
+    height: 56px;
     border: 1px dashed #444;
     border-radius: 6px;
     display: flex;
@@ -318,7 +343,7 @@ app.registerExtension({
                 
                 domWidget.computeSize = function (width) {
                     const nodeWidth = node.size?.[0] || 475;
-                    const estCardHeight = 200; // per subject card
+                    const estCardHeight = 165; // per subject card (compact layout)
                     const extras = 128; // add button + footer + gaps
                     const total = subjects.length * estCardHeight + extras;
                     const height = Math.max(estCardHeight + extras, total);
@@ -345,6 +370,8 @@ app.registerExtension({
                                     subjects.push({
                                         name: s.name || "",
                                         description: s.description || "",
+                                        type: s.type || "Subject",
+                                        relationship: s.relationship || "fully_preserved",
                                         imageFile: s.imageFile || "",
                                         imageB64: s.imageB64 || api.apiURL(`/view?filename=${encodeURIComponent(s.imageFile)}&type=input&subfolder=${encodeURIComponent("minimaxrefdirector")}`),
                                         audioFile: s.audioFile || "",
@@ -359,7 +386,7 @@ app.registerExtension({
 
                     if (subjects.length === 0) {
                         while (subjects.length < subjectCount) {
-                            subjects.push({ name: "", description: "", imageFile: "", audioFile: "" });
+                            subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", imageFile: "", audioFile: "" });
                         }
                     } else {
                         subjectCount = subjects.length;
@@ -485,6 +512,8 @@ app.registerExtension({
                         subjects: subjects.map(s => ({
                             name: s.name,
                             description: s.description,
+                            type: s.type || "Subject",
+                            relationship: s.relationship || "fully_preserved",
                             imageFile: s.imageFile,
                             audioFile: s.audioFile,
                         }))
@@ -559,6 +588,53 @@ app.registerExtension({
                         nameRow.appendChild(nameInput);
                         card.appendChild(nameRow);
 
+                        // Type & Relationship (compact meta row)
+                        const metaRow = document.createElement("div");
+                        metaRow.className = "ref-ms-row";
+                        const typeLabel = document.createElement("span");
+                        typeLabel.className = "ref-ms-label-sm";
+                        typeLabel.textContent = "Type";
+                        const typeSelect = document.createElement("select");
+                        typeSelect.className = "ref-ms-select";
+                        ["Subject", "Picture", "Video", "Audio"].forEach(t => {
+                            const opt = document.createElement("option");
+                            opt.value = t;
+                            opt.textContent = t;
+                            opt.selected = (subj.type || "Subject") === t;
+                            typeSelect.appendChild(opt);
+                        });
+                        typeSelect.addEventListener("change", () => {
+                            subjects[idx].type = typeSelect.value;
+                            saveState();
+                        });
+                        metaRow.appendChild(typeLabel);
+                        metaRow.appendChild(typeSelect);
+
+                        const relLabel = document.createElement("span");
+                        relLabel.className = "ref-ms-label-sm";
+                        relLabel.textContent = "Rel";
+                        const relSelect = document.createElement("select");
+                        relSelect.className = "ref-ms-select";
+                        [
+                            ["fully_preserved", "fully preserved"],
+                            ["partially_preserved", "partially preserved"],
+                            ["attribute_transfer", "attribute transfer"],
+                            ["weak_reference", "weak reference"],
+                        ].forEach(([val, label]) => {
+                            const opt = document.createElement("option");
+                            opt.value = val;
+                            opt.textContent = label;
+                            opt.selected = (subj.relationship || "fully_preserved") === val;
+                            relSelect.appendChild(opt);
+                        });
+                        relSelect.addEventListener("change", () => {
+                            subjects[idx].relationship = relSelect.value;
+                            saveState();
+                        });
+                        metaRow.appendChild(relLabel);
+                        metaRow.appendChild(relSelect);
+                        card.appendChild(metaRow);
+
                         // Description
                         const descRow = document.createElement("div");
                         descRow.className = "ref-ms-row";
@@ -569,7 +645,7 @@ app.registerExtension({
                         descInput.className = "ref-ms-textarea";
                         descInput.placeholder = "Subject description...";
                         descInput.value = subj.description || "";
-                        descInput.rows = 2;
+                        descInput.rows = 1;
                         descInput.addEventListener("input", () => {
                             subjects[idx].description = descInput.value;
                             saveState();
@@ -578,9 +654,8 @@ app.registerExtension({
                         descRow.appendChild(descInput);
                         card.appendChild(descRow);
 
-                        // --- Media boxes (right-aligned image & audio) ---
-                        const mediaRow = document.createElement("div");
-                        mediaRow.className = "ref-ms-media-row";
+                        // --- Media boxes (attached to the desc row for a compact layout) ---
+                        const mediaRow = descRow;
 
                         // ----- Image box -----
                         const imgBox = document.createElement("div");
@@ -716,7 +791,7 @@ app.registerExtension({
                 }
 
                 addBtn.addEventListener("click", () => {
-                    subjects.push({ name: "", description: "", imageFile: "", audioFile: "" });
+                    subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", imageFile: "", audioFile: "" });
                     subjectCount = subjects.length;
                     renderSubjects();
                     saveState();
@@ -745,7 +820,7 @@ app.registerExtension({
                             // or create a new subject
                             const last = subjects[subjects.length - 1];
                             if (!last || last.imageFile || last.name) {
-                                subjects.push({ name: "", description: "", imageFile: filename, imageB64: imgUrl, audioFile: "" });
+                                subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", imageFile: filename, imageB64: imgUrl, audioFile: "" });
                                 subjectCount = subjects.length;
                                 renderSubjects();
                                 saveState();

@@ -9,7 +9,7 @@ import { app } from "../../scripts/app.js";
 // available for this node". Here we repair such values to a valid default right
 // after the node is configured, so the workflow still loads and runs.
 
-const NODE_CLASSES = new Set(["MiniMaxRefDirectorGuide", "MiniMaxRefPromptEnhance"]);
+const NODE_CLASSES = new Set(["MiniMaxRefDirector"]);
 
 function getComboValues(w) {
   // Newer ComfyUI: options.values array; legacy: options is the array itself.
@@ -36,7 +36,7 @@ function fixInvalidComboValues(node) {
 app.registerExtension({
   name: "Comfy.MiniMaxRefComboFix",
   async nodeCreated(node) {
-    if (!NODE_CLASSES.has(node.comfyClass)) return;
+    if (node.comfyClass !== "MiniMaxRefDirector") return;
 
     // Repair synchronously inside onConfigure so it runs before ComfyUI's
     // graph-level invalid-input check after a workflow load.

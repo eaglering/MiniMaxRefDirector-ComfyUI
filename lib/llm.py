@@ -1,10 +1,15 @@
 
-import os
-import folder_paths
+import json
 import logging
+import os
+import re
+import urllib.error
+import urllib.request
 
+import folder_paths
 import torch
 
+from ..api_config import api_config_manager, parse_provider_value
 from .image import has_image, tensor_to_base64
 
 log = logging.getLogger(__name__)
@@ -217,19 +222,19 @@ def get_llama_model(gguf_path: str, mmproj_path: str = ""):
 
 
 def generate_prompt_with_llama(
-    image,
-    gguf_path: str,
-    mmproj_path: str = "",
+    image = None,
     prompt: str = "",
+    gguf_path: str = "",
+    mmproj_path: str = "",
     seed: int = 42,
 ) -> dict:
     """Generate the placeholder-tagged prompt JSON with a local GGUF VLM via llama-cpp-python.
 
     Args:
         image: ComfyUI image tensor [B, H, W, C], optional (None = text-only mode)
+        prompt: user prompt
         gguf_path: full path to the GGUF text model
         mmproj_path: full path to the vision projector GGUF (required for image analysis)
-        prompt: user prompt
         seed: sampling seed for llama.cpp
 
     Returns:
@@ -275,3 +280,105 @@ def _clamp_seed_32(seed: int | None) -> int | None:
     if seed is None:
         return None
     return int(seed) % (2**31)
+
+
+# Env-var fallback per service id (used only when the key is missing everywhere else)
+_SERVICE_ENV_KEYS = {
+    "glm": "ZHIPU_API_KEY",
+    "kimi": "MOONSHOT_API_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
+    "doubao": "ARK_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "xflow": "XFLOW_API_KEY",
+}
+
+
+def _is_glm_vision_model(model: str) -> bool:
+    """True for Zhipu GLM vision models, whose max_tokens is capped at 1024."""
+    return bool(re.search(r"glm-4(?:\.\d+)?v", (model or "").strip().lower()))
+
+
+def generate_prompt_with_api(
+    image = None,
+    prompt: str = "",
+    provider: str = "GLM",
+    api_key: str = "",
+    seed: int = 42,
+) -> str:
+    """Generate text with a cloud OpenAI-compatible VLM/LLM endpoint.
+
+    Args:
+        image: ComfyUI image tensor [B, H, W, C], optional (None = text-only mode)
+        prompt: full user prompt (with the H3 skills template baked in)
+        provider: service label or service id (e.g. "GLM", "glm", "openrouter")
+        api_key: optional key override; falls back to the API 管理器 config,
+            then to the matching env var (e.g. ZHIPU_API_KEY)
+        seed: sampling seed, clamped into the signed 32-bit int range
+
+    Returns:
+        str: the raw generated text (parsing is left to the caller)
+    """
+    service_id = parse_provider_value(provider) if provider else ""
+    cfg = api_config_manager.get_config_for("vlm", service_id=service_id or None) or {}
+    service_name = cfg.get("service_name", "vlm")
+
+    resolved_key = (api_key or "").strip() or cfg.get("api_key", "").strip()
+    if not resolved_key:
+        env_key = _SERVICE_ENV_KEYS.get(cfg.get("service_id", ""))
+        if env_key:
+            resolved_key = os.environ.get(env_key, "").strip()
+    if not resolved_key:
+        raise ValueError(
+            f"[llm] No API key for '{service_name}'. Provide api_key in the node, "
+            "configure it in ComfyUI Settings -> API 管理器, or set the "
+            "corresponding env var (e.g. ZHIPU_API_KEY)."
+        )
+
+    base_url = cfg.get("base_url", "")
+    model = cfg.get("model", "")
+    if not base_url or not model:
+        raise ValueError(
+            f"[llm] Incomplete API config for '{service_name}': "
+            "missing base_url/model. Open ComfyUI Settings -> API 管理器 to configure it."
+        )
+
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    if has_image(image):
+        content.append({"type": "image_url", "image_url": {"url": tensor_to_base64(image)}})
+
+    # GLM vision models cap max_tokens at 1024
+    max_tokens = 1024 if _is_glm_vision_model(model) else 4096
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": content}],
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+    }
+    if seed is not None:
+        payload["seed"] = _clamp_seed_32(seed)
+
+    log.info("[llm] Calling %s API (%s) ...", service_name, model)
+    req = urllib.request.Request(
+        base_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {resolved_key}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"[llm] {service_name} API HTTP {e.code}: {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"[llm] {service_name} API request failed: {e.reason}") from e
+
+    data = json.loads(body)
+    try:
+        generated_text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(f"[llm] Unexpected {service_name} API response: {body[:500]}") from e
+
+    log.info("[llm] %s API generated (first 200 chars): %s",
+             service_name, str(generated_text)[:200])
+    return generated_text

@@ -3,7 +3,7 @@ import os
 import logging
 from comfy_api.latest import io
 
-from .lib import resolve_input_path
+from .lib.path import resolve_input_path
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")

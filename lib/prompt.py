@@ -3,9 +3,9 @@ import json
 import os
 import re
 
-from lib.image import load_image_tensor
-from lib.llm import generate_prompt_with_llama
-from lib.utils import parse_generated_json
+from .image import load_image_tensor
+from .llm import generate_prompt_with_api, generate_prompt_with_llama
+from .utils import parse_generated_json
 
 # 图像分析
 def image_analysis(gguf_path: str, mmproj_path: str, prompt: str, 
@@ -76,9 +76,26 @@ Output ONLY the JSON object. Do not add any text before or after it."""
 
 
 # 生成h3提示词
-def generate_h3_prompt(gguf_path: str, mmproj_path: str, prompt: str, 
-                       image_path:str = "", seed: int = 42):
-    """Generate an H3 full-reference prompt JSON via a local GGUF VLM.
+_H3_DEFAULT_OPTIONS: dict = {
+    "gguf_path": "",
+    "mmproj_path": "",
+    "provider": "GLM",        # vlm_mode="api" 时的服务商
+    "api_key": "",            # vlm_mode="api" 时的 key 覆盖
+}
+
+
+def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None) -> dict:
+    """Generate an H3 full-reference prompt JSON.
+
+    options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
+    避免调用参数不断膨胀。支持的键：
+      - gguf_path / mmproj_path: llama-cpp 本地 GGUF 模型文件
+      - image_path: 首帧参考图路径（提供时输出增加 shot1_description）
+      - seed: 采样种子
+      - vlm_mode: "llama-cpp"（默认，本地 GGUF）/ "api"（云端 OpenAI 兼容接口）
+      - provider: vlm_mode="api" 时的服务商（走 API 管理器配置）
+      - api_key: vlm_mode="api" 时的 key 覆盖（可留空，回落配置/环境变量）
+      - clip_type: CLIP 模型类型（"minimax" / "qwen3vl" / "gemma"）
 
     The output JSON includes detailed_description / overall_soundscape /
     non_diegetic_music (and shot1_description when a first-frame image is
@@ -86,12 +103,19 @@ def generate_h3_prompt(gguf_path: str, mmproj_path: str, prompt: str,
     <#名字:[Language]对话> directly by the model, with a language tag such as
     [Chinese] or [English] before the dialogue text. No mapping is returned.
     """
-    image = load_image_tensor(image_path) if image_path else None
+    opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
+    image = load_image_tensor(opts["image_path"]) if opts.get("image_path") else None
     skills = _load_h3_skills_template()
     full_prompt = _build_h3_prompt(skills, prompt, image is not None)
-    generate_text = generate_prompt_with_llama(
-        image=image, gguf_path=gguf_path, mmproj_path=mmproj_path,
-        prompt=full_prompt, seed=seed,
+    if vlm_mode == "api":
+        generate_text = generate_prompt_with_api(
+        image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
+        api_key=opts.get("api_key", ""), seed=opts.get("seed", 42),
+    )
+    elif vlm_mode == "llama-cpp":
+        generate_text = generate_prompt_with_llama(
+            image=image,prompt=full_prompt, gguf_path=opts["gguf_path"], 
+            mmproj_path=opts["mmproj_path"], seed=opts.get("seed", 42),
     )
     return parse_generated_json(generate_text)
 
