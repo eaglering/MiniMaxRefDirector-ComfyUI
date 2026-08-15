@@ -90,12 +90,12 @@ async def generate_prompt_json(request: web.Request) -> web.Response:
         }
         if not prompt:
             return web.json_response({"success": False, "error": "prompt is required"}, status=400)
-        if options["vlm_mode"] == "llama-cpp":
+        if vlm_mode == "llama-cpp":
             if not options["gguf_path"]:
                 return web.json_response({"success": False, "error": "gguf_path is required"}, status=400)
             if not options["mmproj_path"]:
                 return web.json_response({"success": False, "error": "mmproj_path is required"}, status=400)
-        elif options["vlm_mode"] == "api":
+        elif vlm_mode == "api":
             if not options["provider"]:
                 return web.json_response({"success": False, "error": "provider is required"}, status=400)
             if not options["api_key"]:
