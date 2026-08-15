@@ -79,7 +79,7 @@ class MiniMaxRefDirector(io.ComfyNode):
         return io.Schema(
             node_id="MiniMaxRefDirector",
             display_name="MiniMax Reference Director",
-            category="minimax",
+            category="minimaxrefdirector",
             description=(
                 "Timeline director that combines prompt scheduling, subject data, "
                 "resolution configuration, and prompt templates into a unified guide_data output."

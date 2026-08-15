@@ -11,14 +11,15 @@ SubjectData = io.Custom("SUBJECT_DATA")
 
 class MiniMaxRefSubject(io.ComfyNode):
     """Multi-subject input node supporting any number of subjects with name, description,
-    reference image, and audio file for multi-subject video generation workflows."""
+    reference image, audio file, type (Subject/Picture/Video/Audio) and retention
+    relationship for multi-subject video generation workflows."""
 
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="MiniMaxRefSubject",
             display_name="MiniMax Reference Subject",
-            category="minimax",
+            category="minimaxrefdirector",
             description=(
                 "Define any number of subjects, each with a name, description, reference image, "
                 "and audio file. Connect to LTX Director for @-mention subject injection "
@@ -59,6 +60,9 @@ class MiniMaxRefSubject(io.ComfyNode):
                 "description": str(subj.get("description", ""))[:1024],
                 "imageFile": str(subj.get("imageFile", "")),
                 "audioFile": str(subj.get("audioFile", "")),
+                "type": str(subj.get("type", "") or "Subject")[:32],
+                "relationship": str(subj.get("relationship", "") or "fully_preserved")[:64],
+                "audio_relationship": str(subj.get("audio_relationship", "") or "reference")[:64],
             }
             output["subjects"].append(entry)
 

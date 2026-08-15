@@ -72,10 +72,10 @@ def resolve_gguf_inputs(gguf_name: str = "", mmproj_name: str = "") -> tuple[str
 
     if not gguf_name and models:
         gguf_name = models[0]
-        log.info(f"[MiniMaxRefPromptEnhance] gguf_name empty, auto-selected {gguf_name!r} from models/llm")
+        log.info(f"[llm] gguf_name empty, auto-selected {gguf_name!r} from models/llm")
     if (not mmproj_name or mmproj_name == "None") and mmprojs:
         mmproj_name = mmprojs[0]
-        log.info(f"[MiniMaxRefPromptEnhance] mmproj_name empty, auto-selected {mmproj_name!r}")
+        log.info(f"[llm] mmproj_name empty, auto-selected {mmproj_name!r}")
     return gguf_name, mmproj_name
 
 
@@ -111,7 +111,7 @@ def ensure_llama_cpp() -> None:
     py_tag = _py_tag()
     cuda_tag = _cuda_tag() or "CPU/unknown"
     log.error(
-        "[MiniMaxRefPromptEnhance] llama-cpp-python 未安装，无法加载本地 GGUF 模型"
+        "[llm] llama-cpp-python 未安装，无法加载本地 GGUF 模型"
         "（已移除自动安装，请按以下步骤手动安装）：\n"
         "1. 打开 https://github.com/JamePeng/llama-cpp-python/releases 下载最新 release 中的预编译 wheel\n"
         f"2. 选择与你的环境匹配的文件（形如 llama_cpp_python-0.3.46+cu131-{py_tag}-{py_tag}-win_amd64.whl）：\n"
@@ -124,7 +124,7 @@ def ensure_llama_cpp() -> None:
         "4. 安装完成后重启 ComfyUI 再重试\n"
     )
     raise RuntimeError(
-        "[MiniMaxRefPromptEnhance] llama-cpp-python is not installed. "
+        "[llm] llama-cpp-python is not installed. "
         "See the console output above for the manual install steps."
     )
 
@@ -164,14 +164,14 @@ def unload_llama_models(keep: set | None = None) -> None:
             if callable(close):
                 close()
         except Exception as e:  # pragma: no cover - defensive
-            log.warning(f"[MiniMaxRefPromptEnhance] Error closing llama model {name}: {e}")
+            log.warning(f"[llm] Error closing llama model {name}: {e}")
         del model
         freed.append(name)
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     log.info(
-        f"[MiniMaxRefPromptEnhance] Unloaded llama-cpp model(s): {', '.join(freed) or 'n/a'}; "
+        f"[llm] Unloaded llama-cpp model(s): {', '.join(freed) or 'n/a'}; "
         f"cached models remaining: {len(_LLAMA_MODEL_CACHE)}"
     )
 
@@ -200,13 +200,13 @@ def get_llama_model(gguf_path: str, mmproj_path: str = ""):
     if mmproj_path:
         kwargs["mmproj"] = mmproj_path
     log.info(
-        f"[MiniMaxRefPromptEnhance] Loading GGUF model: {os.path.basename(gguf_path)} "
+        f"[llm] Loading GGUF model: {os.path.basename(gguf_path)} "
         f"(mmproj={os.path.basename(mmproj_path) if mmproj_path else 'None'}) ..."
     )
     try:
         model = Llama(**kwargs)
     except Exception as e:
-        log.warning(f"[MiniMaxRefPromptEnhance] GPU load failed ({e}); retrying on CPU (n_gpu_layers=0)")
+        log.warning(f"[llm] GPU load failed ({e}); retrying on CPU (n_gpu_layers=0)")
         kwargs["n_gpu_layers"] = 0
         model = Llama(**kwargs)
     _LLAMA_MODEL_CACHE[key] = model
@@ -238,14 +238,14 @@ def generate_prompt_with_llama(
     has_multi_model = has_image(image) and bool(mmproj_path)
     if has_image(image) and not mmproj_path:
         log.warning(
-            "[MiniMaxRefPromptEnhance] Image provided but no mmproj (vision projector) selected "
+            "[llm] Image provided but no mmproj (vision projector) selected "
             "-> running in text-only mode."
         )
     llm = get_llama_model(gguf_path, mmproj_path)
     content: list[dict] = [{"type": "text", "text": prompt}]
     if has_multi_model:
         content.append({"type": "image_url", "image_url": {"url": tensor_to_base64(image)}})
-    log.info(f"[MiniMaxRefPromptEnhance] Generating with GGUF model: {os.path.basename(gguf_path)} ...")
+    log.info(f"[llm] Generating with GGUF model: {os.path.basename(gguf_path)} ...")
     try:
         resp = llm.create_chat_completion(
             messages=[{"role": "user", "content": content}],
@@ -254,13 +254,13 @@ def generate_prompt_with_llama(
             seed=_clamp_seed_32(seed),
         )
     except Exception as e:
-        raise RuntimeError(f"[MiniMaxRefPromptEnhance] GGUF generation failed: {e}") from e
+        raise RuntimeError(f"[llm] GGUF generation failed: {e}") from e
     generated_text = ""
     try:
         generated_text = resp["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
-        raise RuntimeError(f"[MiniMaxRefPromptEnhance] Unexpected GGUF response: {str(resp)[:500]}") from e
-    log.info(f"[MiniMaxRefPromptEnhance] GGUF model generated (first 200 chars): {generated_text[:200]}")
+        raise RuntimeError(f"[llm] Unexpected GGUF response: {str(resp)[:500]}") from e
+    log.info(f"[llm] GGUF model generated (first 200 chars): {generated_text[:200]}")
     return generated_text
 
 def _clamp_seed_32(seed: int | None) -> int | None:
