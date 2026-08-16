@@ -3,12 +3,19 @@
 放在 Easy-Use forLoop 内使用：
 - guide_data  ← MiniMaxRefDirector.guide_data
 - guide_index ← easy forLoopStart 的 index（0-based）
-- prev_tail   ← 上一段视频（VHS VideoCombine 的 Filenames 输出），实现跨段衔接
+- prev_tail   ← 上一段视频（VHS VideoCombine 的 Filenames 输出），供 motion context 实现跨段衔接
 
 节点从 guide_data.timeline_data 中取出 guide_index 对应段，合并 MiniMax H3
-Reference-to-video 功能（图片/视频/音频 refs + 上一段视频 prev_tail 作为参考视频），
-输出 positive conditioning 与 latent，视频采样/解码/保存全部由外部节点完成
-（KSampler → VAEDecode → VHS VideoCombine；model/clip/vae 由外部自行接入）。
+Reference-to-video 功能（图片/视频/音频 refs），输出 positive conditioning 与 latent，
+视频采样/解码/保存全部由外部节点完成（KSampler → VAEDecode → VHS VideoCombine；
+model/clip/vae 由外部自行接入）。
+
+跨段衔接使用 H3 motion context（ComfyUI-H3-Motion-Context）：
+- 图片段（type=image 且带 imageFile）：把图片做成 8 帧视频，作为 motion context
+  pinned 帧（节点按 VAE 网格吸附到 5 帧）。
+- 文本段（type=text 且开启 motionContext）：把上一段视频 prev_tail 的尾部帧作为
+  motion context pinned 帧。
+- 其他段不处理 prev_tail 视频。
 
 通知机制（send_sync("minimax_ref_video_progress", ...)）：
 - 当 prev_tail 传入（VHS_FILENAMES，说明上一段视频已保存完成）时，通知前端
@@ -17,14 +24,22 @@ Reference-to-video 功能（图片/视频/音频 refs + 上一段视频 prev_tai
   status="exception" 通知并抛出异常，让 Easy-Use forLoop 结束循环。
 """
 
+import importlib.util
 import logging
 import os
+import sys
 
 import folder_paths
 from comfy_api.latest import io
 from comfy_execution.graph import ExecutionBlocker
 
 from .lib import h3 as h3lib
+from .lib.image import load_image_tensor
+
+try:
+    from comfy_api.latest import VideoFromFile
+except ImportError:  # pragma: no cover
+    from comfy_api.latest._input_impl import VideoFromFile
 
 log = logging.getLogger(__name__)
 
@@ -119,6 +134,118 @@ def _send_progress(payload):
         log.warning("[MiniMaxRefGuide] failed to send progress notification", exc_info=True)
 
 
+# ---- H3 motion context 辅助（ComfyUI-H3-Motion-Context） -------------------
+
+# 与 H3 motion context 节点一致的参数：VAE 编码时每 token 覆盖的像素帧数、
+# 合法的 pinned 帧网格（节点会把 n 向下吸附到该网格）
+_MC_FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
+_MC_RUN_GRID = (124, 107, 90, 73, 56, 39, 22, 5, 1)
+
+
+def _latent_video_capacity(latent):
+    """段 latent 视频流实际覆盖的像素帧数（与 H3 motion context 的 frame_count 一致）。"""
+    samples = latent.get("samples") if isinstance(latent, dict) else None
+    if samples is None:
+        return None
+    if hasattr(samples, "unbind"):
+        video = list(samples.unbind())[0]
+    elif isinstance(samples, (tuple, list)):
+        video = samples[0]
+    else:
+        return None
+    if getattr(video, "ndim", 0) == 4:
+        video = video.unsqueeze(0)
+    latent_t = int(video.shape[2])
+    return sum(_MC_FRAME_PER_TOKEN[k % 5] for k in range(latent_t))
+
+
+def _safe_mc_frames(latent, requested, available):
+    """在段 latent 覆盖帧数之内，取最接近 requested 的合法 motion context 帧数。
+
+    H3 motion context 会把 n 向下吸附到 _MC_RUN_GRID，且要求 n < 段 latent 覆盖的
+    像素帧数，否则会抛 "asked to pin ... frames into a ... frame clip"。
+    """
+    capacity = _latent_video_capacity(latent)
+    n = min(int(requested), int(available))
+    if capacity is None:
+        return max(1, n)
+    for g in _MC_RUN_GRID:  # 降序
+        if g <= n and g < capacity:
+            return g
+    return 1  # 兜底：1 帧对任意合法 latent 均不越界
+
+
+def _get_motion_context_module():
+    """定位并返回 ComfyUI-H3-Motion-Context 的 nodes 模块（含 MiniMaxH3MotionContext）。
+
+    ComfyUI 启动时会 import custom_nodes 下每个目录，因此该包（及其 nodes 子模块）
+    通常已在 sys.modules 中。其 nodes.py 含相对导入（from .patch_layout ...），无法
+    用 importlib 以单个文件方式加载，兜底按包加载以解析相对导入。
+    """
+    for mod in list(sys.modules.values()):
+        f = getattr(mod, "__file__", None) or ""
+        if "ComfyUI-H3-Motion-Context" in f.replace("\\", "/") \
+                and hasattr(mod, "MiniMaxH3MotionContext"):
+            return mod
+
+    root = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                        "ComfyUI-H3-Motion-Context")
+    if not os.path.isdir(root):
+        raise RuntimeError(
+            "[MiniMaxRefGuide] motion context requires ComfyUI-H3-Motion-Context. "
+            "Clone https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context into "
+            "custom_nodes and restart ComfyUI."
+        )
+    pkg_name = "ComfyUI-H3-Motion-Context"
+    nodes_name = pkg_name + ".nodes"
+    if nodes_name not in sys.modules:
+        pkg_spec = importlib.util.spec_from_file_location(
+            pkg_name, os.path.join(root, "__init__.py"))
+        pkg = importlib.util.module_from_spec(pkg_spec)
+        sys.modules[pkg_name] = pkg
+        if pkg_spec.loader is not None:
+            pkg_spec.loader.exec_module(pkg)
+    mod = sys.modules.get(nodes_name)
+    if mod is None or not hasattr(mod, "MiniMaxH3MotionContext"):
+        raise RuntimeError(
+            "[MiniMaxRefGuide] could not load MiniMaxH3MotionContext from "
+            "ComfyUI-H3-Motion-Context. See the ComfyUI console for details."
+        )
+    return mod
+
+
+def _load_prev_tail_frames(path, max_frames=56):
+    """解码上一段视频，截取尾部至多 max_frames 帧，供 motion context 使用。"""
+    try:
+        frames = VideoFromFile(path).get_components().images  # [N, H, W, C]
+    except Exception:
+        log.warning(f"[MiniMaxRefGuide] failed to load prev_tail video {path!r}",
+                    exc_info=True)
+        return None
+    if frames.shape[0] > max_frames:
+        frames = frames[-max_frames:]
+    return frames
+
+
+def _apply_motion_context(cond, latent, video_vae, context_frames,
+                          context_length, audio_vae=None):
+    """对段条件叠加 H3 motion context：把 pinned 帧钉到段头部作为 keyframes。
+
+    context_frames: [N, H, W, C] 帧序列，节点只取其中尾部 n 帧并按当前段分辨率
+    重采样（像素路径，可跨分辨率）。返回 (cond, trim_frames)，trim_frames 是
+    ANCHOR_MODE=head 时需从最终解码结果头部裁掉的帧数。
+    """
+    m = _get_motion_context_module()
+    node = getattr(m, "MiniMaxH3MotionContext")
+    n = _safe_mc_frames(latent, context_length, context_frames.shape[0])
+    cond, trim = node().apply(
+        cond, video_vae, latent, str(n),
+        context_frames=context_frames,
+        audio_vae=audio_vae,
+    )
+    return cond, trim
+
+
 class MiniMaxRefGuide(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -151,7 +278,7 @@ class MiniMaxRefGuide(io.ComfyNode):
                     "prev_tail",
                     types=[VhsFilenames, VhsFilename],
                     optional=True,
-                    tooltip="上一段生成完成的视频（VHS VideoCombine 的 Filenames 输出），作为参考视频实现跨段衔接；收到时通知前端该段完成。",
+                    tooltip="上一段生成完成的视频（VHS VideoCombine 的 Filenames 输出）；文本段开启 motionContext 时作为 motion context 实现跨段衔接；收到时通知前端该段完成。",
                 ),
             ],
             outputs=[
@@ -227,23 +354,45 @@ class MiniMaxRefGuide(io.ComfyNode):
         videos = entry.get("videos") or []
         audios = entry.get("audios") or []
 
-        # prev_tail → 追加为参考视频（跨段衔接 / Reference to video）
-        if prev_paths:
-            videos = [*videos, *({"label": "prev_tail", "src": p} for p in prev_paths)]
-            log.info(f"[MiniMaxRefGuide] guide_index={idx} appended prev_tail refs: {prev_paths}")
-
         if clip is None:
             raise ValueError("[MiniMaxRefGuide] needs a CLIP input to encode positive conditioning.")
         if video_vae is None:
             raise ValueError("[MiniMaxRefGuide] needs a VIDEO_VAE input to prepare the latent.")
 
-        if entry.get("type") == "image" and entry.get("imageFile"):
-            #将图片做成8帧视频
-        # 使用motion context 处理
-            return io.NodeOutput(None, None)
+        # 基础条件：普通 refs（图片/视频/音频）Reference-to-video 编码
         cond, _neg_cond, latent, _frame_count = h3lib.build_segment_conditioning(
             clip, video_vae, audio_vae, prompt, width, height, length,
             images, videos, audios,
         )
 
+        # 1) 图片段 + imageFile：图片做成 8 帧视频，用 motion context 处理
+        if entry.get("type") == "image" and entry.get("imageFile"):
+            img = load_image_tensor(entry.get("imageFile"))
+            if img is None:
+                raise ValueError(
+                    f"[MiniMaxRefGuide] segment {idx} imageFile not found: "
+                    f"{entry.get('imageFile')!r}")
+            frames = img.repeat(8, 1, 1, 1)  # 图片 -> 8 帧视频 [8, H, W, C]
+            cond, _trim = _apply_motion_context(
+                cond, latent, video_vae, frames,
+                context_length="8", audio_vae=audio_vae,
+            )
+            log.info(f"[MiniMaxRefGuide] guide_index={idx} image -> 8-frame motion context")
+
+        # 2) 文本段 + motionContext：用 prev_tail 视频，motion context 处理
+        elif entry.get("type") == "text" and prev_paths and entry.get("motionContext"):
+            frames = _load_prev_tail_frames(prev_paths[0])
+            if frames is not None and frames.shape[0] >= 1:
+                cond, _trim = _apply_motion_context(
+                    cond, latent, video_vae, frames,
+                    context_length="22", audio_vae=audio_vae,
+                )
+                log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
+                         f"({frames.shape[0]} frames)")
+            else:
+                log.warning(
+                    f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
+                    f"skipped: {prev_paths[0]!r} could not be decoded")
+
+        # 3) 其他段：不处理 prev_tail，直接输出普通条件
         return io.NodeOutput(cond, latent)

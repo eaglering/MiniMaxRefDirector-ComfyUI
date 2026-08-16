@@ -1296,12 +1296,11 @@ export function TransferPanel({ director }) {
   function parseResources(text, subjectsList) {
     const out = [];
     const segs = director?.timeline?.segments || [];
-    const sorted = [...segs].sort((a, b) => (a.start || 0) - (b.start || 0));
-    const srcOf = (s) => s.imgObj?.src || s.imageB64 || "";
-    const first = sorted.find(s => s.imgObj || s.imageB64);
-    if (first) out.push({ key: "first", label: "首帧", src: srcOf(first) });
-    const last = [...sorted].reverse().find(s => s.imgObj || s.imageB64);
-    if (last && last !== first) out.push({ key: "last", label: "尾帧", src: srcOf(last) });
+    const srcOf = (s) => s?.imageB64 || s?.imgObj?.src || "";
+    const first = srcOf((segs?.[director.selectedIndex] || null));
+    const last = srcOf((segs?.[director.selectedIndex+1] || null));
+    if (first) out.push({ key: "first", label: "首帧", src: first });
+    if (last) out.push({ key: "last", label: "尾帧", src: last });
     const re = /<(?:@|#)([^>:]+)(?::[^>]*)?>/g;
     const used = new Set();
     let m;
