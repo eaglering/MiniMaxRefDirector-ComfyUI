@@ -141,6 +141,21 @@ function subjectMediaThumb(s) {
   return null;
 }
 
+// 从 graph 中的 MiniMaxRefSubject 节点读取 global_prompt widget 值（与 getSubjectVlmSettings 同源）
+function getSubjectGlobalPrompt() {
+  try {
+    const nodes = app.graph?._nodes || [];
+    for (const n of nodes) {
+      if (n.type !== "MiniMaxRefSubject") continue;
+      const w = (n.widgets || []).find((x) => x.name === "global_prompt");
+      if (w && typeof w.value === "string" && w.value.trim()) return w.value.trim();
+    }
+  } catch (e) {
+    console.warn("[Transfer] getSubjectGlobalPrompt failed:", e);
+  }
+  return "";
+}
+
 // 从 H3 prompt 文本提取 <@name> / <#name:dialogue> 提及
 function extractH3Mentions(text) {
   const names = new Set();
@@ -276,35 +291,105 @@ function imageSrcToInputPath(src) {
   }
 }
 
-// 轮询 /history 等待 prompt 执行完成；成功返回 history 条目，失败 / 超时抛错。
-// 默认 30 分钟：首帧 subgraph 可能排在用户主 workflow（视频任务）之后，且 H3 模型加载 + 采样较慢；
-// 等待期间每 15s 打印一次进度到控制台，便于确认任务状态
-async function waitForPromptDone(promptId, timeoutMs = 1800000, label = "任务") {
+// 等待 prompt 执行完成：优先监听 ComfyUI WebSocket 事件（execution_success / error / interrupted）
+// 即时结束等待，避免纯轮询造成的持续请求；轮询降为 3s 兜底（排队中 / 事件缺失场景）。
+// 成功 resolve history 条目，失败 / 超时 reject。
+// 默认 30 分钟：首帧 subgraph 可能排在用户主 workflow（视频任务）之后，且 H3 模型加载 + 采样较慢
+function waitForPromptDone(promptId, timeoutMs = 1800000, label = "任务") {
   const start = Date.now();
   let lastLog = 0;
-  while (Date.now() - start < timeoutMs) {
+
+  // 拉取一次 /history：完成 → 返回条目；执行错误 → 抛错；其它 → null
+  async function pollOnce() {
+    // 注意：api.fetchApi 返回的是 Response 对象（不是 JSON），必须手动 .json()
     let hist = {};
-    try { hist = await api.fetchApi(`/history/${promptId}`); } catch { /* 网络抖动，重试 */ }
+    try {
+      const resp = await api.fetchApi(`/history/${promptId}`);
+      hist = resp && resp.ok ? await resp.json() : {};
+    } catch { /* 网络抖动，重试 */ }
     const h = hist && hist[promptId];
-    if (h) {
-      const st = h.status || {};
-      if (st.completed || st.status_str === "success") return h;
-      if (st.status_str === "error" || (st.messages || []).some((m) => m[0] === "execution_error")) {
-        const err = (st.messages || []).find((m) => m[0] === "execution_error");
-        throw new Error(err ? `生成失败：${err[1]?.message || "执行错误"}` : "生成失败");
-      }
+    if (!h) return null;
+    const st = h.status || {};
+    if (st.completed || st.status_str === "success") return h;
+    if (st.status_str === "error" || (st.messages || []).some((m) => m[0] === "execution_error")) {
+      const err = (st.messages || []).find((m) => m[0] === "execution_error");
+      throw new Error(err ? `生成失败：${err[1]?.message || "执行错误"}` : "生成失败");
     }
-    const now = Date.now();
-    if (now - lastLog >= 15000) {
-      lastLog = now;
-      console.log(
-        `[Transfer] ${label} 执行中，已等待 ${Math.round((now - start) / 1000)}s ` +
-        `(prompt_id=${promptId}, status=${h ? JSON.stringify(h.status) : "未开始/排队中"})`
-      );
-    }
-    await new Promise((r) => setTimeout(r, 1000));
+    return null; // 仍执行中
   }
-  throw new Error(`生成${label}超时（${Math.round(timeoutMs / 60000)} 分钟），请在 ComfyUI 后端控制台查看是否仍在执行`);
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let pollTimer = null;
+
+    const cleanup = () => {
+      api.removeEventListener("execution_success", onSuccess);
+      api.removeEventListener("execution_error", onError);
+      api.removeEventListener("execution_interrupted", onInterrupt);
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+    const settle = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(arg);
+    };
+    // 老版本事件 detail 无 prompt_id 时按当前任务处理；有则只响应自己的 prompt
+    const matches = (ev) => {
+      const id = ev && ev.detail && ev.detail.prompt_id;
+      return !id || id === promptId;
+    };
+
+    const onSuccess = async (ev) => {
+      if (!matches(ev)) return;
+      try {
+        const h = await pollOnce();
+        if (h) settle(resolve, h); // history 尚未落盘时交给轮询兜底
+      } catch (e) { settle(reject, e); }
+    };
+    const onError = (ev) => {
+      if (!matches(ev)) return;
+      const msg = (ev && ev.detail && ev.detail.exception_message) || "执行错误";
+      settle(reject, new Error(`生成${label}失败：${msg}`));
+    };
+    const onInterrupt = (ev) => {
+      if (!matches(ev)) return;
+      settle(reject, new Error(`生成${label}已中断`));
+    };
+
+    api.addEventListener("execution_success", onSuccess);
+    api.addEventListener("execution_error", onError);
+    api.addEventListener("execution_interrupted", onInterrupt);
+
+    const tick = async () => {
+      if (settled) return;
+      try {
+        const h = await pollOnce();
+        if (h) { settle(resolve, h); return; }
+      } catch (e) { settle(reject, e); return; }
+      const now = Date.now();
+      if (now - lastLog >= 15000) {
+        lastLog = now;
+        let status = "未开始/排队中";
+        try {
+          const resp = await api.fetchApi(`/history/${promptId}`);
+          const hist = resp && resp.ok ? await resp.json() : {};
+          const h = hist && hist[promptId];
+          if (h) status = JSON.stringify(h.status);
+        } catch { /* ignore */ }
+        console.log(
+          `[Transfer] ${label} 执行中，已等待 ${Math.round((now - start) / 1000)}s ` +
+          `(prompt_id=${promptId}, status=${status})`
+        );
+      }
+      if (Date.now() - start >= timeoutMs) {
+        settle(reject, new Error(`生成${label}超时（${Math.round(timeoutMs / 60000)} 分钟），请在 ComfyUI 后端控制台查看是否仍在执行`));
+        return;
+      }
+      pollTimer = setTimeout(tick, 3000);
+    };
+    tick();
+  });
 }
 
 // 从 history 输出中取第一张图片（SaveImage 产物）
@@ -318,24 +403,6 @@ function imageFromHistory(history) {
     }
   }
   return null;
-}
-
-// 拉取图片并转 base64 data URL
-async function fetchImageAsBase64(url) {
-  try {
-    const resp = await fetch(url);
-    if (!resp.ok) return "";
-    const blob = await resp.blob();
-    return await new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(String(fr.result || ""));
-      fr.onerror = reject;
-      fr.readAsDataURL(blob);
-    });
-  } catch (e) {
-    console.warn("[Transfer] fetchImageAsBase64 failed:", e);
-    return "";
-  }
 }
 
 // 主体定义 / retention_analysis / 媒体列表（images / audios / videos）
@@ -832,12 +899,18 @@ export function TransferPanel({ director }) {
     const soundscape = String(pd.overall_soundscape || "").trim();
     const music = String(pd.non_diegetic_music || "").trim();
 
-    // 2) prompt = subject_definitions + retention_analysis + detailed + soundscape + music
+    // 主体节点传来的 global_prompt（锚定贯穿全片的人物/场景），拼到 detailed_description 之前
+    const globalPrompt = getSubjectGlobalPrompt();
+
+    // 2) prompt = subject_definitions + retention_analysis + global_prompt + detailed + soundscape + music
     const subjectDefs = bind.subject_definition || "";
+    const detailSection = globalPrompt
+      ? `detailed_description:\n${globalPrompt}\n${detail}`
+      : `detailed_description:\n${detail}`;
     const promptParts = [
       subjectDefs ? "subject_definition:\n" + subjectDefs : "",
       bind.retention_analysis ? "retention_analysis:\n" + bind.retention_analysis : "",
-      detail ? "detailed_description:\n" + detail : "",
+      detail ? detailSection : (globalPrompt ? `detailed_description:\n${globalPrompt}` : ""),
       soundscape ? "overall_soundscape:\n" + soundscape : "",
       music ? "non_diegetic_music:\n" + music : "",
     ].filter(Boolean);
@@ -961,16 +1034,19 @@ export function TransferPanel({ director }) {
       million_pixels: wVal("million_pixels") ?? 0.6,
       prompt: promptText || "",
       seed: Math.floor(Math.random() * 0xffffffff),
-      steps: 20,
-      cfg: 5.5,
-      sampler_name: "euler",
-      scheduler: "beta",
+      steps: 8,
+      cfg: 1,
+      sampler_name: "res_multistep",
+      scheduler: "simple",
       denoise: 1.0,
       shift_video: 12.0,
       shift_audio: 3.0,
       filename_prefix: `minimaxrefdirector/firstframe/seg${segNo}`,
     };
-    refPaths.forEach((path, i) => { h3Inputs[`ref_image_${i}`] = path; });
+    // 注意：ComfyUI v3 io 的 Autogrow 输入（io.Autogrow.Input("ref_images", ...)）要求提交 key
+    // 使用完整动态路径前缀 "ref_images.ref_image_{i}"，否则服务端匹配不到变体输入，
+    // 会按「未传值」处理并把 ref_images 默认为空 dict（表现为 h3.py 收到 ref_images={}）。
+    refPaths.forEach((path, i) => { h3Inputs[`ref_images.ref_image_${i}`] = path; });
     const refNodeId = addNode("RefGenerateImage", h3Inputs);
 
     // 5) 控制台日志：完整打印 subgraph（含传给 RefGenerateImage 的全部输入）
@@ -997,7 +1073,9 @@ export function TransferPanel({ director }) {
       if (!bind) bind = await fetchBindings();
       const payload = assembleVlmPayload({ segment_id: seg.id, segment_type: seg.type }, bind);
       const promptText = payload?.prompt || seg.prompt || "";
-      const refSrcs = payload?.images || [];
+      const refSrcs = [...(payload?.images || [])];
+      // 该 segment 已有的参考图（用户手动设置或先前生成的首帧）并入 refs 首位
+      if (seg.imageFile) refSrcs.unshift(seg.imageFile);
 
       const p = buildFirstFrameSubgraph({ seg, promptText, refSrcs });
       if (!p) return null;
@@ -1006,21 +1084,33 @@ export function TransferPanel({ director }) {
       const resp = await api.queuePrompt(-1, { output: p, workflow: {} });
       const promptId = resp?.prompt_id;
       if (!promptId) throw new Error("提交队列失败");
+      console.log("[Transfer] 首帧 subgraph 已提交，prompt_id =", promptId);
 
       const history = await waitForPromptDone(promptId, 1800000, "首帧图");
+      console.log("[Transfer] 首帧 history status:", history?.status);
+      console.log("[Transfer] 首帧 history outputs keys:", Object.keys(history?.outputs || {}));
       const img = imageFromHistory(history);
-      if (!img) throw new Error("未找到生成的首帧图");
+      if (!img) {
+        console.error("[Transfer] history.outputs 中未找到 images，完整内容:", JSON.stringify(history?.outputs || {}));
+        throw new Error("未找到生成的首帧图");
+      }
 
-      const fileKey = (img.subfolder ? img.subfolder + "/" : "") + img.filename;
-      const url = viewUrl(img.filename, img.subfolder, img.type || "output");
+      // 归一化 subfolder 分隔符：Windows 后端返回的是 os.sep（反斜杠），
+      // 统一转正斜杠，保证与全站路径约定一致（viewUrl 的 "/" 分割、resolve_input_path 的前缀判断）
+      const sub = (img.subfolder || "").replace(/\\/g, "/");
+      const fileKey = sub ? sub + "/" + img.filename : img.filename;
+      const url = viewUrl(img.filename, sub, img.type || "output");
       const imgObj = new Image();
+      // 注意：这里是 TransferPanel 组件内的普通函数，this 为 undefined，
+      // 必须用外壳实例 director（TimelineEditor）的 render() 刷新画布
+      imgObj.onload = () => { seg.imageObj = imgObj; director.render(); };
       imgObj.src = url;
 
-      // 回写 segment
+      // 回写 segment：imageB64 存 view URL（与手动上传图片的字段约定一致），
+      // 不存 base64 data URL，避免 timeline JSON 体积膨胀
       seg.type = "image";
       seg.imageFile = fileKey;
-      seg.imageObj = imgObj;
-      seg.imageB64 = await fetchImageAsBase64(url);
+      seg.imageB64 = url;
       director.commitChanges();
       if (director._transferSetSeg) director._transferSetSeg(seg);
       return { image_file: fileKey, url };

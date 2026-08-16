@@ -1,11 +1,14 @@
 import math
-
+import json
+import time
+import gc
 from comfy.comfy_types import List
 import torch
 
 import comfy.model_management
 import comfy.model_sampling
 import comfy.nested_tensor
+import comfy.samplers
 import comfy.utils
 import node_helpers
 import nodes
@@ -17,6 +20,7 @@ except ImportError:  # pragma: no cover
     from comfy_api.latest._input_impl import VideoFromFile
 
 from .image import calc_resolution, load_image_tensor
+from .path import resolve_input_path
 from .video import _load_wav_audio
 
 
@@ -81,12 +85,12 @@ class RefGenerateImage(io.ComfyNode):
                 ),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, step=1),
-                io.Int.Input("steps", default=20, min=1, max=100, step=1),
-                io.Float.Input("cfg", default=5.5, min=0.0, max=100.0, step=0.1),
+                io.Int.Input("steps", default=8, min=1, max=100, step=1),
+                io.Float.Input("cfg", default=1, min=0.0, max=100.0, step=0.1),
                 io.Combo.Input(
                     "sampler_name",
-                    options=["euler", "euler_ancestral", "heun", "heunpp2", "dpm_2", "dpm_2_ancestral", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "ddim", "uni_pc", "uni_pc_bh2"],
-                    default="euler",
+                    options=comfy.samplers.KSampler.SAMPLERS,
+                    default="res_multistep",
                 ),
                 io.Combo.Input(
                     "scheduler",
@@ -119,14 +123,38 @@ class RefGenerateImage(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, clip, vae, output_resolution="16:9横屏", million_pixels=0.6, prompt="",
-                seed=0, steps=20, cfg=5.5, sampler_name="res_multistep", scheduler="simple", denoise=1.0,
+                seed=0, steps=8, cfg=1, sampler_name="res_multistep", scheduler="simple", denoise=1.0,
                 shift_video=12.0, shift_audio=3.0, filename_prefix="minimaxrefdirector/firstframe",
                 ref_images=None) -> io.NodeOutput:
         # 后端控制台日志：确认到底收到了什么（前端 subgraph 提交的内容）
         print("=" * 72)
         print(f"[RefGenerateImage] 收到参数：")
         print(f"[RefGenerateImage]   model={type(model).__name__} clip={type(clip).__name__} vae={type(vae).__name__}")
-        print(f"[RefGenerateImage]   prompt={prompt!r}")
+        try:
+            _m_dev = getattr(model, "load_device", None)
+            _m_lora = bool(getattr(model, "patches", None)) or bool(getattr(model, "weight_wrapper_patches", None))
+            _m_base = getattr(model, "model", None)
+            _m_cfg = getattr(_m_base, "model_config", None) if _m_base is not None else None
+            _m_quant = getattr(_m_cfg, "quant_config", None) if _m_cfg is not None else None
+            if isinstance(_m_quant, dict):
+                _m_quant = "dict({}keys)".format(len(_m_quant))
+            else:
+                _m_quant = type(_m_quant).__name__ if _m_quant else None
+            _m_dtype = None
+            if _m_base is not None:
+                try:
+                    _cnt = {}
+                    for _p in _m_base.parameters():
+                        if _p.dtype.is_floating_point:
+                            _cnt[_p.dtype] = _cnt.get(_p.dtype, 0) + 1
+                    if _cnt:
+                        _m_dtype = max(_cnt, key=_cnt.get)
+                except Exception:  # noqa: BLE001
+                    _m_dtype = None
+            print(f"[RefGenerateImage]   model_weight_dtype={_m_dtype} quant={_m_quant} load_device={_m_dev} has_lora={_m_lora}")
+        except Exception as _e:  # noqa: BLE001
+            print(f"[RefGenerateImage]   model 信息读取失败：{_e}")
+        print(f"[RefGenerateImage]   prompt={prompt!r} ref_images={json.dumps(ref_images)}")
         print(f"[RefGenerateImage]   output_resolution={output_resolution!r} million_pixels={million_pixels}")
         print(f"[RefGenerateImage]   seed={seed} steps={steps} cfg={cfg} sampler={sampler_name}/{scheduler} denoise={denoise}")
         print(f"[RefGenerateImage]   shift_video={shift_video} shift_audio={shift_audio} filename_prefix={filename_prefix!r}")
@@ -146,8 +174,13 @@ class RefGenerateImage(io.ComfyNode):
         for image_path in (ref_images or {}).values():
             if not image_path:
                 continue
+            _abs = resolve_input_path(image_path)
+            print(f"[RefGenerateImage]   loading ref {image_path!r} -> abs={_abs!r}")
+            if not _abs:
+                print(f"[RefGenerateImage]   !! 参考图解析失败：{image_path!r} 在 input/output/temp 均找不到")
             img = load_image_tensor(image_path)
             h, w = img.shape[1], img.shape[2]
+            print(f"[RefGenerateImage]     loaded {w}x{h}")
             # aspect-preserving scale (down only) to the output's pixel area
             scale = min(1.0, math.sqrt((width * height) / (w * h)))
             tw = max(CANVAS_MULTIPLE, round(w * scale / CANVAS_MULTIPLE) * CANVAS_MULTIPLE)
@@ -162,9 +195,11 @@ class RefGenerateImage(io.ComfyNode):
             })
 
         tokens = clip.tokenize(prompt, minimax_ref_items=ref_items)
+        print(f"[RefGenerateImage]   tokenize ref_items={len(ref_items)}")
         cond = clip.encode_from_tokens_scheduled(tokens)
         if ref_blocks:
             cond = node_helpers.conditioning_set_values(cond, {"minimax_refs": ref_blocks})
+        print(f"[RefGenerateImage]   conditioning minimax_refs={len(ref_blocks)}")
 
         # negative conditioning：空文本
         neg_tokens = clip.tokenize("")
@@ -188,19 +223,41 @@ class RefGenerateImage(io.ComfyNode):
         to["minimax_h3_sigma_shift_audio"] = shift_audio
 
         # KSampler 采样 → VAEDecode
+        t0 = time.time()
         samples = nodes.KSampler().sample(
             m, int(seed), int(steps), float(cfg), sampler_name, scheduler,
             cond, neg_cond, latent, denoise=float(denoise),
         )[0]
+        print(f"[RefGenerateImage]   KSampler done in {time.time() - t0:.1f}s")
+        t0 = time.time()
         images = nodes.VAEDecode().decode(vae, samples)[0]
+        print(f"[RefGenerateImage]   VAEDecode done in {time.time() - t0:.1f}s")
 
-        # 保存首帧图片，filename 通过 ui 返回
-        ui = UI.ImageSaveHelper.get_save_images_ui(
-            images=images,
-            filename_prefix=filename_prefix,
-            cls=cls,
-        )
-        return io.NodeOutput(images, ui=ui)
+        try:
+            # 保存首帧图片，filename 通过 ui 返回
+            ui = UI.ImageSaveHelper.get_save_images_ui(
+                images=images,
+                filename_prefix=filename_prefix,
+                cls=cls,
+            )
+            print(f"[RefGenerateImage]   saved -> {ui}")
+            return io.NodeOutput(images, ui=ui)
+        finally:
+            # 首帧生成完毕后卸载模型权重并释放显存：
+            # unload_all_models 卸载 current_loaded_models 中的模型，
+            # 再 soft_empty_cache 清空缓存区，彻底归还显存。
+            try:
+                comfy.model_management.unload_all_models()
+                print("[RefGenerateImage]   models unloaded")
+            except Exception as _e:  # noqa: BLE001
+                print(f"[RefGenerateImage]   unload_all_models 失败：{_e}")
+            gc.collect()
+            comfy.model_management.soft_empty_cache()
+            try:
+                _free = comfy.model_management.get_free_memory(comfy.model_management.get_torch_device())
+                print(f"[RefGenerateImage]   cleaned up, free VRAM ~{_free / 1024 ** 3:.1f} GiB")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # ============ 参考视频生成（复刻官方 MiniMaxH3ReferenceToVideo 采样链路） ============
@@ -414,10 +471,10 @@ def generate_segment_video(
     videos=None,
     audios=None,
     seed=0,
-    steps=20,
-    cfg=5.5,
+    steps=8,
+    cfg=1,
     sampler_name="euler",
-    scheduler="beta",
+    scheduler="simple",
     denoise=1.0,
     shift_video=12.0,
     shift_audio=3.0,

@@ -186,11 +186,8 @@ class MiniMaxRefDirector(io.ComfyNode):
             prompt = seg.get("prompt", "").replace("@", "")
             entry = {
                 "prompt": prompt,
-                "prev_prompt": prev_prompt,
                 "first_frame": first_frame,
                 "duration_frames": dur,
-                "prompt_enhance": seg.get("prompt_enhance", "Default"),
-                "is_end_frame": seg.get("isEndFrame", False)
             }
             # 右侧 H3 prompt JSON（per-segment 持久化）：重建与前端 buildFirstFramePayload
             # 等价的 prompt（subject_definitions + retention_analysis + detailed_description
