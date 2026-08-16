@@ -260,6 +260,7 @@ def generate_prompt_with_llama(
         )
     except Exception as e:
         raise RuntimeError(f"[llm] GGUF generation failed: {e}") from e
+    unload_llama_models()
     generated_text = ""
     try:
         generated_text = resp["choices"][0]["message"]["content"]

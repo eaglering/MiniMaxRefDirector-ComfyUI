@@ -400,14 +400,14 @@ function parsePromptText(text) {
   return obj;
 }
 
-// 更新右侧文本中某个字段（如 shotX_description）
+// 更新右侧文本中某个字段
 function updateShotField(text, key, value) {
   const obj = parsePromptText(text);
   obj[key] = value;
   return formatPromptJson(obj);
 }
 
-// 从右侧文本中删除某个字段（如 shotX_description）
+// 从右侧文本中删除某个字段
 function removeShotField(text, key) {
   const obj = parsePromptText(text);
   delete obj[key];
@@ -457,6 +457,11 @@ const S = {
     padding: "4px", minWidth: "170px",
   },
   audioIcon: { fontSize: "10px", color: "#ffb74d" },
+  resAudio: {
+    width: "48px", height: "48px", borderRadius: "4px", background: "#1e3a5f",
+    color: "#38bdf8", display: "inline-flex", alignItems: "center", justifyContent: "center",
+    fontSize: "16px", flex: "0 0 auto",
+  },
   defsWrap: {
     position: "relative", flex: "0 0 auto", display: "flex", alignItems: "center",
     alignSelf: "flex-start", padding: "6px 4px", cursor: "help",
@@ -830,8 +835,8 @@ export function TransferPanel({ director }) {
     // 2) prompt = subject_definitions + retention_analysis + detailed + soundscape + music
     const subjectDefs = bind.subject_definition || "";
     const promptParts = [
-      subjectDefs,
-      bind.retention_analysis,
+      subjectDefs ? "subject_definition:\n" + subjectDefs : "",
+      bind.retention_analysis ? "retention_analysis:\n" + bind.retention_analysis : "",
       detail ? "detailed_description:\n" + detail : "",
       soundscape ? "overall_soundscape:\n" + soundscape : "",
       music ? "non_diegetic_music:\n" + music : "",
@@ -1386,14 +1391,6 @@ export function TransferPanel({ director }) {
                   onClick=${(e) => openAddMenu(e)}
                 >＋添加主体</button>
                 ${
-                  addedNames.map(n => html`
-                    <span key=${"chip-" + n} style=${{ display: "inline-flex", alignItems: "center", gap: "3px", background: "#3a3a3a", border: "1px solid #555", borderRadius: "10px", padding: "1px 6px", fontSize: "11px", color: "#ddd", whiteSpace: "nowrap" }}>
-                      ${n}
-                      <span style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }} onClick=${() => removeAddedSubject(n)}>×</span>
-                    </span>
-                  `)
-                }
-                ${
                   addMenu
                     ? html`<div class="tr-addmenu" style=${Object.assign({}, S.menu, { left: addMenu.x + "px", top: addMenu.y + "px" })}>
                         ${
@@ -1418,18 +1415,29 @@ export function TransferPanel({ director }) {
         ${
           resources.length === 0
             ? html`<div style=${S.hint}>资源引用（首帧 / 尾帧 / 主体 / 手动添加主体）会显示在这里</div>`
-            : resources.map(r => html`
+            : resources.map(r => {
+                const hasImg = !!r.src;
+                const isAudio = !hasImg || !!r.audio;
+                return html`
                 <div style=${S.res} key=${r.key}>
-                  <img style=${S.img} src=${r.src} alt=${r.label} />
+                  ${
+                    hasImg
+                      ? html`<img style=${S.img} src=${r.src} alt=${r.label} />`
+                      : html`<span style=${S.resAudio} title="音频主体">♪</span>`
+                  }
                   ${
                     r.kind === "addition"
-                      ? html`<span style=${Object.assign({}, S.audioIcon, { color: "#a5d6a7" })}>＋${r.label}</span>`
-                      : (r.kind === "subject" && r.audio
+                      ? html`<span style=${{ display: "inline-flex", alignItems: "center", gap: "3px", maxWidth: "64px", overflow: "hidden", whiteSpace: "nowrap" }}>
+                          <span style=${isAudio ? S.audioIcon : Object.assign({}, S.label, { color: "#a5d6a7" })}>${isAudio ? "♪ " : "＋"}${r.label}</span>
+                          <span title="移除" style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }} onClick=${() => removeAddedSubject(r.label)}>×</span>
+                        </span>`
+                      : (isAudio
                           ? html`<span style=${S.audioIcon}>♪ ${r.label}</span>`
                           : html`<span style=${S.label}>${r.label}</span>`)
                   }
                 </div>
-              `)
+              `;
+              })
         }
         <div
           class="tr-defs"

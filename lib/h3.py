@@ -119,7 +119,7 @@ class RefGenerateImage(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, clip, vae, output_resolution="16:9横屏", million_pixels=0.6, prompt="",
-                seed=0, steps=20, cfg=5.5, sampler_name="euler", scheduler="beta", denoise=1.0,
+                seed=0, steps=20, cfg=5.5, sampler_name="res_multistep", scheduler="simple", denoise=1.0,
                 shift_video=12.0, shift_audio=3.0, filename_prefix="minimaxrefdirector/firstframe",
                 ref_images=None) -> io.NodeOutput:
         # 后端控制台日志：确认到底收到了什么（前端 subgraph 提交的内容）
