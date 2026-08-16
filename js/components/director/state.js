@@ -2,7 +2,27 @@
 // 方法: updateSelectionFromBox, syncSelectionTypeAndIndex, growTimelineIfNeeded, getMaxZoom, getVisualDurationFrames, updateZoomSliderMax, updateUIFromSelection, updateSidebarHeights
 import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, RULER_HEIGHT, app } from "./shared.js";
 
+// transfer 面板（.pr-transfer-mount）显示时保证的最小 prop 区高度：
+// textarea 最小 120px + 生成按钮行 + status + resources 预览条 + 间距
+const TRANSFER_MIN_HEIGHT = 280;
+
 export const state = {
+  // 显示/隐藏 .pr-transfer-mount，并按需调整 prop 区（propContainer）高度
+  _setTransferVisible(show) {
+    if (this.transferMount) this.transferMount.style.display = show ? "block" : "none";
+    if (this.propContainer) {
+      const target = show
+        ? Math.max(this.propHeight, TRANSFER_MIN_HEIGHT)
+        : Math.min(this.propHeight, this.initialPropHeight || 200);
+      this.propHeight = target;
+      if (this.node && this.node.properties) this.node.properties.propHeight = target;
+      // 固定 height：transfer 面板 height:100% 填满，textarea（flex:1）随容器拉伸
+      this.propContainer.style.height = `${target}px`;
+    }
+    // 触发实测 wrapper 内容总高并同步 node 高度
+    if (this._syncNodeHeight) this._syncNodeHeight();
+  },
+
   updateSelectionFromBox() {
     if (!this._selectBoxStart || !this._selectBoxCurrent) return;
 
@@ -180,6 +200,7 @@ export const state = {
         this.segmentBoundsDisplay.textContent = "Multiple Segments Selected";
       }
       if (this._transferSetSeg) this._transferSetSeg(null);
+      this._setTransferVisible(false);
       return;
     }
 
@@ -214,6 +235,7 @@ export const state = {
 
     if (this.selectionType === "audio" && seg) {
       if (this.promptWrapper) this.promptWrapper.style.display = "none";
+      this._setTransferVisible(false);
       this.strengthRow.style.display = "flex";
       this.strengthLabel.style.display = "inline";
       this.strengthLabel.textContent = "Guide Strength:";
@@ -244,6 +266,7 @@ export const state = {
         this.promptInput.placeholder = "Enter prompt for selected segment...";
         this.promptInput.disabled = false;
         this.promptInput.style.opacity = "1.0";
+        this._setTransferVisible(true);
 
         const isImage = (this.selectionType === "image") && (seg.type === "image" || seg.type === "video");
         const strength = isImage ? (seg.guideStrength ?? 1.0) : 1.0;
@@ -256,6 +279,7 @@ export const state = {
         this.promptInput.placeholder = "No segment selected!";
         this.promptInput.disabled = true;
         this.promptInput.style.opacity = "0.4";
+        this._setTransferVisible(false);
         this.strengthValue.value = "1.00";
         this.strengthValue.disabled = true;
         this.strengthValue.style.opacity = "0.35";

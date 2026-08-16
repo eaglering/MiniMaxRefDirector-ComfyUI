@@ -107,10 +107,18 @@ export function registerNode(TimelineEditor) {
           });
 
           widget.computeSize = function (width) {
-            const canvasH = self._timelineEditor ? self._timelineEditor.canvasHeight : CANVAS_HEIGHT;
-            const propH = self._timelineEditor ? (self._timelineEditor.propHeight || 90) : 90;
+            const ed = self._timelineEditor;
             const nodeWidth = self.size?.[0] || width || 1375;
-            return [Math.max(10, nodeWidth - 30), canvasH + propH + 160];
+            const w = Math.max(10, nodeWidth - 30);
+            // 布局完成后直接实测内容总高：wrapper 为 height:auto，
+            // offsetHeight 即 gp-mount + toolbar + canvas + controls + prop 区的真实高度，
+            // 无需再猜"固定部分"魔数。未布局时回退估算，checkResize 首帧会自动校正。
+            if (ed && ed.wrapper && ed.wrapper.offsetHeight > 0) {
+              return [w, ed.wrapper.offsetHeight];
+            }
+            const canvasH = ed ? ed.canvasHeight : CANVAS_HEIGHT;
+            const propH = ed ? (ed.propHeight || 90) : 90;
+            return [w, canvasH + propH + 160];
           };
 
           setTimeout(() => {

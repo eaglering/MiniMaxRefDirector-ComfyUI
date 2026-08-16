@@ -2,7 +2,7 @@
 // 方法: createDOM, syncWidgetsAndUI, checkResize, syncLayoutToNode, getRenderScale, resizeCanvas, getMousePos, updateWidgetVisibility
 import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget, viewUrl } from "./shared.js";
 import { h, render } from "../../vendor/preact.module.js";
-import { GlobalParamsPanel, OutputPanel, mountTransfer } from "./transfer.js";
+import { GlobalParamsPanel, mountTransfer } from "./transfer.js";
 
 // Debounce ComfyUI auto-save（segment prompt 输入 300ms 后触发）
 let saveTimeout = null;
@@ -90,14 +90,11 @@ const makeResizer = (minH, getH, setH) => {
 const updateNodeHeight = (editor, key, container, newH) => {
   editor[key] = newH;
   editor.node.properties[key] = newH;
+  // 固定 height：.pr-transfer-mount 是 height:100%，父容器必须是确定高度，
+  // textarea（flex:1 + flex-basis:auto）才能随容器拉伸；内容超高时由
+  // transfer 侧 autoGrow 回调 _growPropBy 增大本高度
   container.style.height = `${newH}px`;
-  if (editor.node && editor.node.computeSize) {
-    const sz = editor.node.computeSize();
-    editor.node.size[1] = sz[1];
-    if (window.app && window.app.graph) {
-      window.app.graph.setDirtyCanvas(true, true);
-    }
-  }
+  editor._syncNodeHeight();
 };
 
 const makePromptArea = (editor, labelText, placeholder, opts = {}) => {
@@ -1059,11 +1056,7 @@ export const dom = {
     this.wrapper.appendChild(this.globalParamsMount);
     render(h(GlobalParamsPanel, { director: this }), this.globalParamsMount);
 
-    // Output 配置：渲染在全局参数之下（采样/编码参数）
-    this.outputParamsMount = document.createElement("div");
-    this.outputParamsMount.className = "pr-out-mount";
-    this.wrapper.appendChild(this.outputParamsMount);
-    render(h(OutputPanel, { director: this }), this.outputParamsMount);
+    // 采样/编码参数已迁移到 MiniMaxRefGuide 节点（Easy-Use forLoop 内配置）
 
     this.wrapper.appendChild(toolbar);
     this.wrapper.appendChild(this.layoutContainer);
@@ -1149,16 +1142,45 @@ export const dom = {
       link.textContent = filename;
       row.appendChild(badge);
       row.appendChild(link);
+    } else if (status === "exception") {
+      row.textContent = `seg${seg_no}/${total} · 循环结束`;
     } else {
       row.textContent = `seg${seg_no}/${total} ... 生成中`;
     }
     this.videoTrackBody.scrollTop = this.videoTrackBody.scrollHeight;
   },
 
+  _syncNodeHeight() {
+    // 等布局完成后再同步 node 高度：widget.computeSize 会实测
+    // wrapper.offsetHeight（height:auto 内容总高），node.computeSize 累加其他
+    // widget 高度后写回 node.size[1]，保证 node 窗体 >= 内容高度。
+    if (this._syncHFrame) cancelAnimationFrame(this._syncHFrame);
+    this._syncHFrame = requestAnimationFrame(() => {
+      this._syncHFrame = 0;
+      if (!this.wrapper || !this.wrapper.offsetHeight || !this.node) return;
+      if (this.node.computeSize) {
+        const sz = this.node.computeSize();
+        if (this.node.size && this.node.size[1] !== sz[1]) {
+          this.node.size[1] = sz[1];
+          if (this.node.setDirtyCanvas) this.node.setDirtyCanvas(true, true);
+          else if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
+        }
+      }
+    });
+  },
+
   checkResize() {
     this.syncLayoutToNode(false);
     const viewportWidth = this.viewport.clientWidth;
     const currentScale = this.getRenderScale();
+
+    // 内容高度变化检测：transfer 面板 / gp-mount / 内容行数变化等都会改变
+    // wrapper 实际高度，检测到后重新实测 extra 并同步 node 高度。
+    const contentH = this.wrapper ? this.wrapper.offsetHeight : 0;
+    if (contentH > 0 && (this._lastContentH == null || Math.abs(contentH - this._lastContentH) > 1)) {
+      this._lastContentH = contentH;
+      this._syncNodeHeight();
+    }
 
     if (viewportWidth > 0 && (this._lastWidth !== viewportWidth || this._lastZoom !== this.zoomLevel || this._lastScale !== currentScale)) {
       this._lastWidth = viewportWidth;

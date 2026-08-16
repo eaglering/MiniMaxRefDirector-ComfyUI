@@ -399,6 +399,9 @@ const S = {
     fontSize: "11px", color: "#ccc", fontFamily: "monospace", lineHeight: "1.5",
   },
   defsTipEmpty: { color: "#888" },
+  trBtn: { width: "100%", margin: "1px 0"},
+  refTextarea: { position: "static", minHeight: "120px", height: "auto", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" },
+  refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
 };
 
 // ---------- 全局参数 ----------
@@ -607,6 +610,29 @@ export function TransferPanel({ director }) {
 
   // ---------- 工具 ----------
 
+  // textarea auto-grow：高度跟随内容（scrollHeight），内容变少时先复位再重算。
+  // fill 链路下 textarea 由 flex-grow 拉伸填满容器（拖拽有效）；
+  // 内容超高（scrollHeight > 可见高）时回调外壳增大 prop 区，node 高度由
+  // checkResize 自动跟随，保证完整显示。
+  const autoGrow = (el, grow) => {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+    if (grow && el.scrollHeight > el.clientHeight + 1) {
+      grow(el.scrollHeight - el.clientHeight);
+    }
+  };
+
+  // 内容超高时增大 prop 区（固定 height），textarea 的 flex 分配随之变大
+  const growProp = (px) => {
+    if (!director) return;
+    const target = Math.max(0, (director.propHeight || 0) + Math.ceil(px));
+    director.propHeight = target;
+    if (director.node && director.node.properties) director.node.properties.propHeight = target;
+    if (director.propContainer) director.propContainer.style.height = `${target}px`;
+    if (director._syncNodeHeight) director._syncNodeHeight();
+  };
+
   const wVal = (name) =>
     director?.node?.widgets?.find(w => w.name === name)?.value ??
     director?.node?.properties?.[name];
@@ -627,6 +653,16 @@ export function TransferPanel({ director }) {
   };
 
   // 请求后端 /h3/build_subject_bindings（lib/prompt.py build_h3_subject_bindings）：
+  // textarea auto-grow：内容变化（含外部 _transferSetLeft / 加载 / 切换 segment）后恢复高度计算
+  useEffect(() => {
+    if (!aliveRef.current) return;
+    const raf = requestAnimationFrame(() => {
+      autoGrow(leftRef.current, growProp);
+      autoGrow(rightRef.current, growProp);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [leftText, rightText]);
+
   // 返回 subject_definition / audio_definition / retention_analysis + pictures / audios / videos。
   // 替代前端 buildFirstFramePayload 中的绑定组装；固定只绑定 prompt 中提到的主体。
   const fetchBindings = async () => {
@@ -1233,14 +1269,15 @@ export function TransferPanel({ director }) {
       }
       <div ref=${rowRef} style=${S.row}>
         <div class="pr-prompt-wrapper" style=${leftWidth ? Object.assign({}, S.col, { flex: "0 0 auto", width: leftWidth + "px" }) : S.col}>
-          <div class="pr-prompt-label">Segment Prompt</div>
+          <div class="pr-prompt-label" style=${S.refTextareaLabel}>Segment Prompt</div>
           <textarea
             ref=${leftRef}
-            class="pr-prompt-area pr-prompt-area-left"
+            class="pr-prompt-area ref-prompt-area"
+            style=${Object.assign({}, S.refTextarea, { flex: "1 1 auto" })}
             value=${leftText}
             placeholder="原始 prompt（输入 @ 引用主体）"
             spellcheck=${false}
-            onInput=${(e) => { setLeftText(e.target.value); handleInput(e, "left"); }}
+            onInput=${(e) => { autoGrow(e.target, growProp); setLeftText(e.target.value); handleInput(e, "left"); }}
           ></textarea>
         </div>
         <div
@@ -1258,17 +1295,17 @@ export function TransferPanel({ director }) {
           >→</button>
         </div>
         <div class="pr-prompt-wrapper" style=${S.col}>
-          <div class="pr-prompt-label" style=${{ position: "static", flexShrink: 0, margin: "6px 0 2px 8px" }}>
+          <div class="pr-prompt-label" style=${S.refTextareaLabel}>
             Minimax H3 Prompt
           </div>
           <textarea
             ref=${rightRef}
-            class="pr-prompt-area pr-prompt-area-right"
-            style=${{ position: "static", flex: "1", minHeight: "0", height: "auto", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" }}
+            class="pr-prompt-area ref-prompt-area"
+            style=${Object.assign({}, S.refTextarea, { flex: "1 1 auto" })}
             value=${rightText}
             placeholder="生成结果（输入 @ 或 # 引用主体）"
             spellcheck=${false}
-            onInput=${(e) => { setRightText(e.target.value); handleInput(e, "right"); }}
+            onInput=${(e) => { autoGrow(e.target, growProp); setRightText(e.target.value); handleInput(e, "right"); }}
           ></textarea>
         </div>
       </div>
@@ -1321,13 +1358,14 @@ export function TransferPanel({ director }) {
               ${
                 subjects.length === 0
                   ? html`<div style=${{ padding: "6px 10px", color: "#888", fontSize: "12px" }}>没有可用主体（请先在主体节点中添加）</div>`
-                  : subjects.map(s => html`
+                  : subjects.map(h => html`
                       <button
                         class="pr-btn"
-                        key=${s.name}
+                        style=${S.trBtn}
+                        key=${h.name}
                         onMouseDown=${(e) => e.preventDefault()}
-                        onClick=${() => pickSubject(s)}
-                      >@ ${s.name}</button>
+                        onClick=${() => pickSubject(h)}
+                      >@ ${h.name}</button>
                     `)
               }
             </div>
@@ -1401,79 +1439,6 @@ export function GlobalParamsPanel({ director }) {
                       step=${def.step}
                       value=${gp[def.name]}
                       onInput=${(e) => setGlobal(def.name, parseFloat(e.target.value) || def.fallback)}
-                    />`
-              }
-            </label>
-          `)
-        }
-      </div>
-      <div class="tr-gap-hr"></div>
-    </div>
-  `;
-}
-
-// ---------- Output 配置（逐段生成视频时的采样/编码参数） ----------
-
-const OUTPUT_DEFS = [
-  { name: "sampler_name", label: "Sampler", type: "select",
-    options: ["euler", "euler_ancestral", "heun", "heunpp2", "dpm_2", "dpm_2_ancestral", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "ddim", "uni_pc", "uni_pc_bh2"],
-    fallback: "euler" },
-  { name: "scheduler", label: "Scheduler", type: "select",
-    options: ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform", "beta"],
-    fallback: "beta" },
-  { name: "steps", label: "Steps", type: "number", min: 1, max: 100, step: 1, fallback: 20 },
-  { name: "cfg", label: "CFG", type: "number", min: 0, max: 100, step: 0.1, fallback: 5.5 },
-  { name: "denoise", label: "Denoise", type: "number", min: 0, max: 1, step: 0.01, fallback: 1.0 },
-  { name: "seed", label: "Seed", type: "number", min: 0, max: 999999999999, step: 1, fallback: 0 },
-  { name: "fps", label: "FPS", type: "number", min: 1, max: 240, step: 1, fallback: 24 },
-  { name: "format", label: "Format", type: "select",
-    options: ["video/h264-mp4", "video/h265-mp4", "video/vp9", "video/av1", "video/h264-webm"],
-    fallback: "video/h264-mp4" },
-];
-
-export function OutputPanel({ director }) {
-  // 从 director 节点 widget 读取 Output 配置当前值（与节点真实状态保持一致）
-  const readOut = () => {
-    const val = (name, fb) =>
-      director?.node?.widgets?.find(w => w.name === name)?.value ?? fb;
-    const out = {};
-    for (const def of OUTPUT_DEFS) out[def.name] = val(def.name, def.fallback);
-    return out;
-  };
-  const [out, setOut] = useState(readOut);
-
-  const setOutVal = (name, value) => {
-    const wd = director?.node?.widgets?.find(w => w.name === name);
-    if (wd) {
-      wd.value = value;
-      if (typeof wd.callback === "function") wd.callback(value);
-    }
-    setOut(readOut());
-  };
-
-  return html`
-    <div class="tr-out">
-      <div class="tr-out-head">Output</div>
-      <div class="tr-out-grid">
-        ${
-          OUTPUT_DEFS.map(def => html`
-            <label class="tr-out-item" key=${def.name}>
-              <span class="tr-out-label">${def.label}</span>
-              ${
-                def.type === "select"
-                  ? html`<select
-                      class="tr-out-select"
-                      value=${out[def.name]}
-                      onChange=${(e) => setOutVal(def.name, e.target.value)}
-                    >${def.options.map(o => html`<option value=${o}>${o}</option>`)}</select>`
-                  : html`<input
-                      class="tr-out-input"
-                      type="number"
-                      min=${def.min}
-                      max=${def.max}
-                      step=${def.step}
-                      value=${out[def.name]}
-                      onInput=${(e) => setOutVal(def.name, parseFloat(e.target.value) || def.fallback)}
                     />`
               }
             </label>

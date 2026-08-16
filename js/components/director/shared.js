@@ -112,12 +112,12 @@ const STYLES = `
 .pr-btn.toggle-on:hover:not(:disabled){background:#2a3445;border-color:#3b4b66}
 .pr-btn-danger:hover:not(:disabled){background:#4a1515;border-color:#cc4444;color:#ffaaaa}
 .pr-canvas{background:#2a2a2a;cursor:pointer;width:100%;outline:none;display:block}
-.pr-prop-container{display:flex;flex-direction:column;width:100%;flex-grow:1;min-height:40px}
-.pr-prompt-wrapper{position:relative;width:100%;height:100%;background:#222;border:1px solid #111;border-radius:6px;box-sizing:border-box;transition:border-color 0.2s ease,opacity 0.2s ease;overflow:hidden}
+.pr-prop-container{display:flex;flex-direction:column;width:100%;flex:none;min-height:40px}
+.pr-prompt-wrapper{position:relative;display:flex;flex-direction:column;width:100%;height:auto;min-height:120px;background:#222;border:1px solid #111;border-radius:6px;box-sizing:border-box;transition:border-color 0.2s ease,opacity 0.2s ease;overflow:hidden}
 .pr-prompt-wrapper.focus-active{border-color:#888}
 .pr-wrapper.has-focus .pr-prompt-wrapper:not(.focus-active),.pr-wrapper:has(.pr-prompt-wrapper.focus-active) .pr-prompt-wrapper:not(.focus-active){opacity:0.65}
-.pr-prompt-label{position:absolute;top:5px;left:8px;font-size:9px;font-weight:bold;color:#666;text-transform:uppercase;letter-spacing:0.5px;pointer-events:none;user-select:none;z-index:5}
-.pr-prompt-area{position:absolute;top:20px;left:0;width:100%;height:calc(100% - 20px);background:transparent;color:#e0e0e0;border:none;padding:0 8px 8px 8px;resize:none;font-size:12px;line-height:1.4;box-sizing:border-box;outline:none}
+.pr-prompt-label{position:static;flex-shrink:0;margin:6px 0 2px 8px;font-size:9px;font-weight:bold;color:#666;text-transform:uppercase;letter-spacing:0.5px;pointer-events:none;user-select:none}
+.pr-prompt-area{width:100%;height:auto;min-height:120px;background:transparent;color:#e0e0e0;border:none;padding:4px 8px 8px 8px;resize:none;font-size:12px;line-height:1.4;box-sizing:border-box;outline:none;display:block}
 .pr-prompt-area:focus{border-color:#888}
 .pr-audio-info{width:100%;height:100%;background:#181818;color:#aaa;border:1px solid #111;border-radius:6px;padding:10px;font-size:12px;line-height:1.6;box-sizing:border-box;display:none}
 .pr-audio-info span{color:#fff;font-weight:500}

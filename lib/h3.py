@@ -253,8 +253,30 @@ def _encode_ref_audio(audio_vae, audio):
     return z, z.shape[-1]
 
 
-def generate_segment_video(
-    model,
+def apply_sigma_shift(model, shift_video, shift_audio):
+    """对模型 clone 应用 MiniMax H3 sigma shift（video 驱动采样 sigma，audio 交给 DiT）。
+
+    与 RefGenerateImage 内置逻辑一致；抽出来供 guide 节点复用。
+    """
+    m = model.clone()
+
+    class ModelSamplingAdvanced(comfy.model_sampling.ModelSamplingDiscreteFlow, comfy.model_sampling.CONST):
+        pass
+
+    original = m.get_model_object("model_sampling")
+    model_sampling = ModelSamplingAdvanced(model.model.model_config)
+    model_sampling.set_parameters(shift=shift_video)
+    if hasattr(original, "noise_scale"):
+        model_sampling.set_noise_scale(original.noise_scale)
+    m.add_object_patch("model_sampling", model_sampling)
+
+    to = m.model_options["transformer_options"] = m.model_options.get("transformer_options", {}).copy()
+    to["minimax_h3_sigma_shift_video"] = shift_video
+    to["minimax_h3_sigma_shift_audio"] = shift_audio
+    return m
+
+
+def build_segment_conditioning(
     clip,
     video_vae,
     audio_vae,
@@ -265,24 +287,20 @@ def generate_segment_video(
     pictures=None,
     videos=None,
     audios=None,
-    seed=0,
-    steps=20,
-    cfg=5.5,
-    sampler_name="euler",
-    scheduler="beta",
-    denoise=1.0,
-    shift_video=12.0,
-    shift_audio=3.0,
+    negative_prompt="",
 ):
-    """参考生成视频：图/视频/音频 refs 全部传入模型，采样一段视频，返回帧序列 [N,H,W,C]。
+    """构建 H3 参考视频条件编码：图/视频/音频 refs 全部编码进条件与 latent。
+
+    返回 (cond, neg_cond, latent, frame_count)。供 guide 节点复用，输出
+    positive/negative/latent 让用户自己接 KSampler 等节点完成采样。
 
     bind 数据（build_h3_subject_bindings 产出）中 pictures/videos/audios 均为
     [{label, src}]，src 为文件路径。
     """
-    if model is None:
-        raise ValueError("generate_segment_video needs a model to sample")
+    if clip is None:
+        raise ValueError("build_segment_conditioning needs a clip to encode the prompt")
     if video_vae is None:
-        raise ValueError("generate_segment_video needs a video vae to decode the latent")
+        raise ValueError("build_segment_conditioning needs a video vae")
 
     latent, frame_count = _empty_av_latent(width, height, length)
 
@@ -350,7 +368,7 @@ def generate_segment_video(
         if not src:
             continue
         if audio_vae is None:
-            raise ValueError("generate_segment_video needs audio_vae when reference audios are provided")
+            raise ValueError("build_segment_conditioning needs audio_vae when reference audios are provided")
         audio = _load_wav_audio(src)
         audio_latent, ref_audio_t = _encode_ref_audio(audio_vae, audio)
         ref_items.append({"type": "audio"})
@@ -362,26 +380,49 @@ def generate_segment_video(
     if ref_blocks:
         cond = node_helpers.conditioning_set_values(cond, {"minimax_refs": ref_blocks})
 
-    # negative conditioning：空文本
-    neg_tokens = clip.tokenize("")
+    # negative conditioning
+    neg_tokens = clip.tokenize(negative_prompt)
     neg_cond = clip.encode_from_tokens_scheduled(neg_tokens)
 
-    # sigma shift（与 RefGenerateImage 相同：video 驱动采样 sigma，audio 交给 DiT）
-    m = model.clone()
+    return cond, neg_cond, latent, frame_count
 
-    class ModelSamplingAdvanced(comfy.model_sampling.ModelSamplingDiscreteFlow, comfy.model_sampling.CONST):
-        pass
 
-    original = m.get_model_object("model_sampling")
-    model_sampling = ModelSamplingAdvanced(model.model.model_config)
-    model_sampling.set_parameters(shift=shift_video)
-    if hasattr(original, "noise_scale"):
-        model_sampling.set_noise_scale(original.noise_scale)
-    m.add_object_patch("model_sampling", model_sampling)
+def generate_segment_video(
+    model,
+    clip,
+    video_vae,
+    audio_vae,
+    prompt,
+    width,
+    height,
+    length,
+    pictures=None,
+    videos=None,
+    audios=None,
+    seed=0,
+    steps=20,
+    cfg=5.5,
+    sampler_name="euler",
+    scheduler="beta",
+    denoise=1.0,
+    shift_video=12.0,
+    shift_audio=3.0,
+    negative_prompt="",
+):
+    """参考生成视频：构建条件 → sigma shift → 采样 → 解码，返回帧序列 [N,H,W,C]。
 
-    to = m.model_options["transformer_options"] = m.model_options.get("transformer_options", {}).copy()
-    to["minimax_h3_sigma_shift_video"] = shift_video
-    to["minimax_h3_sigma_shift_audio"] = shift_audio
+    bind 数据（build_h3_subject_bindings 产出）中 pictures/videos/audios 均为
+    [{label, src}]，src 为文件路径。
+    """
+    if model is None:
+        raise ValueError("generate_segment_video needs a model to sample")
+
+    cond, neg_cond, latent, frame_count = build_segment_conditioning(
+        clip, video_vae, audio_vae, prompt, width, height, length,
+        pictures, videos, audios, negative_prompt,
+    )
+
+    m = apply_sigma_shift(model, shift_video, shift_audio)
 
     # KSampler 采样 → VAEDecode → 帧序列
     samples = nodes.KSampler().sample(
