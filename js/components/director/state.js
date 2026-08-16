@@ -281,6 +281,9 @@ export const state = {
     if (this.mainTrackLabel) {
       this.mainTrackLabel.style.height = `${this.blockHeight}px`;
       this.audioTrackLabel.style.height = `${this.audioTrackHeight}px`;
+      if (this.videoTrackLabel) {
+        this.videoTrackLabel.style.height = `${this.videoTrackHeight}px`;
+      }
     }
   }
 };

@@ -1412,6 +1412,79 @@ export function GlobalParamsPanel({ director }) {
   `;
 }
 
+// ---------- Output 配置（逐段生成视频时的采样/编码参数） ----------
+
+const OUTPUT_DEFS = [
+  { name: "sampler_name", label: "Sampler", type: "select",
+    options: ["euler", "euler_ancestral", "heun", "heunpp2", "dpm_2", "dpm_2_ancestral", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "ddim", "uni_pc", "uni_pc_bh2"],
+    fallback: "euler" },
+  { name: "scheduler", label: "Scheduler", type: "select",
+    options: ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform", "beta"],
+    fallback: "beta" },
+  { name: "steps", label: "Steps", type: "number", min: 1, max: 100, step: 1, fallback: 20 },
+  { name: "cfg", label: "CFG", type: "number", min: 0, max: 100, step: 0.1, fallback: 5.5 },
+  { name: "denoise", label: "Denoise", type: "number", min: 0, max: 1, step: 0.01, fallback: 1.0 },
+  { name: "seed", label: "Seed", type: "number", min: 0, max: 999999999999, step: 1, fallback: 0 },
+  { name: "fps", label: "FPS", type: "number", min: 1, max: 240, step: 1, fallback: 24 },
+  { name: "format", label: "Format", type: "select",
+    options: ["video/h264-mp4", "video/h265-mp4", "video/vp9", "video/av1", "video/h264-webm"],
+    fallback: "video/h264-mp4" },
+];
+
+export function OutputPanel({ director }) {
+  // 从 director 节点 widget 读取 Output 配置当前值（与节点真实状态保持一致）
+  const readOut = () => {
+    const val = (name, fb) =>
+      director?.node?.widgets?.find(w => w.name === name)?.value ?? fb;
+    const out = {};
+    for (const def of OUTPUT_DEFS) out[def.name] = val(def.name, def.fallback);
+    return out;
+  };
+  const [out, setOut] = useState(readOut);
+
+  const setOutVal = (name, value) => {
+    const wd = director?.node?.widgets?.find(w => w.name === name);
+    if (wd) {
+      wd.value = value;
+      if (typeof wd.callback === "function") wd.callback(value);
+    }
+    setOut(readOut());
+  };
+
+  return html`
+    <div class="tr-out">
+      <div class="tr-out-head">Output</div>
+      <div class="tr-out-grid">
+        ${
+          OUTPUT_DEFS.map(def => html`
+            <label class="tr-out-item" key=${def.name}>
+              <span class="tr-out-label">${def.label}</span>
+              ${
+                def.type === "select"
+                  ? html`<select
+                      class="tr-out-select"
+                      value=${out[def.name]}
+                      onChange=${(e) => setOutVal(def.name, e.target.value)}
+                    >${def.options.map(o => html`<option value=${o}>${o}</option>`)}</select>`
+                  : html`<input
+                      class="tr-out-input"
+                      type="number"
+                      min=${def.min}
+                      max=${def.max}
+                      step=${def.step}
+                      value=${out[def.name]}
+                      onInput=${(e) => setOutVal(def.name, parseFloat(e.target.value) || def.fallback)}
+                    />`
+              }
+            </label>
+          `)
+        }
+      </div>
+      <div class="tr-gap-hr"></div>
+    </div>
+  `;
+}
+
 // ---------- 挂载辅助 ----------
 
 export function mountTransfer(director, container) {

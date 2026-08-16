@@ -4,7 +4,7 @@
 // 大量实例方法按功能拆分到 js/components/director/ 下的 mixin 模块，
 // 通过 Object.assign 合并到 TimelineEditor.prototype。
 // ============================================================
-import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, CANVAS_HEIGHT, HIDDEN_WIDGET_NAMES, RULER_HEIGHT, app, clamp, hideWidget, parseInitial } from "./components/director/shared.js";
+import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, CANVAS_HEIGHT, HIDDEN_WIDGET_NAMES, RULER_HEIGHT, VIDEO_TRACK_HEIGHT, app, clamp, hideWidget, parseInitial } from "./components/director/shared.js";
 import { state } from "./components/director/state.js";
 import { media } from "./components/director/media.js";
 import { dom } from "./components/director/dom.js";
@@ -26,6 +26,7 @@ class TimelineEditor {
     this.rulerHeight = RULER_HEIGHT;
     this.blockHeight = BLOCK_HEIGHT;
     this.audioTrackHeight = AUDIO_TRACK_HEIGHT;
+    this.videoTrackHeight = VIDEO_TRACK_HEIGHT;
     this.canvasHeight = CANVAS_HEIGHT;
 
     // Core data

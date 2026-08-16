@@ -104,6 +104,35 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "million_pixels", default=0.6, min=0.1, max=4.0, step=0.1, optional=True,
                     tooltip="Million pixels target. 1.0 MP ≈ 1024×1024.",
                 ),
+                # --- Output 配置（点击 Run 时逐段生成视频用） ---
+                io.Combo.Input(
+                    "sampler_name",
+                    options=["euler", "euler_ancestral", "heun", "heunpp2", "dpm_2", "dpm_2_ancestral", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral", "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu", "ddim", "uni_pc", "uni_pc_bh2"],
+                    default="euler", optional=True,
+                    tooltip="Sampler for per-segment video generation.",
+                ),
+                io.Combo.Input(
+                    "scheduler",
+                    options=["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform", "beta"],
+                    default="beta", optional=True,
+                    tooltip="Scheduler for per-segment video generation.",
+                ),
+                io.Int.Input("steps", default=20, min=1, max=100, step=1, optional=True,
+                             tooltip="Sampling steps per segment."),
+                io.Float.Input("cfg", default=5.5, min=0.0, max=100.0, step=0.1, optional=True,
+                               tooltip="Classifier-free guidance scale."),
+                io.Float.Input("denoise", default=1.0, min=0.0, max=1.0, step=0.01, optional=True,
+                               tooltip="Denoise strength (1.0 = full sample)."),
+                io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, step=1, optional=True,
+                             tooltip="Random seed for video sampling."),
+                io.Int.Input("fps", default=24, min=1, max=240, step=1, optional=True,
+                             tooltip="Video encode frames per second."),
+                io.Combo.Input(
+                    "format",
+                    options=["video/h264-mp4", "video/h265-mp4", "video/vp9", "video/av1", "video/h264-webm"],
+                    default="video/h264-mp4", optional=True,
+                    tooltip="Video container/codec for encoded segment files.",
+                ),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
@@ -119,7 +148,9 @@ class MiniMaxRefDirector(io.ComfyNode):
                 start_second=0.0, end_second=5.0, duration_seconds=5.0, 
                 start_frame=0, end_frame=120, duration_frames=120, timeline_data="", 
                 local_prompts="", segment_lengths="", frame_rate=24, 
-                display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
+                display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6,
+                sampler_name="euler", scheduler="beta", steps=20, cfg=5.5, denoise=1.0,
+                seed=0, fps=24, format="video/h264-mp4") -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
         # config 是可选输入：前端首帧 subgraph 中 director 不连接 config，需容错
         global_prompt = config.get("global_prompt", "") if config else ""
@@ -255,6 +286,58 @@ class MiniMaxRefDirector(io.ComfyNode):
             f"{out_w}×{out_h} ({outpu_resolution}, {million_pixels}MP) | "
             f"{len(subject)} subjects"
         )
+
+        # --- 逐段生成视频（串行；仅当 model/clip/video_vae 全部可用时执行） ---
+        # 失败直接抛出 → 终止整个 execute（整个队列报错），符合既定策略
+        if model is not None and clip is not None and video_vae is not None:
+            from .lib import video as video_lib
+            from .lib.h3 import generate_segment_video
+            try:
+                from server import PromptServer
+            except ImportError:
+                from comfy_api.latest import server as _comfy_server
+                PromptServer = _comfy_server.PromptServer
+
+            total = len(guide_timeline)
+            video_files = []
+            for i, entry in enumerate(guide_timeline):
+                seg_no = i + 1
+                log.info(
+                    f"[MiniMaxRefDirector] generating segment {seg_no}/{total} "
+                    f"({entry['duration_frames']} frames)"
+                )
+                frames = generate_segment_video(
+                    model=model,
+                    clip=clip,
+                    video_vae=video_vae,
+                    audio_vae=audio_vae,
+                    prompt=entry.get("h3_prompt") or entry.get("prompt", ""),
+                    width=out_w,
+                    height=out_h,
+                    length=entry["duration_frames"],
+                    pictures=entry.get("pictures", []),
+                    videos=entry.get("videos", []),
+                    audios=entry.get("audios", []),
+                    seed=seed,
+                    steps=steps,
+                    cfg=cfg,
+                    sampler_name=sampler_name,
+                    scheduler=scheduler,
+                    denoise=denoise,
+                )
+                saved = video_lib.encode_video_frames(
+                    frames,
+                    fps=fps,
+                    filename_prefix=f"minimaxrefdirector/video/seg{seg_no:02d}",
+                    format=format,
+                )
+                entry["video_file"] = saved
+                video_files.append(saved)
+                PromptServer.instance.send_sync(
+                    "minimax_ref_video_progress",
+                    {"seg_no": seg_no, "total": total, "status": "done", **saved},
+                )
+            guide_data["video_files"] = video_files
 
         return io.NodeOutput(
             model=model,

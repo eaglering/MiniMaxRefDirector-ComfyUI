@@ -426,6 +426,95 @@ def ffmpeg_replace_audio(
     return True
 
 
+def _next_video_filename(folder: str, prefix: str, ext: str) -> str:
+    """Pick the next free video filename in folder, e.g. prefix_00000.mp4."""
+    n = 0
+    while True:
+        name = f"{prefix}_{n:05d}.{ext}"
+        if not os.path.exists(os.path.join(folder, name)):
+            return name
+        n += 1
+
+
+def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
+    """Local fallback: encode a [B,H,W,C] float frame batch to a video file with ffmpeg."""
+    import folder_paths
+    from PIL import Image
+
+    fmt_map = {
+        "video/h264-mp4": ("libx264", "mp4"),
+        "video/h265-mp4": ("libx265", "mp4"),
+        "video/vp9": ("libvpx-vp9", "webm"),
+        "video/av1": ("libaom-av1", "webm"),
+        "video/h264-webm": ("libx264", "webm"),
+    }
+    codec, ext = fmt_map.get(format, ("libx264", "mp4"))
+
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found; install ffmpeg or VideoHelperSuite to encode videos")
+
+    out_dir = folder_paths.get_output_directory()
+    subfolder = os.path.dirname(os.path.normpath(filename_prefix))
+    full_out_dir = os.path.join(out_dir, subfolder)
+    os.makedirs(full_out_dir, exist_ok=True)
+    prefix = os.path.basename(os.path.normpath(filename_prefix))
+    filename = _next_video_filename(full_out_dir, prefix, ext)
+    full_out = os.path.join(full_out_dir, filename)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(frames.shape[0]):
+            frame = frames[i]
+            if frame.ndim == 4:  # [1,H,W,C] -> [H,W,C]
+                frame = frame[0]
+            img = Image.fromarray((frame.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy()))
+            img.save(os.path.join(tmpdir, f"frame_{i:05d}.png"))
+        cmd = [
+            ffmpeg, "-y", "-framerate", str(fps),
+            "-i", os.path.join(tmpdir, "frame_%05d.png"),
+            "-c:v", codec, "-pix_fmt", "yuv420p", full_out,
+        ]
+        res = subprocess.run(cmd, capture_output=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"ffmpeg encode failed: {res.stderr.decode(errors='replace')[:2000]}")
+
+    return {"filename": filename, "subfolder": subfolder, "type": "output"}
+
+
+def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
+    """Encode a [B,H,W,C] float frame batch into a video file.
+
+    Returns {"filename", "subfolder", "type"} suitable for send_sync / /view.
+    Uses VideoHelperSuite when installed (soft dependency), otherwise falls back
+    to local ffmpeg (lib.video._encode_video_frames_ffmpeg).
+    """
+    try:
+        from videohelpersuite.videohelpersuite.nodes import VideoCombine
+    except ImportError:
+        VideoCombine = None
+
+    if VideoCombine is not None:
+        try:
+            vc = VideoCombine()
+            out = vc.combine_video(
+                frame_rate=float(fps),
+                loop_count=1,
+                images=frames,
+                format=format,
+                filename_prefix=filename_prefix,
+            )
+            preview = out["ui"]["gifs"][0]
+            return {
+                "filename": preview["filename"],
+                "subfolder": preview.get("subfolder", ""),
+                "type": preview.get("type", "output"),
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("VideoCombine encode failed, falling back to local ffmpeg: %s", exc)
+
+    return _encode_video_frames_ffmpeg(frames, fps, filename_prefix, format)
+
+
 def _load_wav_audio(path: str) -> dict:
     try:
         import soundfile as sf  # type: ignore[import]
