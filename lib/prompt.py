@@ -233,7 +233,7 @@ def build_h3_subject_bindings(
         subject_definitions.append(f"<Subject {index}> {description}")
         retention_analysis.append(f"<Subject {index}>: {relationship}")
         images.append(image_file)
-        subject_definitions.append(f"<Audio {index}> is the voice-timbre reference for <Subject {subject_counter}>")
+        subject_definitions.append(f"<Audio {index}> is the voice-timbre reference for <Subject {index}>")
         text = _AUDIO_RELATION_TEXT.get(relationship, _AUDIO_RELATION_TEXT["reference"])
         retention_analysis.append(
             f"<Audio {index}>: {relationship} - {text.format(n=index)}"
