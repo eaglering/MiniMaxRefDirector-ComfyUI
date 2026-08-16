@@ -311,13 +311,14 @@ def build_h3_subject_bindings(
 
     return {
         "subjects": subjects_out,
-        "subject_definition": "\n".join(subject_definitions),
+        "subject_definitions": "\n".join(subject_definitions),
         "retention_analysis": "\n".join(retention_analysis),
-        "detailed_description": prompt_json.get("detailed_description"), 
-        "overall_soundscape": prompt_json.get("overall_soundscape"),
-        "non_diegetic_music": prompt_json.get("non_diegetic_music"),
+        "detailed_description": prompt_json.get("detailed_description", ""), 
+        "overall_soundscape": prompt_json.get("overall_soundscape", ""),
+        "non_diegetic_music": prompt_json.get("non_diegetic_music", ""),
         "unmatched_mentions": unmatched,
         "images": images,
         "audios": audios,
         "videos": videos,
+        "mapping": mapping,
     }

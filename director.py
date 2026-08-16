@@ -154,14 +154,9 @@ class MiniMaxRefDirector(io.ComfyNode):
         # --- Build timeline_data array for guide_data ---
         guide_timeline = []
         segment_count = 0
-        prev_prompt = ""
+        timeline_data_len = len(timeline_segments)
 
-        # 全局尾帧（最后一个有图 segment，与前端 buildFirstFramePayload 一致）；
-        # 首帧图不再作为 shot1 首帧锚点（图片改为与提示词合并进 detailed_description）
-        img_segs = [s for s in timeline_segments if s.get("imageFile", "")]
-        last_frame_path = img_segs[-1].get("imageFile", "") if img_segs else ""
-
-        if len(timeline_segments) == 0:
+        if timeline_data_len == 0:
             timeline_segments = [{
                 "length": duration_frames,
                 "start": 0,
@@ -169,7 +164,7 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "imageFile": "",
             }]
         
-        for seg in timeline_segments:
+        for i, seg in enumerate(timeline_segments):
             dur = int(seg.get("length", 1))
             seg_start_frames = int(seg.get("start", 0))
             seg_end_frames = seg_start_frames + dur
@@ -182,59 +177,36 @@ class MiniMaxRefDirector(io.ComfyNode):
             dur = seg_end_frames - seg_start_frames
             if dur <= 0:
                 continue
-            first_frame = seg.get("imageFile", "") if seg.get("type", "text") == "image" else ""
-            prompt = seg.get("prompt", "").replace("@", "")
+            h3_prompt_json = seg.get("h3PromptJson", "")
+            prompt_json = cls._transfer_prompt_json(h3_prompt_json, global_prompt=global_prompt, mapping=mapping)
+            last_frame_path = ""
+            if i + 1 < timeline_data_len and seg.get("autoEndFrame", False):
+                last_frame_path = timeline_segments[i + 1].get("imageFile", "")
+            prompt_res = build_h3_subject_bindings(subject_data=subject, prompt_json=prompt_json,
+                                               last_frame_path=last_frame_path, timeline_segment=seg)
+            mapping = prompt_res.get("mapping", {})
+            subject_definitions = prompt_res.get("subject_definitions", "")
+            retention_analysis = prompt_res.get("retention_analysis", "")
+            detailed_description = prompt_res.get("detailed_description", "")
+            overall_soundscape = prompt_res.get("overall_soundscape", "") if prompt_res.get("detailed_description", "") else "N/A"
+            non_diegetic_music = prompt_res.get("non_diegetic_music", "") if prompt_res.get("detailed_description", "") else "N/A"
+            prompt = "subject_definitions:\n" + subject_definitions + "\n"
+            prompt += "retention_analysis:\n" + retention_analysis + "\n"
+            prompt += "detailed_description:\n" + detailed_description + "\n"
+            prompt += "overall_soundscape:\n" + overall_soundscape + "\n"
+            prompt += "non_diegetic_music:\n" + non_diegetic_music
             entry = {
                 "prompt": prompt,
-                "first_frame": first_frame,
+                "subjects": seg.get("subjects", ""),
+                "images": seg.get("images", []),
+                "audios": seg.get("audios", []),
+                "videos": seg.get("videos", []),
                 "duration_frames": dur,
+                "type": seg.get("type", "text"),
+                "imageFile": seg.get("imageFile", ""),
+                "motionContext": seg.get("motionContext", False)
             }
-            # 右侧 H3 prompt JSON（per-segment 持久化）：重建与前端 buildFirstFramePayload
-            # 等价的 prompt（subject_definitions + retention_analysis + detailed_description
-            # + overall_soundscape + non_diegetic_music）与媒体列表（pictures / audios / videos），
-            prompt_json = seg.get("h3PromptJson")
-            if isinstance(prompt_json, str):
-                try:
-                    prompt_json = json.loads(prompt_json)
-                except (json.JSONDecodeError, TypeError):
-                    prompt_json = None
-            if isinstance(prompt_json, dict) and prompt_json:
-                try:
-                    bind = build_h3_subject_bindings(
-                        subject_data, prompt_json,
-                        last_frame_path=last_frame_path,
-                        timeline_segment=seg,
-                    )
-                except Exception:
-                    log.warning("[MiniMaxRefDirector] build_h3_subject_bindings failed", exc_info=True)
-                    bind = None
-                if bind:
-                    entry["prompt_json"] = prompt_json
-                    entry["subject_definition"] = bind.get("subject_definition", "")
-                    entry["retention_analysis"] = bind.get("retention_analysis", "")
-                    entry["pictures"] = [
-                        {"label": f"<Picture {i}>", "src": p} for i, p in enumerate(bind.get("images", []) or [], 1)
-                    ]
-                    entry["audios"] = [
-                        {"label": f"<Audio {i}>", "src": a} for i, a in enumerate(bind.get("audios", []) or [], 1)
-                    ]
-                    entry["videos"] = [
-                        {"label": f"<Video {i}>", "src": v} for i, v in enumerate(bind.get("videos", []) or [], 1)
-                    ]
-                    subject_defs = bind.get("subject_definition", "")
-                    parts = []
-                    if subject_defs:
-                        parts.append(subject_defs)
-                    if bind.get("retention_analysis"):
-                        parts.append(bind["retention_analysis"])
-                    for field in ("detailed_description", "overall_soundscape", "non_diegetic_music"):
-                        val = prompt_json.get(field)
-                        if isinstance(val, str) and val.strip():
-                            parts.append(f"{field}:\n{val}")
-                    if parts:
-                        entry["h3_prompt"] = "\n\n".join(parts)
             guide_timeline.append(entry)
-            prev_prompt = prompt
             segment_count += 1
 
         # --- Resolve output resolution ---
@@ -248,23 +220,49 @@ class MiniMaxRefDirector(io.ComfyNode):
             "global_prompt": global_prompt,
             "subject_data": subject,
             "timeline_data": guide_timeline,
-            # Easy-Use forLoopStart 的 num_loops 建议取 seg_count：
-            # 循环执行 0..len(timeline) 共 len+1 轮，最后一轮 guide_index 越界，
-            # MiniMaxRefGuide 发送 exception 通知并结束循环。
             "seg_count": len(guide_timeline) + 1,
         }
 
         log.info(
             f"[MiniMaxRefDirector] {segment_count} segments | timeline: {timeline_data} "
             f"{out_w}×{out_h} ({outpu_resolution}, {million_pixels}MP) | "
-            f"{len(subject)} subjects"
+            f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
         )
 
-        # --- 视频生成已迁移到 MiniMaxRefGuide 节点 ---
-        # 将 director 输出的 guide_data 接入 Easy-Use forLoop，循环内由
-        # MiniMaxRefGuide 按 guide_index 逐段构建条件并生成视频。
-
         return io.NodeOutput(guide_data=guide_data, segment_count=segment_count+1)
+
+    @classmethod
+    def _transfer_prompt_json(cls, h3_prompt_json: str, global_prompt: str, mapping: dict) -> list:
+        for k, v in mapping.items():
+            h3_prompt_json = h3_prompt_json.replace(k, v)
+        lines = h3_prompt_json.split("\n")
+        prompt_json = {
+            "detailed_description": "",
+            "overall_soundscape": "",
+            "non_diegetic_music": ""
+        }
+        section = "detail"
+        detail_lines = []
+        for line in lines:
+            if line.startswith("detailed_description:"):
+                section = "detail"
+                continue
+            if line.startswith("overall_soundscape:"):
+                section = "overall"
+                continue
+            if line.startswith("non_diegetic_music:"):
+                section = "music"
+                continue
+            if section == "detail":
+                detail_lines.append(line)
+            elif section == "overall":
+                if line.strip() != "" and line.strip() != "N/A":
+                    prompt_json["overall_soundscape"] = line
+            elif section == "music":
+                if line.strip() != "" and line.strip() != "N/A":
+                    prompt_json["non_diegetic_music"] = line
+        prompt_json["detailed_description"] = global_prompt + "\n" + "\n".join(detail_lines)
+        return prompt_json
 
 NODE_CLASS_MAPPINGS = {
     "MiniMaxRefDirector": MiniMaxRefDirector,

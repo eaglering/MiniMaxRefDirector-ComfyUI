@@ -451,12 +451,7 @@ function parsePromptText(text) {
     if (line.startsWith("overall_soundscape:")) { section = "overall"; continue; }
     if (line.startsWith("non_diegetic_music:")) { section = "music"; continue; }
     if (section === "detail") {
-      const m = line.match(/^\[Shot\s*(\d+)\](.*)$/);
-      if (m) {
-        obj["shot" + m[1] + "_description"] = m[2];
-      } else {
-        detailLines.push(line);
-      }
+      detailLines.push(line);
     } else if (section === "overall") {
       if (line.trim() !== "" && line.trim() !== "N/A") obj.overall_soundscape = line;
     } else if (section === "music") {

@@ -204,15 +204,26 @@ class MiniMaxRefGuide(io.ComfyNode):
         if entry.get("is_end_frame"):
             log.info(f"[MiniMaxRefGuide] guide_index={idx} is an END frame -> skip iteration")
             return io.NodeOutput(*([ExecutionBlocker(None)] * 2))
-
-        prompt = entry.get("h3_prompt") or entry.get("prompt") or ""
+        """
+                        "prompt": prompt,
+                "subjects": seg.get("subjects", ""),
+                "images": seg.get("images", []),
+                "audios": seg.get("audios", []),
+                "videos": seg.get("videos", []),
+                "duration_frames": dur,
+                "type": seg.get("type", "text"),
+                "imageFile": seg.get("imageFile", ""),
+                "autoEndFrame": seg.get("autoEndFrame", False),
+                "motionContext": seg.get("motionContext", False)
+                """
+        prompt = entry.get("prompt", "")
         width = int(guide_data.get("width", 1024))
         height = int(guide_data.get("height", 576))
         length = int(entry.get("duration_frames", 0))
         if length <= 0:
             raise ValueError(f"[MiniMaxRefGuide] segment {idx} has invalid duration_frames={length}.")
 
-        pictures = entry.get("pictures") or []
+        images = entry.get("images") or []
         videos = entry.get("videos") or []
         audios = entry.get("audios") or []
 
@@ -226,9 +237,13 @@ class MiniMaxRefGuide(io.ComfyNode):
         if video_vae is None:
             raise ValueError("[MiniMaxRefGuide] needs a VIDEO_VAE input to prepare the latent.")
 
+        if entry.get("type") == "image" and entry.get("imageFile"):
+            #将图片做成8帧视频
+        # 使用motion context 处理
+            return io.NodeOutput(None, None)
         cond, _neg_cond, latent, _frame_count = h3lib.build_segment_conditioning(
             clip, video_vae, audio_vae, prompt, width, height, length,
-            pictures, videos, audios,
+            images, videos, audios,
         )
 
         return io.NodeOutput(cond, latent)
