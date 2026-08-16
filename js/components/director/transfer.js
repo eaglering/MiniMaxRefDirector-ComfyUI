@@ -45,19 +45,43 @@ function getSubjectsFromGraph() {
   return [];
 }
 
+// 优先读取 subject.js 实时发布的全局缓存（window.__refSubjects，随每次保存更新，
+// 新增/改名/删主体后立即可用），无缓存时兜底从 graph widget 解析。
+function getSubjectsLatest() {
+  try {
+    const cached = window.__refSubjects;
+    if (Array.isArray(cached) && cached.length) return cached;
+  } catch (e) {
+    console.warn("[Transfer] getSubjectsLatest failed:", e);
+  }
+  return getSubjectsFromGraph();
+}
+
 function getSubjectVlmSettings() {
   // 从 graph 中的 MiniMaxRefSubject 节点读取 vlm_mode / gguf_name / mmproj_path /
   // provider / api_key widget 值（director 节点自身无这些 widget，配置在 subject 上）
+  // vlm_mode 是 DynamicCombo，ComfyUI 前端有三种形态，这里全部兼容：
+  //   1) 主 widget 值为对象 {vlm_mode, gguf_name, ...}（后端合并格式）
+  //   2) 主 widget 值为字符串 + 子 widget 名带前缀 vlm_mode.gguf_name（LiteGraph 新格式）
+  //   3) 主 widget 值为字符串 + 子 widget 裸名 gguf_name（旧格式）
   try {
     const nodes = app.graph?._nodes || [];
     for (const n of nodes) {
       if (n.type !== "MiniMaxRefSubject") continue;
       const widgets = n.widgets || [];
       const findW = (name) => widgets.find((x) => x.name === name);
+      // 依次尝试多个候选 widget 名，返回第一个存在的值
+      const findAny = (...names) => {
+        for (const nm of names) {
+          const w = findW(nm);
+          if (w) return w.value;
+        }
+        return undefined;
+      };
       const clean = (s) => (s === "None" ? "" : s || "");
       const v = findW("vlm_mode")?.value;
       const out = { vlm_mode: "api", gguf_name: "", mmproj_path: "", provider: "GLM", api_key: "" };
-      if (v && typeof v === "object") {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
         out.vlm_mode = v.vlm_mode || out.vlm_mode;
         out.gguf_name = clean(v.gguf_name);
         out.mmproj_path = clean(v.mmproj_path);
@@ -65,10 +89,21 @@ function getSubjectVlmSettings() {
         out.api_key = clean(v.api_key);
       } else {
         out.vlm_mode = v || out.vlm_mode;
-        out.gguf_name = clean(findW("gguf_name")?.value);
-        out.mmproj_path = clean(findW("mmproj_path")?.value);
-        out.provider = findW("provider")?.value || out.provider;
-        out.api_key = clean(findW("api_key")?.value);
+        out.gguf_name = clean(findAny("vlm_mode.gguf_name", "gguf_name"));
+        out.mmproj_path = clean(findAny("vlm_mode.mmproj_path", "mmproj_path"));
+        out.provider = findAny("vlm_mode.provider", "provider") || out.provider;
+        out.api_key = clean(findAny("vlm_mode.api_key", "api_key"));
+      }
+      // 主 widget 缺失或为空时，从子 widget 推断模式
+      if (out.vlm_mode === "api") {
+        const hasGguf =
+          findW("vlm_mode.gguf_name") || findW("gguf_name") ||
+          findW("vlm_mode.mmproj_path") || findW("mmproj_path");
+        if (hasGguf) out.vlm_mode = "llama-cpp";
+      }
+      if (!findW("vlm_mode") && !findW("vlm_mode.gguf_name") && !findW("vlm_mode.provider") && !findW("gguf_name") && !findW("provider")) {
+        console.warn("[Transfer] getSubjectVlmSettings: 未找到 vlm 相关 widget，当前 widget 列表:",
+          widgets.map((w) => `${w.name}(${w.type})`).join(", "));
       }
       return out;
     }
@@ -84,6 +119,182 @@ function subjectImgSrc(s) {
     return viewUrl(s.imageFile, "minimaxrefdirector");
   }
   return "";
+}
+
+// ---------- 主体定义 / 音频定义 / retention_analysis ----------
+// 与 lib/prompt.py build_h3_subject_bindings 保持一致（前端版），
+// 供 .tr-resources 信息图标 hover 展示。
+const H3_TYPES_LIST = ["Subject", "Picture", "Video", "Audio"];
+const VISUAL_RELATIONS_LIST = ["fully_preserved", "partially_preserved", "attribute_transfer", "weak_reference"];
+const AUDIO_RELATIONS_LIST = ["fully_copy", "partially_copy", "reference", "weak_reference"];
+const AUDIO_RELATION_TEXT = {
+  fully_copy: "<Audio {n}> is reused 1:1 as the target video's complete final audio track.",
+  partially_copy: "Only part of the timeline or selected audio layers of <Audio {n}> are copied.",
+  reference: "the target speaker follows <Audio {n}>'s voice timbre and measured delivery without copying the original signal.",
+  weak_reference: "Only broad similarity in category or atmosphere from <Audio {n}> is retained.",
+};
+
+// 从 H3 prompt 文本提取 <@name> / <#name:dialogue> 提及
+function extractH3Mentions(text) {
+  const names = new Set();
+  const dialogues = new Set();
+  const nameRe = /<@([^>]+)>/g;
+  const diaRe = /<#([^>:]+):/g;
+  let m;
+  while ((m = nameRe.exec(text || ""))) {
+    const n = m[1].trim();
+    if (n) names.add(n);
+  }
+  while ((m = diaRe.exec(text || ""))) {
+    const n = m[1].trim();
+    if (n) dialogues.add(n);
+  }
+  return { names, dialogues };
+}
+
+// 参考 lib/prompt.py build_h3_subject_bindings：
+// 返回 { subject_definition, audio_definition, retention_analysis,
+//        pictures, audios, videos }（后三者按 <… N> 编号排序，含 label + src）
+function buildSubjectBindings(text, subjectsList, dir) {
+  const { names, dialogues } = extractH3Mentions(text);
+  const bound = [];
+  let subjectCounter = 0;
+  let pictureCounter = 0;
+  let audioCounter = 0;
+
+  const pictures = []; // { label: "<Picture N>", src }
+  const audios = [];   // { label: "<Audio N>", src }
+  const videos = [];   // { label: "<Video N>", src }
+
+  for (const s of subjectsList || []) {
+    const name = String(s.name || "").trim();
+    if (!name) continue;
+    let stype = String(s.type || "").trim();
+    if (!H3_TYPES_LIST.includes(stype)) stype = "Subject";
+    let relationship = String(s.relationship || "").trim();
+    if (!VISUAL_RELATIONS_LIST.includes(relationship)) relationship = "fully_preserved";
+    let audioRelationship = String(s.audio_relationship || "").trim();
+    if (!AUDIO_RELATIONS_LIST.includes(audioRelationship)) audioRelationship = "reference";
+
+    const description = String(s.description || "").trim();
+    const imageFile = String(s.imageFile || "").trim();
+    const audioFile = String(s.audioFile || "").trim();
+    const videoFile = String(s.videoFile || "").trim();
+    const useAudio = !!audioFile;
+
+    let label;
+    let definition;
+    if (stype === "Subject") {
+      subjectCounter += 1;
+      label = `<Subject ${subjectCounter}>`;
+      let source = "";
+      if (imageFile) {
+        pictureCounter += 1;
+        const picLabel = `<Picture ${pictureCounter}>`;
+        source = ` in ${picLabel}`;
+        pictures.push({ label: picLabel, src: subjectImgSrc(s) });
+      }
+      definition = `${label} is ${name}${source}`;
+      if (description) definition += `, ${description}`;
+    } else if (stype === "Picture") {
+      pictureCounter += 1;
+      label = `<Picture ${pictureCounter}>`;
+      pictures.push({ label, src: subjectImgSrc(s) });
+      definition = `${label} is ${description || name} (reference image anchor)`;
+    } else if (stype === "Audio") {
+      subjectCounter += 1;
+      label = `<Audio ${subjectCounter}>`;
+      if (audioFile) audios.push({ label, src: audioFile });
+      definition = `${label} is ${description || name}`;
+    } else if (stype === "Video") {
+      subjectCounter += 1;
+      label = `<Video ${subjectCounter}>`;
+      if (videoFile) videos.push({ label, src: videoFile });
+      definition = `${label} is ${description || name}`;
+    } else {
+      subjectCounter += 1;
+      label = `<${stype} ${subjectCounter}>`;
+      definition = `${label} is ${description || name}`;
+    }
+
+    let audioDefinition = null;
+    let audioLabel = null;
+    let audioNumber = null;
+    if (useAudio) {
+      audioCounter += 1;
+      audioLabel = `<Audio ${audioCounter}>`;
+      audioNumber = audioCounter;
+      audios.push({ label: audioLabel, src: audioFile });
+      audioDefinition = `${audioLabel} is the voice-timbre reference for ${label}`;
+    }
+
+    bound.push({
+      label,
+      name,
+      relationship,
+      audioRelationship,
+      subject_definition: definition,
+      audio_definition: audioDefinition,
+      audio_label: audioLabel,
+      audio_number: audioNumber,
+      matched: names.has(name),
+      has_dialogue: dialogues.has(name),
+    });
+  }
+
+  const subjectLines = bound.filter((b) => b.subject_definition).map((b) => b.subject_definition);
+  const audioLines = bound.filter((b) => b.audio_definition).map((b) => b.audio_definition);
+  const retentionLines = [];
+  for (const b of bound) {
+    if (b.label) retentionLines.push(`${b.label}: ${b.relationship}`);
+    if (b.audio_definition && b.audio_number) {
+      const tpl = AUDIO_RELATION_TEXT[b.audioRelationship] || AUDIO_RELATION_TEXT.reference;
+      retentionLines.push(
+        `${b.audio_label}: ${b.audioRelationship} - ${tpl.replace("{n}", b.audio_number)}`
+      );
+    }
+  }
+
+  // 首帧 / 尾帧 → 独立 Picture 锚点（与 Python 端一致）
+  const segs = dir?.timeline?.segments || [];
+  const sorted = [...segs].sort((a, b) => (a.start || 0) - (b.start || 0));
+  const srcOf = (s) => s.imgObj?.src || s.imageB64 || "";
+  const first = sorted.find((s) => s.imgObj || s.imageB64);
+  const last = [...sorted].reverse().find((s) => s.imgObj || s.imageB64);
+  if (first) {
+    pictureCounter += 1;
+    const label = `<Picture ${pictureCounter}>`;
+    pictures.push({ label, src: srcOf(first) });
+    subjectLines.push(`${label} is the first frame of [Shot 1].`);
+    retentionLines.push(`${label} ([Shot 1] first frame): fully_preserved.`);
+  }
+  if (last && last !== first) {
+    pictureCounter += 1;
+    const label = `<Picture ${pictureCounter}>`;
+    pictures.push({ label, src: srcOf(last) });
+    subjectLines.push(`${label} is the last frame of the target video.`);
+    retentionLines.push(`${label} (last frame of the target video): fully_preserved.`);
+  }
+
+  // 从时间轴 segments 收集视频 / 音频地址（type 维度的兜底，编号续接主体绑定）
+  for (const seg of sorted) {
+    if (seg.type === "video" && seg.videoFile) {
+      const n = videos.length + 1;
+      videos.push({ label: `<Video ${n}>`, src: seg.videoFile });
+    } else if (seg.type === "audio" && seg.audioFile) {
+      const n = audios.length + 1;
+      audios.push({ label: `<Audio ${n}>`, src: seg.audioFile });
+    }
+  }
+
+  return {
+    subject_definition: subjectLines.join("\n"),
+    audio_definition: audioLines.join("\n"),
+    retention_analysis: retentionLines.join("\n"),
+    pictures,
+    audios,
+    videos,
+  };
 }
 
 // 右侧 textarea 默认 JSON 数据结构（→ 生成结果会替代它）
@@ -210,6 +421,19 @@ const S = {
     padding: "4px", minWidth: "170px",
   },
   audioIcon: { fontSize: "10px", color: "#ffb74d" },
+  defsWrap: {
+    position: "relative", flex: "0 0 auto", display: "flex", alignItems: "center",
+    alignSelf: "flex-start", padding: "6px 4px", cursor: "help",
+  },
+  defsIcon: { fontSize: "13px", color: "#5c9dff", lineHeight: 1, userSelect: "none" },
+  defsTip: {
+    position: "absolute", bottom: "calc(100% + 6px)", right: "0", zIndex: 9999,
+    background: "#2d2d2d", border: "1px solid #555", borderRadius: "6px",
+    padding: "8px 10px", minWidth: "280px", maxWidth: "460px", maxHeight: "60vh",
+    overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.5)",
+    fontSize: "11px", color: "#ccc", fontFamily: "monospace", lineHeight: "1.5",
+  },
+  defsTipEmpty: { color: "#888" },
 };
 
 // ---------- 全局参数 ----------
@@ -254,17 +478,25 @@ export function TransferPanel({ director }) {
   const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
   const [motionCtxOn, setMotionCtxOn] = useState(false); // Motion Context 开关
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
+  const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
 
   const rowRef = useRef(null);
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const debounceRef = useRef(null);
   const aliveRef = useRef(true);
+  const rightSaveFirstRun = useRef(true);
 
   // 挂载：读主体列表，向外壳注册左侧同步通道 + 当前选中 segment 通道
   useEffect(() => {
     aliveRef.current = true;
-    setSubjects(getSubjectsFromGraph());
+    setSubjects(getSubjectsLatest());
+    // 监听 subject.js 发布的 ref:subjects-changed 事件：主体新增/删除/修改时实时刷新
+    const onSubjectsChanged = () => {
+      if (!aliveRef.current) return;
+      setSubjects(getSubjectsLatest());
+    };
+    window.addEventListener("ref:subjects-changed", onSubjectsChanged);
     if (director) {
       director._transferSetLeft = setLeftText;
       director._transferSetSeg = (seg) => {
@@ -277,9 +509,19 @@ export function TransferPanel({ director }) {
         ? (director.timeline?.audioSegments?.[director.selectedIndex] || null)
         : (director.timeline?.segments?.[director.selectedIndex] || null);
       if (initSeg && director._transferSetSeg) director._transferSetSeg(initSeg);
+      // 同步左侧 prompt：外壳 updateUIFromSelection 可能在 _transferSetLeft 注册
+      // 之前就已执行（构造时序竞争），这里手动补一次，保证刷新/加载后左侧显示对应内容
+      const initPrompt = initSeg
+        ? (initSeg.prompt || "")
+        : (director.promptInput?.value || "");
+      setLeftText(initPrompt);
+      // 从节点 properties 恢复已保存的右侧生成结果（随 workflow 持久化）
+      const savedRight = director.node?.properties?.__rightPromptText;
+      if (typeof savedRight === "string" && savedRight) setRightText(savedRight);
     }
     return () => {
       aliveRef.current = false;
+      window.removeEventListener("ref:subjects-changed", onSubjectsChanged);
       clearTimeout(debounceRef.current);
       if (director && director._transferSetLeft === setLeftText) {
         director._transferSetLeft = null;
@@ -289,6 +531,23 @@ export function TransferPanel({ director }) {
       }
     };
   }, [director]);
+
+  // 右侧内容持久化：每次编辑写入节点 properties（__rightPromptText），
+  // 随 workflow 的 onSerialize 一起保存，刷新后由挂载 effect 恢复。
+  // 首次渲染跳过，避免用默认值覆盖已保存内容。
+  useEffect(() => {
+    if (rightSaveFirstRun.current) {
+      rightSaveFirstRun.current = false;
+      return;
+    }
+    if (!aliveRef.current || !director?.node) return;
+    const node = director.node;
+    if (node.properties.__rightPromptText !== rightText) {
+      node.properties.__rightPromptText = rightText;
+      // 标记画布已修改，触发 ComfyUI 自动保存 / 序列化
+      if (app.graph) app.graph.setDirtyCanvas(true, true);
+    }
+  }, [rightText, director]);
 
   // 中间列拖拽：按住中间列（按钮除外）左右拖动调节两个 textarea 的宽度
   function startDrag(e) {
@@ -406,6 +665,141 @@ export function TransferPanel({ director }) {
     } catch (e) {
       console.error("[Transfer] generateFirstFrame failed:", e);
       setError(String(e?.message || e));
+    } finally {
+      if (aliveRef.current) setBusy(false);
+    }
+  }
+
+  // ---------- 组装并提交 /llm/generate_first_frame ----------
+  // 生成 payload：
+  //   prompt   = subject_definitions(subject_definition + audio_definition)
+  //            + retention_analysis + detailed_description + overall_soundscape
+  //            + non_diegetic_music
+  //   images   = 按 <Subject/Picture x> 排序的图片地址（含首帧 / 尾帧）
+  //   audios   = 按 <Audio x> 排序的音频地址
+  //   videos   = 按 <Video x> 排序的视频地址
+  //   segment_data + 全局参数（start/end/frame_rate/resolution 等）
+  function buildFirstFramePayload(extra) {
+    // 1) subject_definitions + retention_analysis（与后端 build_h3_subject_bindings 一致）
+    const bind = buildSubjectBindings(rightText, subjects, director);
+    const subjectDefs = [bind.subject_definition, bind.audio_definition].filter(Boolean).join("\n");
+
+    // 2) detailed_description / overall_soundscape / non_diegetic_music
+    const pd = parsePromptText(rightText);
+    const detail = String(pd.detailed_description || "").trim();
+    const soundscape = String(pd.overall_soundscape || "").trim();
+    const music = String(pd.non_diegetic_music || "").trim();
+
+    // 3) prompt = subject_definitions + retention_analysis + detailed + soundscape + music
+    const promptParts = [
+      subjectDefs,
+      bind.retention_analysis,
+      detail ? "detailed_description:\n" + detail : "",
+      soundscape ? "overall_soundscape:\n" + soundscape : "",
+      music ? "non_diegetic_music:\n" + music : "",
+    ].filter(Boolean);
+    const prompt = promptParts.join("\n\n");
+
+    // 4) images / audios / videos（去重，按编号顺序）
+    const imgSeen = new Set();
+    const images = (bind.pictures || [])
+      .map((p) => p.src)
+      .filter((src) => {
+        if (!src || imgSeen.has(src)) return false;
+        imgSeen.add(src);
+        return true;
+      });
+    const audios = (bind.audios || []).map((a) => a.src).filter((src) => !!src);
+    const videos = (bind.videos || []).map((v) => v.src).filter((src) => !!src);
+
+    // 5) segment_data：时间轴 segments（按 start 排序）
+    const segs = (director?.timeline?.segments || [])
+      .slice()
+      .sort((a, b) => (a.start || 0) - (b.start || 0))
+      .map((s) => ({
+        id: s.id,
+        type: s.type,
+        start: s.start,
+        length: s.length,
+        prompt: s.prompt || "",
+        imageFile: s.imageFile || "",
+        videoFile: s.videoFile || "",
+        audioFile: s.audioFile || "",
+        motionContext: !!s.motionContext,
+        autoEndFrame: !!s.autoEndFrame,
+        isEndFrame: !!s.isEndFrame,
+      }));
+
+    // 6) 全局参数（与 director.py widget 同名）
+    const segment_data = {
+      segments: segs,
+      start_second: wVal("start_second"),
+      end_second: wVal("end_second"),
+      duration_seconds: wVal("duration_seconds"),
+      start_frame: wVal("start_frame"),
+      end_frame: wVal("end_frame"),
+      duration_frames: wVal("duration_frames"),
+      frame_rate: wVal("frame_rate"),
+      display_mode: wVal("display_mode"),
+      outpu_resolution: wVal("outpu_resolution"),
+      million_pixels: wVal("million_pixels"),
+    };
+
+    const payload = {
+      prompt,
+      images,
+      audios,
+      videos,
+      segment_data,
+      ...(extra || {}),
+    };
+
+    console.log("[Transfer] buildFirstFramePayload ->", {
+      prompt,
+      images,
+      audios,
+      videos,
+      segment_data,
+    });
+
+    return payload;
+  }
+
+  // 将 buildFirstFramePayload 的结果提交到 /llm/generate_first_frame 接口
+  async function submitGenerateFirstFrame(seg) {
+    if (busy || !director) return;
+    setBusy(true);
+    setError("");
+    try {
+      const extra = {};
+      if (seg) {
+        extra.segment_id = seg.id;
+        extra.segment_type = seg.type;
+      }
+      const body = vlmBody(buildFirstFramePayload(extra));
+      console.log("[Transfer] submit /llm/generate_first_frame, body:", body);
+      const res = await api.fetchApi("/minimax_ref/api/llm/generate_first_frame", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      console.log("[Transfer] /llm/generate_first_frame ->", data);
+      if (data && data.success) {
+        if (seg) {
+          seg.type = "image";
+          seg.imageFile = data.image_file || data.imageFile || data.image_path || "";
+          director.commitChanges();
+          if (director._transferSetSeg) director._transferSetSeg(seg);
+        }
+        return data;
+      }
+      setError((data && data.error) || "提交 /llm/generate_first_frame 失败");
+      return null;
+    } catch (e) {
+      console.error("[Transfer] submitGenerateFirstFrame failed:", e);
+      setError(String(e?.message || e));
+      return null;
     } finally {
       if (aliveRef.current) setBusy(false);
     }
@@ -546,6 +940,8 @@ export function TransferPanel({ director }) {
     const charW = 7.5;
     const x = Math.max(4, Math.min(rect.left + col * charW, window.innerWidth - 200));
     const y = rect.top + (line + 1) * lineHeight + 6;
+    // 打开菜单前刷新一次主体列表，确保新增的主体立即可选
+    setSubjects(getSubjectsLatest());
     setMenu({ side, trigger: ch, caret, x, y });
   }
 
@@ -615,6 +1011,13 @@ export function TransferPanel({ director }) {
   }
 
   // ---------- 渲染 ----------
+  // 计算主体定义 / 音频定义 / retention_analysis（参考 lib/prompt.py build_h3_subject_bindings）
+  const bindings = buildSubjectBindings(rightText, subjects, director);
+  const bindParts = [];
+  if (bindings.subject_definition) bindParts.push("subject_definition:\n" + bindings.subject_definition);
+  if (bindings.audio_definition) bindParts.push("audio_definition:\n" + bindings.audio_definition);
+  if (bindings.retention_analysis) bindParts.push("retention_analysis:\n" + bindings.retention_analysis);
+  const bindingsText = bindParts.join("\n\n");
 
   return html`
     <div class="tr-panel" style=${S.panel}>
@@ -657,7 +1060,7 @@ export function TransferPanel({ director }) {
           <div class="pr-prompt-label">Segment Prompt</div>
           <textarea
             ref=${leftRef}
-            class="pr-prompt-area"
+            class="pr-prompt-area pr-prompt-area-left"
             value=${leftText}
             placeholder="原始 prompt（输入 @ 引用主体）"
             spellcheck=${false}
@@ -682,7 +1085,7 @@ export function TransferPanel({ director }) {
           <div class="pr-prompt-label" style=${{ position: "static", flexShrink: 0, margin: "6px 0 2px 8px" }}>Minimax H3 Prompt</div>
           <textarea
             ref=${rightRef}
-            class="pr-prompt-area"
+            class="pr-prompt-area pr-prompt-area-right"
             style=${{ position: "static", flex: "1", minHeight: "0", height: "auto", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" }}
             value=${rightText}
             placeholder="生成结果（输入 @ 或 # 引用主体）"
@@ -706,12 +1109,31 @@ export function TransferPanel({ director }) {
             ? html`<div style=${S.hint}>资源引用（首帧 / 尾帧 / 主体）会显示在这里</div>`
             : resources.map(r => html`
                 <div style=${S.res} key=${r.key}>
-                  ${r.kind === "subject" && r.audio ? html`<span style=${S.audioIcon}>♪ ${r.label}</span>` : null}
                   <img style=${S.img} src=${r.src} alt=${r.label} />
-                  ${r.kind === "subject" && r.audio ? null : html`<span style=${S.label}>${r.label}</span>`}
+                  ${r.kind === "subject" && r.audio ? html`<span style=${S.audioIcon}>♪ ${r.label}</span>` : html`<span style=${S.label}>${r.label}</span>`}
                 </div>
               `)
         }
+        <div
+          class="tr-defs"
+          style=${S.defsWrap}
+          title="主体定义 / 音频定义 / retention_analysis"
+          onMouseEnter=${() => setDefsOpen(true)}
+          onMouseLeave=${() => setDefsOpen(false)}
+        >
+          <span style=${S.defsIcon}>ℹ</span>
+          ${
+            defsOpen
+              ? html`<div style=${S.defsTip}>
+                  ${
+                    bindingsText
+                      ? html`<div style=${{ whiteSpace: "pre-wrap" }}>${bindingsText}</div>`
+                      : html`<div style=${S.defsTipEmpty}>暂无主体定义 / 音频引用</div>`
+                  }
+                </div>`
+              : null
+          }
+        </div>
       </div>
 
       ${

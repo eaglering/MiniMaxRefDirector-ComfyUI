@@ -7,7 +7,9 @@ import traceback
 
 import folder_paths
 from aiohttp import web
-from .lib.image import load_image_tensor
+
+from lib.h3 import generate_first_frame
+from .lib.image import calc_resolution, load_image_tensor
 from .lib.llm import generate_prompt_with_api
 from .lib.prompt import generate_h3_prompt, image_analysis
 from server import PromptServer
@@ -15,6 +17,31 @@ from server import PromptServer
 from .api_config import api_config_manager
 
 API_PREFIX = "/minimax_ref/api"
+
+# --- 开发期扩展资源缓存失效 ---
+# ComfyUI 对 /extensions/ 静态资源可能带 ETag / 启发式缓存，改 JS/CSS 后浏览器
+# 仍可能使用旧模块，导致新增样式/逻辑不生效。这里对本节点的 web 资源强制
+# Cache-Control: no-store，改文件后刷新页面即拉取最新模块。
+_WEB_PREFIX = "/extensions/MiniMaxRefDirector-ComfyUI/"
+
+
+@web.middleware
+async def no_cache_extension_assets(request: web.Request, handler):
+    response = await handler(request)
+    if request.path.startswith(_WEB_PREFIX) and (
+        request.path.endswith(".js") or request.path.endswith(".css")
+    ):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+try:
+    _app = PromptServer.instance.app
+    if no_cache_extension_assets not in _app.middlewares:
+        _app.middlewares.append(no_cache_extension_assets)
+except Exception:
+    # 极少数 ComfyUI 版本 app 已 freeze / middlewares 不可变时忽略，不影响功能
+    pass
 
 
 def _resolve_llm_file(name: str) -> str:
@@ -60,14 +87,14 @@ async def save_api_config(request: web.Request) -> web.Response:
 
 
 @PromptServer.instance.routes.post(f"{API_PREFIX}/llm/unload")
-async def unload_llama_models(request: web.Request) -> web.Response:
+async def unload_llama_models_api(request: web.Request) -> web.Response:
     """Unload all cached local GGUF (llama-cpp) models to free RAM/VRAM.
 
     Lazy import keeps this module import-order agnostic (avoids cycles with
     minimax_ref_prompt_enhance which imports comfy modules).
     """
     try:
-        from .minimax_ref_prompt_enhance import _unload_llama_models as _unload
+        from .lib.llm import unload_llama_models as _unload
 
         _unload()
         return web.json_response({"success": True, "unloaded": True})
@@ -76,7 +103,7 @@ async def unload_llama_models(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 @PromptServer.instance.routes.post(f"{API_PREFIX}/llm/generate_image_analysis")
-async def generate_image_analysis(request: web.Request) -> web.Response:
+async def generate_image_analysis_api(request: web.Request) -> web.Response:
     try:
         data = await request.json()
         image_path = data.get("image_path", "")
@@ -107,7 +134,7 @@ async def generate_image_analysis(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 @PromptServer.instance.routes.post(f"{API_PREFIX}/llm/generate_prompt_json")
-async def generate_prompt_json(request: web.Request) -> web.Response:
+async def generate_prompt_json_api(request: web.Request) -> web.Response:
     try:
         data = await request.json()
         prompt = data.get("prompt", "")
@@ -134,6 +161,29 @@ async def generate_prompt_json(request: web.Request) -> web.Response:
         json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed, 
                                        vlm_mode=vlm_mode, options=options)
         return web.json_response({"success": True, "json_data": json_data})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+@PromptServer.instance.routes.post(f"{API_PREFIX}/llm/generate_first_frame")
+async def generate_first_frame_api(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+        preset = data.get("preset", "")
+        prompt = data.get("prompt", "")
+        image_paths = data.get("image_paths", "")
+        million_pixels = data.get("million_pixels", 0)
+        options = {
+            "gguf_path": data.get("gguf_path", ""),
+            "mmproj_path": data.get("mmproj_path", ""),
+            "provider": data.get("provider", "GLM"),
+            "api_key": data.get("api_key", ""),
+        }
+        if not prompt:
+            return web.json_response({"success": False, "error": "prompt is required"}, status=400)
+        
+        width, height = calc_resolution(preset=preset, million_pixels=million_pixels)
+        generate_first_frame(prompt=prompt, image_paths=image_paths, width=width, height=height, options=options)
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)

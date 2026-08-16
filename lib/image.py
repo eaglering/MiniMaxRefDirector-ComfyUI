@@ -9,6 +9,50 @@ from .path import resolve_input_path
 
 log = logging.getLogger(__name__)
 
+# Aspect ratio presets: (width_ratio, height_ratio)
+RESOLUTION_PRESETS = {
+    "1:1方形":   (1, 1),
+    "9:16竖屏":  (9, 16),
+    "16:9横屏":  (16, 9),
+    "3:2横屏":   (3, 2),
+    "2:3竖屏":   (2, 3),
+    "4:3横屏":   (4, 3),
+    "3:4竖屏":   (3, 4),
+    "21:9超宽":  (21, 9),
+}
+
+def calc_resolution(preset: str, million_pixels: float, divide_by=32) -> tuple[int, int]:
+    """Calculate width/height from aspect ratio and target megapixels.
+
+    Computes the long side first: long = sqrt(total_pixels * long_ratio / short_ratio),
+    snaps it to divide_by, then derives the short side from the snapped long side.
+    Uses round-half-up to avoid Python's banker's rounding.
+    """
+    ratios = RESOLUTION_PRESETS.get(preset, RESOLUTION_PRESETS["16:9横屏"])
+    w_ratio, h_ratio = ratios
+    total_pixels = million_pixels * 1_000_000
+
+    if total_pixels <= 0:
+        return divide_by, divide_by
+
+    def snap(v: float) -> int:
+        """Round-half-up and snap to nearest multiple of divide_by."""
+        return max(divide_by, int(v / divide_by + 0.5) * divide_by)
+
+    if w_ratio >= h_ratio:
+        # Landscape or square: width is the long side
+        w = (total_pixels * w_ratio / h_ratio) ** 0.5
+        w = snap(w)
+        h = snap(w * h_ratio / w_ratio)
+    else:
+        # Portrait: height is the long side
+        h = (total_pixels * h_ratio / w_ratio) ** 0.5
+        h = snap(h)
+        w = snap(h * w_ratio / h_ratio)
+
+    return int(w), int(h)
+
+
 def has_image(image) -> bool:
     """Check whether the image is valid (not None and not an empty tensor)."""
     if image is None:

@@ -3,7 +3,7 @@ import os
 import logging
 from comfy_api.latest import io
 
-from .lib.path import resolve_input_path
+from .lib.image import calc_resolution
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")
@@ -13,50 +13,6 @@ log = logging.getLogger(__name__)
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_TEMPLATE = os.path.join(_PROJECT_ROOT, "prompt", "minimax_ref2v_template.txt")
-
-# Aspect ratio presets: (width_ratio, height_ratio)
-RESOLUTION_PRESETS = {
-    "1:1方形":   (1, 1),
-    "9:16竖屏":  (9, 16),
-    "16:9横屏":  (16, 9),
-    "3:2横屏":   (3, 2),
-    "2:3竖屏":   (2, 3),
-    "4:3横屏":   (4, 3),
-    "3:4竖屏":   (3, 4),
-    "21:9超宽":  (21, 9),
-}
-
-
-def _calc_resolution(preset: str, million_pixels: float, divide_by=32) -> tuple[int, int]:
-    """Calculate width/height from aspect ratio and target megapixels.
-
-    Computes the long side first: long = sqrt(total_pixels * long_ratio / short_ratio),
-    snaps it to divide_by, then derives the short side from the snapped long side.
-    Uses round-half-up to avoid Python's banker's rounding.
-    """
-    ratios = RESOLUTION_PRESETS.get(preset, RESOLUTION_PRESETS["16:9横屏"])
-    w_ratio, h_ratio = ratios
-    total_pixels = million_pixels * 1_000_000
-
-    if total_pixels <= 0:
-        return divide_by, divide_by
-
-    def snap(v: float) -> int:
-        """Round-half-up and snap to nearest multiple of divide_by."""
-        return max(divide_by, int(v / divide_by + 0.5) * divide_by)
-
-    if w_ratio >= h_ratio:
-        # Landscape or square: width is the long side
-        w = (total_pixels * w_ratio / h_ratio) ** 0.5
-        w = snap(w)
-        h = snap(w * h_ratio / w_ratio)
-    else:
-        # Portrait: height is the long side
-        h = (total_pixels * h_ratio / w_ratio) ** 0.5
-        h = snap(h)
-        w = snap(h * w_ratio / h_ratio)
-
-    return int(w), int(h)
 
 
 class MiniMaxRefDirector(io.ComfyNode):
@@ -229,7 +185,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             segment_count += 1
 
         # --- Resolve output resolution ---
-        out_w, out_h = _calc_resolution(outpu_resolution, million_pixels)
+        out_w, out_h = calc_resolution(outpu_resolution, million_pixels)
 
         # --- Assemble guide_data ---
         guide_data = {
