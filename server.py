@@ -127,7 +127,7 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
             text = generate_prompt_with_api(
                 image=image, prompt=prompt, provider=provider, api_key=api_key, seed=seed
             )
-            prompt_data = {"shot1_description": text}
+            prompt_data = {"detailed_description": text}
         return web.json_response({"success": True, "prompt_data": prompt_data})
     except Exception as e:
         traceback.print_exc()
@@ -168,8 +168,8 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
 
 @PromptServer.instance.routes.post(f"{API_PREFIX}/h3/build_subject_bindings")
 async def build_subject_bindings_api(request: web.Request) -> web.Response:
-    """构建 H3 主体绑定（subject_definition / audio_definition / retention_analysis
-    + pictures / audios / videos），替代前端 buildFirstFramePayload 中的组装逻辑。"""
+    """构建 H3 主体绑定（subject_definition / retention_analysis
+    + images / audios / videos），替代前端 buildFirstFramePayload 中的组装逻辑。"""
     try:
         from .lib.prompt import build_h3_subject_bindings
         data = await request.json()
@@ -182,15 +182,13 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
                 prompt_json = {}
         if not isinstance(prompt_json, dict):
             return web.json_response({"success": False, "error": "prompt_json must be an object"}, status=400)
-        first_frame_path = data.get("first_frame_path", "") or ""
         last_frame_path = data.get("last_frame_path", "") or ""
-        timeline_segments = data.get("timeline_segments", None)
+        timeline_segment = data.get("timeline_segment", None)
         result = build_h3_subject_bindings(
             subject_data,
             prompt_json,
-            first_frame_path=first_frame_path,
             last_frame_path=last_frame_path,
-            timeline_segments=timeline_segments,
+            timeline_segment=timeline_segment,
         )
         return web.json_response({"success": True, "data": result})
     except Exception as e:

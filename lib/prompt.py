@@ -5,7 +5,7 @@ import re
 
 from .image import load_image_tensor
 from .llm import generate_prompt_with_api, generate_prompt_with_llama
-from .utils import parse_generated_json
+from .utils import find_index, parse_generated_json
 
 # 图像分析
 def image_analysis(gguf_path: str, mmproj_path: str, prompt: str, 
@@ -31,21 +31,18 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool) -> str:
     """Build the full prompt sent to the local GGUF VLM.
 
     Includes the custom skills guide, the required JSON output format
-    (detailed_description / overall_soundscape / non_diegetic_music, plus
-    shot1_description when a first-frame image is provided) and the
-    <@角色名称> / <#角色名称:[Language]对话内容> placeholder rules. No mapping is returned.
+    (detailed_description / overall_soundscape / non_diegetic_music) and the
+    <@角色名称> / <#角色名称:[Language]对话内容> placeholder rules. When a reference
+    image is provided it is NOT treated as a first frame; instead its contents
+    are merged into "detailed_description" together with the user's input.
     """
-    shot1_field = ""
-    shot1_note = ""
+    image_note = ""
     if has_image:
-        shot1_field = (
-            '  - "shot1_description": a string describing what is visible in the '
-            "first-frame reference image (scene, characters, lighting, atmosphere).\n\n"
-        )
-        shot1_note = (
-            '- If a first-frame image is provided, analyze it and describe it in '
-            '"shot1_description", then continue the remaining content in '
-            '"detailed_description" following the user\'s input.\n'
+        image_note = (
+            "- If a reference image is provided, analyze what is visible in it "
+            "(scene, characters, lighting, atmosphere) and merge it with the "
+            "user's input into \"detailed_description\". The image is not a "
+            "first frame and must not be output as its own field.\n"
         )
 
     return f"""You are an expert video prompt writer. Follow the skills guide below.
@@ -61,7 +58,7 @@ Output ONLY a JSON object with exactly these keys:
   - "detailed_description": string
   - "overall_soundscape": string
   - "non_diegetic_music": string
-{shot1_field}## Placeholder Rules
+## Placeholder Rules
 In "detailed_description", "overall_soundscape" and "non_diegetic_music":
 1. Wrap every character name as <@角色名称>, e.g. <@Zhang San>.
 2. Wrap every dialogue as <#角色名称:[Language]对话内容>, e.g. <#Zhang San:[English]Hello!> or <#李四:[Chinese]你好！>.
@@ -69,7 +66,7 @@ In "detailed_description", "overall_soundscape" and "non_diegetic_music":
 
 ## Strictness
 - Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
-{shot1_note}## User Input Prompt
+{image_note}## User Input Prompt
 {prompt}
 
 Output ONLY the JSON object. Do not add any text before or after it."""
@@ -90,7 +87,7 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
     避免调用参数不断膨胀。支持的键：
       - gguf_path / mmproj_path: llama-cpp 本地 GGUF 模型文件
-      - image_path: 首帧参考图路径（提供时输出增加 shot1_description）
+      - image_path: 参考图路径（提供时与用户输入合并进 detailed_description）
       - seed: 采样种子
       - vlm_mode: "llama-cpp"（默认，本地 GGUF）/ "api"（云端 OpenAI 兼容接口）
       - provider: vlm_mode="api" 时的服务商（走 API 管理器配置）
@@ -98,10 +95,11 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
       - clip_type: CLIP 模型类型（"minimax" / "qwen3vl" / "gemma"）
 
     The output JSON includes detailed_description / overall_soundscape /
-    non_diegetic_music (and shot1_description when a first-frame image is
-    provided). Character names are wrapped as <@名字> and dialogue as
-    <#名字:[Language]对话> directly by the model, with a language tag such as
-    [Chinese] or [English] before the dialogue text. No mapping is returned.
+    non_diegetic_music (a provided reference image is merged into
+    detailed_description, not treated as a first frame). Character names are
+    wrapped as <@名字> and dialogue as <#名字:[Language]对话> directly by the
+    model, with a language tag such as [Chinese] or [English] before the
+    dialogue text. No mapping is returned.
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
@@ -143,45 +141,30 @@ _AUDIO_RELATION_TEXT = {
 def _extract_h3_mentions(prompt_json: dict) -> dict:
     """Extract <@name> and <#name:dialogue> mentions from all H3 prompt fields.
 
-    Returns {"names": {name: count}, "dialogues": {name: [dialogue, ...]}}.
+    Returns {"names": {name: count}, "dialogues": {name: {pattern:dialogue, ...}}}.
     """
     names: dict[str, int] = {}
-    dialogues: dict[str, list[str]] = {}
-    for field in ("shot1_description", "detailed_description", "overall_soundscape", "non_diegetic_music"):
+    dialogues: dict[str, dict[str, str]] = {}
+    for field in ("detailed_description", "overall_soundscape", "non_diegetic_music"):
         text = prompt_json.get(field) or ""
         if not isinstance(text, str):
             continue
         for m in _H3_NAME_RE.finditer(text):
             name = m.group(1).strip()
             if name:
-                names[name] = names.get(name, 0) + 1
+                names[name] = m.group(0).strip()
         for m in _H3_DIALOGUE_RE.finditer(text):
             name = m.group(1).strip()
             if name:
-                dialogues.setdefault(name, []).append(m.group(2).strip())
+                dialogue = m.group(2).strip()
+                dialogues.setdefault(name, {})[m.group(0).strip()] = dialogue
     return {"names": names, "dialogues": dialogues}
-
-
-def _resolve_subject(subjects: list[dict], name: str) -> dict | None:
-    """Find a subject by name (exact match first, case-insensitive fallback)."""
-    target = name.strip()
-    if not target:
-        return None
-    for s in subjects:
-        if str(s.get("name", "")).strip() == target:
-            return s
-    for s in subjects:
-        if str(s.get("name", "")).strip().lower() == target.lower():
-            return s
-    return None
-
 
 def build_h3_subject_bindings(
     subject_data,
     prompt_json: dict,
-    first_frame_path: str = "",
     last_frame_path: str = "",
-    timeline_segments: list | None = None,
+    timeline_segment: dict|None = None,
 ) -> dict:
     """Match <@name> / <#name:dialogue> placeholders against subject data and build H3 bindings.
 
@@ -193,21 +176,22 @@ def build_h3_subject_bindings(
                 partially_preserved / attribute_transfer / weak_reference.
             audio_relationship: audio marker, one of reference (default) /
                 fully_copy / partially_copy / weak_reference.
-        prompt_json: H3 output JSON with shot1_description / detailed_description /
+        prompt_json: H3 output JSON with detailed_description /
             overall_soundscape / non_diegetic_music.
-        first_frame_path / last_frame_path: optional first/last frame images,
-            appended as <Picture N> anchors.
+        last_frame_path: optional last-frame image, appended as <Picture N> anchor.
+        timeline_segment: current timeline segment dict; its "additionSubject"
+            list (subject names added in the editor but not mentioned in the
+            prompt) is bound in addition.
 
     Returns:
         {
             "subjects": [...],             # 主体信息（含 use_audio / matched / has_dialogue）
-            "subject_definition": str,     # <Subject 1> is 名字 in <Picture 1>, 描述 / <Picture N> is ...
-            "audio_definition": str,       # <Audio 1> is the voice-timbre reference for <Subject 1>
+            "subject_definition": str,     # <Subject 1> 描述 / <Audio 1> is the voice-timbre reference... / <Picture N> is the last frame...
             "retention_analysis": str,     # <Subject 1>: fully_preserved / <Audio 1>: reference - ...
-            "unmatched_mentions": [...],   # 被 @ 提及但未在主体中定义的名字
-            "pictures": [...],             # [{label: <Picture N>, src}] 媒体 src 列表（按编号）
-            "audios": [...],               # [{label: <Audio N>, src}]
-            "videos": [...],               # [{label: <Video N>, src}]
+            "unmatched_mentions": [...],   # 被 @ 提及 / 添加但未在主体中定义的名字
+            "images": [...],               # 图片文件路径列表（主体图片 + 尾帧）
+            "audios": [...],               # 音频文件路径列表
+            "videos": [...],               # 视频文件路径列表
         }
     """
     if isinstance(subject_data, str):
@@ -221,159 +205,119 @@ def build_h3_subject_bindings(
     names = mentions["names"]
     dialogues = mentions["dialogues"]
 
-    # 被 @ 提及（含对话中的名字）但未在主体中定义
+    subject_definitions = []
+    retention_analysis = []
+    images: list[str] = []
+    audios: list[str] = []
+    videos: list[str] = []
     unmatched: list[str] = []
     seen: set[str] = set()
-    for n in list(names) + list(dialogues):
-        if n in seen:
+    subjects_out: list[dict] = []
+    mapping: dict[str, str] = {}
+    index = 1
+    for name, dat in dialogues.items():
+        if name in seen or name in unmatched:
             continue
-        if _resolve_subject(subjects_in, n) is None:
-            unmatched.append(n)
-            seen.add(n)
-
-    bound: list[dict] = []
-    subject_counter = 0
-    picture_counter = 0
-    audio_counter = 0
-    pictures: list[dict] = []  # {label, src} 按 <Picture N> 编号顺序
-    audios: list[dict] = []    # {label, src} 按 <Audio N> 编号顺序
-    videos: list[dict] = []    # {label, src} 按 <Video N> 编号顺序
-
-    for subj in subjects_in:
-        name = str(subj.get("name", "")).strip()
-        if not name:
+        idx = find_index(subjects_in, func=lambda x, y=name: x.get("name") == y)
+        if idx == -1:
+            unmatched.append(name)
             continue
-        matched = name in names
+        subj = subjects_in[idx]
+        image_file = subj.get("imageFile", "")
+        audio_file = subj.get("audioFile", "")
+        if not audio_file:
+            unmatched.append(f"{name} has no audioFile")
+            continue
+        description = subj.get("description", "")
+        relationship = subj.get("relationship", "")
+        subject_definitions.append(f"<Subject {index}> {description}")
+        retention_analysis.append(f"<Subject {index}>: {relationship}")
+        images.append(image_file)
+        subject_definitions.append(f"<Audio {index}> is the voice-timbre reference for <Subject {subject_counter}>")
+        text = _AUDIO_RELATION_TEXT.get(relationship, _AUDIO_RELATION_TEXT["reference"])
+        retention_analysis.append(
+            f"<Audio {index}>: {relationship} - {text.format(n=index)}"
+        )
+        audios.append(audio_file)
+        seen.add(name)
+        index += 1
+        subjects_out.append(subj)
+        for k, v in dat.items():
+            # 判断是否存在汉字
+            language = "Chinese" if any('\u4e00' <= char <= '\u9fff' for char in v) else "English"
+            mapping[k] = f"<d>[{language}]{v}</d>"
 
-        stype = str(subj.get("type", "") or "").strip()
-        if stype not in _H3_TYPES:
-            stype = "Subject"
-        relationship = str(subj.get("relationship", "") or "").strip()
-        if relationship not in _VISUAL_RELATIONS:
-            relationship = "fully_preserved"
-        audio_relationship = str(subj.get("audio_relationship", "") or "").strip()
-        if audio_relationship not in _AUDIO_RELATIONS:
-            audio_relationship = "reference"
+    for name in names:
+        if name in seen or name in unmatched:
+            continue
+        idx = find_index(subjects_in, func=lambda x, y=name: x.get("name") == y)
+        if idx == -1:
+            unmatched.append(name)
+            continue
+        subj = subjects_in[idx]
+        image_file = subj.get("imageFile", "")
+        audio_file = subj.get("audioFile", "")
+        video_file = subj.get("videoFile", "")
+        description = subj.get("description", "")
+        dType = subj.get("type", "") or "Subject"
+        relationship = subj.get("relationship", "")
+        label = f"<{dType} {index}>"
+        subject_definitions.append(f"{label} {description}")
+        retention_analysis.append(f"{label}: {relationship}")
+        if dType == "Picture" or dType == "Subject":
+            images.append(image_file)
+        elif dType == "Audio":
+            audios.append(audio_file)
+        elif dType == "Video":
+            videos.append(video_file)
+        seen.add(name)
+        index += 1
+        subjects_out.append(subj)
+        mapping[name] = label
 
-        description = str(subj.get("description", "") or "").strip()
-        image_file = str(subj.get("imageFile", "") or "").strip()
-        audio_file = str(subj.get("audioFile", "") or "").strip()
-        video_file = str(subj.get("videoFile", "") or "").strip()
-        use_audio = bool(audio_file)
+    for name in (timeline_segment or {}).get("additionSubject", []) or []:
+        if name in seen or name in unmatched:
+            continue
+        idx = find_index(subjects_in, func=lambda x, y=name: x.get("name") == y)
+        if idx == -1:
+            unmatched.append(name)
+            continue
+        subj = subjects_in[idx]
+        image_file = subj.get("imageFile", "")
+        audio_file = subj.get("audioFile", "")
+        video_file = subj.get("videoFile", "")
+        description = subj.get("description", "")
+        dType = subj.get("type", "") or "Subject"
+        relationship = subj.get("relationship", "")
+        label = f"<{dType} {index}>"
+        subject_definitions.append(f"{label} {description}")
+        retention_analysis.append(f"{label}: {relationship}")
+        if dType == "Picture" or dType == "Subject":
+            images.append(image_file)
+        elif dType == "Audio":
+            audios.append(audio_file)
+        elif dType == "Video":
+            videos.append(video_file)
+        seen.add(name)
+        index += 1
+        subjects_out.append(subj)
 
-        if stype == "Subject":
-            subject_counter += 1
-            label = f"<Subject {subject_counter}>"
-            source = ""
-            if image_file:
-                picture_counter += 1
-                pic_label = f"<Picture {picture_counter}>"
-                source = f" in {pic_label}"
-                pictures.append({"label": pic_label, "src": image_file})
-            definition = f"{label} is {name}{source}"
-            if description:
-                definition += f", {description}"
-        elif stype == "Picture":
-            picture_counter += 1
-            label = f"<Picture {picture_counter}>"
-            pictures.append({"label": label, "src": image_file})
-            definition = f"{label} is {description or name} (reference image anchor)"
-        elif stype == "Audio":
-            subject_counter += 1
-            label = f"<Audio {subject_counter}>"
-            if audio_file:
-                audios.append({"label": label, "src": audio_file})
-            definition = f"{label} is {description or name}"
-        elif stype == "Video":
-            subject_counter += 1
-            label = f"<Video {subject_counter}>"
-            if video_file:
-                videos.append({"label": label, "src": video_file})
-            definition = f"{label} is {description or name}"
-        else:  # 其他类型兜底
-            subject_counter += 1
-            label = f"<{stype} {subject_counter}>"
-            definition = f"{label} is {description or name}"
-
-        audio_label = None
-        audio_definition = None
-        if use_audio:
-            audio_counter += 1
-            audio_label = f"<Audio {audio_counter}>"
-            audio_definition = f"{audio_label} is the voice-timbre reference for {label}"
-            audios.append({"label": audio_label, "src": audio_file})
-
-        bound.append({
-            "name": name,
-            "description": description,
-            "type": stype,
-            "relationship": relationship,
-            "audio_relationship": audio_relationship,
-            "imageFile": image_file,
-            "audioFile": audio_file,
-            "use_audio": use_audio,
-            "matched": matched,
-            "has_dialogue": name in dialogues,
-            "subject_definition": definition,
-            "audio_definition": audio_definition,
-            "audio_label": audio_label,
-            "audio_number": audio_counter if use_audio else None,
-        })
-
-    subject_lines = [b["subject_definition"] for b in bound if b["subject_definition"]]
-    audio_lines = [b["audio_definition"] for b in bound if b["audio_definition"]]
-    retention_lines: list[str] = []
-
-    for b in bound:
-        label = b["subject_definition"].split(" is ")[0] if b["subject_definition"] else ""
-        if label:
-            retention_lines.append(f"{label}: {b['relationship']}")
-        if b["audio_definition"] and b["audio_number"]:
-            text = _AUDIO_RELATION_TEXT.get(b["audio_relationship"], _AUDIO_RELATION_TEXT["reference"])
-            retention_lines.append(
-                f"{b['audio_label']}: {b['audio_relationship']} - "
-                f"{text.format(n=b['audio_number'])}"
-            )
-
-    # 首帧 / 尾帧 → 独立 Picture 锚点
-    if first_frame_path:
-        picture_counter += 1
-        label = f"<Picture {picture_counter}>"
-        subject_lines.append(f"{label} is the first frame of [Shot 1].")
-        retention_lines.append(f"{label} ([Shot 1] first frame): fully_preserved.")
-    # 与前端 buildSubjectBindings 一致：首帧 == 尾帧时不重复追加尾帧锚点
-    if last_frame_path and last_frame_path != first_frame_path:
-        picture_counter += 1
-        label = f"<Picture {picture_counter}>"
-        subject_lines.append(f"{label} is the last frame of the target video.")
-        retention_lines.append(f"{label} (last frame of the target video): fully_preserved.")
-
-    # 从 timeline segments 兜底收集视频 / 音频媒体（对齐前端 buildSubjectBindings：
-    if timeline_segments:
-        for seg in sorted(
-            (s for s in timeline_segments if isinstance(s, dict)),
-            key=lambda s: s.get("start") or 0,
-        ):
-            stype = str(seg.get("type", "") or "").strip()
-            if stype == "video" and seg.get("videoFile"):
-                label = f"<Video {len(videos) + 1}>"
-                videos.append({"label": label, "src": seg["videoFile"]})
-            elif stype == "audio" and seg.get("audioFile"):
-                label = f"<Audio {len(audios) + 1}>"
-                audios.append({"label": label, "src": seg["audioFile"]})
-
-    subjects_out = []
-    for b in bound:
-        entry = {k: v for k, v in b.items() if k not in ("audio_label", "audio_number")}
-        subjects_out.append(entry)
+    if last_frame_path:
+        label = f"<Picture {index}>"
+        subject_definitions.append(f"{label} is the last frame of the target video.")
+        retention_analysis.append(f"{label} (last frame of the target video): fully_preserved.")
+        index += 1
+        images.append(last_frame_path)
 
     return {
         "subjects": subjects_out,
-        "subject_definition": "\n".join(subject_lines),
-        "audio_definition": "\n".join(audio_lines),
-        "retention_analysis": "\n".join(retention_lines),
+        "subject_definition": "\n".join(subject_definitions),
+        "retention_analysis": "\n".join(retention_analysis),
+        "detailed_description": prompt_json.get("detailed_description"), 
+        "overall_soundscape": prompt_json.get("overall_soundscape"),
+        "non_diegetic_music": prompt_json.get("non_diegetic_music"),
         "unmatched_mentions": unmatched,
-        "pictures": pictures,
+        "images": images,
         "audios": audios,
         "videos": videos,
     }

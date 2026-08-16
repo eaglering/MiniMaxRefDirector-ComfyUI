@@ -156,9 +156,9 @@ class MiniMaxRefDirector(io.ComfyNode):
         segment_count = 0
         prev_prompt = ""
 
-        # 全局首帧 / 尾帧（有图 segment 的第一个 / 最后一个，与前端 buildFirstFramePayload 一致）
+        # 全局尾帧（最后一个有图 segment，与前端 buildFirstFramePayload 一致）；
+        # 首帧图不再作为 shot1 首帧锚点（图片改为与提示词合并进 detailed_description）
         img_segs = [s for s in timeline_segments if s.get("imageFile", "")]
-        first_frame_path = img_segs[0].get("imageFile", "") if img_segs else ""
         last_frame_path = img_segs[-1].get("imageFile", "") if img_segs else ""
 
         if len(timeline_segments) == 0:
@@ -205,9 +205,8 @@ class MiniMaxRefDirector(io.ComfyNode):
                 try:
                     bind = build_h3_subject_bindings(
                         subject_data, prompt_json,
-                        first_frame_path=first_frame_path,
                         last_frame_path=last_frame_path,
-                        timeline_segments=timeline_segments,
+                        timeline_segment=seg,
                     )
                 except Exception:
                     log.warning("[MiniMaxRefDirector] build_h3_subject_bindings failed", exc_info=True)
@@ -215,14 +214,17 @@ class MiniMaxRefDirector(io.ComfyNode):
                 if bind:
                     entry["prompt_json"] = prompt_json
                     entry["subject_definition"] = bind.get("subject_definition", "")
-                    entry["audio_definition"] = bind.get("audio_definition", "")
                     entry["retention_analysis"] = bind.get("retention_analysis", "")
-                    entry["pictures"] = bind.get("pictures", [])
-                    entry["audios"] = bind.get("audios", [])
-                    entry["videos"] = bind.get("videos", [])
-                    subject_defs = "\n".join(
-                        x for x in (bind.get("subject_definition", ""), bind.get("audio_definition", "")) if x
-                    )
+                    entry["pictures"] = [
+                        {"label": f"<Picture {i}>", "src": p} for i, p in enumerate(bind.get("images", []) or [], 1)
+                    ]
+                    entry["audios"] = [
+                        {"label": f"<Audio {i}>", "src": a} for i, a in enumerate(bind.get("audios", []) or [], 1)
+                    ]
+                    entry["videos"] = [
+                        {"label": f"<Video {i}>", "src": v} for i, v in enumerate(bind.get("videos", []) or [], 1)
+                    ]
+                    subject_defs = bind.get("subject_definition", "")
                     parts = []
                     if subject_defs:
                         parts.append(subject_defs)

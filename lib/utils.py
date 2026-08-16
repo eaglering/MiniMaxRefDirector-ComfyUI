@@ -2,6 +2,12 @@ import json
 import re
 from comfy_api.latest import io, UI
 
+def find_index(list: list, func: callable):
+    for i, v in enumerate(list):
+        if func(v):
+            return i
+    return -1
+
 def seconds_to_mmssmmm(seconds: float) -> str:
     """Convert float seconds to MM:SS.mmm format string.
 

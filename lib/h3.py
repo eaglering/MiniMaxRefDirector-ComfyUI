@@ -57,6 +57,9 @@ class RefGenerateImage(io.ComfyNode):
             node_id="RefGenerateImage",
             display_name="MiniMaxRef Generate Image",
             category="minimaxrefdirector",
+            # 声明为输出节点：否则 ComfyUI 提交 prompt 时校验不到输出，
+            # 直接报 prompt_no_outputs 拒绝执行
+            is_output_node=True,
             description=(
                 "Sample a single first-frame image from the H3 model (with sigma shift) "
                 "and save it to the ComfyUI output directory. The saved image's "
@@ -119,6 +122,17 @@ class RefGenerateImage(io.ComfyNode):
                 seed=0, steps=20, cfg=5.5, sampler_name="euler", scheduler="beta", denoise=1.0,
                 shift_video=12.0, shift_audio=3.0, filename_prefix="minimaxrefdirector/firstframe",
                 ref_images=None) -> io.NodeOutput:
+        # 后端控制台日志：确认到底收到了什么（前端 subgraph 提交的内容）
+        print("=" * 72)
+        print(f"[RefGenerateImage] 收到参数：")
+        print(f"[RefGenerateImage]   model={type(model).__name__} clip={type(clip).__name__} vae={type(vae).__name__}")
+        print(f"[RefGenerateImage]   prompt={prompt!r}")
+        print(f"[RefGenerateImage]   output_resolution={output_resolution!r} million_pixels={million_pixels}")
+        print(f"[RefGenerateImage]   seed={seed} steps={steps} cfg={cfg} sampler={sampler_name}/{scheduler} denoise={denoise}")
+        print(f"[RefGenerateImage]   shift_video={shift_video} shift_audio={shift_audio} filename_prefix={filename_prefix!r}")
+        for k, v in sorted((ref_images or {}).items()):
+            print(f"[RefGenerateImage]   {k}={v!r}")
+        print("=" * 72)
         if model is None:
             raise ValueError("RefGenerateImage needs a model to sample")
         if vae is None:
