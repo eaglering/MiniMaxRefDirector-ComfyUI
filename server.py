@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import traceback
 
 import folder_paths
 from aiohttp import web
 
-from lib.h3 import generate_first_frame
-from .lib.image import calc_resolution, load_image_tensor
+from .lib.image import load_image_tensor
 from .lib.llm import generate_prompt_with_api
 from .lib.prompt import generate_h3_prompt, image_analysis
 from server import PromptServer
@@ -165,25 +165,34 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
-@PromptServer.instance.routes.post(f"{API_PREFIX}/llm/generate_first_frame")
-async def generate_first_frame_api(request: web.Request) -> web.Response:
+
+@PromptServer.instance.routes.post(f"{API_PREFIX}/h3/build_subject_bindings")
+async def build_subject_bindings_api(request: web.Request) -> web.Response:
+    """构建 H3 主体绑定（subject_definition / audio_definition / retention_analysis
+    + pictures / audios / videos），替代前端 buildFirstFramePayload 中的组装逻辑。"""
     try:
+        from .lib.prompt import build_h3_subject_bindings
         data = await request.json()
-        preset = data.get("preset", "")
-        prompt = data.get("prompt", "")
-        image_paths = data.get("image_paths", "")
-        million_pixels = data.get("million_pixels", 0)
-        options = {
-            "gguf_path": data.get("gguf_path", ""),
-            "mmproj_path": data.get("mmproj_path", ""),
-            "provider": data.get("provider", "GLM"),
-            "api_key": data.get("api_key", ""),
-        }
-        if not prompt:
-            return web.json_response({"success": False, "error": "prompt is required"}, status=400)
-        
-        width, height = calc_resolution(preset=preset, million_pixels=million_pixels)
-        generate_first_frame(prompt=prompt, image_paths=image_paths, width=width, height=height, options=options)
+        subject_data = data.get("subject_data", {}) or {}
+        prompt_json = data.get("prompt_json", {}) or {}
+        if isinstance(prompt_json, str):
+            try:
+                prompt_json = json.loads(prompt_json)
+            except (json.JSONDecodeError, TypeError):
+                prompt_json = {}
+        if not isinstance(prompt_json, dict):
+            return web.json_response({"success": False, "error": "prompt_json must be an object"}, status=400)
+        first_frame_path = data.get("first_frame_path", "") or ""
+        last_frame_path = data.get("last_frame_path", "") or ""
+        timeline_segments = data.get("timeline_segments", None)
+        result = build_h3_subject_bindings(
+            subject_data,
+            prompt_json,
+            first_frame_path=first_frame_path,
+            last_frame_path=last_frame_path,
+            timeline_segments=timeline_segments,
+        )
+        return web.json_response({"success": True, "data": result})
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)

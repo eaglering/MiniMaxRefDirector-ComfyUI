@@ -72,11 +72,12 @@ const genId = () => Date.now().toString() + Math.random().toString(36).substr(2,
 
 // Build a /view? URL for a stored media key. fileKey may be "name.ext" or
 // "subfolder/name.ext"; an explicit subfolder param is used when fileKey has no slash.
-const viewUrl = (fileKey, subfolder = "") => {
+// type 默认 input；output 目录的首帧图等产物传 type="output"。
+const viewUrl = (fileKey, subfolder = "", type = "input") => {
   const slash = fileKey.lastIndexOf("/");
   const fn = slash >= 0 ? fileKey.slice(slash + 1) : fileKey;
   const sf = slash >= 0 ? fileKey.slice(0, slash) : subfolder;
-  return api.apiURL(`/view?filename=${encodeURIComponent(fn)}&type=input&subfolder=${encodeURIComponent(sf)}`);
+  return api.apiURL(`/view?filename=${encodeURIComponent(fn)}&type=${type}&subfolder=${encodeURIComponent(sf)}`);
 };
 
 // Upload an image to the server. Returns { imageFile, imgUrl } or null on failure.
@@ -174,7 +175,7 @@ const STYLES = `
 .tr-gp-head{font-size:11px;font-weight:700;color:#cfcfcf;text-transform:uppercase;letter-spacing:0.06em;padding-bottom:5px;border-bottom:1px solid #3a3a3a;display:flex;align-items:center;gap:6px}
 .tr-gp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:6px}
 .tr-gp-item{display:flex;flex-direction:column;gap:2px;min-width:0}
-.tr-gp-label{font-size:10px;color:#8a8a8a;white-space:nowrap;user-select:none;-webkit-user-select:none}
+.tr-gp-label{font-size:10px;color:#fff;white-space:nowrap;user-select:none;-webkit-user-select:none}
 .tr-gp-input{background:#222;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:4px;padding:3px 6px;font-size:11px;font-family:monospace;width:100%;box-sizing:border-box;outline:none;transition:border-color 0.15s ease}
 .tr-gp-input:hover{border-color:#555}
 .tr-gp-input:focus{border-color:#888}
@@ -183,15 +184,51 @@ const STYLES = `
 .tr-gp-select{background:#222;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:4px;padding:3px 6px;font-size:11px;width:100%;box-sizing:border-box;outline:none;cursor:pointer}
 .tr-gp-select:hover{border-color:#555}
 .tr-gp-select:focus{border-color:#888}
+.tr-gap-hr{height:1px;background:#fff;transform:scaleY(.2)}
 `;
 
-let styleEl = document.getElementById("prompt-relay-styles");
+const STYLE_VERSION = "20260816-c"; // 开发期改样式后递增；在 DevTools Console 检查是否打印，确认浏览器加载的是最新模块
+// 注意：id 必须唯一！WhatDreamsCost-ComfyUI 的 ltx_director.js 也用 "prompt-relay-styles" 并会覆盖 textContent，
+// 因此这里使用本扩展专属 id 避免样式被整体覆盖。
+const STYLE_ID = "minimax-ref-director-styles";
+let styleEl = document.getElementById(STYLE_ID);
 if (!styleEl) {
   styleEl = document.createElement("style");
-  styleEl.id = "prompt-relay-styles";
+  styleEl.id = STYLE_ID;
   document.head.appendChild(styleEl);
 }
-styleEl.textContent = STYLES;
+styleEl.textContent = `/* MiniMaxRefDirector styles v${STYLE_VERSION} */\n${STYLES}`;
+console.info(`[MiniMaxRefDirector] styles injected v${STYLE_VERSION} (id: ${STYLE_ID})`);
+
+// --- 诊断：确认 CSS 规则真的在文档中 + 自动报告 .tr-gp 挂载状态 ---
+// 1) 检查注入的 <style> 是否仍在 head 且包含 tr-gp 规则
+const checkCssRules = () => {
+  let rulesFound = 0;
+  for (const sheet of document.styleSheets) {
+    if (sheet.ownerNode !== styleEl) continue;
+    try {
+      for (const r of sheet.cssRules) {
+        if (r.selectorText && r.selectorText.includes(".tr-gp")) rulesFound++;
+      }
+    } catch (e) { /* 跨域样式表不可读，忽略 */ }
+  }
+  console.info(`[MiniMaxRefDirector] styleEl in head: ${document.head.contains(styleEl)}, tr-gp cssRules found: ${rulesFound}`);
+};
+// 2) 监听 DOM：director 节点创建/选中后 .tr-gp 挂载时自动报告（避免页面加载瞬间误报 not-yet）
+const trGpReport = (el) => {
+  const style = el ? window.getComputedStyle(el) : null;
+  console.info(
+    `[MiniMaxRefDirector] tr-gp mounted: ${!!el}` + (style ? `, display=${style.display}, visibility=${style.visibility}, flexDirection=${style.flexDirection}` : "")
+  );
+  if (el) trGpObserver.disconnect();
+};
+const trGpObserver = new MutationObserver(() => {
+  const el = document.querySelector(".tr-gp");
+  if (el) trGpReport(el);
+});
+trGpObserver.observe(document.documentElement, { childList: true, subtree: true });
+setTimeout(() => { trGpReport(document.querySelector(".tr-gp")); trGpObserver.disconnect(); }, 20000); // 20s 兜底：即使未选中节点也报告一次
+checkCssRules();
 
 // --- Icons ---
 const ICONS = {

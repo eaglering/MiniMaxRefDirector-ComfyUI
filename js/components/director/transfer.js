@@ -121,19 +121,6 @@ function subjectImgSrc(s) {
   return "";
 }
 
-// ---------- 主体定义 / 音频定义 / retention_analysis ----------
-// 与 lib/prompt.py build_h3_subject_bindings 保持一致（前端版），
-// 供 .tr-resources 信息图标 hover 展示。
-const H3_TYPES_LIST = ["Subject", "Picture", "Video", "Audio"];
-const VISUAL_RELATIONS_LIST = ["fully_preserved", "partially_preserved", "attribute_transfer", "weak_reference"];
-const AUDIO_RELATIONS_LIST = ["fully_copy", "partially_copy", "reference", "weak_reference"];
-const AUDIO_RELATION_TEXT = {
-  fully_copy: "<Audio {n}> is reused 1:1 as the target video's complete final audio track.",
-  partially_copy: "Only part of the timeline or selected audio layers of <Audio {n}> are copied.",
-  reference: "the target speaker follows <Audio {n}>'s voice timbre and measured delivery without copying the original signal.",
-  weak_reference: "Only broad similarity in category or atmosphere from <Audio {n}> is retained.",
-};
-
 // 从 H3 prompt 文本提取 <@name> / <#name:dialogue> 提及
 function extractH3Mentions(text) {
   const names = new Set();
@@ -152,150 +139,128 @@ function extractH3Mentions(text) {
   return { names, dialogues };
 }
 
-// 参考 lib/prompt.py build_h3_subject_bindings：
-// 返回 { subject_definition, audio_definition, retention_analysis,
-//        pictures, audios, videos }（后三者按 <… N> 编号排序，含 label + src）
-function buildSubjectBindings(text, subjectsList, dir) {
-  const { names, dialogues } = extractH3Mentions(text);
-  const bound = [];
-  let subjectCounter = 0;
-  let pictureCounter = 0;
-  let audioCounter = 0;
+// ============================================================
+// 首帧图 subgraph（机制 1：前端独立构造并提交，不污染 director 节点）
+// ============================================================
 
-  const pictures = []; // { label: "<Picture N>", src }
-  const audios = [];   // { label: "<Audio N>", src }
-  const videos = [];   // { label: "<Video N>", src }
-
-  for (const s of subjectsList || []) {
-    const name = String(s.name || "").trim();
-    if (!name) continue;
-    let stype = String(s.type || "").trim();
-    if (!H3_TYPES_LIST.includes(stype)) stype = "Subject";
-    let relationship = String(s.relationship || "").trim();
-    if (!VISUAL_RELATIONS_LIST.includes(relationship)) relationship = "fully_preserved";
-    let audioRelationship = String(s.audio_relationship || "").trim();
-    if (!AUDIO_RELATIONS_LIST.includes(audioRelationship)) audioRelationship = "reference";
-
-    const description = String(s.description || "").trim();
-    const imageFile = String(s.imageFile || "").trim();
-    const audioFile = String(s.audioFile || "").trim();
-    const videoFile = String(s.videoFile || "").trim();
-    const useAudio = !!audioFile;
-
-    let label;
-    let definition;
-    if (stype === "Subject") {
-      subjectCounter += 1;
-      label = `<Subject ${subjectCounter}>`;
-      let source = "";
-      if (imageFile) {
-        pictureCounter += 1;
-        const picLabel = `<Picture ${pictureCounter}>`;
-        source = ` in ${picLabel}`;
-        pictures.push({ label: picLabel, src: subjectImgSrc(s) });
-      }
-      definition = `${label} is ${name}${source}`;
-      if (description) definition += `, ${description}`;
-    } else if (stype === "Picture") {
-      pictureCounter += 1;
-      label = `<Picture ${pictureCounter}>`;
-      pictures.push({ label, src: subjectImgSrc(s) });
-      definition = `${label} is ${description || name} (reference image anchor)`;
-    } else if (stype === "Audio") {
-      subjectCounter += 1;
-      label = `<Audio ${subjectCounter}>`;
-      if (audioFile) audios.push({ label, src: audioFile });
-      definition = `${label} is ${description || name}`;
-    } else if (stype === "Video") {
-      subjectCounter += 1;
-      label = `<Video ${subjectCounter}>`;
-      if (videoFile) videos.push({ label, src: videoFile });
-      definition = `${label} is ${description || name}`;
-    } else {
-      subjectCounter += 1;
-      label = `<${stype} ${subjectCounter}>`;
-      definition = `${label} is ${description || name}`;
-    }
-
-    let audioDefinition = null;
-    let audioLabel = null;
-    let audioNumber = null;
-    if (useAudio) {
-      audioCounter += 1;
-      audioLabel = `<Audio ${audioCounter}>`;
-      audioNumber = audioCounter;
-      audios.push({ label: audioLabel, src: audioFile });
-      audioDefinition = `${audioLabel} is the voice-timbre reference for ${label}`;
-    }
-
-    bound.push({
-      label,
-      name,
-      relationship,
-      audioRelationship,
-      subject_definition: definition,
-      audio_definition: audioDefinition,
-      audio_label: audioLabel,
-      audio_number: audioNumber,
-      matched: names.has(name),
-      has_dialogue: dialogues.has(name),
-    });
+// 根据输入语义找 loader 对应输出槽位（MODEL / CLIP / VAE）
+function outputSlotFor(loaderNode, inputName) {
+  const want = inputName === "model" ? "MODEL" : inputName === "clip" ? "CLIP" : "VAE";
+  const outs = loaderNode?.outputs || [];
+  for (let i = 0; i < outs.length; i++) {
+    if (String(outs[i]?.type || "") === want) return i;
   }
-
-  const subjectLines = bound.filter((b) => b.subject_definition).map((b) => b.subject_definition);
-  const audioLines = bound.filter((b) => b.audio_definition).map((b) => b.audio_definition);
-  const retentionLines = [];
-  for (const b of bound) {
-    if (b.label) retentionLines.push(`${b.label}: ${b.relationship}`);
-    if (b.audio_definition && b.audio_number) {
-      const tpl = AUDIO_RELATION_TEXT[b.audioRelationship] || AUDIO_RELATION_TEXT.reference;
-      retentionLines.push(
-        `${b.audio_label}: ${b.audioRelationship} - ${tpl.replace("{n}", b.audio_number)}`
-      );
-    }
-  }
-
-  // 首帧 / 尾帧 → 独立 Picture 锚点（与 Python 端一致）
-  const segs = dir?.timeline?.segments || [];
-  const sorted = [...segs].sort((a, b) => (a.start || 0) - (b.start || 0));
-  const srcOf = (s) => s.imgObj?.src || s.imageB64 || "";
-  const first = sorted.find((s) => s.imgObj || s.imageB64);
-  const last = [...sorted].reverse().find((s) => s.imgObj || s.imageB64);
-  if (first) {
-    pictureCounter += 1;
-    const label = `<Picture ${pictureCounter}>`;
-    pictures.push({ label, src: srcOf(first) });
-    subjectLines.push(`${label} is the first frame of [Shot 1].`);
-    retentionLines.push(`${label} ([Shot 1] first frame): fully_preserved.`);
-  }
-  if (last && last !== first) {
-    pictureCounter += 1;
-    const label = `<Picture ${pictureCounter}>`;
-    pictures.push({ label, src: srcOf(last) });
-    subjectLines.push(`${label} is the last frame of the target video.`);
-    retentionLines.push(`${label} (last frame of the target video): fully_preserved.`);
-  }
-
-  // 从时间轴 segments 收集视频 / 音频地址（type 维度的兜底，编号续接主体绑定）
-  for (const seg of sorted) {
-    if (seg.type === "video" && seg.videoFile) {
-      const n = videos.length + 1;
-      videos.push({ label: `<Video ${n}>`, src: seg.videoFile });
-    } else if (seg.type === "audio" && seg.audioFile) {
-      const n = audios.length + 1;
-      audios.push({ label: `<Audio ${n}>`, src: seg.audioFile });
-    }
-  }
-
-  return {
-    subject_definition: subjectLines.join("\n"),
-    audio_definition: audioLines.join("\n"),
-    retention_analysis: retentionLines.join("\n"),
-    pictures,
-    audios,
-    videos,
-  };
+  return 0;
 }
+
+// 反查节点某输入的"真实加载器"（沿链向上，穿过 MiniMaxRefSubject/Director/Guide 等透传节点），
+// 返回 { node, slot }，slot 为该 loader 对应语义的输出索引；找不到返回 { node: 当前节点, slot: null }
+function resolveLoaderNode(node, inputName) {
+  let cur = node;
+  const seen = new Set();
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    const cls = cur.comfyClass || cur.type || "";
+    if (/^(CheckpointLoaderSimple|CheckpointLoader|UNETLoader|VAELoader|CLIPLoader|DualCLIPLoader|TripleCLIPLoader)$/.test(cls)) {
+      return { node: cur, slot: outputSlotFor(cur, inputName) };
+    }
+    const input = (cur.inputs || []).find((i) => i.name === inputName);
+    if (!input || input.link == null) return { node: cur, slot: null };
+    const link = app.graph?.links?.[input.link];
+    if (!link) return { node: cur, slot: null };
+    const origin = app.graph?.getNodeById?.(link.origin_id);
+    if (!origin) return { node: cur, slot: null };
+    cur = origin;
+  }
+  return { node: cur, slot: null };
+}
+
+// 复制节点全部 widget 值（跳过隐藏 / 按钮 / 指定项）
+function nodeWidgetValues(node, skip = {}) {
+  const out = {};
+  for (const w of node?.widgets || []) {
+    if (!w || w.type === "hidden" || w.name == null) continue;
+    if (w.name.startsWith("_") || w.type === "button") continue;
+    if (skip[w.name]) continue;
+    if (typeof w.value === "undefined" || w.value === null) continue;
+    out[w.name] = w.value;
+  }
+  return out;
+}
+
+// 把资源 src（/view? URL 或相对路径）转成 LoadImage 可用的 input 相对文件名；
+// data URL / 外部 URL / 非 input 类型一律返回 null
+function imageSrcToInputPath(src) {
+  if (!src || typeof src !== "string") return null;
+  if (src.startsWith("data:")) return null;
+  try {
+    const u = new URL(src, location.origin);
+    if (u.pathname.endsWith("/view")) {
+      const fn = u.searchParams.get("filename");
+      const sub = u.searchParams.get("subfolder") || "";
+      const type = u.searchParams.get("type") || "input";
+      if (!fn || type !== "input") return null;
+      return sub ? `${sub}/${fn}` : fn;
+    }
+    return null; // 其他同源 URL 无法保证位于 input 目录
+  } catch { /* 非 URL，按相对路径处理 */ }
+  return src;
+}
+
+// 轮询 /history 等待 prompt 执行完成；成功返回 history 条目，失败 / 超时抛错
+async function waitForPromptDone(promptId, timeoutMs = 600000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    let hist = {};
+    try { hist = await api.fetchApi(`/history/${promptId}`); } catch { /* 网络抖动，重试 */ }
+    const h = hist && hist[promptId];
+    if (h) {
+      const st = h.status || {};
+      if (st.completed || st.status_str === "success") return h;
+      if (st.status_str === "error" || (st.messages || []).some((m) => m[0] === "execution_error")) {
+        const err = (st.messages || []).find((m) => m[0] === "execution_error");
+        throw new Error(err ? `生成失败：${err[1]?.message || "执行错误"}` : "生成失败");
+      }
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("生成首帧超时");
+}
+
+// 从 history 输出中取第一张图片（SaveImage 产物）
+function imageFromHistory(history) {
+  const outputs = history?.outputs || {};
+  for (const key of Object.keys(outputs)) {
+    const o = outputs[key];
+    if (o?.images?.length) {
+      const img = o.images[0];
+      return { filename: img.filename, subfolder: img.subfolder || "", type: img.type || "output" };
+    }
+  }
+  return null;
+}
+
+// 拉取图片并转 base64 data URL
+async function fetchImageAsBase64(url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return "";
+    const blob = await resp.blob();
+    return await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ""));
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn("[Transfer] fetchImageAsBase64 failed:", e);
+    return "";
+  }
+}
+
+// 主体定义 / 音频定义 / retention_analysis / 媒体列表（pictures / audios / videos）
+// 由后端 /h3/build_subject_bindings 接口（lib/prompt.py build_h3_subject_bindings）
+// 生成，前端不再本地组装，见 fetchBindings()。
 
 // 右侧 textarea 默认 JSON 数据结构（→ 生成结果会替代它）
 const DEFAULT_PROMPT_JSON = {
@@ -459,8 +424,8 @@ const TIME_PARAM_DEFS = {
 
 const OTHER_GLOBAL_DEFS = [
   { name: "frame_rate", label: "FPS", type: "number", fallback: 24, min: 1, max: 240, step: 1 },
-  { name: "outpu_resolution", label: "Ratio", type: "select", fallback: "16:9横屏", options: RESOLUTION_OPTIONS },
-  { name: "million_pixels", label: "MP", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1 },
+  { name: "outpu_resolution", label: "Resolution", type: "select", fallback: "16:9横屏", options: RESOLUTION_OPTIONS },
+  { name: "million_pixels", label: "Million Pixels", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1 },
 ];
 
 // ---------- Preact 组件 ----------
@@ -479,13 +444,17 @@ export function TransferPanel({ director }) {
   const [motionCtxOn, setMotionCtxOn] = useState(false); // Motion Context 开关
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
+  const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
 
   const rowRef = useRef(null);
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const debounceRef = useRef(null);
+  const bindDebounceRef = useRef(null); // 主体绑定接口请求防抖
+  const bindSeqRef = useRef(0); // 绑定请求序号：只应用最新一次请求的返回，防并发乱序覆盖
   const aliveRef = useRef(true);
   const rightSaveFirstRun = useRef(true);
+  const lastSegIdRef = useRef(null); // 记录当前已加载右侧 JSON 的 segment id
 
   // 挂载：读主体列表，向外壳注册左侧同步通道 + 当前选中 segment 通道
   useEffect(() => {
@@ -503,6 +472,20 @@ export function TransferPanel({ director }) {
         setCurSeg(seg);
         setMotionCtxOn(!!(seg && seg.motionContext));
         setAutoEndOn(!!(seg && seg.autoEndFrame));
+        // 切换 segment 时加载该 segment 独立的 H3 prompt JSON（右侧）。
+        // 同一 segment 的 UI 刷新（如生成首帧成功后回推）不重置右侧内容。
+        const segId = seg ? seg.id : null;
+        if (segId && segId !== lastSegIdRef.current) {
+          lastSegIdRef.current = segId;
+          // 无 segment JSON 时回退默认模板，避免残留上一个 segment 的内容
+          setRightText(
+            seg && typeof seg.h3PromptJson === "string"
+              ? seg.h3PromptJson
+              : formatPromptJson(DEFAULT_PROMPT_JSON)
+          );
+        } else if (!segId) {
+          lastSegIdRef.current = null;
+        }
       };
       // 挂载时主动同步一次当前选中 segment（director 可能早已有选择）
       const initSeg = director.selectionType === "audio"
@@ -515,9 +498,16 @@ export function TransferPanel({ director }) {
         ? (initSeg.prompt || "")
         : (director.promptInput?.value || "");
       setLeftText(initPrompt);
-      // 从节点 properties 恢复已保存的右侧生成结果（随 workflow 持久化）
-      const savedRight = director.node?.properties?.__rightPromptText;
-      if (typeof savedRight === "string" && savedRight) setRightText(savedRight);
+      // 优先从当前 segment 的 h3PromptJson 恢复右侧内容；
+      // 无 segment JSON 时兜底从节点 properties 恢复旧版 __rightPromptText（兼容旧 workflow）
+      const segJson = initSeg && typeof initSeg.h3PromptJson === "string" ? initSeg.h3PromptJson : "";
+      if (segJson) {
+        lastSegIdRef.current = initSeg.id;
+        setRightText(segJson);
+      } else {
+        const savedRight = director.node?.properties?.__rightPromptText;
+        if (typeof savedRight === "string" && savedRight) setRightText(savedRight);
+      }
     }
     return () => {
       aliveRef.current = false;
@@ -532,8 +522,9 @@ export function TransferPanel({ director }) {
     };
   }, [director]);
 
-  // 右侧内容持久化：每次编辑写入节点 properties（__rightPromptText），
-  // 随 workflow 的 onSerialize 一起保存，刷新后由挂载 effect 恢复。
+  // 右侧内容持久化：每次编辑写回当前 segment 的 h3PromptJson，
+  // 随 commitChanges 的 ...rest 序列化进 timeline_data（per-segment 存储）。
+  // 旧版 __rightPromptText 仅作为无 segment JSON 时的加载兜底，不再写入。
   // 首次渲染跳过，避免用默认值覆盖已保存内容。
   useEffect(() => {
     if (rightSaveFirstRun.current) {
@@ -541,13 +532,16 @@ export function TransferPanel({ director }) {
       return;
     }
     if (!aliveRef.current || !director?.node) return;
-    const node = director.node;
-    if (node.properties.__rightPromptText !== rightText) {
-      node.properties.__rightPromptText = rightText;
+    const seg = curSeg;
+    if (!seg || typeof seg.id === "undefined") return;
+    if (seg.h3PromptJson !== rightText) {
+      seg.h3PromptJson = rightText;
+      // 经外壳 commitChanges 序列化（...rest 保留 h3PromptJson 自定义字段）
+      director.commitChanges(true);
       // 标记画布已修改，触发 ComfyUI 自动保存 / 序列化
       if (app.graph) app.graph.setDirtyCanvas(true, true);
     }
-  }, [rightText, director]);
+  }, [rightText, curSeg, director]);
 
   // 中间列拖拽：按住中间列（按钮除外）左右拖动调节两个 textarea 的宽度
   function startDrag(e) {
@@ -599,6 +593,18 @@ export function TransferPanel({ director }) {
     return () => clearTimeout(debounceRef.current);
   }, [rightText, subjects]);
 
+  // 右侧 H3 JSON / 主体 / 时间轴变化时 debounce 请求后端
+  // /h3/build_subject_bindings（替代前端 buildFirstFramePayload 的绑定组装）。
+  // 固定只绑定 prompt 中提到的主体。
+  useEffect(() => {
+    if (!aliveRef.current || !director) return;
+    clearTimeout(bindDebounceRef.current);
+    bindDebounceRef.current = setTimeout(() => {
+      fetchBindings();
+    }, 400);
+    return () => clearTimeout(bindDebounceRef.current);
+  }, [rightText, subjects, director]);
+
   // ---------- 工具 ----------
 
   const wVal = (name) =>
@@ -620,11 +626,54 @@ export function TransferPanel({ director }) {
     };
   };
 
+  // 请求后端 /h3/build_subject_bindings（lib/prompt.py build_h3_subject_bindings）：
+  // 返回 subject_definition / audio_definition / retention_analysis + pictures / audios / videos。
+  // 替代前端 buildFirstFramePayload 中的绑定组装；固定只绑定 prompt 中提到的主体。
+  const fetchBindings = async () => {
+    if (!aliveRef.current || !director) return null;
+    const seq = ++bindSeqRef.current; // 本次请求序号
+    try {
+      const pj = parsePromptText(rightText);
+      const body = {
+        subject_data: { subjects: subjects || [] },
+        prompt_json: pj,
+        first_frame_path: firstFramePath(),
+        last_frame_path: lastFramePath(),
+        timeline_segments: (director?.timeline?.segments || []).map((s) => ({
+          type: s.type,
+          start: s.start,
+          videoFile: s.videoFile || "",
+          audioFile: s.audioFile || "",
+        })),
+      };
+      const res = await api.fetchApi("/minimax_ref/api/h3/build_subject_bindings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      // 仅最新一次请求的返回允许写回 bindData：并发请求乱序返回时，
+      // 旧请求的成功响应不再覆盖新请求的结果（失败时保留上次成功结果作为 fallback）。
+      if (data && data.success && aliveRef.current && seq === bindSeqRef.current) {
+        setBindData(data.data || null);
+        return data.data || null;
+      }
+      return null;
+    } catch (e) {
+      console.warn("[Transfer] build_subject_bindings failed:", e);
+      return null;
+    }
+  };
+
+  // 与 director.py 一致：取时间轴上第一个 / 最后一个有 imageFile 的 segment（首帧 / 尾帧锚点）
+  const sortedSegs = () => (director?.timeline?.segments || []).slice().sort((a, b) => (a.start || 0) - (b.start || 0));
   const firstFramePath = () => {
-    const segs = director?.timeline?.segments || [];
-    if (!segs.length) return "";
-    const first = [...segs].sort((a, b) => (a.start || 0) - (b.start || 0))[0];
-    return first.imageFile || first.videoFile || "";
+    const img = sortedSegs().find((s) => s.imageFile);
+    return img ? img.imageFile || "" : "";
+  };
+  const lastFramePath = () => {
+    const img = sortedSegs().reverse().find((s) => s.imageFile);
+    return img ? img.imageFile || "" : "";
   };
 
   // 当前 segment 在时间轴上的序号（第几个 shot，从 1 开始）
@@ -679,18 +728,19 @@ export function TransferPanel({ director }) {
   //   audios   = 按 <Audio x> 排序的音频地址
   //   videos   = 按 <Video x> 排序的视频地址
   //   segment_data + 全局参数（start/end/frame_rate/resolution 等）
-  function buildFirstFramePayload(extra) {
-    // 1) subject_definitions + retention_analysis（与后端 build_h3_subject_bindings 一致）
-    const bind = buildSubjectBindings(rightText, subjects, director);
-    const subjectDefs = [bind.subject_definition, bind.audio_definition].filter(Boolean).join("\n");
+  // 绑定部分（subject_definition / audio_definition / retention_analysis + pictures /
+  // audios / videos）来自后端 /h3/build_subject_bindings 的返回（bindData）。
+  function assembleVlmPayload(extra, bindOverride) {
+    const bind = bindOverride || bindData || {};
 
-    // 2) detailed_description / overall_soundscape / non_diegetic_music
+    // 1) detailed_description / overall_soundscape / non_diegetic_music
     const pd = parsePromptText(rightText);
     const detail = String(pd.detailed_description || "").trim();
     const soundscape = String(pd.overall_soundscape || "").trim();
     const music = String(pd.non_diegetic_music || "").trim();
 
-    // 3) prompt = subject_definitions + retention_analysis + detailed + soundscape + music
+    // 2) prompt = subject_definitions + retention_analysis + detailed + soundscape + music
+    const subjectDefs = [bind.subject_definition, bind.audio_definition].filter(Boolean).join("\n");
     const promptParts = [
       subjectDefs,
       bind.retention_analysis,
@@ -700,7 +750,7 @@ export function TransferPanel({ director }) {
     ].filter(Boolean);
     const prompt = promptParts.join("\n\n");
 
-    // 4) images / audios / videos（去重，按编号顺序）
+    // 3) images / audios / videos（去重，按编号顺序）
     const imgSeen = new Set();
     const images = (bind.pictures || [])
       .map((p) => p.src)
@@ -712,7 +762,7 @@ export function TransferPanel({ director }) {
     const audios = (bind.audios || []).map((a) => a.src).filter((src) => !!src);
     const videos = (bind.videos || []).map((v) => v.src).filter((src) => !!src);
 
-    // 5) segment_data：时间轴 segments（按 start 排序）
+    // 4) segment_data：时间轴 segments（按 start 排序）
     const segs = (director?.timeline?.segments || [])
       .slice()
       .sort((a, b) => (a.start || 0) - (b.start || 0))
@@ -730,7 +780,7 @@ export function TransferPanel({ director }) {
         isEndFrame: !!s.isEndFrame,
       }));
 
-    // 6) 全局参数（与 director.py widget 同名）
+    // 5) 全局参数（与 director.py widget 同名）
     const segment_data = {
       segments: segs,
       start_second: wVal("start_second"),
@@ -754,7 +804,7 @@ export function TransferPanel({ director }) {
       ...(extra || {}),
     };
 
-    console.log("[Transfer] buildFirstFramePayload ->", {
+    console.log("[Transfer] assembleVlmPayload ->", {
       prompt,
       images,
       audios,
@@ -765,7 +815,7 @@ export function TransferPanel({ director }) {
     return payload;
   }
 
-  // 将 buildFirstFramePayload 的结果提交到 /llm/generate_first_frame 接口
+  // 将 assembleVlmPayload 的结果提交到 /llm/generate_first_frame 接口
   async function submitGenerateFirstFrame(seg) {
     if (busy || !director) return;
     setBusy(true);
@@ -776,7 +826,10 @@ export function TransferPanel({ director }) {
         extra.segment_id = seg.id;
         extra.segment_type = seg.type;
       }
-      const body = vlmBody(buildFirstFramePayload(extra));
+      // bindData 可能因 debounce 尚未返回：提交前确保拿到后端绑定结果
+      let bind = bindData;
+      if (!bind) bind = await fetchBindings();
+      const body = vlmBody(assembleVlmPayload(extra, bind));
       console.log("[Transfer] submit /llm/generate_first_frame, body:", body);
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_first_frame", {
         method: "POST",
@@ -798,6 +851,122 @@ export function TransferPanel({ director }) {
       return null;
     } catch (e) {
       console.error("[Transfer] submitGenerateFirstFrame failed:", e);
+      setError(String(e?.message || e));
+      return null;
+    } finally {
+      if (aliveRef.current) setBusy(false);
+    }
+  }
+
+  // ---------- 机制 1：前端构造首帧图 subgraph（独立 prompt，与用户完整图互不冲突）----------
+  // subgraph = [loader 链] + [RefGenerateImage]（节点内完成 ref 编码 + sigma shift + KSampler
+  //            + VAEDecode + SaveImage，UI 输出保存图片的 filename 供前端回写 segment）
+  function buildFirstFrameSubgraph({ seg, promptText, refSrcs }) {
+    const dNode = director?.node;
+    if (!dNode) return null;
+    const p = {};
+    let nid = 1;
+    const addNode = (class_type, inputs) => {
+      const id = String(nid++);
+      p[id] = { class_type, inputs };
+      return id;
+    };
+
+    // 1) 反查 loader 链（model / clip / video_vae 三路）
+    const modelSrc = resolveLoaderNode(dNode, "model");
+    const clipSrc = resolveLoaderNode(dNode, "clip");
+    const vaeSrc = resolveLoaderNode(dNode, "video_vae");
+
+    const loaderSub = new Map(); // LGraphNode.id -> subgraph 节点 id
+    const registerLoader = (src) => {
+      if (!src || !src.node || src.slot == null || loaderSub.has(src.node.id)) return null;
+      loaderSub.set(src.node.id, addNode(src.node.comfyClass || src.node.type, nodeWidgetValues(src.node)));
+      return [loaderSub.get(src.node.id), src.slot];
+    };
+    const modelRef = registerLoader(modelSrc);
+    const clipRef = registerLoader(clipSrc);
+    const vaeRef = registerLoader(vaeSrc);
+
+    if (!modelRef || !clipRef || !vaeRef) {
+      setError("首帧图需要 director 的 model / clip / video_vae 输入连接到加载器（如 CheckpointLoaderSimple / VAELoader）。");
+      return null;
+    }
+
+    // 2) 参考图 refs：subjects 图片转 input 相对路径，以字符串直接传给 RefGenerateImage（最多 9 张）
+    const refPaths = [];
+    for (const src of refSrcs || []) {
+      const path = imageSrcToInputPath(src);
+      if (!path) continue;
+      refPaths.push(path);
+      if (refPaths.length >= 9) break;
+    }
+
+    // 3) RefGenerateImage：ref 编码 + sigma shift + 采样 + 解码 + 保存全部在节点内完成
+    const segNo = (director.timeline?.segments || []).findIndex((s) => s.id === seg.id) + 1 || 1;
+    const h3Inputs = {
+      model: modelRef,
+      clip: clipRef,
+      vae: vaeRef,
+      output_resolution: wVal("outpu_resolution") || "16:9横屏",
+      million_pixels: wVal("million_pixels") ?? 0.6,
+      prompt: promptText || "",
+      seed: Math.floor(Math.random() * 0xffffffff),
+      steps: 20,
+      cfg: 5.5,
+      sampler_name: "euler",
+      scheduler: "beta",
+      denoise: 1.0,
+      shift_video: 12.0,
+      shift_audio: 3.0,
+      filename_prefix: `minimaxrefdirector/firstframe/seg${segNo}`,
+    };
+    refPaths.forEach((path, i) => { h3Inputs[`ref_image_${i}`] = path; });
+    addNode("RefGenerateImage", h3Inputs);
+
+    return p;
+  }
+
+  // 提交首帧图 subgraph → 轮询 /history → 回写 segment（type=image + imageFile + imageObj + imageB64）
+  async function submitFirstFrameSubgraph(seg) {
+    if (busy || !director) return null;
+    setBusy(true);
+    setError("");
+    try {
+      if (!seg) { setError("未选中 segment"); return null; }
+      // 复用组装逻辑（与视频任务一致）：绑定结果来自后端 /h3/build_subject_bindings
+      let bind = bindData;
+      if (!bind) bind = await fetchBindings();
+      const payload = assembleVlmPayload({ segment_id: seg.id, segment_type: seg.type }, bind);
+      const promptText = payload?.prompt || seg.prompt || "";
+      const refSrcs = payload?.images || [];
+
+      const p = buildFirstFrameSubgraph({ seg, promptText, refSrcs });
+      if (!p) return null;
+      console.log("[Transfer] submit first-frame subgraph ->", p);
+
+      const resp = await api.queuePrompt(-1, { output: p, workflow: {} });
+      const promptId = resp?.prompt_id;
+      if (!promptId) throw new Error("提交队列失败");
+
+      const history = await waitForPromptDone(promptId);
+      const img = imageFromHistory(history);
+      if (!img) throw new Error("未找到生成的首帧图");
+
+      const fileKey = (img.subfolder ? img.subfolder + "/" : "") + img.filename;
+      const url = viewUrl(img.filename, img.subfolder, img.type || "output");
+      const imgObj = new Image();
+      imgObj.src = url;
+
+      // 回写 segment
+      seg.type = "image";
+      seg.imageFile = fileKey;
+      seg.imageObj = imgObj;
+      seg.imageB64 = await fetchImageAsBase64(url);
+      director.commitChanges();
+      if (director._transferSetSeg) director._transferSetSeg(seg);
+      return { image_file: fileKey, url };
+    } catch (e) {
+      console.error("[Transfer] submitFirstFrameSubgraph failed:", e);
       setError(String(e?.message || e));
       return null;
     } finally {
@@ -890,6 +1059,7 @@ export function TransferPanel({ director }) {
     }
     setBusy(true);
     setError("");
+    const targetSeg = curSeg; // 记录发起请求时的 segment，返回结果写回该 segment
     try {
       const body = vlmBody({
         prompt: source,
@@ -907,13 +1077,19 @@ export function TransferPanel({ director }) {
         if (typeof obj === "string") {
           try { obj = JSON.parse(obj); } catch { /* 保留原始字符串 */ }
         }
-        setRightText(
+        const text =
           obj && typeof obj === "object"
             ? formatPromptJson(obj)
             : typeof data.json_data === "string"
               ? data.json_data
-              : JSON.stringify(data.json_data, null, 2)
-        );
+              : JSON.stringify(data.json_data, null, 2);
+        // 生成结果写回发起请求时的 segment 的 H3 prompt JSON（随 timeline_data 持久化）
+        if (targetSeg && typeof targetSeg.id !== "undefined") {
+          targetSeg.h3PromptJson = text;
+          director.commitChanges(true);
+        }
+        // 右侧编辑器仅在仍处于同一 segment 时刷新，避免请求期间切换 segment 被误覆盖
+        if (targetSeg === curSeg) setRightText(text);
       } else {
         setError(data.error || "生成失败");
       }
@@ -1011,8 +1187,8 @@ export function TransferPanel({ director }) {
   }
 
   // ---------- 渲染 ----------
-  // 计算主体定义 / 音频定义 / retention_analysis（参考 lib/prompt.py build_h3_subject_bindings）
-  const bindings = buildSubjectBindings(rightText, subjects, director);
+  // 主体定义 / 音频定义 / retention_analysis（来自后端 /h3/build_subject_bindings 的 debounce 结果）
+  const bindings = bindData || {};
   const bindParts = [];
   if (bindings.subject_definition) bindParts.push("subject_definition:\n" + bindings.subject_definition);
   if (bindings.audio_definition) bindParts.push("audio_definition:\n" + bindings.audio_definition);
@@ -1028,9 +1204,9 @@ export function TransferPanel({ director }) {
                 curSeg.type === "text" || curSeg.type === "image"
                   ? html`<button
                       class="pr-btn"
-                      title="Generate the first frame from the selected segment"
+                      title="Generate the first frame from the selected segment (subgraph: loader + RefGenerateImage)"
                       disabled=${busy}
-                      onClick=${() => generateFirstFrame(curSeg)}
+                      onClick=${() => submitFirstFrameSubgraph(curSeg)}
                     >Generate First Frame</button>`
                   : null
               }
@@ -1082,7 +1258,9 @@ export function TransferPanel({ director }) {
           >→</button>
         </div>
         <div class="pr-prompt-wrapper" style=${S.col}>
-          <div class="pr-prompt-label" style=${{ position: "static", flexShrink: 0, margin: "6px 0 2px 8px" }}>Minimax H3 Prompt</div>
+          <div class="pr-prompt-label" style=${{ position: "static", flexShrink: 0, margin: "6px 0 2px 8px" }}>
+            Minimax H3 Prompt
+          </div>
           <textarea
             ref=${rightRef}
             class="pr-prompt-area pr-prompt-area-right"
@@ -1229,6 +1407,7 @@ export function GlobalParamsPanel({ director }) {
           `)
         }
       </div>
+      <div class="tr-gap-hr"></div>
     </div>
   `;
 }

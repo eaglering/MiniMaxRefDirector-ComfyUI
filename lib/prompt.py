@@ -181,12 +181,13 @@ def build_h3_subject_bindings(
     prompt_json: dict,
     first_frame_path: str = "",
     last_frame_path: str = "",
+    timeline_segments: list | None = None,
 ) -> dict:
     """Match <@name> / <#name:dialogue> placeholders against subject data and build H3 bindings.
 
     Args:
         subject_data: JSON string or dict with {"subjects": [{name, description,
-            imageFile, audioFile, type?, relationship?, audio_relationship?}]}.
+            imageFile, audioFile, videoFile, type?, relationship?, audio_relationship?}]}.
             type: "Subject" (default) | "Picture" | "Video" | "Audio".
             relationship: visual marker, one of fully_preserved (default) /
                 partially_preserved / attribute_transfer / weak_reference.
@@ -204,6 +205,9 @@ def build_h3_subject_bindings(
             "audio_definition": str,       # <Audio 1> is the voice-timbre reference for <Subject 1>
             "retention_analysis": str,     # <Subject 1>: fully_preserved / <Audio 1>: reference - ...
             "unmatched_mentions": [...],   # 被 @ 提及但未在主体中定义的名字
+            "pictures": [...],             # [{label: <Picture N>, src}] 媒体 src 列表（按编号）
+            "audios": [...],               # [{label: <Audio N>, src}]
+            "videos": [...],               # [{label: <Video N>, src}]
         }
     """
     if isinstance(subject_data, str):
@@ -231,11 +235,15 @@ def build_h3_subject_bindings(
     subject_counter = 0
     picture_counter = 0
     audio_counter = 0
+    pictures: list[dict] = []  # {label, src} 按 <Picture N> 编号顺序
+    audios: list[dict] = []    # {label, src} 按 <Audio N> 编号顺序
+    videos: list[dict] = []    # {label, src} 按 <Video N> 编号顺序
 
     for subj in subjects_in:
         name = str(subj.get("name", "")).strip()
         if not name:
             continue
+        matched = name in names
 
         stype = str(subj.get("type", "") or "").strip()
         if stype not in _H3_TYPES:
@@ -250,6 +258,7 @@ def build_h3_subject_bindings(
         description = str(subj.get("description", "") or "").strip()
         image_file = str(subj.get("imageFile", "") or "").strip()
         audio_file = str(subj.get("audioFile", "") or "").strip()
+        video_file = str(subj.get("videoFile", "") or "").strip()
         use_audio = bool(audio_file)
 
         if stype == "Subject":
@@ -258,15 +267,30 @@ def build_h3_subject_bindings(
             source = ""
             if image_file:
                 picture_counter += 1
-                source = f" in <Picture {picture_counter}>"
+                pic_label = f"<Picture {picture_counter}>"
+                source = f" in {pic_label}"
+                pictures.append({"label": pic_label, "src": image_file})
             definition = f"{label} is {name}{source}"
             if description:
                 definition += f", {description}"
         elif stype == "Picture":
             picture_counter += 1
             label = f"<Picture {picture_counter}>"
+            pictures.append({"label": label, "src": image_file})
             definition = f"{label} is {description or name} (reference image anchor)"
-        else:  # Video / Audio 兜底
+        elif stype == "Audio":
+            subject_counter += 1
+            label = f"<Audio {subject_counter}>"
+            if audio_file:
+                audios.append({"label": label, "src": audio_file})
+            definition = f"{label} is {description or name}"
+        elif stype == "Video":
+            subject_counter += 1
+            label = f"<Video {subject_counter}>"
+            if video_file:
+                videos.append({"label": label, "src": video_file})
+            definition = f"{label} is {description or name}"
+        else:  # 其他类型兜底
             subject_counter += 1
             label = f"<{stype} {subject_counter}>"
             definition = f"{label} is {description or name}"
@@ -277,6 +301,7 @@ def build_h3_subject_bindings(
             audio_counter += 1
             audio_label = f"<Audio {audio_counter}>"
             audio_definition = f"{audio_label} is the voice-timbre reference for {label}"
+            audios.append({"label": audio_label, "src": audio_file})
 
         bound.append({
             "name": name,
@@ -287,7 +312,7 @@ def build_h3_subject_bindings(
             "imageFile": image_file,
             "audioFile": audio_file,
             "use_audio": use_audio,
-            "matched": name in names,
+            "matched": matched,
             "has_dialogue": name in dialogues,
             "subject_definition": definition,
             "audio_definition": audio_definition,
@@ -316,11 +341,26 @@ def build_h3_subject_bindings(
         label = f"<Picture {picture_counter}>"
         subject_lines.append(f"{label} is the first frame of [Shot 1].")
         retention_lines.append(f"{label} ([Shot 1] first frame): fully_preserved.")
-    if last_frame_path:
+    # 与前端 buildSubjectBindings 一致：首帧 == 尾帧时不重复追加尾帧锚点
+    if last_frame_path and last_frame_path != first_frame_path:
         picture_counter += 1
         label = f"<Picture {picture_counter}>"
         subject_lines.append(f"{label} is the last frame of the target video.")
         retention_lines.append(f"{label} (last frame of the target video): fully_preserved.")
+
+    # 从 timeline segments 兜底收集视频 / 音频媒体（对齐前端 buildSubjectBindings：
+    if timeline_segments:
+        for seg in sorted(
+            (s for s in timeline_segments if isinstance(s, dict)),
+            key=lambda s: s.get("start") or 0,
+        ):
+            stype = str(seg.get("type", "") or "").strip()
+            if stype == "video" and seg.get("videoFile"):
+                label = f"<Video {len(videos) + 1}>"
+                videos.append({"label": label, "src": seg["videoFile"]})
+            elif stype == "audio" and seg.get("audioFile"):
+                label = f"<Audio {len(audios) + 1}>"
+                audios.append({"label": label, "src": seg["audioFile"]})
 
     subjects_out = []
     for b in bound:
@@ -333,4 +373,7 @@ def build_h3_subject_bindings(
         "audio_definition": "\n".join(audio_lines),
         "retention_analysis": "\n".join(retention_lines),
         "unmatched_mentions": unmatched,
+        "pictures": pictures,
+        "audios": audios,
+        "videos": videos,
     }

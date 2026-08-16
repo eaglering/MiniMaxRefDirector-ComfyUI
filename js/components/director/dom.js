@@ -4,6 +4,15 @@ import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget } from "./sh
 import { h, render } from "../../vendor/preact.module.js";
 import { GlobalParamsPanel, mountTransfer } from "./transfer.js";
 
+// Debounce ComfyUI auto-save（segment prompt 输入 300ms 后触发）
+let saveTimeout = null;
+const triggerAutoSave = () => {
+  if (window.app && window.app.graph && window.app.graph.change) window.app.graph.change();
+  if (window.LiteGraph && window.LiteGraph.fireEvent) {
+    window.LiteGraph.fireEvent("onSaveState");
+  }
+};
+
 // --- DOM 工厂辅助（createDOM 内样板去重）---
 const iconBtn = (icon, title, onClick) => {
   const b = document.createElement("button");

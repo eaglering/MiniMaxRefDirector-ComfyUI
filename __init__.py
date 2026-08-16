@@ -6,6 +6,7 @@ from .lib.utils import RefJoinString
 from .lib.video import RefMergeVideosFromPaths
 from .lib.audio import RefSaveAudio
 from .lib.image import RefSaveImage
+from .lib.h3 import RefGenerateImage
 
 from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
@@ -16,6 +17,7 @@ class PromptRelay(ComfyExtension):
         return [
             MiniMaxRefDirector,
             MiniMaxRefSubject,
+            RefGenerateImage,
             RefJoinString,
             RefMergeVideosFromPaths,
             RefSaveAudio,
@@ -28,6 +30,7 @@ async def comfy_entrypoint() -> PromptRelay:
 NODE_CLASS_MAPPINGS = {
     "MiniMaxRefSubject": MiniMaxRefSubject,
     "MiniMaxRefDirector": MiniMaxRefDirector,
+    "RefGenerateImage": RefGenerateImage,
     "MiniMaxRefMergeVideosFromPaths": RefMergeVideosFromPaths,
     "MiniMaxRefSaveImage": RefSaveImage,
     "MiniMaxRefSaveAudio": RefSaveAudio,
@@ -37,6 +40,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefSubject": "MiniMax Subject",
     "MiniMaxRefDirector": "MiniMax Super Director",
+    "RefGenerateImage": "MiniMaxRef Generate Image",
     "MiniMaxRefMergeVideosFromPaths": "Merge Videos From Paths",
     "MiniMaxRefSaveImage": "Save Image",
     "MiniMaxRefSaveAudio": "Save Audio",

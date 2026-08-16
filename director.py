@@ -4,6 +4,7 @@ import logging
 from comfy_api.latest import io
 
 from .lib.image import calc_resolution
+from .lib.prompt import build_h3_subject_bindings
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")
@@ -105,8 +106,11 @@ class MiniMaxRefDirector(io.ComfyNode):
                 ),
             ],
             outputs=[
+                io.Model.Output(display_name="model"),
+                io.Clip.Output(display_name="clip"),
+                io.Vae.Output(display_name="video_vae"),
+                io.Vae.Output(display_name="audio_vae"),
                 GuideData.Output(display_name="guide_data"),
-                io.Int.Output(display_name="segment_count", tooltip="Number of timeline segments."),
             ],
         )
 
@@ -117,7 +121,8 @@ class MiniMaxRefDirector(io.ComfyNode):
                 local_prompts="", segment_lengths="", frame_rate=24, 
                 display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
-        global_prompt = config.get("global_prompt", "")
+        # config 是可选输入：前端首帧 subgraph 中 director 不连接 config，需容错
+        global_prompt = config.get("global_prompt", "") if config else ""
         subject_data = config.get("subject_data", {}) if config else {}
         subject = subject_data.get("subjects", []) if subject_data else []
         if not subject:
@@ -150,6 +155,11 @@ class MiniMaxRefDirector(io.ComfyNode):
         segment_count = 0
         prev_prompt = ""
 
+        # 全局首帧 / 尾帧（有图 segment 的第一个 / 最后一个，与前端 buildFirstFramePayload 一致）
+        img_segs = [s for s in timeline_segments if s.get("imageFile", "")]
+        first_frame_path = img_segs[0].get("imageFile", "") if img_segs else ""
+        last_frame_path = img_segs[-1].get("imageFile", "") if img_segs else ""
+
         if len(timeline_segments) == 0:
             timeline_segments = [{
                 "length": duration_frames,
@@ -173,14 +183,57 @@ class MiniMaxRefDirector(io.ComfyNode):
                 continue
             first_frame = seg.get("imageFile", "") if seg.get("type", "text") == "image" else ""
             prompt = seg.get("prompt", "").replace("@", "")
-            guide_timeline.append({
+            entry = {
                 "prompt": prompt,
                 "prev_prompt": prev_prompt,
                 "first_frame": first_frame,
                 "duration_frames": dur,
                 "prompt_enhance": seg.get("prompt_enhance", "Default"),
                 "is_end_frame": seg.get("isEndFrame", False)
-            })
+            }
+            # 右侧 H3 prompt JSON（per-segment 持久化）：重建与前端 buildFirstFramePayload
+            # 等价的 prompt（subject_definitions + retention_analysis + detailed_description
+            # + overall_soundscape + non_diegetic_music）与媒体列表（pictures / audios / videos），
+            prompt_json = seg.get("h3PromptJson")
+            if isinstance(prompt_json, str):
+                try:
+                    prompt_json = json.loads(prompt_json)
+                except (json.JSONDecodeError, TypeError):
+                    prompt_json = None
+            if isinstance(prompt_json, dict) and prompt_json:
+                try:
+                    bind = build_h3_subject_bindings(
+                        subject_data, prompt_json,
+                        first_frame_path=first_frame_path,
+                        last_frame_path=last_frame_path,
+                        timeline_segments=timeline_segments,
+                    )
+                except Exception:
+                    log.warning("[MiniMaxRefDirector] build_h3_subject_bindings failed", exc_info=True)
+                    bind = None
+                if bind:
+                    entry["prompt_json"] = prompt_json
+                    entry["subject_definition"] = bind.get("subject_definition", "")
+                    entry["audio_definition"] = bind.get("audio_definition", "")
+                    entry["retention_analysis"] = bind.get("retention_analysis", "")
+                    entry["pictures"] = bind.get("pictures", [])
+                    entry["audios"] = bind.get("audios", [])
+                    entry["videos"] = bind.get("videos", [])
+                    subject_defs = "\n".join(
+                        x for x in (bind.get("subject_definition", ""), bind.get("audio_definition", "")) if x
+                    )
+                    parts = []
+                    if subject_defs:
+                        parts.append(subject_defs)
+                    if bind.get("retention_analysis"):
+                        parts.append(bind["retention_analysis"])
+                    for field in ("detailed_description", "overall_soundscape", "non_diegetic_music"):
+                        val = prompt_json.get(field)
+                        if isinstance(val, str) and val.strip():
+                            parts.append(f"{field}:\n{val}")
+                    if parts:
+                        entry["h3_prompt"] = "\n\n".join(parts)
+            guide_timeline.append(entry)
             prev_prompt = prompt
             segment_count += 1
 
@@ -191,14 +244,10 @@ class MiniMaxRefDirector(io.ComfyNode):
         guide_data = {
             "width": out_w,
             "height": out_h,
-            "global_prompt": global_prompt,
             "frame_rate": float(frame_rate),
+            "global_prompt": global_prompt,
             "subject_data": subject,
             "timeline_data": guide_timeline,
-            "model": model,
-            "clip": clip,
-            "video_vae": video_vae,
-            "audio_vae": audio_vae,
         }
 
         log.info(
@@ -208,8 +257,11 @@ class MiniMaxRefDirector(io.ComfyNode):
         )
 
         return io.NodeOutput(
-            guide_data,
-            segment_count,
+            model=model,
+            clip=clip,
+            video_vae=video_vae,
+            audio_vae=audio_vae,
+            guide_data=guide_data,
         )
 
 NODE_CLASS_MAPPINGS = {
