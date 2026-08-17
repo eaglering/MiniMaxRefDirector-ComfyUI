@@ -200,15 +200,17 @@ function slotForOutputSemantic(node, inputName) {
   return 0;
 }
 
-// 整链 DFS：从节点某输入出发，沿连线向上把整条 model/clip/vae 链原样复制进 subgraph。
+// 整链 DFS：从节点某输入出发，沿连线向上把整条 model/clip/vae 链复制进 subgraph。
 // 规则：
 //  - 加载器（Checkpoint/CLIP/UNet/VAE Loader）→ 登记为资源源（Map 去重，model/clip 共用一份），返回其输出；
 //  - 透传占位（MiniMaxRefSubject/Director/Guide、Reroute）→ 不改数据，穿透继续向上；
+//  - skipModifiers=true（实验模式：只保留加载器链路）→ 跳过 LoRA / te-speed / SageAttention / Spectrum
+//    等所有中间修改节点，沿其输入继续向上（等价 bypass，排除加速/改造节点对单帧细节的损耗）；
 //  - 其余任何节点（LoRA、sigma shift、SageAttention patch、Spectrum Apply…）→ 先递归复制整棵上游，
 //    再复制本节点并连线，返回其输出。未来新增的"修改型"节点无需改代码，自动被原样搬入。
 // ctx = { addNode(class_type, inputs)->id, loaderSub: Map<原id,{id}>, copied: Map<原id,新id|null>, outLinks: [] }
 // 返回 { node: 新节点 id 字符串, slot: 输出槽 } 或 null（悬空 / 无法解析 / 环）
-function collectLoaderChain(node, inputName, ctx) {
+function collectLoaderChain(node, inputName, ctx, skipModifiers = false) {
   const input = (node.inputs || []).find((i) => i.name === inputName);
   if (!input || input.link == null) return null; // 悬空输入
   const link = app.graph?.links?.[input.link];
@@ -230,7 +232,27 @@ function collectLoaderChain(node, inputName, ctx) {
 
   // 2) 透传占位：穿透，沿它对应输入继续向上（Reroute 输入名固定为 "input"）
   if (/^(MiniMaxRefSubject|MiniMaxRefDirector|MiniMaxRefGuide|Reroute)$/.test(cls)) {
-    return collectLoaderChain(origin, cls === "Reroute" ? "input" : inputName, ctx);
+    return collectLoaderChain(origin, cls === "Reroute" ? "input" : inputName, ctx, skipModifiers);
+  }
+
+  // 2b) 实验模式（skipModifiers）：只保留加载器链路，跳过 LoRA / te-speed / SageAttention / Spectrum
+  //     等所有中间修改节点——它们会原样搬进首帧 subgraph 并损耗单帧细节（turbo LoRA / Spectrum
+  //     尤其明显）。穿透：优先取与目标语义同名的输入，无同名则取第一个已连接的输入继续向上。
+  if (skipModifiers) {
+    console.warn(`[Transfer] 首帧 subgraph 跳过中间节点 ${cls}（只保留加载器链路）`);
+    const inp = origin.inputs?.find((i) => i.name === inputName && i.link != null)
+      || origin.inputs?.find((i) => i.link != null);
+    if (!inp) {
+      // 没有任何已连接输入 = 资源源（自定义 Loader，如 MiniMaxRefHybridLoader 等）：
+      // 视为加载器直接复制并登记去重，否则整条链断裂会返回 null 导致报错
+      let rec = ctx.loaderSub.get(origin.id);
+      if (!rec) {
+        rec = { id: ctx.addNode(cls, nodeWidgetValues(origin)) };
+        ctx.loaderSub.set(origin.id, rec);
+      }
+      return { node: rec.id, slot: outputSlotFor(origin, inputName) };
+    }
+    return collectLoaderChain(origin, inp.name, ctx, skipModifiers);
   }
 
   // 3) 其余节点：后序 DFS —— 先复制整棵上游，再复制本节点并重建连线
@@ -239,7 +261,7 @@ function collectLoaderChain(node, inputName, ctx) {
     const resolved = {};
     for (const inp of origin.inputs || []) {
       if (inp.link == null) continue;
-      const src = collectLoaderChain(origin, inp.name, ctx);
+      const src = collectLoaderChain(origin, inp.name, ctx, skipModifiers);
       if (src) resolved[inp.name] = src;
     }
     const nid = ctx.addNode(cls, nodeWidgetValues(origin));
@@ -589,6 +611,7 @@ export function TransferPanel({ director }) {
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
   const [addMenu, setAddMenu] = useState(null); // additionSubject 添加框下拉坐标 { x, y }（fixed 定位，避免被资源条 overflow 裁剪）
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
+  const [imageVersion, setImageVersion] = useState(0); // 首帧/尾帧图回写计数（驱动资源条预览刷新）
 
   const rowRef = useRef(null);
   const leftRef = useRef(null);
@@ -745,7 +768,7 @@ export function TransferPanel({ director }) {
       setResources(parseResources(rightText, subjects));
     }, 500);
     return () => clearTimeout(debounceRef.current);
-  }, [rightText, subjects, addVersion]);
+  }, [rightText, subjects, addVersion, imageVersion]);
 
   // 右侧 H3 JSON / 主体 / 时间轴变化时 debounce 请求后端
   // /h3/build_subject_bindings（替代前端 buildFirstFramePayload 的绑定组装）。
@@ -984,9 +1007,10 @@ export function TransferPanel({ director }) {
     // 1) 整链复制（model / clip / video_vae 三路）：加载器登记资源源、透传占位穿透、
     //    其余任何节点（LoRA / sigma shift / SageAttention patch / Spectrum Apply…）原样搬入
     const ctx = { addNode, loaderSub: new Map(), copied: new Map(), outLinks: [] };
-    const modelRef = collectLoaderChain(dNode, "model", ctx);
-    const clipRef = collectLoaderChain(dNode, "clip", ctx);
-    const vaeRef = collectLoaderChain(dNode, "video_vae", ctx);
+    // 实验模式：只保留加载器链路（跳过 LoRA / te-speed / SageAttention / Spectrum 等中间节点）
+    const modelRef = collectLoaderChain(dNode, "model", ctx, true);
+    const clipRef = collectLoaderChain(dNode, "clip", ctx, true);
+    const vaeRef = collectLoaderChain(dNode, "video_vae", ctx, true);
 
     if (!modelRef || !clipRef || !vaeRef) {
       setError("首帧图需要 director 的 model / clip / video_vae 输入连接到加载器（如 CheckpointLoaderSimple / VAELoader）。");
@@ -1018,14 +1042,11 @@ export function TransferPanel({ director }) {
       clip: [clipRef.node, clipRef.slot],
       vae: [vaeRef.node, vaeRef.slot],
       output_resolution: wVal("outpu_resolution") || "16:9横屏",
-      // 首帧质量优先：首帧分辨率下限 1.0MP（16:9 → 1344x768），避免 0.6MP 下脸部像素不足；
-      // 若全局已设更高则跟随全局。回写后的首帧会被 guide 按段分辨率重采样，不会浪费。
+      // 首帧质量优先：首帧分辨率下限 1.0MP（16:9 → 1344x768），避免 0.6MP 下脸部像素不足。
       million_pixels: Math.max(parseFloat(wVal("million_pixels")) || 0.6, 1.0),
       prompt: promptText || "",
       seed: Math.floor(Math.random() * 0xffffffff),
-      // 首帧是 T=1 单帧 latent，无视频时间维信息，8 步偏少导致人脸/细节糊；
-      // 16 步质量显著提升，单帧生成耗时仍在可接受范围
-      steps: 16,
+      steps: 20,
       cfg: 1,
       sampler_name: "res_multistep",
       scheduler: "simple",
@@ -1067,9 +1088,6 @@ export function TransferPanel({ director }) {
       // 否则首帧只按泛化描述生成，人物容易糊）
       const promptText = [payload?.prompt, seg.prompt].filter(Boolean).join("\n\n");
       const refSrcs = [...(payload?.images || [])];
-      // 该 segment 已有的参考图（用户手动设置或先前生成的首帧）并入 refs 首位
-      if (seg.imageFile) refSrcs.unshift(seg.imageFile);
-
       const p = buildFirstFrameSubgraph({ seg, promptText, refSrcs });
       if (!p) return null;
       console.log("[Transfer] submit first-frame subgraph ->", p);
@@ -1096,7 +1114,7 @@ export function TransferPanel({ director }) {
       const imgObj = new Image();
       // 注意：这里是 TransferPanel 组件内的普通函数，this 为 undefined，
       // 必须用外壳实例 director（TimelineEditor）的 render() 刷新画布
-      imgObj.onload = () => { seg.imageObj = imgObj; director.render(); };
+      imgObj.onload = () => { seg.imgObj = imgObj; director.render(); };
       imgObj.src = url;
 
       // 回写 segment：imageB64 存 view URL（与手动上传图片的字段约定一致），
@@ -1106,6 +1124,8 @@ export function TransferPanel({ director }) {
       seg.imageB64 = url;
       director.commitChanges();
       if (director._transferSetSeg) director._transferSetSeg(seg);
+      // 递增资源版本号，触发右侧「首帧/尾帧」资源预览的 useEffect 重新 parseResources
+      setImageVersion((v) => v + 1);
       return { image_file: fileKey, url };
     } catch (e) {
       console.error("[Transfer] submitFirstFrameSubgraph failed:", e);
