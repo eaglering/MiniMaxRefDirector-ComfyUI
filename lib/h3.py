@@ -136,8 +136,9 @@ def build_segment_conditioning(
     返回 (cond, neg_cond, latent, frame_count)。供 guide 节点复用，输出
     positive/negative/latent 让用户自己接 KSampler 等节点完成采样。
 
-    bind 数据（build_h3_subject_bindings 产出）中 pictures/videos/audios 均为
-    [{label, src}]，src 为文件路径。
+    bind 数据（build_h3_subject_bindings 产出）中 pictures/videos/audios 为
+    [{label, src}]（src 为文件路径）；director 的 guide_data 中则是纯字符串
+    路径列表，两种形态都兼容。
     """
     if clip is None:
         raise ValueError("build_segment_conditioning needs a clip to encode the prompt")
@@ -149,9 +150,13 @@ def build_segment_conditioning(
     ref_items = []   # tokenizer presentation, in request order
     ref_blocks = []  # DiT payload, same order
 
+    def _src_of(item):
+        """兼容 {label, src} 字典与纯字符串路径两种 ref 元素形态。"""
+        return item.get("src", "") if isinstance(item, dict) else (item or "")
+
     # --- 参考图 ---
     for pic in pictures or []:
-        src = pic.get("src", "")
+        src = _src_of(pic)
         if not src:
             continue
         img = load_image_tensor(src)
@@ -170,7 +175,7 @@ def build_segment_conditioning(
 
     # --- 参考视频（复刻官方 ref_videos 处理） ---
     for vid in videos or []:
-        src = vid.get("src", "")
+        src = _src_of(vid)
         if not src:
             continue
         frames = VideoFromFile(src).get_components().images  # [N, H, W, C]
@@ -206,7 +211,7 @@ def build_segment_conditioning(
 
     # --- 参考音频 ---
     for aud in audios or []:
-        src = aud.get("src", "")
+        src = _src_of(aud)
         if not src:
             continue
         if audio_vae is None:

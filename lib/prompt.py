@@ -2,10 +2,13 @@
 import json
 import os
 import re
+import logging
 
 from .image import load_image_tensor
 from .llm import generate_prompt_with_api, generate_prompt_with_llama
 from .utils import find_index, parse_generated_json
+
+log = logging.getLogger(__name__)
 
 # 图像分析
 def image_analysis(gguf_path: str, mmproj_path: str, prompt: str, 
@@ -32,7 +35,7 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool) -> str:
 
     Includes the custom skills guide, the required JSON output format
     (detailed_description / overall_soundscape / non_diegetic_music) and the
-    <@角色名称> / <#角色名称:[Language]对话内容> placeholder rules. When a reference
+    <@角色名称> / <#角色名称:对话内容> placeholder rules. When a reference
     image is provided it is NOT treated as a first frame; instead its contents
     are merged into "detailed_description" together with the user's input.
     """
@@ -61,8 +64,8 @@ Output ONLY a JSON object with exactly these keys:
 ## Placeholder Rules
 In "detailed_description", "overall_soundscape" and "non_diegetic_music":
 1. Wrap every character name as <@角色名称>, e.g. <@Zhang San>.
-2. Wrap every dialogue as <#角色名称:[Language]对话内容>, e.g. <#Zhang San:[English]Hello!> or <#李四:[Chinese]你好！>.
-3. Add a language tag before the dialogue text using the format [Chinese], [English], [Japanese], etc. Keep character names and dialogue in their original language. Never translate them.
+2. Wrap every dialogue as <#角色名称:对话内容>, e.g. <#Zhang San:Hello!> or <#李四:你好！>.
+3. Keep character names and dialogue in their original language, never translate them.
 
 ## Strictness
 - Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
@@ -141,7 +144,7 @@ _AUDIO_RELATION_TEXT = {
 def _extract_h3_mentions(prompt_json: dict) -> dict:
     """Extract <@name> and <#name:dialogue> mentions from all H3 prompt fields.
 
-    Returns {"names": {name: count}, "dialogues": {name: {pattern:dialogue, ...}}}.
+    Returns {"names": {name: "<@name>"}, "dialogues": {name: {"<#name:dialogue>":dialogue, ...}}}.
     """
     names: dict[str, int] = {}
     dialogues: dict[str, dict[str, str]] = {}
@@ -197,6 +200,7 @@ def build_h3_subject_bindings(
     subjects_in = (subject_data or {}).get("subjects", []) or []
     prompt_json = _build_prompt_json(raw_prompt)
     mentions = _extract_h3_mentions(prompt_json)
+    log.info(f"mentions: {json.dumps(mentions, indent=2)}")
     names = mentions["names"]
     dialogues = mentions["dialogues"]
 
@@ -237,12 +241,13 @@ def build_h3_subject_bindings(
         seen.add(name)
         index += 1
         subjects_out.append(subj)
+        mapping[f"<@{name}>"] = f"<Subject {index}>"
         for k, v in dat.items():
             # 判断是否存在汉字
             language = "Chinese" if any('\u4e00' <= char <= '\u9fff' for char in v) else "English"
             mapping[k] = f"<d>[{language}]{v}</d>"
 
-    for name in names:
+    for name, pattern in names.items():
         if name in seen or name in unmatched:
             continue
         idx = find_index(subjects_in, func=lambda x, y=name: x.get("name") == y)
@@ -268,7 +273,7 @@ def build_h3_subject_bindings(
         seen.add(name)
         index += 1
         subjects_out.append(subj)
-        mapping[name] = label
+        mapping[pattern] = label
 
     for name in (timeline_segment or {}).get("additionSubject", []) or []:
         if name in seen or name in unmatched:
@@ -304,7 +309,7 @@ def build_h3_subject_bindings(
         index += 1
         images.append(last_frame_path)
 
-    return {
+    data = {
         "subjects": subjects_out,
         "subject_definitions": "\n".join(subject_definitions),
         "retention_analysis": "\n".join(retention_analysis),
@@ -317,6 +322,10 @@ def build_h3_subject_bindings(
         "videos": videos,
         "mapping": mapping,
     }
+
+    log.info(f"build_h3_subject_bindings: {json.dumps(data, indent=2)}")
+
+    return data
 
 def build_h3_prompt(
     global_prompt: str,
@@ -380,11 +389,9 @@ def _build_prompt_json(raw_prompt: str) -> list:
         if section == "detail":
             detail_lines.append(line.strip())
         elif section == "overall":
-            overall_lines.append(line.strip())
             if line.strip() != "" and line.strip() != "N/A":
                 overall_lines.append(line)
         elif section == "music":
-            non_lines.append(line.strip())
             if line.strip() != "" and line.strip() != "N/A":
                 non_lines.append(line)
     

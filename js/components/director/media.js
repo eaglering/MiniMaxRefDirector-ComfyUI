@@ -228,7 +228,10 @@ export const media = {
 
     const onSeekedHandler = () => {
       vid.removeEventListener('seeked', onSeekedHandler);
-      if (!seg.imageB64 || !seg.imgObj) {
+      // imageB64 已是服务器 API 路径时（上传完成回填 / 工作流恢复），用该 URL 加载预览，
+      // 不要用 canvas 抽取 base64 覆盖，保持 API 路径。
+      const isApiUrl = seg.imageB64 && /^(https?:)?\/\//.test(seg.imageB64);
+      if (!seg.imageB64 || (!seg.imgObj && !isApiUrl)) {
         const canvas = document.createElement('canvas');
         canvas.width = Math.min(vid.videoWidth, 512);
         canvas.height = Math.round((vid.videoHeight / vid.videoWidth) * canvas.width);
@@ -242,6 +245,11 @@ export const media = {
         };
         img.src = seg.imageB64;
       } else {
+        if (isApiUrl && !seg.imgObj) {
+          seg.imgObj = new Image();
+          seg.imgObj.onload = () => { this.render(); };
+          seg.imgObj.src = seg.imageB64;
+        }
         this.render();
       }
     };
@@ -295,7 +303,7 @@ export const media = {
     }
 
     const extractionPromise = (async () => {
-      const resp = await api.fetchApi(`/ltx_director_get_audio?filename=${encodeURIComponent(fileKey)}`);
+      const resp = await api.fetchApi(`/minimax_ref/api/h3/ltx_director_get_audio?filename=${encodeURIComponent(fileKey)}`);
       if (resp.status === 200) {
         return await resp.json();
       }
@@ -590,7 +598,7 @@ export const media = {
 
     // First check if the file already exists on the server to de-duplicate
     try {
-      const checkResp = await api.fetchApi(`/ltx_director_check_file?filename=${encodeURIComponent(safeFileName)}&size=${file.size}`);
+      const checkResp = await api.fetchApi(`/minimax_ref/api/h3/ltx_director_check_file?filename=${encodeURIComponent(safeFileName)}&size=${file.size}`);
       if (checkResp.status === 200) {
         const checkResult = await checkResp.json();
         if (checkResult.exists) {
@@ -613,7 +621,7 @@ export const media = {
         formData.append("filename", safeName);
         formData.append("chunk_index", i);
         formData.append("total_chunks", totalChunks);
-        const resp = await api.fetchApi("/ltx_director_upload_chunk", { method: "POST", body: formData });
+        const resp = await api.fetchApi("/minimax_ref/api/h3/ltx_director_upload_chunk", { method: "POST", body: formData });
         if (resp.status !== 200) throw new Error("LTX Director video chunk upload failed");
       }
       return safeName; // filename (no subfolder) in the input dir
@@ -876,6 +884,9 @@ export const media = {
       for (let s of this.timeline.segments) {
         if (s._blobUrl === blobUrl || s.id === vidSeg.id) {
           s.imageFile = filePath;
+          // 上传完成后把 imageB64 从首帧 base64 缩略图替换为服务器 API 路径，
+          // imgObj 已加载 base64，仍可本地即时预览，两者互不影响。
+          s.imageB64 = viewUrl(filePath);
           s._uploading = false;
         }
       }
@@ -898,7 +909,7 @@ export const media = {
 
       // Query server for extracted WAV audio file and waveform peaks
       if (filePath) {
-        api.fetchApi(`/ltx_director_get_audio?filename=${encodeURIComponent(filePath)}`)
+        api.fetchApi(`/minimax_ref/api/h3/ltx_director_get_audio?filename=${encodeURIComponent(filePath)}`)
           .then(r => r.json())
           .then(res => {
             if (res.audio_file && res.peaks) {

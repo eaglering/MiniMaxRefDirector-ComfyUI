@@ -2,12 +2,12 @@
 // 方法: updateSelectionFromBox, syncSelectionTypeAndIndex, growTimelineIfNeeded, getMaxZoom, getVisualDurationFrames, updateZoomSliderMax, updateUIFromSelection, updateSidebarHeights
 import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, RULER_HEIGHT, app } from "./shared.js";
 
-// transfer 面板（.pr-transfer-mount）显示时保证的最小 prop 区高度：
+// transfer 面板（.mrd-pr-transfer-mount）显示时保证的最小 prop 区高度：
 // textarea 最小 120px + 生成按钮行 + status + resources 预览条 + 间距
 const TRANSFER_MIN_HEIGHT = 280;
 
 export const state = {
-  // 显示/隐藏 .pr-transfer-mount，并按需调整 prop 区（propContainer）高度
+  // 显示/隐藏 .mrd-pr-transfer-mount，并按需调整 prop 区（propContainer）高度
   _setTransferVisible(show) {
     if (this.transferMount) this.transferMount.style.display = show ? "block" : "none";
     if (this.propContainer) {

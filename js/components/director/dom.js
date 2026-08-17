@@ -16,7 +16,7 @@ const triggerAutoSave = () => {
 // --- DOM 工厂辅助（createDOM 内样板去重）---
 const iconBtn = (icon, title, onClick) => {
   const b = document.createElement("button");
-  b.className = "pr-btn";
+  b.className = "mrd-pr-btn";
   Object.assign(b.style, {
     padding: "6px", display: "flex", alignItems: "center", justifyContent: "center",
     width: "28px", height: "28px", boxSizing: "border-box"
@@ -29,7 +29,7 @@ const iconBtn = (icon, title, onClick) => {
 
 const miniIconBtn = (icon, title, onClick, extraStyle) => {
   const b = document.createElement("button");
-  b.className = "pr-icon-btn";
+  b.className = "mrd-pr-icon-btn";
   b.style.padding = "4px";
   if (extraStyle) Object.assign(b.style, extraStyle);
   b.innerHTML = icon;
@@ -40,7 +40,7 @@ const miniIconBtn = (icon, title, onClick, extraStyle) => {
 
 const toolBtn = (html, onClick, opts = {}) => {
   const b = document.createElement("button");
-  b.className = "pr-btn" + (opts.danger ? " pr-btn-danger" : "");
+  b.className = "mrd-pr-btn" + (opts.danger ? " mrd-pr-btn-danger" : "");
   b.innerHTML = html;
   if (opts.title) b.title = opts.title;
   if (opts.style) Object.assign(b.style, opts.style);
@@ -90,7 +90,7 @@ const makeResizer = (minH, getH, setH) => {
 const updateNodeHeight = (editor, key, container, newH) => {
   editor[key] = newH;
   editor.node.properties[key] = newH;
-  // 固定 height：.pr-transfer-mount 是 height:100%，父容器必须是确定高度，
+  // 固定 height：.mrd-pr-transfer-mount 是 height:100%，父容器必须是确定高度，
   // textarea（flex:1 + flex-basis:auto）才能随容器拉伸；内容超高时由
   // transfer 侧 autoGrow 回调 _growPropBy 增大本高度
   container.style.height = `${newH}px`;
@@ -99,17 +99,17 @@ const updateNodeHeight = (editor, key, container, newH) => {
 
 const makePromptArea = (editor, labelText, placeholder, opts = {}) => {
   const wrapper = document.createElement("div");
-  wrapper.className = "pr-prompt-wrapper";
+  wrapper.className = "mrd-pr-prompt-wrapper";
   Object.assign(wrapper.style, { width: "100%", height: "100%" });
   if (opts.hidden) wrapper.style.display = "none";
 
   const label = document.createElement("div");
-  label.className = "pr-prompt-label";
+  label.className = "mrd-pr-prompt-label";
   label.textContent = labelText;
   wrapper.appendChild(label);
 
   const input = document.createElement("textarea");
-  input.className = "pr-prompt-area";
+  input.className = "mrd-pr-prompt-area";
   input.placeholder = placeholder;
   input.spellcheck = false;
   if (opts.opacity) input.style.opacity = opts.opacity;
@@ -129,7 +129,7 @@ const makePromptArea = (editor, labelText, placeholder, opts = {}) => {
 export const dom = {
   createDOM() {
     this.wrapper = document.createElement("div");
-    this.wrapper.className = "pr-wrapper";
+    this.wrapper.className = "mrd-pr-wrapper";
 
     this.wrapper.addEventListener("mouseenter", () => { this._isHovering = true; });
     this.wrapper.addEventListener("mouseleave", () => { this._isHovering = false; });
@@ -254,10 +254,10 @@ export const dom = {
 
     // --- Toolbar ---
     const toolbar = document.createElement("div");
-    toolbar.className = "pr-toolbar";
+    toolbar.className = "mrd-pr-toolbar";
 
     const actionGroup = document.createElement("div");
-    actionGroup.className = "pr-actions";
+    actionGroup.className = "mrd-pr-actions";
 
     this.fileInput = makeFileInput("image/*", true, (e) => this.handleImageUpload(e.target.files));
     this.audioFileInput = makeFileInput("audio/*", true, (e) => this.handleAudioUpload(e.target.files));
@@ -281,14 +281,14 @@ export const dom = {
     toolbar.appendChild(actionGroup);
 
     const rightGroup = document.createElement("div");
-    rightGroup.className = "pr-right-group";
+    rightGroup.className = "mrd-pr-right-group";
 
     this.segmentBoundsDisplay = document.createElement("div");
-    this.segmentBoundsDisplay.className = "pr-segment-bounds";
+    this.segmentBoundsDisplay.className = "mrd-pr-segment-bounds";
     this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
 
     this.timeCodeDisplay = document.createElement("div");
-    this.timeCodeDisplay.className = "pr-timecode";
+    this.timeCodeDisplay.className = "mrd-pr-timecode";
     this.timeCodeDisplay.textContent = this.formatTime(0);
 
     const settingsBtn = iconBtn(ICONS.gear, "Settings", () => {
@@ -298,73 +298,6 @@ export const dom = {
         this.showSettingsMenu(settingsBtn);
       }
     });
-
-    const inpaintToggleBtn = document.createElement("button");
-    inpaintToggleBtn.className = "pr-btn";
-    inpaintToggleBtn.style.padding = "4px 0px";
-    inpaintToggleBtn.style.fontSize = "9px";
-    inpaintToggleBtn.style.lineHeight = "1";
-    inpaintToggleBtn.style.marginRight = "0px";
-    inpaintToggleBtn.style.marginTop = "8px"; // Adjust this value to fine-tune spacing between the title and button
-    inpaintToggleBtn.style.width = "72px";
-    inpaintToggleBtn.style.whiteSpace = "nowrap";
-    inpaintToggleBtn.style.textAlign = "center";
-    inpaintToggleBtn.style.justifyContent = "center";
-    inpaintToggleBtn.style.alignItems = "center";
-    inpaintToggleBtn.style.gap = "0px";
-    inpaintToggleBtn.style.boxSizing = "border-box";
-    inpaintToggleBtn.style.borderRadius = "2px";
-    inpaintToggleBtn.textContent = "Inpaint: ON";
-    inpaintToggleBtn.title = "Toggle Audio Inpainting in Gaps";
-
-    this.updateInpaintToggleStyle = (isOn) => {
-      inpaintToggleBtn.textContent = isOn ? "Inpaint: ON" : "Inpaint: OFF";
-      if (isOn) {
-        inpaintToggleBtn.classList.add("toggle-on");
-      } else {
-        inpaintToggleBtn.classList.remove("toggle-on");
-      }
-    };
-
-    this.syncInpaintState = () => {
-      const customAudioWidget = this.node.widgets?.find(w => w.name === "use_custom_audio");
-      if (customAudioWidget && !customAudioWidget.value) {
-        inpaintToggleBtn.disabled = true;
-        inpaintToggleBtn.style.opacity = "0.4";
-        inpaintToggleBtn.style.cursor = "default";
-        inpaintToggleBtn.title = "Audio Inpainting requires Custom Audio to be ON";
-      } else {
-        inpaintToggleBtn.disabled = false;
-        inpaintToggleBtn.style.opacity = "1.0";
-        inpaintToggleBtn.style.cursor = "pointer";
-        inpaintToggleBtn.title = "Toggle Audio Inpainting in Gaps";
-      }
-    };
-
-
-
-    inpaintToggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (inpaintToggleBtn.disabled) return;
-      const widget = this.node.widgets?.find(w => w.name === "inpaint_audio");
-      if (widget) {
-        widget.value = !widget.value;
-        if (this.node.properties) {
-          this.node.properties.inpaint_audio = widget.value;
-        }
-        this.updateInpaintToggleStyle(widget.value);
-        this.commitChanges(true);
-        this.node.setDirtyCanvas(true, true);
-      }
-    });
-
-    // Initial state check (widgets might not be ready immediately)
-    setTimeout(() => {
-      const inpaintWidget = this.node.widgets?.find(w => w.name === "inpaint_audio");
-      if (inpaintWidget) {
-        this.updateInpaintToggleStyle(inpaintWidget.value);
-      }
-    }, 100);
 
     const helpBtn = iconBtn(ICONS.help, "Help / Documentation", () => {
       window.open("https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI", "_blank");
@@ -433,7 +366,7 @@ export const dom = {
 
     // --- Canvas & Viewport ---
     this.viewport = document.createElement("div");
-    this.viewport.className = "pr-timeline-viewport";
+    this.viewport.className = "mrd-pr-timeline-viewport";
 
     this.viewport.addEventListener("wheel", (e) => {
       if (e.ctrlKey || e.metaKey) {
@@ -458,7 +391,7 @@ export const dom = {
     }, { passive: false, capture: true });
 
     this.canvas = document.createElement("canvas");
-    this.canvas.className = "pr-canvas";
+    this.canvas.className = "mrd-pr-canvas";
     this.ctx = this.canvas.getContext("2d");
     this.canvas.style.width = "100%";
 
@@ -480,7 +413,7 @@ export const dom = {
     this.propHeight = this.initialPropHeight;
 
     const propContainer = document.createElement("div");
-    propContainer.className = "pr-prop-container";
+    propContainer.className = "mrd-pr-prop-container";
     propContainer.style.position = "relative";
     propContainer.style.flex = "none";
     propContainer.style.height = `${this.propHeight}px`;
@@ -512,13 +445,13 @@ export const dom = {
 
     // --- Audio Info Area ---
     this.audioInfoArea = document.createElement("div");
-    this.audioInfoArea.className = "pr-audio-info";
+    this.audioInfoArea.className = "mrd-pr-audio-info";
 
     // --- Transfer 窗体（Preact 内层，替代原 promptWrapper 的可视区）---
     // promptInput 引用保留在 this 上，transfer 左输入与它双向同步，
     // 继续复用原有 commitChanges 链路。
     this.transferMount = document.createElement("div");
-    this.transferMount.className = "pr-transfer-mount";
+    this.transferMount.className = "mrd-pr-transfer-mount";
     this.transferMount.style.boxSizing = "border-box";
     this.transferMount.style.width = "100%";
     this.transferMount.style.height = "100%";
@@ -650,14 +583,14 @@ export const dom = {
 
     // --- Player Controls ---
     const playerControls = document.createElement("div");
-    playerControls.className = "pr-player-controls";
+    playerControls.className = "mrd-pr-player-controls";
 
     this.playBtn = miniIconBtn(ICONS.play, "Play/Pause Audio", () => this.togglePlay());
     this.loopBtn = miniIconBtn(ICONS.loop, "Toggle Loop", () => this.toggleLoop());
 
     this.seekBar = document.createElement("input");
     this.seekBar.type = "range";
-    this.seekBar.className = "pr-seek-bar";
+    this.seekBar.className = "mrd-pr-seek-bar";
     this.seekBar.min = "0";
     this.seekBar.value = "0";
     this.seekBar.style.flex = "1"; // take up remaining space
@@ -673,7 +606,7 @@ export const dom = {
 
     // --- Zoom Controls ---
     const zoomControls = document.createElement("div");
-    zoomControls.className = "pr-zoom-controls";
+    zoomControls.className = "mrd-pr-zoom-controls";
 
     const zoomOutBtn = miniIconBtn(ICONS.minus, "Zoom Out", () => {
       const currentZoom = parseFloat(this.zoomSlider.value);
@@ -683,7 +616,7 @@ export const dom = {
 
     this.zoomSlider = document.createElement("input");
     this.zoomSlider.type = "range";
-    this.zoomSlider.className = "pr-zoom-slider";
+    this.zoomSlider.className = "mrd-pr-zoom-slider";
     this.zoomSlider.min = "1";
     this.zoomSlider.max = "1"; // Updated dynamically via updateZoomSliderMax()
     this.zoomSlider.step = "0.1";
@@ -744,15 +677,15 @@ export const dom = {
 
     // --- Guide Strength Slider ---
     this.strengthRow = document.createElement("div");
-    this.strengthRow.className = "pr-strength-row";
+    this.strengthRow.className = "mrd-pr-strength-row";
 
     this.strengthLabel = document.createElement("span");
-    this.strengthLabel.className = "pr-strength-label";
+    this.strengthLabel.className = "mrd-pr-strength-label";
     this.strengthLabel.textContent = "Guide Strength:";
 
     this.strengthValue = document.createElement("input");
     this.strengthValue.type = "text";
-    this.strengthValue.className = "pr-strength-input";
+    this.strengthValue.className = "mrd-pr-strength-input";
     this.strengthValue.value = "1.00";
     this.strengthValue.disabled = true;
     this.strengthValue.style.cursor = "ew-resize";
@@ -834,7 +767,7 @@ export const dom = {
 
     // Layout container for sidebar + viewport
     this.layoutContainer = document.createElement("div");
-    this.layoutContainer.className = "pr-timeline-layout";
+    this.layoutContainer.className = "mrd-pr-timeline-layout";
     this.layoutContainer.style.display = "flex";
     this.layoutContainer.style.flexDirection = "row";
     this.layoutContainer.style.width = "100%";
@@ -844,7 +777,7 @@ export const dom = {
 
     // Sidebar
     this.sidebar = document.createElement("div");
-    this.sidebar.className = "pr-timeline-sidebar";
+    this.sidebar.className = "mrd-pr-timeline-sidebar";
     this.sidebar.style.width = "120px";
     this.sidebar.style.flexShrink = "0";
     this.sidebar.style.display = "flex";
@@ -972,18 +905,9 @@ export const dom = {
         if (this.updateToggleStyle) this.updateToggleStyle(customAudioWidget.value);
       }
 
-      // Disable toggle buttons visually
-      inpaintToggleBtn.disabled = !this.audioTrackEnabled;
-      inpaintToggleBtn.style.opacity = this.audioTrackEnabled ? "1.0" : "0.3";
-
       this.commitChanges(true);
       this.render();
     });
-    this.audioTrackLabel.appendChild(inpaintToggleBtn);
-
-    // Initialize audio toggle states immediately
-    inpaintToggleBtn.disabled = !this.audioTrackEnabled;
-    inpaintToggleBtn.style.opacity = this.audioTrackEnabled ? "1.0" : "0.3";
 
     this.sidebar.appendChild(this.mainTrackLabel);
     this.sidebar.appendChild(this.audioTrackLabel);
@@ -1033,9 +957,9 @@ export const dom = {
     this.viewport.style.minWidth = "0";
     this.layoutContainer.appendChild(this.viewport);
 
-    // 全局参数分组：渲染在 .pr-toolbar 之上（preact inline 输入框）
+    // 全局参数分组：渲染在 .mrd-pr-toolbar 之上（preact inline 输入框）
     this.globalParamsMount = document.createElement("div");
-    this.globalParamsMount.className = "pr-gp-mount";
+    this.globalParamsMount.className = "mrd-pr-gp-mount";
     this.wrapper.appendChild(this.globalParamsMount);
     render(h(GlobalParamsPanel, { director: this }), this.globalParamsMount);
 
@@ -1046,7 +970,7 @@ export const dom = {
 
 
     const controlsGroup = document.createElement("div");
-    controlsGroup.className = "pr-controls-group";
+    controlsGroup.className = "mrd-pr-controls-group";
     controlsGroup.appendChild(this.strengthRow);
     controlsGroup.appendChild(playerControls);
     this.wrapper.appendChild(controlsGroup);
@@ -1076,22 +1000,6 @@ export const dom = {
     if (this.audioTrackLabel?._eyeBtn && this.updateTrackIcon) {
       this.updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", this.audioTrackEnabled);
       console.log("  - Updated audio track eye icon");
-    }
-
-    // 3. Sync the inpaint button disabled/opacity state
-    const inpaintToggleBtn = this.audioTrackLabel?.querySelector(".pr-btn");
-    if (inpaintToggleBtn) {
-      inpaintToggleBtn.disabled = !this.audioTrackEnabled;
-      inpaintToggleBtn.style.opacity = this.audioTrackEnabled ? "1.0" : "0.3";
-      console.log(`  - Updated inpaint toggle button disabled: ${inpaintToggleBtn.disabled}`);
-    }
-
-    if (this.updateInpaintToggleStyle) {
-      const inpaintWidget = this.node.widgets?.find(w => w.name === "inpaint_audio");
-      if (inpaintWidget) {
-        console.log(`  - calling updateInpaintToggleStyle with ${inpaintWidget.value}`);
-        this.updateInpaintToggleStyle(inpaintWidget.value);
-      }
     }
 
 

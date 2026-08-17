@@ -21,7 +21,8 @@
 import { h, render } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
-import { api, app, clamp, viewUrl, ICONS } from "./shared.js";
+import { api, app, viewUrl, ICONS } from "./shared.js";
+import { RefModal } from "./modal.js";
 
 const html = htm.bind(h);
 
@@ -132,12 +133,13 @@ function subjectMediaPreview(s) {
 }
 
 // 下拉菜单里的媒体缩略图：图片/视频显示资源，音频用图标占位
-function subjectMediaThumb(s) {
+// size：缩略图边长（px），默认 22（mention 菜单）；弹窗"添加主体"列表放大一倍用 44
+function subjectMediaThumb(s, size = 22) {
   const p = subjectMediaPreview(s);
-  const base = { width: "22px", height: "22px", borderRadius: "3px", flex: "0 0 auto", objectFit: "cover" };
+  const base = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", objectFit: "cover" };
   if (p.kind === "image") return html`<img src=${p.src} alt="" style=${base} />`;
   if (p.kind === "video") return html`<video src=${p.src} muted preload="metadata" style=${Object.assign({}, base, { background: "#000" })} />`;
-  if (p.kind === "audio") return html`<span title="音频" style=${{ width: "22px", height: "22px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#1e3a5f", color: "#38bdf8", fontSize: "11px", fontStyle: "normal" }}>♪</span>`;
+  if (p.kind === "audio") return html`<span title="音频" style=${{ width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#1e3a5f", color: "#38bdf8", fontSize: Math.round(size * 0.5) + "px", fontStyle: "normal" }}>♪</span>`;
   return null;
 }
 
@@ -237,7 +239,6 @@ const S = {
     display: "flex", flexDirection: "column", gap: "4px",
     fontFamily: "inherit",
   },
-  row: { display: "flex", gap: "6px", flex: 1, minHeight: 0 },
   area: {
     flex: 1, resize: "none", boxSizing: "border-box", width: "100%", minHeight: 0,
     background: "#1e1e1e", color: "#ccc", border: "1px solid #444", borderRadius: "4px",
@@ -245,11 +246,6 @@ const S = {
   },
   col: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
   buttons: { display: "flex", gap: "6px", padding: "4px 0" },
-  actions: {
-    display: "flex", flexDirection: "column", justifyContent: "center",
-    alignItems: "center", cursor: "col-resize", touchAction: "none",
-    userSelect: "none", borderRadius: "4px", transition: "background 0.15s",
-  },
   resources: {
     display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
     gap: "8px", padding: "4px 0", minHeight: "60px", borderTop: "1px solid #333",
@@ -292,7 +288,7 @@ const S = {
   },
   defsTipEmpty: { color: "#888" },
   trBtn: { width: "100%", margin: "1px 0"},
-  refTextarea: { position: "static", minHeight: "120px", height: "auto", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" },
+  refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" },
   refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
 };
 
@@ -333,19 +329,16 @@ export function TransferPanel({ director }) {
   const [subjects, setSubjects] = useState([]);
   const [menu, setMenu] = useState(null); // { side, trigger, caret, x, y }
   const [resources, setResources] = useState([]);
-  const [leftWidth, setLeftWidth] = useState(null); // 左侧宽度(px)，null 表示默认平分
-  const [midHover, setMidHover] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false); // 统一弹窗（Segment Prompt / H3 Prompt / 添加主体）
   const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
   const [motionCtxOn, setMotionCtxOn] = useState(false); // Motion Context 开关
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
-  const [addMenu, setAddMenu] = useState(null); // additionSubject 添加框下拉坐标 { x, y }（fixed 定位，避免被资源条 overflow 裁剪）
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
   const [imageVersion, setImageVersion] = useState(0); // 首帧/尾帧图回写计数（驱动资源条预览刷新）
 
-  const rowRef = useRef(null);
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const debounceRef = useRef(null);
@@ -442,36 +435,6 @@ export function TransferPanel({ director }) {
     }
   }, [rightText, curSeg, director]);
 
-  // 中间列拖拽：按住中间列（按钮除外）左右拖动调节两个 textarea 的宽度
-  function startDrag(e) {
-    if (e.target.closest && e.target.closest("button")) return; // 点击按钮不触发拖拽
-    e.preventDefault();
-    const row = rowRef.current;
-    const left = leftRef.current;
-    if (!row || !left) return;
-    const startX = e.clientX;
-    const startW = left.getBoundingClientRect().width; // 左列当前宽度
-    const actionsW = e.currentTarget.getBoundingClientRect().width;
-    const minW = 80; // 左右两列各保留的最小宽度
-    const maxW = Math.max(minW + 1, row.getBoundingClientRect().width - actionsW - minW);
-    const onMove = (ev) => {
-      if (!aliveRef.current) return;
-      setLeftWidth(clamp(startW + (ev.clientX - startX), minW, maxW));
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }
-
   // 点击外部关闭 mention 菜单
   useEffect(() => {
     if (!menu) return;
@@ -481,16 +444,6 @@ export function TransferPanel({ director }) {
     window.addEventListener("mousedown", onDown, true);
     return () => window.removeEventListener("mousedown", onDown, true);
   }, [menu]);
-
-  // 点击外部关闭 additionSubject 下拉（fixed 定位，需显式关闭）
-  useEffect(() => {
-    if (!addMenu) return;
-    const onDown = (e) => {
-      if (e.target.closest && !e.target.closest(".tr-addmenu") && !e.target.closest(".tr-addsub")) setAddMenu(null);
-    };
-    window.addEventListener("mousedown", onDown, true);
-    return () => window.removeEventListener("mousedown", onDown, true);
-  }, [addMenu]);
 
   // 右侧内容 debounce 解析资源引用
   useEffect(() => {
@@ -502,9 +455,11 @@ export function TransferPanel({ director }) {
     return () => clearTimeout(debounceRef.current);
   }, [rightText, subjects, addVersion, imageVersion]);
 
-  // 右侧 H3 JSON / 主体 / 时间轴变化时 debounce 请求后端
+  // 右侧 H3 JSON / 主体 / 当前选中段 / 时间轴变化时 debounce 请求后端
   // /h3/build_subject_bindings（替代前端 buildFirstFramePayload 的绑定组装）。
   // 绑定 prompt 中提到的主体 + 当前 segment additionSubject 手动添加的主体。
+  // 注意：curSeg 必须在依赖中——切换 segment 时若两段 h3PromptJson 相同，
+  // setRightText 相同值会 bail out，仅靠 rightText 变化驱动会导致不发起请求。
   useEffect(() => {
     if (!aliveRef.current || !director) return;
     clearTimeout(bindDebounceRef.current);
@@ -512,32 +467,9 @@ export function TransferPanel({ director }) {
       fetchBindings();
     }, 400);
     return () => clearTimeout(bindDebounceRef.current);
-  }, [rightText, subjects, director, addVersion]);
+  }, [rightText, subjects, director, addVersion, curSeg]);
 
   // ---------- 工具 ----------
-
-  // textarea auto-grow：高度跟随内容（scrollHeight），内容变少时先复位再重算。
-  // fill 链路下 textarea 由 flex-grow 拉伸填满容器（拖拽有效）；
-  // 内容超高（scrollHeight > 可见高）时回调外壳增大 prop 区，node 高度由
-  // checkResize 自动跟随，保证完整显示。
-  const autoGrow = (el, grow) => {
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = el.scrollHeight + "px";
-    if (grow && el.scrollHeight > el.clientHeight + 1) {
-      grow(el.scrollHeight - el.clientHeight);
-    }
-  };
-
-  // 内容超高时增大 prop 区（固定 height），textarea 的 flex 分配随之变大
-  const growProp = (px) => {
-    if (!director) return;
-    const target = Math.max(0, (director.propHeight || 0) + Math.ceil(px));
-    director.propHeight = target;
-    if (director.node && director.node.properties) director.node.properties.propHeight = target;
-    if (director.propContainer) director.propContainer.style.height = `${target}px`;
-    if (director._syncNodeHeight) director._syncNodeHeight();
-  };
 
   const wVal = (name) =>
     director?.node?.widgets?.find(w => w.name === name)?.value ??
@@ -558,16 +490,7 @@ export function TransferPanel({ director }) {
     };
   };
 
-  // 请求后端 /h3/build_subject_bindings（lib/prompt.py build_h3_subject_bindings）：
-  // textarea auto-grow：内容变化（含外部 _transferSetLeft / 加载 / 切换 segment）后恢复高度计算
-  useEffect(() => {
-    if (!aliveRef.current) return;
-    const raf = requestAnimationFrame(() => {
-      autoGrow(leftRef.current, growProp);
-      autoGrow(rightRef.current, growProp);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [leftText, rightText]);
+  // textarea 高度由 flex:1 均分弹窗高度控制（auto-grow 已移除）
 
   // 返回 subject_definitions / retention_analysis + images / audios / videos。
   // 替代前端 buildFirstFramePayload 中的绑定组装；绑定 prompt 中提到的主体 +
@@ -732,6 +655,18 @@ export function TransferPanel({ director }) {
     }
   }
 
+  // 最近的 transform 祖先 = position:fixed 的实际包含块（ComfyUI 图容器带平移/缩放）
+  function getFixedCb(el) {
+    let node = el.parentElement;
+    while (node) {
+      const cs = getComputedStyle(node);
+      const tf = cs.transform || cs.webkitTransform || "";
+      if (tf && tf !== "none") return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
   function openMenu(e, side) {
     const el = e.target;
     const caret = el.selectionStart;
@@ -745,8 +680,13 @@ export function TransferPanel({ director }) {
     const col = lines[line].length;
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 18;
     const charW = 7.5;
-    const x = Math.max(4, Math.min(rect.left + col * charW, window.innerWidth - 200));
-    const y = rect.top + (line + 1) * lineHeight + 6;
+    // fixed 定位实际以最近 transform 祖先（图容器）为包含块解析，rect 是视口坐标，
+    // 需减去包含块左上角，否则菜单整体偏移（可能移出可视区，表现为输入 @/# 无反应）。
+    const cb = getFixedCb(el);
+    const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
+    const vw = cb ? cbRect.width : window.innerWidth;
+    const x = Math.max(4, Math.min(rect.left + col * charW - cbRect.left, vw - 200));
+    const y = rect.top + (line + 1) * lineHeight + 6 - cbRect.top;
     // 打开菜单前刷新一次主体列表，确保新增的主体立即可选
     setSubjects(getSubjectsLatest());
     setMenu({ side, trigger: ch, caret, x, y });
@@ -774,7 +714,7 @@ export function TransferPanel({ director }) {
     if (!menu) return;
     const el = menu.side === "left" ? leftRef.current : rightRef.current;
     if (!el) return;
-    const token = menu.trigger === "@" ? `<@${s.name}>` : `<#${s.name}:[Chinese]对话内容>`;
+    const token = menu.trigger === "@" ? `<@${s.name}>` : `<#${s.name}:对话内容>`;
     const text = el.value;
     const newText = text.slice(0, menu.caret - 1) + token + text.slice(menu.caret);
     if (menu.side === "left") {
@@ -835,22 +775,8 @@ export function TransferPanel({ director }) {
     if (!Array.isArray(curSeg.additionSubject)) curSeg.additionSubject = [];
     if (curSeg.additionSubject.includes(name)) return;
     curSeg.additionSubject.push(name);
-    setAddMenu(null);
     setAddVersion((v) => v + 1);
     director.commitChanges(true);
-  };
-  // 打开 / 关闭添加主体下拉：fixed 定位并按按钮位置计算坐标，做视口边界钳制。
-  // 不能用 absolute（会被 .tr-resources 的 overflow-x: auto 裁剪遮挡）。
-  const openAddMenu = (e) => {
-    if (addMenu) {
-      setAddMenu(null);
-      return;
-    }
-    const rect = e.currentTarget.getBoundingClientRect();
-    const menuH = 200; // 与 S.menu.maxHeight 一致
-    const top = rect.bottom + menuH > window.innerHeight ? Math.max(4, rect.top - menuH) : rect.bottom;
-    const left = Math.max(4, Math.min(rect.left, window.innerWidth - 190));
-    setAddMenu({ x: left, y: top });
   };
   // 信息图标 tooltip：fixed 定位避免被 .tr-resources 的 overflow 裁剪；按视口空间决定向上/向下弹出
   const openDefsTip = (e) => {
@@ -879,71 +805,35 @@ export function TransferPanel({ director }) {
 
   return html`
     <div class="tr-panel" style=${S.panel}>
-    ${
-        curSeg && curSeg.type !== "audio"
-          ? html`<div style=${S.buttons}>
-              ${
-                curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video"
-                  ? html`<button
-                      class=${motionCtxOn ? "pr-btn toggle-on" : "pr-btn"}
-                      title="Toggle Motion Context for the selected segment"
-                      onClick=${toggleMotionContext}
-                    >Motion Context</button>`
-                  : null
-              }
-              ${
-                curSeg.type !== "audio"
-                  ? html`<button
-                      class=${autoEndOn ? "pr-btn toggle-on" : "pr-btn"}
-                      title="Toggle Auto End Frame for the selected segment"
-                      onClick=${toggleAutoEndFrame}
-                    >Auto End Frame</button>`
-                  : null
-              }
-            </div>`
-          : null
-      }
-      <div ref=${rowRef} style=${S.row}>
-        <div class="pr-prompt-wrapper" style=${leftWidth ? Object.assign({}, S.col, { flex: "0 0 auto", width: leftWidth + "px" }) : S.col}>
-          <div class="pr-prompt-label" style=${S.refTextareaLabel}>Segment Prompt</div>
-          <textarea
-            ref=${leftRef}
-            class="pr-prompt-area ref-prompt-area"
-            style=${Object.assign({}, S.refTextarea, { flex: "1 1 auto" })}
-            value=${leftText}
-            placeholder="原始 prompt（输入 @ 引用主体）"
-            spellcheck=${false}
-            onInput=${(e) => { autoGrow(e.target, growProp); setLeftText(e.target.value); handleInput(e, "left"); }}
-          ></textarea>
-        </div>
-        <div
-          style=${Object.assign({}, S.actions)}
-          title="拖动调节左右宽度"
-          onPointerDown=${startDrag}
-          onPointerEnter=${() => setMidHover(true)}
-          onPointerLeave=${() => setMidHover(false)}
-        >
-          <button
-            class="pr-btn"
-            title="以左侧为源生成 H3 Prompt，结果展示在右侧"
-            disabled=${busy}
-            onClick=${() => runGenerate(leftText)}
-          >→</button>
-        </div>
-        <div class="pr-prompt-wrapper" style=${S.col}>
-          <div class="pr-prompt-label" style=${S.refTextareaLabel}>
-            Minimax H3 Prompt
-          </div>
-          <textarea
-            ref=${rightRef}
-            class="pr-prompt-area ref-prompt-area"
-            style=${Object.assign({}, S.refTextarea, { flex: "1 1 auto" })}
-            value=${rightText}
-            placeholder="生成结果（输入 @ 或 # 引用主体）"
-            spellcheck=${false}
-            onInput=${(e) => { autoGrow(e.target, growProp); setRightText(e.target.value); handleInput(e, "right"); }}
-          ></textarea>
-        </div>
+      <div style=${S.buttons}>
+        <button
+          class="mrd-pr-btn"
+          title="编辑 Segment Prompt / Minimax H3 Prompt / 添加主体"
+          onClick=${() => setEditorOpen(true)}
+        >✎ Prompt & Subjects</button>
+        ${
+          curSeg && curSeg.type !== "audio"
+            ? html`
+                ${
+                  curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video"
+                    ? html`<button
+                        class=${motionCtxOn ? "mrd-pr-btn toggle-on" : "mrd-pr-btn"}
+                        title="Toggle Motion Context for the selected segment"
+                        onClick=${toggleMotionContext}
+                      >Motion Context</button>`
+                    : null
+                }
+                ${
+                  curSeg.type !== "audio"
+                    ? html`<button
+                        class=${autoEndOn ? "mrd-pr-btn toggle-on" : "mrd-pr-btn"}
+                        title="Toggle Auto End Frame for the selected segment"
+                        onClick=${toggleAutoEndFrame}
+                      >Auto End Frame</button>`
+                    : null
+                }`
+            : null
+        }
       </div>
 
       ${
@@ -955,37 +845,6 @@ export function TransferPanel({ director }) {
       }
 
       <div class="tr-resources" style=${S.resources}>
-        ${
-          // additionSubject 添加框：主体展示最前方，可手动添加未在 prompt 中提及的主体
-          curSeg && curSeg.type !== "audio"
-            ? html`<div class="tr-addsub" style=${{ position: "relative", flex: "0 0 auto", display: "flex", alignItems: "center", gap: "4px", padding: "4px" }}>
-                <button
-                  class="pr-btn"
-                  title="添加未在提示词中提及的主体（additionSubject，写入 timeline_data 当前段）"
-                  onClick=${(e) => openAddMenu(e)}
-                >＋添加主体</button>
-                ${
-                  addMenu
-                    ? html`<div class="tr-addmenu" style=${Object.assign({}, S.menu, { left: addMenu.x + "px", top: addMenu.y + "px" })}>
-                        ${
-                          addCandidates.length === 0
-                            ? html`<div style=${{ padding: "6px 10px", color: "#888", fontSize: "12px" }}>没有可添加的主体（未提及的主体均已添加）</div>`
-                            : addCandidates.map(h => html`
-                                <button
-                                  class="pr-btn"
-                                  style=${Object.assign({}, S.trBtn, { display: "flex", alignItems: "center", gap: "6px", textAlign: "left", padding: "3px 6px" })}
-                                  key=${"addc-" + h.name}
-                                  onMouseDown=${(e) => e.preventDefault()}
-                                  onClick=${() => addSubject(h.name)}
-                                >${subjectMediaThumb(h)}<span>@ ${h.name}</span></button>
-                              `)
-                        }
-                      </div>`
-                    : null
-                }
-              </div>`
-            : null
-        }
         ${
           resources.length === 0
             ? html`<div style=${S.hint}>资源引用（首帧 / 尾帧 / 主体 / 手动添加主体）会显示在这里</div>`
@@ -1047,23 +906,105 @@ export function TransferPanel({ director }) {
                   ? html`<div style=${{ padding: "6px 10px", color: "#888", fontSize: "12px" }}>没有可用主体（请先在主体节点中添加）</div>`
                   : subjects.map(h => html`
                       <button
-                        class="pr-btn"
-                        style=${S.trBtn}
+                        class="mrd-pr-btn"
+                        style=${Object.assign({}, S.trBtn, { display: "flex", alignItems: "center", gap: "6px", textAlign: "left", padding: "3px 6px" })}
                         key=${h.name}
                         onMouseDown=${(e) => e.preventDefault()}
                         onClick=${() => pickSubject(h)}
-                      >@ ${h.name}</button>
+                      >${subjectMediaThumb(h)}<span>${h.name}</span></button>
                     `)
               }
             </div>
           `
           : null
       }
+
+      <${RefModal}
+        open=${editorOpen}
+        title="Segment Prompt / H3 Prompt / 添加主体"
+        width="1500px"
+        height="720px"
+        onClose=${() => { setEditorOpen(false); setMenu(null); }}
+      >
+        <div style=${{ display: "flex", gap: "6px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
+          <div class="mrd-pr-prompt-wrapper" style=${S.col}>
+            <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>Segment Prompt</div>
+            <textarea
+              ref=${leftRef}
+              class="mrd-pr-prompt-area"
+              style=${S.refTextarea}
+              value=${leftText}
+              placeholder="原始 prompt（输入 @ 引用主体）"
+              spellcheck=${false}
+              onInput=${(e) => { setLeftText(e.target.value); handleInput(e, "left"); }}
+            ></textarea>
+          </div>
+          <div style=${{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: "22px", flex: "0 0 auto" }}>
+            <button
+              class="mrd-pr-btn"
+              title="以左侧为源生成 H3 Prompt，结果展示在右侧"
+              disabled=${busy}
+              onClick=${() => runGenerate(leftText)}
+            >→</button>
+          </div>
+          <div class="mrd-pr-prompt-wrapper" style=${S.col}>
+            <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>
+              Minimax H3 Prompt
+            </div>
+            <textarea
+              ref=${rightRef}
+              class="mrd-pr-prompt-area"
+              style=${S.refTextarea}
+              value=${rightText}
+              placeholder="生成结果（输入 @ 或 # 引用主体）"
+              spellcheck=${false}
+              onInput=${(e) => { setRightText(e.target.value); handleInput(e, "right"); }}
+            ></textarea>
+          </div>
+        </div>
+
+        <div style=${{ borderTop: "1px solid #333", marginTop: "8px", paddingTop: "6px", display: "flex", flexDirection: "column", gap: "4px" }}>
+          <div style=${{ fontSize: "10px", fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 2px 2px" }}>添加主体（additionSubject）</div>
+          <div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
+            ${
+              addedNames.length === 0 && addCandidates.length === 0
+                ? html`<div style=${{ color: "#888", fontSize: "12px", padding: "2px" }}>没有可添加的主体（未提及的主体均已添加）</div>`
+                : html`
+                    ${
+                      addedNames.map(n => {
+                        const h = subjects.find(x => x.name === n);
+                        return html`
+                        <span
+                          style=${{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#1e3a5f", color: "#a5d6a7", border: "1px solid #2b4a6f", borderRadius: "10px", padding: "2px 8px 2px 2px", fontSize: "12px" }}
+                          key=${"added-" + n}
+                          title=${h ? "已添加主体：" + n : n}
+                        >${h ? subjectMediaThumb(h, 44) : null}<span>＋${n}</span><span
+                            title="移除"
+                            style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }}
+                            onClick=${() => removeAddedSubject(n)}
+                          >×</span></span>`;
+                      })
+                    }
+                    ${
+                      addCandidates.map(h => html`
+                        <button
+                          class="mrd-pr-btn"
+                          style=${{ display: "flex", alignItems: "center", gap: "8px", textAlign: "left", padding: "4px 10px", fontSize: "12px" }}
+                          key=${"addc-" + h.name}
+                          onClick=${() => addSubject(h.name)}
+                        >${subjectMediaThumb(h, 44)}<span>@ ${h.name}</span></button>
+                      `)
+                    }
+                  `
+            }
+          </div>
+        </div>
+      </${RefModal}>
     </div>
   `;
 }
 
-// ---------- 全局参数分组（渲染在 .pr-wrapper 中 .pr-toolbar 之上） ----------
+// ---------- 全局参数分组（渲染在 .mrd-pr-wrapper 中 .mrd-pr-toolbar 之上） ----------
 
 export function GlobalParamsPanel({ director }) {
   // 根据 display_mode 决定 Start/End/Duration 使用秒还是帧单位

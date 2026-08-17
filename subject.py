@@ -77,10 +77,6 @@ class MiniMaxRefSubject(io.ComfyNode):
                 "and VLM settings (local llama-cpp or cloud API) as a unified config."
             ),
             inputs=[
-                io.Model.Input("model", tooltip="The diffusion model to use for generation."),
-                io.Clip.Input("clip", tooltip="The CLIP model to use for conditioning."),
-                io.Vae.Input("video_vae", tooltip="The video VAE to use for latent decoding."),
-                io.Vae.Input("audio_vae", tooltip="The audio VAE to use for audio conditioning.", optional=True),
                 io.DynamicCombo.Input(
                     "vlm_mode",
                     options=[
@@ -123,17 +119,12 @@ class MiniMaxRefSubject(io.ComfyNode):
                 ),
             ],
             outputs=[
-                io.Model.Output("model", tooltip="The diffusion model, passed through unchanged."),
-                io.Clip.Output("clip", tooltip="The CLIP model, passed through unchanged."),
-                io.Vae.Output("video_vae", tooltip="The video VAE, passed through unchanged."),
-                io.Vae.Output("audio_vae", tooltip="The audio VAE, passed through unchanged."),
                 SubjectConfig.Output("config", tooltip="Unified config: VLM opts plus structured subject data."),
             ],
         )
 
     @classmethod
-    def execute(cls, model=None, clip=None, video_vae=None, audio_vae=None, vlm_mode=None,
-                global_prompt="", subject_data="", subject_count=1) -> io.NodeOutput:
+    def execute(cls, vlm_mode=None, global_prompt="", subject_data="", subject_count=1) -> io.NodeOutput:
         # VLM mode: llama-cpp (local GGUF) or api (cloud provider).
         # DynamicCombo passes a dict, e.g. {"vlm_mode": "llama-cpp", "gguf_name": ..., "mmproj_path": ...}
         mode = "llama-cpp"
@@ -215,10 +206,6 @@ class MiniMaxRefSubject(io.ComfyNode):
         }
 
         return io.NodeOutput(
-            model,
-            clip,
-            video_vae,
-            audio_vae,
             config,
         )
 

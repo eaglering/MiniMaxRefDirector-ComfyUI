@@ -248,7 +248,7 @@ export const audio = {
       for (const seg of activeSegments) {
         if (seg.type === "video" && seg.videoEl) {
           if (seg === activeSeg) {
-            const expectedSec = (seg.trimStart + (this.currentFrame - seg.start)) / frameRate;
+            const expectedSec = ((seg.trimStart || 0) + (this.currentFrame - seg.start)) / frameRate;
             if (seg.videoEl.paused && !seg.videoEl.seeking) {
               // Not playing and no seek in flight — start a fresh seek+play
               seg.videoEl.currentTime = expectedSec;
@@ -289,7 +289,10 @@ export const audio = {
           seg.videoEl.pause();
         }
         if (this.currentFrame >= seg.start && this.currentFrame < seg.start + seg.length) {
-          seg.videoEl.currentTime = (seg.trimStart + (this.currentFrame - seg.start)) / this.getFrameRate();
+          const targetSec = ((seg.trimStart || 0) + (this.currentFrame - seg.start)) / this.getFrameRate();
+          if (Number.isFinite(targetSec)) {
+            seg.videoEl.currentTime = targetSec;
+          }
         }
       }
     }

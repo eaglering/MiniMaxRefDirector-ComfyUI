@@ -30,22 +30,6 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "resolution configuration, and prompt templates into a unified guide_data output."
             ),
             inputs=[
-                io.Model.Input(
-                    "model", optional=True,
-                    tooltip="Diffusion model to pass through to the generation node.",
-                ),
-                io.Clip.Input(
-                    "clip", optional=True,
-                    tooltip="CLIP model to pass through to the generation node.",
-                ),
-                io.Vae.Input(
-                    "video_vae", optional=True,
-                    tooltip="Video VAE to pass through to the generation node.",
-                ),
-                io.Vae.Input(
-                    "audio_vae", optional=True,
-                    tooltip="Audio VAE to pass through to the generation node.",
-                ),
                 SubjectConfig.Input(
                     "config", optional=True,
                     tooltip="Unified config from MiniMax Reference Subject (VLM opts + subject data).",
@@ -114,14 +98,12 @@ class MiniMaxRefDirector(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model=None, clip=None, video_vae=None, audio_vae=None, config=None,
+    def execute(cls, config=None,
                 start_second=0.0, end_second=5.0, duration_seconds=5.0, 
                 start_frame=0, end_frame=120, duration_frames=120, timeline_data="", 
                 local_prompts="", segment_lengths="", frame_rate=24, 
                 display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
-        # model/clip/video_vae/audio_vae 为保留的透传输入（不再输出，由外部自行接入采样链路）
-        _ = (model, clip, video_vae, audio_vae)
         # config 是可选输入：前端首帧 subgraph 中 director 不连接 config，需容错
         global_prompt = config.get("global_prompt", "") if config else ""
         subject_data = config.get("subject_data", {}) if config else {}
@@ -219,7 +201,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
         )
 
-        return io.NodeOutput(guide_data=guide_data, segment_count=segment_count+1)
+        return io.NodeOutput(guide_data, segment_count + 1)
 
 
 NODE_CLASS_MAPPINGS = {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import traceback
@@ -236,4 +237,324 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
         return web.json_response({"success": True, "data": result})
     except Exception as e:
         traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+# ── 迁移自 WhatDreamsCost-ComfyUI/ltx_director.py：/ltx_director_get_audio ──
+def _read_wav_peaks(wav_path: str) -> list:
+    """读取 16-bit PCM WAV，返回 200 个归一化峰值点。"""
+    import wave
+
+    import numpy as np
+
+    peaks: list = []
+    with wave.open(wav_path, "rb") as wav:
+        n_frames = wav.getnframes()
+        if n_frames > 0:
+            frames = wav.readframes(n_frames)
+            samples = np.frombuffer(frames, dtype=np.int16)
+            num_peaks = 200
+            step = max(1, len(samples) // num_peaks)
+            for i in range(num_peaks):
+                chunk = samples[i * step : (i + 1) * step]
+                if len(chunk) > 0:
+                    max_val = np.max(np.abs(chunk)) / 32767.0
+                    peaks.append(float(max_val))
+                else:
+                    peaks.append(0.0)
+        else:
+            peaks = [0.0] * 200
+    return peaks
+
+
+def _extract_audio_from_video(video_path: str):
+    """用 PyAV 从视频提取 44.1kHz mono s16 音轨为同目录 WAV，返回 (相对 input 路径, 峰值)。"""
+    import wave
+
+    import numpy as np
+
+    try:
+        import av
+    except ImportError:
+        print("[MiniMaxRefDirector] 'av' 未安装，无法在服务端提取音频")
+        return None, None
+
+    try:
+        base, _ = os.path.splitext(video_path)
+        output_wav = base + "_extracted_audio.wav"
+
+        # 已存在则直接复用，避免重复提取
+        if os.path.exists(output_wav) and os.path.getsize(output_wav) > 44:
+            try:
+                with wave.open(output_wav, "rb") as wav:
+                    if wav.getframerate() == 44100:
+                        peaks = _read_wav_peaks(output_wav)
+                        input_dir = folder_paths.get_input_directory()
+                        rel_output = os.path.relpath(output_wav, input_dir).replace("\\", "/")
+                        return rel_output, peaks
+            except Exception:
+                pass
+
+        with av.open(video_path) as container:
+            if not container.streams.audio:
+                return None, None
+            stream = container.streams.audio[0]
+            resampler = av.AudioResampler(format="s16", layout="mono", rate=44100)
+            audio_bytes = bytearray()
+
+            for frame in container.decode(stream):
+                for resampled_frame in resampler.resample(frame):
+                    arr = resampled_frame.to_ndarray()
+                    audio_bytes.extend(arr.tobytes())
+            for resampled_frame in resampler.resample(None):
+                arr = resampled_frame.to_ndarray()
+                audio_bytes.extend(arr.tobytes())
+
+            if not audio_bytes:
+                return None, None
+
+            with wave.open(output_wav, "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(44100)
+                wav.writeframes(audio_bytes)
+
+        peaks = []
+        samples = np.frombuffer(audio_bytes, dtype=np.int16)
+        num_peaks = 200
+        step = max(1, len(samples) // num_peaks)
+        for i in range(num_peaks):
+            chunk = samples[i * step : (i + 1) * step]
+            if len(chunk) > 0:
+                max_val = np.max(np.abs(chunk)) / 32767.0
+                peaks.append(float(max_val))
+            else:
+                peaks.append(0.0)
+
+        input_dir = folder_paths.get_input_directory()
+        rel_output = os.path.relpath(output_wav, input_dir).replace("\\", "/")
+        return rel_output, peaks
+    except Exception:
+        traceback.print_exc()
+        return None, None
+
+
+def _get_audio_peaks(audio_path: str):
+    """读取音频文件（wav/mp3/ogg/flac/m4a 等）的 200 个归一化峰值点。"""
+    import numpy as np
+
+    try:
+        import av
+    except ImportError:
+        print("[MiniMaxRefDirector] 'av' 未安装，无法在服务端计算音频峰值")
+        return None
+
+    try:
+        _, ext = os.path.splitext(audio_path)
+        if ext.lower() == ".wav":
+            try:
+                return _read_wav_peaks(audio_path)
+            except Exception:
+                pass
+
+        with av.open(audio_path) as container:
+            if not container.streams.audio:
+                return None
+            stream = container.streams.audio[0]
+            resampler = av.AudioResampler(format="s16", layout="mono", rate=8000)
+            audio_bytes = bytearray()
+
+            for frame in container.decode(stream):
+                for resampled_frame in resampler.resample(frame):
+                    arr = resampled_frame.to_ndarray()
+                    audio_bytes.extend(arr.tobytes())
+            for resampled_frame in resampler.resample(None):
+                arr = resampled_frame.to_ndarray()
+                audio_bytes.extend(arr.tobytes())
+
+            if not audio_bytes:
+                return None
+
+            peaks = []
+            samples = np.frombuffer(audio_bytes, dtype=np.int16)
+            num_peaks = 200
+            step = max(1, len(samples) // num_peaks)
+            for i in range(num_peaks):
+                chunk = samples[i * step : (i + 1) * step]
+                if len(chunk) > 0:
+                    max_val = np.max(np.abs(chunk)) / 32767.0
+                    peaks.append(float(max_val))
+                else:
+                    peaks.append(0.0)
+            return peaks
+    except Exception:
+        traceback.print_exc()
+        return None
+
+
+@PromptServer.instance.routes.get(f"{API_PREFIX}/h3/ltx_director_get_audio")
+async def get_audio_file(request):
+    """从视频/音频文件提取波形峰值（迁移自 WhatDreamsCost 插件）。"""
+    filename = request.query.get("filename")
+    if not filename:
+        return web.json_response({"error": "Missing filename"}, status=400)
+
+    input_dir = folder_paths.get_input_directory()
+    clean_filename = filename.replace("\\", "/")
+    file_path = os.path.join(input_dir, clean_filename)
+    if not os.path.exists(file_path):
+        # 兼容旧上传路径：upload_dir/whatdreamscost/<name> 或 upload_dir/<name>
+        basename = os.path.basename(clean_filename)
+        temp_path = os.path.join(input_dir, "whatdreamscost", basename)
+        if os.path.exists(temp_path):
+            file_path = temp_path
+        else:
+            file_path = os.path.join(input_dir, basename)
+    if not os.path.exists(file_path):
+        return web.json_response({"error": f"File not found: {filename}"}, status=404)
+
+    try:
+        _, ext = os.path.splitext(file_path)
+        audio_extensions = [".wav", ".mp3", ".ogg", ".flac", ".m4a"]
+        if ext.lower() in audio_extensions:
+            peaks = await asyncio.to_thread(_get_audio_peaks, file_path)
+            rel_path = os.path.relpath(file_path, input_dir).replace("\\", "/")
+            if peaks is None:
+                return web.json_response({"error": "No audio track found in file"}, status=422)
+            return web.json_response({"audio_file": rel_path, "peaks": peaks})
+        else:
+            rel_path, peaks = await asyncio.to_thread(_extract_audio_from_video, file_path)
+            if peaks is None:
+                return web.json_response({"error": "No audio track found in video"}, status=422)
+            return web.json_response({"audio_file": rel_path, "peaks": peaks})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"error": str(e)}, status=500)
+
+
+# ── 迁移自 WhatDreamsCost-ComfyUI/ltx_director.py：文件去重 / 分块上传 ──
+@PromptServer.instance.routes.get(f"{API_PREFIX}/h3/ltx_director_check_file")
+async def ltx_director_check_file(request):
+    """检查文件是否已存在（去重），返回 {"exists": bool, "name": rel_path}。"""
+    filename = request.query.get("filename", "")
+    file_size = request.query.get("size", "")
+    if not filename:
+        return web.json_response({"exists": False})
+
+    upload_dir = folder_paths.get_input_directory()
+    temp_dir = os.path.join(upload_dir, "whatdreamscost")
+    # 防路径穿越：仅取 basename
+    filename = os.path.basename(filename)
+
+    # 1. 精确匹配：whatdreamscost 子目录或 input 根目录
+    possible_paths = [
+        os.path.join(temp_dir, filename),
+        os.path.join(upload_dir, filename),
+    ]
+
+    found_path = None
+    for p in possible_paths:
+        if os.path.exists(p) and os.path.isfile(p):
+            if file_size:
+                try:
+                    if os.path.getsize(p) == int(file_size):
+                        found_path = p
+                        break
+                except ValueError:
+                    found_path = p
+                    break
+            else:
+                found_path = p
+                break
+
+    if found_path:
+        rel_name = os.path.relpath(found_path, upload_dir).replace("\\", "/")
+        return web.json_response({"exists": True, "name": rel_name})
+
+    # 2. 后缀匹配（如 _xxx.mp4）
+    base_name = os.path.basename(filename)
+    suffix = f"_{base_name}"
+    try:
+        for search_dir in [temp_dir, upload_dir]:
+            if os.path.exists(search_dir):
+                for f_name in os.listdir(search_dir):
+                    if f_name.endswith(suffix) or f_name == base_name:
+                        pot_path = os.path.join(search_dir, f_name)
+                        if os.path.isfile(pot_path):
+                            if file_size:
+                                try:
+                                    if os.path.getsize(pot_path) == int(file_size):
+                                        rel_name = os.path.relpath(pot_path, upload_dir).replace("\\", "/")
+                                        return web.json_response({"exists": True, "name": rel_name})
+                                except ValueError:
+                                    pass
+                            else:
+                                rel_name = os.path.relpath(pot_path, upload_dir).replace("\\", "/")
+                                return web.json_response({"exists": True, "name": rel_name})
+    except Exception:
+        traceback.print_exc()
+
+    return web.json_response({"exists": False})
+
+
+def _read_and_write_file_chunk(file, file_path, mode):
+    """读取上传的分块并写入磁盘（在 executor 中执行）。"""
+    chunk_bytes = file.file.read()
+    with open(file_path, mode) as f:
+        f.write(chunk_bytes)
+
+
+@PromptServer.instance.routes.post(f"{API_PREFIX}/h3/ltx_director_upload_chunk")
+async def ltx_director_upload_chunk(request):
+    """分块上传视频以绕过 413 限制；最后一块完成后提取音频波形。"""
+    post = await request.post()
+    file = post.get("file")
+    filename = post.get("filename")
+    chunk_index = int(post.get("chunk_index"))
+    total_chunks = int(post.get("total_chunks"))
+
+    upload_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # 防路径穿越
+    filename = os.path.basename(filename)
+    file_path = os.path.join(upload_dir, filename)
+    if not os.path.realpath(file_path).startswith(os.path.realpath(upload_dir)):
+        return web.json_response({"error": "Invalid filename"}, status=400)
+
+    # 首块覆盖写入，后续块追加
+    mode = "ab" if chunk_index > 0 else "wb"
+    await asyncio.to_thread(_read_and_write_file_chunk, file, file_path, mode)
+
+    if chunk_index == total_chunks - 1:
+        audio_file, peaks = None, None
+        try:
+            audio_file, peaks = await asyncio.to_thread(_extract_audio_from_video, file_path)
+        except Exception as e:
+            print(f"[MiniMaxRefDirector] Error in final chunk audio extraction: {e}")
+
+        return web.json_response({
+            "name": f"whatdreamscost/{filename}",
+            "audio_file": audio_file,
+            "peaks": peaks,
+        })
+    return web.json_response({"status": "ok"})
+
+
+# ── 迁移自 WhatDreamsCost-ComfyUI/ltx_director.py：/ltx_director_open_folder ──
+@PromptServer.instance.routes.get(f"{API_PREFIX}/h3/ltx_director_open_folder")
+async def ltx_director_open_folder(request):
+    """打开本扩展视频上传目录。"""
+    upload_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
+    os.makedirs(upload_dir, exist_ok=True)
+    try:
+        if hasattr(os, "startfile"):
+            os.startfile(upload_dir)
+        else:
+            import webbrowser
+
+            webbrowser.open(os.path.abspath(upload_dir))
+        return web.json_response({"success": True})
+    except Exception as e:
+        print(f"[MiniMaxRefDirector] Failed to open workspace folder: {e}")
         return web.json_response({"success": False, "error": str(e)}, status=500)

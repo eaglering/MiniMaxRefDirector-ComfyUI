@@ -40,9 +40,12 @@ const MSCSS = `
     border-radius: 3px;
 }
 .ref-ms-subject-list {
-    display: flex;
-    flex-direction: column;
+    /* 流式 grid：列数按容器宽度自适应，列宽填满不留空
+       （≥686px 排 2 列，≥1032px 排 3 列，即 760 两列一行、1080 三列一行） */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
     gap: 6px;
+    align-items: start;
 }
 .ref-ms-subject-card {
     background: #1e1e1e;
@@ -53,6 +56,7 @@ const MSCSS = `
     flex-direction: column;
     gap: 5px;
     transition: border-color 0.2s;
+    min-width: 0;
 }
 .ref-ms-subject-card:hover {
     border-color: #555;
@@ -93,21 +97,17 @@ const MSCSS = `
     gap: 6px;
     align-items: center;
 }
-.ref-ms-label {
+.ref-ms-label,.ref-ms-label-sm {
     font-size: 10px;
     color: #888;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    min-width: 60px;
-    flex-shrink: 0;
-}
-.ref-ms-label-sm {
-    font-size: 10px;
-    color: #888;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    min-width: 38px;
-    flex-shrink: 0;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    line-height: 1.5;
+    text-align: left;
+    user-select: none;
+    min-width: 40px;
 }
 .ref-ms-input {
     flex: 1;
@@ -159,7 +159,7 @@ const MSCSS = `
     font-family: inherit;
     outline: none;
     resize: vertical;
-    min-height: 30px;
+    min-height: 60px;
     box-sizing: border-box;
     transition: border-color 0.2s;
 }
@@ -547,21 +547,30 @@ app.registerExtension({
                 
                 domWidget.computeSize = function (width) {
                     const nodeWidth = node.size?.[0] || 475;
+                    const innerWidth = Math.max(10, nodeWidth - 30); // DOM widget 内容宽（与 .ref-ms-wrapper 一致）
+                    const listWidth = Math.max(1, innerWidth - 12); // 列表可用宽（wrapper padding 6px ×2）
                     const estCardHeight = 215; // per subject card (image/audio boxes + video row)
                     const extras = 206; // global prompt area + tabs + add button + footer + gaps
                     const visibleCount = subjects.filter(s => (s.type || "Subject") === activeTab).length;
-                    const total = visibleCount * estCardHeight + extras;
-                    const height = Math.max(estCardHeight + extras, total);
-                    return [Math.max(10, nodeWidth - 30), height];
+                    if (visibleCount === 0) return [innerWidth, extras];
+                    // 与 CSS .ref-ms-subject-list 的 minmax(340px, 1fr) 对齐：最小列宽 340 + 间隙 6
+                    const cols = Math.max(1, Math.floor((listWidth + 6) / 346));
+                    const rows = Math.ceil(visibleCount / cols);
+                    const height = rows * estCardHeight + extras;
+                    return [innerWidth, height];
                 };
 
+                // 上次触发重算时的节点宽度，用于判断是否跨列档
+                let lastNodeWidth = node.size?.[0] || 475;
                 node.syncLayoutToNode = function () {
-                    // const nodeWidth = this.size?.[0] || 475;
-                    // const targetWidth = Math.max(10, nodeWidth - 30);
-                    // if (wrapper) {
-                    //     wrapper.style.width = `${targetWidth}px`;
-                    //     wrapper.style.maxWidth = `${targetWidth}px`;
-                    // }
+                    // grid 列数跨档时自动重算高度（多列并排后高度收缩，不留大片空白）；
+                    // 同列数内的宽度/高度微调不干预，保留用户手动调整的高度。
+                    const w = this.size?.[0] || 475;
+                    const listWidth = Math.max(1, w - 42); // 节点宽 - 30 内容区 - 12 padding
+                    const colsNow = Math.max(1, Math.floor((listWidth + 6) / 346));
+                    const colsPrev = Math.max(1, Math.floor((lastNodeWidth - 42 + 6) / 346));
+                    lastNodeWidth = w;
+                    if (colsNow !== colsPrev) updateNodeSize();
                 };
 
                 // 将当前主体列表发布到全局缓存并通知外部（如 Transfer mention 菜单刷新）

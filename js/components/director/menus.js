@@ -107,7 +107,7 @@ export const menus = {
   openMenu(clientX, clientY, build) {
     this.dismissMenu();
     const menu = document.createElement("div");
-    menu.className = "pr-gap-menu";
+    menu.className = "mrd-pr-gap-menu";
     menu.style.left = `${clientX + 6}px`;
     menu.style.top = `${clientY - 10}px`;
     build(menu);
@@ -136,7 +136,7 @@ export const menus = {
 
   _menuBtn(label, o = {}) {
     const b = document.createElement("button");
-    b.className = "pr-gap-menu-btn";
+    b.className = "mrd-pr-gap-menu-btn";
     b.innerHTML = label;
     if (o.color) b.style.color = o.color;
     if (o.disabled) {
@@ -151,7 +151,7 @@ export const menus = {
 
   _menuDivider() {
     const d = document.createElement("div");
-    d.className = "pr-settings-divider";
+    d.className = "mrd-pr-settings-divider";
     return d;
   },
 
@@ -404,6 +404,8 @@ export const menus = {
 
     // 清理旧类型专属字段
     if (seg.type === "video") {
+      // 转换前提取首帧（thumbnails[0] 或 imageB64），video→image 时回填，避免空壳段导致首帧/尾帧资源条不显示
+      const firstSrc = seg.thumbnails?.[0]?.img?.src || seg.imageB64;
       if (seg.videoEl) { try { seg.videoEl.pause(); } catch (_) {} }
       delete seg.videoFile;
       delete seg.videoEl;
@@ -426,13 +428,35 @@ export const menus = {
       seg.type = newType;
       seg.motionContext = true;
       seg.autoEndFrame = true;
+      // 视频→图片：回填首帧缩略图，保证转换后图片段仍有内容可显示
+      if (newType === "image" && firstSrc) {
+        seg.imageB64 = firstSrc;
+        const img = new Image();
+        img.onload = () => { seg.imgObj = img; this.render(); };
+        img.src = firstSrc;
+      }
     } else if (seg.type === "image") {
-      delete seg.imageFile;
-      delete seg.imageB64;
-      delete seg.imgObj;
-      seg.type = newType;
-      seg.motionContext = true;
-      seg.autoEndFrame = true;
+      if (newType === "video") {
+        // 图片→视频：保留图片作为视频段首帧占位（避免空壳），并弹框让用户选择真实视频文件
+        seg.type = newType;
+        seg.motionContext = true;
+        seg.autoEndFrame = true;
+        const fi = document.createElement("input");
+        fi.type = "file";
+        fi.accept = "video/*";
+        fi.addEventListener("change", (ev) => {
+          if (ev.target.files?.[0]) this.handleVideoUpload([ev.target.files[0]], null, seg);
+        });
+        fi.click();
+      } else {
+        // 图片→文字：清理图片字段
+        delete seg.imageFile;
+        delete seg.imageB64;
+        delete seg.imgObj;
+        seg.type = newType;
+        seg.motionContext = true;
+        seg.autoEndFrame = true;
+      }
     } else if (seg.type === "text") {
       delete seg.imageFile; delete seg.imageB64; delete seg.imgObj;
       delete seg.videoFile; delete seg.videoEl; delete seg.thumbnails;

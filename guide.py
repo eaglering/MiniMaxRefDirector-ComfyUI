@@ -348,6 +348,8 @@ class MiniMaxRefGuide(io.ComfyNode):
         if video_vae is None:
             raise ValueError("[MiniMaxRefGuide] needs a VIDEO_VAE input to prepare the latent.")
 
+        log.info(f"[MiniMaxRefGuide] guide_index={idx} prompt={prompt} images={images} videos={videos} audios={audios}")
+
         # 基础条件：普通 refs（图片/视频/音频）Reference-to-video 编码
         cond, _neg_cond, latent, _frame_count = h3lib.build_segment_conditioning(
             clip, video_vae, audio_vae, prompt, width, height, length,

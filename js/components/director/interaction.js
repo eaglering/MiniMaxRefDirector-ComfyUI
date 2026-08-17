@@ -8,8 +8,8 @@ export const interaction = {
     this._ensureVideoEl(seg);
     if (!seg.videoEl) return;
     const targetSec = edge === "end"
-      ? (seg.trimStart + seg.length) / this.getFrameRate()
-      : seg.trimStart / this.getFrameRate();
+      ? ((seg.trimStart || 0) + seg.length) / this.getFrameRate()
+      : (seg.trimStart || 0) / this.getFrameRate();
 
     seg._scrubTargetSec = targetSec;
   }
@@ -21,7 +21,7 @@ export const interaction = {
     if (seg) {
       this._ensureVideoEl(seg);
       if (seg.videoEl) {
-        const targetSec = (seg.trimStart + (targetFrame - seg.start)) / this.getFrameRate();
+        const targetSec = ((seg.trimStart || 0) + (targetFrame - seg.start)) / this.getFrameRate();
         seg._scrubTargetSec = targetSec;
       }
     }
@@ -1242,7 +1242,7 @@ export const interaction = {
       if (!segs) return;
       for (const seg of segs) {
         if (seg._scrubTargetSec !== undefined) {
-          if (seg.videoEl) seg.videoEl.currentTime = seg._scrubTargetSec;
+          if (seg.videoEl && Number.isFinite(seg._scrubTargetSec)) seg.videoEl.currentTime = seg._scrubTargetSec;
           delete seg._scrubTargetSec;
         }
       }

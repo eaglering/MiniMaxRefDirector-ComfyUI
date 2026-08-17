@@ -182,12 +182,6 @@ export const settings = {
       this.syncWidgetsAndUI();
       this.commitChanges(true); // forces sync to UI and other widgets
 
-
-      if (this.updateInpaintToggleStyle) {
-        const inpaintWidget = this.node.widgets?.find(w => w.name === "inpaint_audio");
-        if (inpaintWidget) this.updateInpaintToggleStyle(inpaintWidget.value);
-      }
-
       this.render();
       this.dismissSettingsMenu();
 
@@ -303,9 +297,9 @@ export const settings = {
 
   _makeSettingRow(label, inputEl) {
     const row = document.createElement("div");
-    row.className = "pr-settings-row";
+    row.className = "mrd-pr-settings-row";
     const lbl = document.createElement("span");
-    lbl.className = "pr-settings-label";
+    lbl.className = "mrd-pr-settings-label";
     lbl.textContent = label;
     row.appendChild(lbl);
     row.appendChild(inputEl);
@@ -316,7 +310,7 @@ export const settings = {
   showSettingsMenu(anchorEl) {
     this.dismissSettingsMenu();
     const menu = document.createElement("div");
-    menu.className = "pr-settings-menu";
+    menu.className = "mrd-pr-settings-menu";
 
     // --- 闭包辅助（配置驱动构建，替代重复的 DOM 样板） ---
     const fire = (w, val) => {
@@ -324,10 +318,10 @@ export const settings = {
       if (w.callback) { try { w.callback(val, app.canvas, this.node, null, null); } catch (e) { } }
       if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
     };
-    const divider = () => { const d = document.createElement("div"); d.className = "pr-settings-divider"; return d; };
+    const divider = () => { const d = document.createElement("div"); d.className = "mrd-pr-settings-divider"; return d; };
     const btn = (text, onClick, style) => {
       const b = document.createElement("button");
-      b.className = "pr-settings-toggle-btn";
+      b.className = "mrd-pr-settings-toggle-btn";
       b.textContent = text;
       if (style) Object.assign(b.style, style);
       b.addEventListener("click", onClick);
@@ -335,11 +329,11 @@ export const settings = {
     };
     const segmented = (options, value, onChange) => {
       const ctrl = document.createElement("div");
-      ctrl.className = "pr-segmented-control";
+      ctrl.className = "mrd-pr-segmented-control";
       const segs = {};
       for (const opt of options) {
         const s = document.createElement("div");
-        s.className = "pr-segment" + (String(opt.value) === String(value) ? " active" : "");
+        s.className = "mrd-pr-segment" + (String(opt.value) === String(value) ? " active" : "");
         s.textContent = opt.label;
         s.addEventListener("click", () => {
           for (const k in segs) segs[k].classList.toggle("active", k === opt.value);
@@ -352,10 +346,10 @@ export const settings = {
     };
     const scrub = (w, step, min, max, isFloat) => {
       const container = document.createElement("div");
-      container.className = "pr-number-control";
+      container.className = "mrd-pr-number-control";
       const mkBtn = (label, act) => {
         const b = document.createElement("button");
-        b.className = "pr-number-btn";
+        b.className = "mrd-pr-number-btn";
         b.textContent = label;
         b.addEventListener("click", act);
         container.appendChild(b);
@@ -363,7 +357,7 @@ export const settings = {
       };
       const inp = document.createElement("input");
       inp.type = "number";
-      inp.className = "pr-settings-input";
+      inp.className = "mrd-pr-settings-input";
       inp.value = w.value;
       inp.step = String(step);
       inp.min = String(min);
@@ -407,7 +401,7 @@ export const settings = {
 
     // Title & Close Button Container
     const titleContainer = document.createElement("div");
-    titleContainer.className = "pr-settings-title";
+    titleContainer.className = "mrd-pr-settings-title";
     titleContainer.style.display = "flex";
     titleContainer.style.justifyContent = "space-between";
     titleContainer.style.alignItems = "center";
@@ -415,7 +409,7 @@ export const settings = {
     titleText.textContent = "Timeline Settings";
     titleContainer.appendChild(titleText);
     const closeBtn = document.createElement("button");
-    closeBtn.className = "pr-settings-close-btn";
+    closeBtn.className = "mrd-pr-settings-close-btn";
     closeBtn.innerHTML = ICONS.close;
     closeBtn.title = "Close Settings";
     closeBtn.addEventListener("click", () => this.dismissSettingsMenu());
@@ -489,7 +483,7 @@ export const settings = {
     // Workspace Folder button
     const btnOpenFolder = btn("Open", async () => {
       try {
-        const response = await api.fetchApi("/ltx_director_open_folder");
+        const response = await api.fetchApi("/minimax_ref/api/h3/ltx_director_open_folder");
         const data = await response.json();
         if (!data.success) {
           console.error("Failed to open workspace folder:", data.error || "Unknown error");
