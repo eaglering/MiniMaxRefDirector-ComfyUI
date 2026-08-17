@@ -331,18 +331,7 @@ class MiniMaxRefGuide(io.ComfyNode):
         if entry.get("is_end_frame"):
             log.info(f"[MiniMaxRefGuide] guide_index={idx} is an END frame -> skip iteration")
             return io.NodeOutput(*([ExecutionBlocker(None)] * 2))
-        """
-                        "prompt": prompt,
-                "subjects": seg.get("subjects", ""),
-                "images": seg.get("images", []),
-                "audios": seg.get("audios", []),
-                "videos": seg.get("videos", []),
-                "duration_frames": dur,
-                "type": seg.get("type", "text"),
-                "imageFile": seg.get("imageFile", ""),
-                "autoEndFrame": seg.get("autoEndFrame", False),
-                "motionContext": seg.get("motionContext", False)
-                """
+
         prompt = entry.get("prompt", "")
         width = int(guide_data.get("width", 1024))
         height = int(guide_data.get("height", 576))
