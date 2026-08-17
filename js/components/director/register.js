@@ -6,17 +6,7 @@
 // 通过 registerNode(TimelineEditor) 注入类，避免与 director.js
 // 产生循环依赖。
 // ============================================================
-import { CANVAS_HEIGHT, HIDDEN_WIDGET_NAMES, api, app, clamp, hideWidget, parseInitial } from "./shared.js";
-
-// 后端 execute 逐段生成视频后 send_sync 推送 → 转发给对应节点的 editor 更新 VIDEO 轨
-api.addEventListener("minimax_ref_video_progress", (e) => {
-  const d = e.detail || {};
-  for (const n of app.graph?._nodes || []) {
-    if (n.type === "MiniMaxRefDirector" && n._timelineEditor?.onVideoProgress) {
-      n._timelineEditor.onVideoProgress(d);
-    }
-  }
-});
+import { CANVAS_HEIGHT, HIDDEN_WIDGET_NAMES, app, clamp, hideWidget, parseInitial } from "./shared.js";
 
 export function registerNode(TimelineEditor) {
   // --- Node Registration Hooks ---

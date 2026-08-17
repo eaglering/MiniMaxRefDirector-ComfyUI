@@ -5,7 +5,6 @@ const { api } = window.comfyAPI.api;
 const RULER_HEIGHT = 24;
 const BLOCK_HEIGHT = 160; // Increased to make the image timeline area much taller
 const AUDIO_TRACK_HEIGHT = 80;
-const VIDEO_TRACK_HEIGHT = 80;
 const CANVAS_HEIGHT = RULER_HEIGHT + BLOCK_HEIGHT + AUDIO_TRACK_HEIGHT;
 const HANDLE_HIT_PX = 14;
 const MIN_SEGMENT_LENGTH = 6;
@@ -217,12 +216,6 @@ const STYLES = `
 .tr-out-input:focus{border-color:#888}
 .tr-out-input::-webkit-outer-spin-button,.tr-out-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .tr-out-input[type=number]{-moz-appearance:textfield}
-/* --- VIDEO 结果轨 --- */
-.pr-video-body{flex:1;min-height:0}
-.pr-video-row{font-size:10px;color:#8f8;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
-.pr-video-row a{color:#7ec8ff;text-decoration:none}
-.pr-video-row a:hover{text-decoration:underline}
-.pr-video-badge{color:#8f8;flex-shrink:0}
 `;
 
 const STYLE_VERSION = "20260816-d"; // 开发期改样式后递增；在 DevTools Console 检查是否打印，确认浏览器加载的是最新模块
@@ -352,4 +345,4 @@ function parseInitial(jsonStr) {
 }
 
 
-export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, VIDEO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl };
+export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl };

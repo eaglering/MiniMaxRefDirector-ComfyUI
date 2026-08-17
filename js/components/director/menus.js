@@ -342,7 +342,7 @@ export const menus = {
 
     // Group 5: Convert to another node type (main track: text / image / video)
     if (trackType !== "audio" && (seg.type === "text" || seg.type === "image" || seg.type === "video")) {
-      const convertTargets = seg.type === "text" ? ["image"]
+      const convertTargets = seg.type === "text" ? ["image", "video"]
         : ["text"];
       for (const target of convertTargets) {
         const label = "Convert to " + (target === "text" ? "Text" : target === "image" ? "Image" : "Video");
@@ -444,6 +444,14 @@ export const menus = {
             if (ev.target.files?.[0]) this.handleImageUpload([ev.target.files[0]], null, null, seg);
           });
           fi.click();
+      } else if (newType === "video") {
+        const fi = document.createElement("input");
+        fi.type = "file";
+        fi.accept = "video/*";
+        fi.addEventListener("change", (ev) => {
+          if (ev.target.files?.[0]) this.handleVideoUpload([ev.target.files[0]], null, seg);
+        });
+        fi.click();
       }
     }
 

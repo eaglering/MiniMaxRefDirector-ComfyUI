@@ -7,7 +7,6 @@ from .lib.utils import RefJoinString
 from .lib.video import RefMergeVideosFromPaths
 from .lib.audio import RefSaveAudio
 from .lib.image import RefSaveImage
-from .lib.h3 import RefGenerateImage
 from .lib.hybrid import RefHybridLoader
 
 from comfy_api.latest import ComfyExtension, io
@@ -20,7 +19,6 @@ class PromptRelay(ComfyExtension):
             MiniMaxRefDirector,
             MiniMaxRefGuide,
             MiniMaxRefSubject,
-            RefGenerateImage,
             RefJoinString,
             RefMergeVideosFromPaths,
             RefSaveAudio,
@@ -34,7 +32,6 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxRefSubject": MiniMaxRefSubject,
     "MiniMaxRefDirector": MiniMaxRefDirector,
     "MiniMaxRefGuide": MiniMaxRefGuide,
-    "RefGenerateImage": RefGenerateImage,
     "MiniMaxRefMergeVideosFromPaths": RefMergeVideosFromPaths,
     "MiniMaxRefSaveImage": RefSaveImage,
     "MiniMaxRefSaveAudio": RefSaveAudio,
@@ -46,7 +43,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefSubject": "MiniMax Subject",
     "MiniMaxRefDirector": "MiniMax Super Director",
     "MiniMaxRefGuide": "MiniMax Ref Guide",
-    "RefGenerateImage": "MiniMa xRef Generate Image",
     "MiniMaxRefMergeVideosFromPaths": "Merge Videos From Paths",
     "MiniMaxRefSaveImage": "Save Image",
     "MiniMaxRefSaveAudio": "Save Audio",

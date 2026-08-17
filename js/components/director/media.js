@@ -626,94 +626,8 @@ export const media = {
   }
 ,
 
-  async handleVideoUpload(files, targetFrameStart = null) {
+  async handleVideoUpload(files, targetFrameStart = null, seg = null) {
     const frameRate = this.getFrameRate();
-
-    if (this.retakeMode) {
-      const file = files[0];
-      if (!file) return;
-      const nameLower = file.name.toLowerCase();
-      if (!(file.type.startsWith("video/") || nameLower.match(/\.(mp4|webm|mkv|avi|mov|m4v|flv|wmv)$/))) return;
-
-      // Clean up previous retake video if one exists
-      if (this.timeline.retakeVideo) {
-        const oldVid = this.timeline.retakeVideo;
-        if (oldVid.videoEl) {
-          oldVid.videoEl.pause();
-          oldVid.videoEl.src = "";
-          oldVid.videoEl.load();
-        }
-        if (oldVid._blobUrl) {
-          URL.revokeObjectURL(oldVid._blobUrl);
-        }
-      }
-
-      const blobUrl = URL.createObjectURL(file);
-      const vid = document.createElement('video');
-      vid.crossOrigin = "Anonymous";
-      vid.preload = 'auto';
-      vid.muted = true;
-
-      await new Promise((resolve) => {
-        vid.onloadeddata = async () => {
-          vid.onloadeddata = null;
-          const clipDurationSecs = vid.duration || 1;
-          const clipFrames = Math.max(1, Math.ceil(clipDurationSecs * frameRate));
-
-          this.timeline.retakeVideo = {
-            fileName: file.name,
-            imageFile: "",
-            videoDurationFrames: clipFrames,
-            _blobUrl: blobUrl,
-            fileSize: file.size,
-            videoEl: vid,
-            _uploading: true
-          };
-
-          // Initialize retake region to the middle 50% of the clip (25%–75%)
-          const retakeLen = Math.max(1, Math.round(clipFrames * 0.5));
-          const retakeStartFrame = Math.round((clipFrames - retakeLen) / 2);
-          this.timeline.retakeStart = retakeStartFrame;
-          this.timeline.retakeLength = retakeLen;
-          if (this.timeline.retakePrompt === undefined) this.timeline.retakePrompt = "";
-          if (this.timeline.retakeStrength === undefined) this.timeline.retakeStrength = 1.0;
-
-          // Start background upload
-          this._uploadVideoFile(file).then(filePath => {
-            if (this.timeline.retakeVideo) {
-              this.timeline.retakeVideo.imageFile = filePath;
-              this.timeline.retakeVideo._uploading = false;
-            }
-            this.commitChanges(true);
-            this.render();
-          }).catch(e => {
-            console.error(e);
-            if (this.timeline.retakeVideo) {
-              this.timeline.retakeVideo._uploading = false;
-            }
-            this.commitChanges(true);
-            this.render();
-          });
-
-          this._ensureThumbnails(this.timeline.retakeVideo);
-
-          this.syncWidgetsToRetakeDuration(clipFrames);
-          this.commitChanges(true);
-          this.render();
-          resolve();
-        };
-
-        vid.onerror = (err) => {
-          console.error("Retake video load error:", err);
-          URL.revokeObjectURL(blobUrl);
-          alert("Video Load Error:\n\nThis video format or codec is not supported by your web browser (e.g., MKV or ProRes).\n\nPlease convert the video to a standard MP4 (H.264 / AAC) to use it on the timeline.");
-          resolve();
-        };
-
-        vid.src = blobUrl;
-      });
-      return;
-    }
 
     for (let file of files) {
       const nameLower = file.name.toLowerCase();
@@ -734,6 +648,14 @@ export const media = {
             vid.onloadeddata = null; // prevent re-firing if src changes or browser buffers more data
             const clipDurationSecs = vid.duration || 1;
             const clipFrames = Math.max(1, Math.ceil(clipDurationSecs * frameRate));
+
+            // 文本段 → 视频段：原位转换（不新增段、不改位置），转换后立即 resolve
+            if (seg && seg.type === "text") {
+              this._applyVideoToTextSegment(seg, vid, file, blobUrl, clipFrames);
+              resolve();
+              return;
+            }
+
             let newLength = clipFrames;
             let newStart = targetFrameStart;
 
@@ -835,10 +757,6 @@ export const media = {
               this.timeline.segments.sort((a, b) => a.start - b.start);
               this.timeline.audioSegments.sort((a, b) => a.start - b.start);
 
-              if (!this.retakeMode) {
-                this.growTimelineIfNeeded(vidSeg.start + vidSeg.length);
-              }
-
               this.selectionType = "image";
               this.selectedIndex = this.timeline.segments.findIndex(s => s.id === vidSeg.id);
               this.updateUIFromSelection();
@@ -858,81 +776,8 @@ export const media = {
               // We intentionally do NOT change vid.src after upload — the blob URL
               // works perfectly for local playback. Only imageFile/audioFile
               // need updating so Python can find the file at generation time.
-              this._uploadVideoFile(file).then(filePath => {
-                for (let s of this.timeline.segments) {
-                  if (s._blobUrl === blobUrl || s.id === vidSeg.id) {
-                    s.imageFile = filePath;
-                    s._uploading = false;
-                  }
-                }
-                for (let s of this.timeline.audioSegments) {
-                  if (s._blobUrl === blobUrl || s.id === audSeg.id) {
-                    s.audioFile = filePath;
-                    s._uploading = false;
-                  }
-                }
-                if (blobUrl && filePath) {
-                  this._thumbnailCache = this._thumbnailCache || new Map();
-                  this._thumbnailPromises = this._thumbnailPromises || new Map();
-                  if (this._thumbnailCache.has(blobUrl)) {
-                    this._thumbnailCache.set(filePath, this._thumbnailCache.get(blobUrl));
-                  }
-                  if (this._thumbnailPromises.has(blobUrl)) {
-                    this._thumbnailPromises.set(filePath, this._thumbnailPromises.get(blobUrl));
-                  }
-                }
-
-                // Query server for extracted WAV audio file and waveform peaks
-                if (filePath) {
-                  api.fetchApi(`/ltx_director_get_audio?filename=${encodeURIComponent(filePath)}`)
-                    .then(r => r.json())
-                    .then(res => {
-                      if (res.audio_file && res.peaks) {
-                        for (let s of this.timeline.audioSegments) {
-                          if (s.audioFile === filePath || s._blobUrl === blobUrl) {
-                            s.audioFile = res.audio_file;
-                            s.waveformPeaks = res.peaks;
-                            s._decoding = false;
-                            this._preloadAudioSegment(s);
-                          }
-                        }
-                      } else {
-                        // Fallback
-                        if (IS_LARGE_FILE) {
-                          console.warn("[LTXDirector] Server audio extraction failed for large file, skipping.");
-                          for (let s of this.timeline.audioSegments) {
-                            if (s.audioFile === filePath || s._blobUrl === blobUrl) {
-                              s._decoding = false;
-                            }
-                          }
-                        } else {
-                          this._extractAudioOnClient(file, audSeg.id, blobUrl);
-                        }
-                      }
-                      this.commitChanges(true);
-                      this.render();
-                    })
-                    .catch(err => {
-                      console.error("[LTXDirector] Server audio extraction query failed:", err);
-                      for (let s of this.timeline.audioSegments) {
-                        if (s.audioFile === filePath || s._blobUrl === blobUrl) {
-                          s._decoding = false;
-                        }
-                      }
-                      this.render();
-                    });
-                } else {
-                  this.commitChanges(true);
-                  this.render();
-                }
-              }).catch(err => {
-                console.error("[LTXDirector] Background video upload failed", err);
-                const currentVidSeg = this.timeline.segments.find(s => s.id === vidSeg.id);
-                if (currentVidSeg) currentVidSeg._uploading = false;
-                const currentAudSeg = this.timeline.audioSegments.find(s => s.id === audSeg.id);
-                if (currentAudSeg) currentAudSeg._uploading = false;
-                this.render();
-              });
+              // 后台：上传文件 + 回填 imageFile/audioFile + 波形提取（与文本段转换共用）
+              this._backgroundUploadVideo(file, blobUrl, vidSeg, audSeg);
             };
           };
 
@@ -955,6 +800,153 @@ export const media = {
     if (this.videoFileInput) {
       this.videoFileInput.value = "";
     }
+  }
+,
+
+  // 文本段 → 视频段原位转换：保留 start/length/prompt/h3PromptJson/motionContext/autoEndFrame，
+  // 附加视频字段并创建 _a 音频兄弟（与既有视频段 id 惯例一致，便于链接/解除链接逻辑）
+  _applyVideoToTextSegment(seg, vid, file, blobUrl, clipFrames) {
+    const sharedBase = seg.id.endsWith("_v") ? seg.id.slice(0, -2) : seg.id;
+    const newVidId = sharedBase + "_v";
+    const newAudId = sharedBase + "_a";
+
+    // 幂等：清理可能已存在的同名段（防止重复转换）
+    this.timeline.segments = this.timeline.segments.filter(s => s.id !== newVidId);
+    this.timeline.audioSegments = this.timeline.audioSegments.filter(s => s.id !== newAudId);
+
+    // 原文本段改造为视频段（文本专属字段 prompt/h3PromptJson/motionContext/autoEndFrame 保留）
+    seg.id = newVidId;
+    seg.type = "video";
+    seg.trimStart = 0;
+    seg.videoDurationFrames = clipFrames;
+    seg.imageFile = ""; // 后台上传完成后回填
+    seg.fileName = file.name;
+    seg.videoEl = vid;
+    seg._uploading = true;
+    seg._blobUrl = blobUrl;
+    seg.fileSize = file.size;
+
+    const audSeg = {
+      id: newAudId,
+      type: "audio",
+      start: seg.start,
+      length: seg.length,
+      trimStart: 0,
+      audioDurationFrames: clipFrames,
+      audioFile: "", // 后台上传完成后回填
+      fileName: file.name,
+      waveformPeaks: [],
+      _uploading: true,
+      _decoding: true,
+      _blobUrl: blobUrl,
+      fileSize: file.size
+    };
+    this.timeline.audioSegments.push(audSeg);
+    this.timeline.audioSegments.sort((a, b) => a.start - b.start);
+
+    // 提取首帧缩略图（本地 blob，即时）
+    vid.currentTime = 0.01;
+    vid.onseeked = () => {
+      vid.onseeked = null;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.min(vid.videoWidth, 512);
+      canvas.height = Math.round((vid.videoHeight / vid.videoWidth) * canvas.width);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+      seg.imageB64 = canvas.toDataURL('image/jpeg');
+      const imgObj = new Image();
+      imgObj.onload = () => { seg.imgObj = imgObj; this.render(); };
+      imgObj.src = seg.imageB64;
+      this.selectionType = "image";
+      this.selectedIndex = this.timeline.segments.findIndex(s => s.id === seg.id);
+      this.updateUIFromSelection();
+      this.commitChanges(true);
+      this._ensureThumbnails(seg);
+    };
+
+    // 后台：上传文件 + 回填 imageFile/audioFile + 波形提取
+    this._backgroundUploadVideo(file, blobUrl, seg, audSeg);
+  }
+,
+
+  // 后台上传视频文件并回填 imageFile/audioFile/波形峰值（添加视频与文本段转换共用）
+  _backgroundUploadVideo(file, blobUrl, vidSeg, audSeg) {
+    const IS_LARGE_FILE = file.size > 100 * 1024 * 1024;
+    this._uploadVideoFile(file).then(filePath => {
+      for (let s of this.timeline.segments) {
+        if (s._blobUrl === blobUrl || s.id === vidSeg.id) {
+          s.imageFile = filePath;
+          s._uploading = false;
+        }
+      }
+      for (let s of this.timeline.audioSegments) {
+        if (s._blobUrl === blobUrl || s.id === audSeg.id) {
+          s.audioFile = filePath;
+          s._uploading = false;
+        }
+      }
+      if (blobUrl && filePath) {
+        this._thumbnailCache = this._thumbnailCache || new Map();
+        this._thumbnailPromises = this._thumbnailPromises || new Map();
+        if (this._thumbnailCache.has(blobUrl)) {
+          this._thumbnailCache.set(filePath, this._thumbnailCache.get(blobUrl));
+        }
+        if (this._thumbnailPromises.has(blobUrl)) {
+          this._thumbnailPromises.set(filePath, this._thumbnailPromises.get(blobUrl));
+        }
+      }
+
+      // Query server for extracted WAV audio file and waveform peaks
+      if (filePath) {
+        api.fetchApi(`/ltx_director_get_audio?filename=${encodeURIComponent(filePath)}`)
+          .then(r => r.json())
+          .then(res => {
+            if (res.audio_file && res.peaks) {
+              for (let s of this.timeline.audioSegments) {
+                if (s.audioFile === filePath || s._blobUrl === blobUrl) {
+                  s.audioFile = res.audio_file;
+                  s.waveformPeaks = res.peaks;
+                  s._decoding = false;
+                  this._preloadAudioSegment(s);
+                }
+              }
+            } else {
+              // Fallback
+              if (IS_LARGE_FILE) {
+                console.warn("[LTXDirector] Server audio extraction failed for large file, skipping.");
+                for (let s of this.timeline.audioSegments) {
+                  if (s.audioFile === filePath || s._blobUrl === blobUrl) {
+                    s._decoding = false;
+                  }
+                }
+              } else {
+                this._extractAudioOnClient(file, audSeg.id, blobUrl);
+              }
+            }
+            this.commitChanges(true);
+            this.render();
+          })
+          .catch(err => {
+            console.error("[LTXDirector] Server audio extraction query failed:", err);
+            for (let s of this.timeline.audioSegments) {
+              if (s.audioFile === filePath || s._blobUrl === blobUrl) {
+                s._decoding = false;
+              }
+            }
+            this.render();
+          });
+      } else {
+        this.commitChanges(true);
+        this.render();
+      }
+    }).catch(err => {
+      console.error("[LTXDirector] Background video upload failed", err);
+      const currentVidSeg = this.timeline.segments.find(s => s.id === vidSeg.id);
+      if (currentVidSeg) currentVidSeg._uploading = false;
+      const currentAudSeg = this.timeline.audioSegments.find(s => s.id === audSeg.id);
+      if (currentAudSeg) currentAudSeg._uploading = false;
+      this.render();
+    });
   }
 ,
 
@@ -1097,10 +1089,6 @@ export const media = {
 
           this.timeline.audioSegments.push(seg);
           this.timeline.audioSegments.sort((a, b) => a.start - b.start);
-
-          if (!this.retakeMode) {
-            this.growTimelineIfNeeded(seg.start + seg.length);
-          }
 
           this.selectionType = "audio";
           this.selectedIndex = this.timeline.audioSegments.findIndex(s => s.id === seg.id);

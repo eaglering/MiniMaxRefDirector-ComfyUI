@@ -1,6 +1,6 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: createDOM, syncWidgetsAndUI, checkResize, syncLayoutToNode, getRenderScale, resizeCanvas, getMousePos, updateWidgetVisibility
-import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget, viewUrl } from "./shared.js";
+import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget } from "./shared.js";
 import { h, render } from "../../vendor/preact.module.js";
 import { GlobalParamsPanel, mountTransfer } from "./transfer.js";
 
@@ -985,23 +985,8 @@ export const dom = {
     inpaintToggleBtn.disabled = !this.audioTrackEnabled;
     inpaintToggleBtn.style.opacity = this.audioTrackEnabled ? "1.0" : "0.3";
 
-    // VIDEO 轨：逐段生成视频的结果展示（进度 + 文件名列表，支持拉伸）
-    this.videoTrackLabel = createTrackLabel("VIDEO", "#1e1e1e", "video", this.videoTrackEnabled ?? true, () => {
-      this.videoTrackEnabled = !this.videoTrackEnabled;
-      updateTrackIcon(this.videoTrackLabel._eyeBtn, "video", this.videoTrackEnabled);
-      this.videoTrackBody.style.display = this.videoTrackEnabled ? "flex" : "none";
-      this.commitChanges(true);
-      this.render();
-    });
-    this.videoTrackBody = document.createElement("div");
-    this.videoTrackBody.className = "pr-video-body";
-    this.videoTrackBody.style.cssText =
-      "display:flex;flex-direction:column;gap:2px;width:100%;overflow-y:auto;padding:2px 6px;box-sizing:border-box;";
-    this.videoTrackLabel.appendChild(this.videoTrackBody);
-
     this.sidebar.appendChild(this.mainTrackLabel);
     this.sidebar.appendChild(this.audioTrackLabel);
-    this.sidebar.appendChild(this.videoTrackLabel);
 
     const setupSidebarLabelResizing = (labelEl, dragType) => {
       labelEl.addEventListener("mousemove", (e) => {
@@ -1027,7 +1012,6 @@ export const dom = {
           this._dragType = dragType;
           this._startBlockHeight = this.blockHeight;
           this._startAudioTrackHeight = this.audioTrackHeight;
-          this._startVideoTrackHeight = this.videoTrackHeight;
           this._startY = this.getMousePos(e).y;
           document.body.style.userSelect = "none";
           document.body.style.cursor = "ns-resize";
@@ -1039,7 +1023,6 @@ export const dom = {
 
     setupSidebarLabelResizing(this.mainTrackLabel, "divider");
     setupSidebarLabelResizing(this.audioTrackLabel, "audio_divider");
-    setupSidebarLabelResizing(this.videoTrackLabel, "video_divider");
 
     this.updateSidebarHeights();
 
@@ -1114,41 +1097,6 @@ export const dom = {
 
   }
 ,
-
-  // 后端 execute 逐段完成视频后 send_sync 推送，前端在此更新 VIDEO 轨
-  onVideoProgress(d) {
-    const { seg_no, total, status, filename, subfolder, type } = d || {};
-    if (!this.videoTrackBody) return;
-    let row = this.videoTrackBody.querySelector(`[data-seg="${seg_no}"]`);
-    if (!row) {
-      row = document.createElement("div");
-      row.className = "pr-video-row";
-      row.dataset.seg = String(seg_no);
-      this.videoTrackBody.appendChild(row);
-    }
-    if (status === "done" && filename) {
-      const url = viewUrl(filename, subfolder, type);
-      row.innerHTML = "";
-      row.style.display = "flex";
-      row.style.alignItems = "center";
-      row.style.gap = "6px";
-      const badge = document.createElement("span");
-      badge.className = "pr-video-badge";
-      badge.textContent = `seg${seg_no}/${total}`;
-      const link = document.createElement("a");
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      link.textContent = filename;
-      row.appendChild(badge);
-      row.appendChild(link);
-    } else if (status === "exception") {
-      row.textContent = `seg${seg_no}/${total} · 循环结束`;
-    } else {
-      row.textContent = `seg${seg_no}/${total} ... 生成中`;
-    }
-    this.videoTrackBody.scrollTop = this.videoTrackBody.scrollHeight;
-  },
 
   _syncNodeHeight() {
     // 等布局完成后再同步 node 高度：widget.computeSize 会实测

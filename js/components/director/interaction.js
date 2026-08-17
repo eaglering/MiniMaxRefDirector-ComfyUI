@@ -453,16 +453,12 @@ export const interaction = {
       return;
     }
 
-    // Sidebar track label 拖拽（AUDIO / VIDEO 轨高度拉伸）
-    if (this._dragType === "audio_divider" || this._dragType === "video_divider") {
+    // Sidebar track label 拖拽（AUDIO 轨高度拉伸）
+    if (this._dragType === "audio_divider") {
       this.canvas.style.cursor = "ns-resize";
       const deltaY = mouseY - this._startY;
       const minH = 40;
-      if (this._dragType === "audio_divider") {
-        this.audioTrackHeight = Math.max(minH, (this._startAudioTrackHeight ?? this.audioTrackHeight) + deltaY);
-      } else {
-        this.videoTrackHeight = Math.max(minH, (this._startVideoTrackHeight ?? this.videoTrackHeight) + deltaY);
-      }
+      this.audioTrackHeight = Math.max(minH, (this._startAudioTrackHeight ?? this.audioTrackHeight) + deltaY);
       this.updateSidebarHeights();
       return;
     }
