@@ -200,7 +200,6 @@ def build_h3_subject_bindings(
     subjects_in = (subject_data or {}).get("subjects", []) or []
     prompt_json = _build_prompt_json(raw_prompt)
     mentions = _extract_h3_mentions(prompt_json)
-    log.info(f"mentions: {json.dumps(mentions, indent=2)}")
     names = mentions["names"]
     dialogues = mentions["dialogues"]
 
@@ -323,8 +322,6 @@ def build_h3_subject_bindings(
         "mapping": mapping,
     }
 
-    log.info(f"build_h3_subject_bindings: {json.dumps(data, indent=2)}")
-
     return data
 
 def build_h3_prompt(
@@ -342,9 +339,9 @@ def build_h3_prompt(
     detailed_description = prompt_res.get("detailed_description", "")
 
     detailed_description = _replace_mapping(detailed_description, mapping)
-    overall_soundscape = prompt_res.get("overall_soundscape", "") 
+    overall_soundscape = prompt_res.get("overall_soundscape", "") or "N/A"
     overall_soundscape = _replace_mapping(overall_soundscape, mapping)
-    non_diegetic_music = prompt_res.get("non_diegetic_music", "")
+    non_diegetic_music = prompt_res.get("non_diegetic_music", "") or "N/A"
     non_diegetic_music = _replace_mapping(non_diegetic_music, mapping)
 
     prompt = "subject_definitions:\n" + subject_definitions + "\n"

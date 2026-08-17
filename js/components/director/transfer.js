@@ -248,8 +248,8 @@ const S = {
   buttons: { display: "flex", gap: "6px", padding: "4px 0" },
   resources: {
     display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
-    gap: "8px", padding: "4px 0", minHeight: "60px", borderTop: "1px solid #333",
-    scrollbarWidth: "thin",
+    gap: "8px", padding: "4px 0", minHeight: "450px", alignItems: "flex-start",
+    borderTop: "1px solid #333", scrollbarWidth: "thin",
   },
   res: {
     flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
@@ -288,6 +288,24 @@ const S = {
   },
   defsTipEmpty: { color: "#888" },
   trBtn: { width: "100%", margin: "1px 0"},
+  // .tr-resources 右下角：Minimax H3 Prompt 只读预览（点击打开编辑器）
+  // 宽度占资源条一半，高度自适应（min 450px），超高内部滚动
+  h3PreviewWrap: {
+    flex: "0 0 50%", width: "50%", display: "flex", flexDirection: "column",
+    alignSelf: "stretch", marginLeft: "auto", borderLeft: "1px solid #333",
+    paddingLeft: "8px", minHeight: "450px", cursor: "pointer",
+  },
+  h3PreviewLabel: {
+    fontSize: "10px", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px",
+    padding: "0 0 2px", userSelect: "none", whiteSpace: "nowrap",
+  },
+  h3PreviewArea: {
+    flex: "1 1 0", minHeight: "0", width: "100%", boxSizing: "border-box",
+    background: "rgba(30,30,30,.55)", color: "#9e9e9e", border: "1px dashed #444",
+    borderRadius: "4px", padding: "4px 6px", fontFamily: "monospace", fontSize: "10px",
+    lineHeight: "1.4", resize: "none", outline: "none", cursor: "pointer",
+    overflowY: "auto", scrollbarWidth: "thin", whiteSpace: "pre-wrap",
+  },
   refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" },
   refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
 };
@@ -872,6 +890,22 @@ export function TransferPanel({ director }) {
               `;
               })
         }
+        <div
+          class="tr-h3-preview"
+          style=${S.h3PreviewWrap}
+          title="点击打开 Prompt & Subjects 编辑器"
+          onClick=${() => setEditorOpen(true)}
+          onMouseDown=${(e) => e.preventDefault()}
+        >
+          <span style=${S.h3PreviewLabel}>Minimax H3 Prompt</span>
+          <textarea
+            class="mrd-h3-preview-area"
+            style=${S.h3PreviewArea}
+            value=${rightText}
+            readOnly
+            spellcheck=${false}
+          ></textarea>
+        </div>
         <div
           class="tr-defs"
           style=${S.defsWrap}

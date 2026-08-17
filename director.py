@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import logging
@@ -14,6 +15,11 @@ log = logging.getLogger(__name__)
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_TEMPLATE = os.path.join(_PROJECT_ROOT, "prompt", "minimax_ref2v_template.txt")
+
+# director 是纯函数（同一组输入必得同一输出）。
+# 缓存兜底：Easy-Use forLoop 展开时，director 输出可能被 compare 的 link 引用而重复调度执行。
+# 同一次 prompt 内同一输入直接返回缓存，避免 build_h3_prompt / LLM 生成被重复计算。
+_director_cache: dict[str, io.NodeOutput] = {}
 
 
 class MiniMaxRefDirector(io.ComfyNode):
@@ -104,6 +110,22 @@ class MiniMaxRefDirector(io.ComfyNode):
                 local_prompts="", segment_lengths="", frame_rate=24, 
                 display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
+        # --- 缓存键：全量输入序列化（director 为纯函数，同一输入必得同一输出） ---
+        key_data = {
+            "config": config,
+            "start_second": start_second, "end_second": end_second, "duration_seconds": duration_seconds,
+            "start_frame": start_frame, "end_frame": end_frame, "duration_frames": duration_frames,
+            "timeline_data": timeline_data, "local_prompts": local_prompts, "segment_lengths": segment_lengths,
+            "frame_rate": frame_rate, "display_mode": display_mode,
+            "outpu_resolution": outpu_resolution, "million_pixels": million_pixels,
+        }
+        cache_key = hashlib.md5(
+            json.dumps(key_data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        ).hexdigest()
+        if cache_key in _director_cache:
+            log.info("[MiniMaxRefDirector] cache hit (loop re-reference) -> skip recompute")
+            return _director_cache[cache_key]
+
         # config 是可选输入：前端首帧 subgraph 中 director 不连接 config，需容错
         global_prompt = config.get("global_prompt", "") if config else ""
         subject_data = config.get("subject_data", {}) if config else {}
@@ -137,6 +159,7 @@ class MiniMaxRefDirector(io.ComfyNode):
         guide_timeline = []
         segment_count = 0
         timeline_data_len = len(timeline_segments)
+        last_frame_path = ""
 
         if timeline_data_len == 0:
             timeline_segments = [{
@@ -192,7 +215,6 @@ class MiniMaxRefDirector(io.ComfyNode):
             "global_prompt": global_prompt,
             "subject_data": subject,
             "timeline_data": guide_timeline,
-            "seg_count": len(guide_timeline) + 1,
         }
 
         log.info(
@@ -201,7 +223,9 @@ class MiniMaxRefDirector(io.ComfyNode):
             f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
         )
 
-        return io.NodeOutput(guide_data, segment_count + 1)
+        result = io.NodeOutput(guide_data, segment_count)
+        _director_cache[cache_key] = result
+        return result
 
 
 NODE_CLASS_MAPPINGS = {

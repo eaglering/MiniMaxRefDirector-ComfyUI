@@ -47,6 +47,12 @@ GuideData = io.Custom("GUIDE_DATA")
 VhsFilenames = io.Custom("VHS_FILENAMES")
 VhsFilename = io.Custom("VHS_FILENAME")
 
+# guide_index 未连接时的自动取段计数器：{id(guide_data): next_index}
+# Easy-Use forLoop 展开时，若循环体节点直接引用 forLoopStart 的输出，
+# forLoopStart 会被复制进循环体并重新执行，导致 index 错乱（如 0,0,1,2）。
+# 断开 guide_index 后由这里顺序取段，最可靠。
+_guide_auto_index: dict = {}
+
 
 def _vhs_tuple_path(item):
     """(filename, subfolder, type[, path]) → 本地绝对路径。"""
@@ -264,8 +270,12 @@ class MiniMaxRefGuide(io.ComfyNode):
             inputs=[
                 GuideData.Input("guide_data",
                                 tooltip="MiniMaxRefDirector 输出的 guide_data。"),
-                io.Int.Input("guide_index", default=0, min=0, step=1,
-                             tooltip="0-based 段索引，接 easy forLoopStart 的 index。"),
+                io.Int.Input("guide_index", optional=True, default=None, min=0, step=1,
+                             tooltip="0-based 段索引，接 easy forLoopStart 的 index。"
+                             "建议断开此输入，节点会自动按 guide_data 段顺序取段，"
+                             "避免 Easy-Use 循环展开导致的 index 错乱（如 0,0,1）。"),
+                io.Int.Input("seed", default=-1, min=-1, step=1,
+                             tooltip="采样种子（-1 表示随机）。传入后用于后续采样链路，实现跨段可复现。"),
                 io.Model.Input("model", optional=True,
                                tooltip="采样模型（透传保留，供外部采样链路使用；sigma shift 请自行处理）。"),
                 io.Clip.Input("clip", optional=True,
@@ -284,24 +294,37 @@ class MiniMaxRefGuide(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
                 io.Latent.Output(display_name="latent"),
+                io.Float.Output(display_name="frame_rate"),
             ],
         )
 
     @classmethod
-    def execute(cls, guide_data=None, guide_index=0, model=None, clip=None, video_vae=None,
-                audio_vae=None, prev_tail=None) -> io.NodeOutput:
-        """按 guide_index 取段 → 条件编码 → 输出 positive/latent；并按 prev_tail/越界发送通知。"""
+    def execute(cls, guide_data=None, guide_index=None, seed=-1, model=None, clip=None,
+                video_vae=None, audio_vae=None, prev_tail=None) -> io.NodeOutput:
+        """按 guide_index 取段 → 条件编码 → 输出 positive/latent；并按 prev_tail/越界发送通知。
+
+        guide_index 未连接（None）时自动按 timeline 段顺序取段（模块级计数器，
+        以 id(guide_data) 键控，同一 prompt 内递增，跨 prompt 自动重置）。
+        """
         if not isinstance(guide_data, dict) or not guide_data.get("timeline_data"):
             raise ValueError("[MiniMaxRefGuide] guide_data is required "
                              "(connect MiniMaxRefDirector's guide_data output).")
 
         timeline = guide_data["timeline_data"]
-        idx = int(guide_index)
+        frame_rate = float(guide_data["frame_rate"])
+        if guide_index is None:
+            key = id(guide_data)
+            idx = _guide_auto_index.get(key, 0)
+            _guide_auto_index[key] = idx + 1
+            log.info(f"[MiniMaxRefGuide] guide_index auto -> {idx}")
+        else:
+            idx = int(guide_index)
         total = len(timeline)
 
-        # 循环结束轮：guide_index 越界 → 发送 exception 通知并抛异常结束 Easy-Use forLoop
+        # 防御：guide_index 越界。Director 的 segment_count 已输出精确段数，
+        # 正常循环（total=段数）不会走到这里；触发说明 forLoop 接线/段数配置有误。
         if idx >= total:
-            log.info(f"[MiniMaxRefGuide] guide_index={idx} >= {total} -> send exception, end loop")
+            log.warning(f"[MiniMaxRefGuide] guide_index={idx} >= {total} -> out of range")
             _send_progress({
                 "seg_no": total,
                 "total": total,
@@ -310,7 +333,7 @@ class MiniMaxRefGuide(io.ComfyNode):
             })
             raise ValueError(
                 f"[MiniMaxRefGuide] guide_index {idx} out of range (0..{total - 1}); "
-                f"forLoop iteration end (seg_count={total + 1})."
+                f"check forLoopStart.total is connected to MiniMaxRefDirector's segment_count."
             )
 
         entry = timeline[idx]
@@ -326,11 +349,6 @@ class MiniMaxRefGuide(io.ComfyNode):
                 **meta,
             })
             log.info(f"[MiniMaxRefGuide] guide_index={idx} received prev_tail -> notify segment {idx} done")
-
-        # 尾帧：阻断本轮迭代（等价于 forLoop continue，直接进入下一轮）
-        if entry.get("is_end_frame"):
-            log.info(f"[MiniMaxRefGuide] guide_index={idx} is an END frame -> skip iteration")
-            return io.NodeOutput(*([ExecutionBlocker(None)] * 2))
 
         prompt = entry.get("prompt", "")
         width = int(guide_data.get("width", 1024))
@@ -348,7 +366,8 @@ class MiniMaxRefGuide(io.ComfyNode):
         if video_vae is None:
             raise ValueError("[MiniMaxRefGuide] needs a VIDEO_VAE input to prepare the latent.")
 
-        log.info(f"[MiniMaxRefGuide] guide_index={idx} prompt={prompt} images={images} videos={videos} audios={audios}")
+        log.info(f"[MiniMaxRefGuide] guide_index={idx} seed={seed} prompt={prompt} "
+                 f"images={images} videos={videos} audios={audios}")
 
         # 基础条件：普通 refs（图片/视频/音频）Reference-to-video 编码
         cond, _neg_cond, latent, _frame_count = h3lib.build_segment_conditioning(
@@ -386,4 +405,4 @@ class MiniMaxRefGuide(io.ComfyNode):
                     f"skipped: {prev_paths[0]!r} could not be decoded")
 
         # 3) 其他段：不处理 prev_tail，直接输出普通条件
-        return io.NodeOutput(cond, latent)
+        return io.NodeOutput(cond, latent, frame_rate)
