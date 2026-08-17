@@ -239,9 +239,9 @@ def build_h3_subject_bindings(
         )
         audios.append(audio_file)
         seen.add(name)
+        mapping[f"<@{name}>"] = f"<Subject {index}>"
         index += 1
         subjects_out.append(subj)
-        mapping[f"<@{name}>"] = f"<Subject {index}>"
         for k, v in dat.items():
             # 判断是否存在汉字
             language = "Chinese" if any('\u4e00' <= char <= '\u9fff' for char in v) else "English"
