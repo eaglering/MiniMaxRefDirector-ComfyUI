@@ -21,7 +21,7 @@
 import { h, render } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
-import { api, app, clamp, viewUrl } from "./shared.js";
+import { api, app, clamp, viewUrl, viewUrlInline } from "./shared.js";
 
 const html = htm.bind(h);
 
@@ -1110,7 +1110,9 @@ export function TransferPanel({ director }) {
       // 统一转正斜杠，保证与全站路径约定一致（viewUrl 的 "/" 分割、resolve_input_path 的前缀判断）
       const sub = (img.subfolder || "").replace(/\\/g, "/");
       const fileKey = sub ? sub + "/" + img.filename : img.filename;
-      const url = viewUrl(img.filename, sub, img.type || "output");
+      // 用 inline 端点：官方 /view 返回裸 filename= 被浏览器当作附件下载，
+      // 右键“在新标签页中打开图片”会看不到；viewUrlInline 强制 inline 显示。
+      const url = viewUrlInline(img.filename, sub, img.type || "output");
       const imgObj = new Image();
       // 注意：这里是 TransferPanel 组件内的普通函数，this 为 undefined，
       // 必须用外壳实例 director（TimelineEditor）的 render() 刷新画布

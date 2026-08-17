@@ -81,6 +81,18 @@ const viewUrl = (fileKey, subfolder = "", type = "input") => {
   return api.apiURL(`/view?filename=${encodeURIComponent(fn)}&type=${type}&subfolder=${encodeURIComponent(sf)}`);
 };
 
+// 与 viewUrl 等价，但走插件自带的 /minimax_ref/api/view_image 端点。
+// 该端点强制返回 Content-Disposition: inline，使浏览器右键
+// “在新标签页中打开图片”时能直接显示；官方 /view 对图片只返回裸
+// filename="..."（无 inline 前缀），浏览器按 RFC 6266 缺省视作
+// attachment 而直接下载，导致新标签页里看不到图片。
+const viewUrlInline = (fileKey, subfolder = "", type = "input") => {
+  const slash = fileKey.lastIndexOf("/");
+  const fn = slash >= 0 ? fileKey.slice(slash + 1) : fileKey;
+  const sf = slash >= 0 ? fileKey.slice(0, slash) : subfolder;
+  return api.apiURL(`/minimax_ref/api/view_image?filename=${encodeURIComponent(fn)}&type=${type}&subfolder=${encodeURIComponent(sf)}`);
+};
+
 // Upload an image to the server. Returns { imageFile, imgUrl } or null on failure.
 const uploadImage = async (file, subfolder = "minimaxrefdirector") => {
   try {
@@ -336,4 +348,4 @@ function parseInitial(jsonStr) {
 }
 
 
-export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, VIDEO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, uploadImage, ICONS, parseInitial, STYLES, styleEl };
+export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, VIDEO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl };

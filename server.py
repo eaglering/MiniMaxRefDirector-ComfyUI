@@ -62,6 +62,47 @@ def _resolve_llm_file(name: str) -> str:
     return os.path.join(folder_paths.models_dir, "llm", name)
 
 
+@PromptServer.instance.routes.get(f"{API_PREFIX}/view_image")
+async def view_image_inline(request: web.Request) -> web.Response:
+    """与 ComfyUI 官方 /view 等价，但强制 Content-Disposition: inline。
+
+    官方 /view 对输出图只返回裸 ``filename="..."``（无 inline 前缀），
+    浏览器按 RFC 6266 缺省视作 attachment，导致右键“在新标签页中打开
+    图片”变成下载而非显示。本端点供插件内图片预览 URL 使用。
+    """
+    filename = request.query.get("filename", "")
+    subfolder = (request.query.get("subfolder", "") or "").replace("\\", "/").strip("/")
+    type_ = request.query.get("type", "output")
+    if not filename:
+        return web.Response(status=400)
+    if type_ == "input":
+        base_dir = folder_paths.get_input_directory()
+    elif type_ == "temp":
+        base_dir = folder_paths.get_temp_directory()
+    else:
+        base_dir = folder_paths.get_output_directory()
+    target = os.path.abspath(os.path.join(base_dir, subfolder, os.path.basename(filename)))
+    # 防目录穿越：target 必须位于 base_dir 之内
+    try:
+        if os.path.commonpath([target, os.path.abspath(base_dir)]) != os.path.abspath(base_dir):
+            return web.Response(status=403)
+    except ValueError:
+        return web.Response(status=403)
+    if not os.path.isfile(target):
+        return web.Response(status=404)
+    import mimetypes
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    safe_name = filename.replace("\\", "\\\\").replace('"', '\\"')
+    return web.FileResponse(
+        target,
+        headers={
+            "Content-Type": content_type,
+            "Content-Disposition": f'inline; filename="{safe_name}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @PromptServer.instance.routes.get(f"{API_PREFIX}/config")
 async def get_api_config(request: web.Request) -> web.Response:
     """Return the full API configuration (API keys are returned as-is to the owner)."""
