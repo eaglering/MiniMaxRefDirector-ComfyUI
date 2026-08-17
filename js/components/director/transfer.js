@@ -941,13 +941,120 @@ export function TransferPanel({ director }) {
     return srcOf((segs?.[director.selectedIndex+1] || null));
   };
 
+<<<<<<< HEAD
+=======
+  // ---------- 组装 VLM 首帧 payload（供 subgraph 机制复用）----------
+  // 生成 payload：
+  //   prompt   = subject_definitions + retention_analysis + detailed_description
+  //            + overall_soundscape + non_diegetic_music
+  //   images   = 图片文件路径列表（主体图片 + 尾帧）
+  //   audios   = 音频文件路径列表
+  //   videos   = 视频文件路径列表
+  //   segment_data + 全局参数（start/end/frame_rate/resolution 等）
+  // 绑定部分（subject_definitions / retention_analysis + images / audios / videos）
+  // 来自后端 /h3/build_subject_bindings 的返回（bindData）。
+  function assembleVlmPayload(extra, bindOverride) {
+    const bind = bindOverride || bindData || {};
+
+    // 1) detailed_description / overall_soundscape / non_diegetic_music
+    const pd = parsePromptText(rightText);
+    const detail = String(pd.detailed_description || "").trim();
+    const soundscape = String(pd.overall_soundscape || "").trim();
+    const music = String(pd.non_diegetic_music || "").trim();
+
+    // 主体节点传来的 global_prompt（锚定贯穿全片的人物/场景），拼到 detailed_description 之前
+    const globalPrompt = getSubjectGlobalPrompt();
+
+    // 2) prompt = subject_definitions + retention_analysis + global_prompt + detailed + soundscape + music
+    const subjectDefs = bind.subject_definitions || "";
+    const detailSection = globalPrompt
+      ? `detailed_description:\n${globalPrompt}\n${detail}`
+      : `detailed_description:\n${detail}`;
+    const promptParts = [
+      subjectDefs ? "subject_definitions:\n" + subjectDefs : "",
+      bind.retention_analysis ? "retention_analysis:\n" + bind.retention_analysis : "",
+      detail ? detailSection : (globalPrompt ? `detailed_description:\n${globalPrompt}` : ""),
+      soundscape ? "overall_soundscape:\n" + soundscape : "",
+      music ? "non_diegetic_music:\n" + music : "",
+    ].filter(Boolean);
+    const prompt = promptParts.join("\n\n");
+
+    // 3) images / audios / videos（去重，按编号顺序；后端已返回纯文件路径列表）
+    const imgSeen = new Set();
+    const images = (bind.images || []).filter((src) => {
+      if (!src || imgSeen.has(src)) return false;
+      imgSeen.add(src);
+      return true;
+    });
+    const audios = (bind.audios || []).filter((src) => !!src);
+    const videos = (bind.videos || []).filter((src) => !!src);
+
+    // 4) segment_data：时间轴 segments（按 start 排序）
+    const segs = (director?.timeline?.segments || [])
+      .slice()
+      .sort((a, b) => (a.start || 0) - (b.start || 0))
+      .map((s) => ({
+        id: s.id,
+        type: s.type,
+        start: s.start,
+        length: s.length,
+        prompt: s.prompt || "",
+        imageFile: s.imageFile || "",
+        videoFile: s.videoFile || "",
+        audioFile: s.audioFile || "",
+        motionContext: !!s.motionContext,
+        autoEndFrame: !!s.autoEndFrame,
+        isEndFrame: !!s.isEndFrame,
+        additionSubject: Array.isArray(s.additionSubject) ? s.additionSubject : [],
+      }));
+
+    // 5) 全局参数（与 director.py widget 同名）
+    const segment_data = {
+      segments: segs,
+      start_second: wVal("start_second"),
+      end_second: wVal("end_second"),
+      duration_seconds: wVal("duration_seconds"),
+      start_frame: wVal("start_frame"),
+      end_frame: wVal("end_frame"),
+      duration_frames: wVal("duration_frames"),
+      frame_rate: wVal("frame_rate"),
+      display_mode: wVal("display_mode"),
+      outpu_resolution: wVal("outpu_resolution"),
+      million_pixels: wVal("million_pixels"),
+    };
+
+    const payload = {
+      prompt,
+      images,
+      audios,
+      videos,
+      segment_data,
+      ...(extra || {}),
+    };
+
+    console.log("[Transfer] assembleVlmPayload ->", {
+      prompt,
+      images,
+      audios,
+      videos,
+      segment_data,
+    });
+
+    return payload;
+  }
+
+>>>>>>> 92890455fa8445977525a2e06bd52fc367908311
   // ---------- 机制 1：前端构造预览视频 subgraph（独立 prompt，与用户完整图互不冲突）----------
   // subgraph = [loader 链(含 LoRA 等中间节点)] + [RefGenerateImage]
   // 节点内完成 ref 编码 + sigma shift + KSampler + VAEDecode + mp4 编码，
   // UI 输出保存视频的 filename 供前端回写 segment 的 video 轨道。
   // skipModifiers=false：把 LoRA / te-speed / SageAttention / Spectrum 等中间节点
   // 一起搬入（其中包含 8 步 turbo LoRA，配合 Settings 里 steps=8 快速出预览）。
+<<<<<<< HEAD
   function buildPreviewSubgraph({ seg, promptText, refSrcs, refAudios, refVideos }) {
+=======
+  function buildPreviewSubgraph({ seg, promptText, refSrcs }) {
+>>>>>>> 92890455fa8445977525a2e06bd52fc367908311
     const dNode = director?.node;
     if (!dNode) return null;
     const p = {};
@@ -962,11 +1069,17 @@ export function TransferPanel({ director }) {
     //    其余任何节点（LoRA / sigma shift / SageAttention patch / Spectrum Apply…）原样搬入
     //    model 走 preview model（4 步 lora）：穿透 MiniMaxRefSubject 时沿 preview_model 输入向上
     const ctx = { addNode, loaderSub: new Map(), copied: new Map(), outLinks: [] };
+<<<<<<< HEAD
     const modelRef = collectLoaderChain(dNode, "model", ctx, false, true);
     const clipRef = collectLoaderChain(dNode, "clip", ctx, false);
     const vaeRef = collectLoaderChain(dNode, "video_vae", ctx, false);
     // audio_vae 可选：只有传入 ref_audios 时才要求链路（未连接则退回不带音频的预览）
     const audioVaeRef = collectLoaderChain(dNode, "audio_vae", ctx, false);
+=======
+    const modelRef = collectLoaderChain(dNode, "model", ctx, false);
+    const clipRef = collectLoaderChain(dNode, "clip", ctx, false);
+    const vaeRef = collectLoaderChain(dNode, "video_vae", ctx, false);
+>>>>>>> 92890455fa8445977525a2e06bd52fc367908311
 
     if (!modelRef || !clipRef || !vaeRef) {
       setError("预览视频需要 director 的 model / clip / video_vae 输入连接到加载器（如 CheckpointLoaderSimple / VAELoader）。");
@@ -1052,6 +1165,7 @@ export function TransferPanel({ director }) {
     setBusy(true);
     setError("");
     try {
+<<<<<<< HEAD
       // timeline_segment：当前选中 segment（含 additionSubject，供后端追加绑定未提及的主体）
       const seg = curSeg;
       const body = {
@@ -1086,6 +1200,18 @@ export function TransferPanel({ director }) {
       const refVideos = [...(bindData.videos || [])];
       console.log("[Transfer] /h3/build_h3_prompt 返回 ->", { prompt: bindData.prompt, images: refSrcs, audios: refAudios, videos: refVideos });
       const p = buildPreviewSubgraph({ seg, promptText, refSrcs, refAudios, refVideos });
+=======
+      if (!seg) { setError("未选中 segment"); return null; }
+      // 复用组装逻辑（与视频任务一致）：绑定结果来自后端 /h3/build_subject_bindings
+      let bind = bindData;
+      if (!bind) bind = await fetchBindings();
+      const payload = assembleVlmPayload({ segment_id: seg.id, segment_type: seg.type }, bind);
+      // 预览 prompt = 全局主体/场景描述 + 当前段 prompt（把段级镜头语言如"人物特写"带进预览，
+      // 否则只按泛化描述生成，内容容易不符合预期）
+      const promptText = [payload?.prompt, seg.prompt].filter(Boolean).join("\n\n");
+      const refSrcs = [...(payload?.images || [])];
+      const p = buildPreviewSubgraph({ seg, promptText, refSrcs });
+>>>>>>> 92890455fa8445977525a2e06bd52fc367908311
       if (!p) return null;
       console.log("[Transfer] submit preview-video subgraph ->", p);
 
@@ -1129,6 +1255,7 @@ export function TransferPanel({ director }) {
   // 用 data-seg="preview-<segNo>" 隔离，避免覆盖正式生成行。
   // 行内容用 Preact/htm 声明式渲染；仅保留一个容器锚点定位（Preact render 会整体替换 container 内容，因此每行需要独立容器）。
   function appendPreviewToVideoTrack(seg, fileKey, url) {
+<<<<<<< HEAD
     const initSeg = director.timeline?.segments?.[director.selectedIndex] || null;
     if (!initSeg) return;
     initSeg.previewVideoFile = url
@@ -1165,6 +1292,39 @@ export function TransferPanel({ director }) {
     //   } catch { /* 忽略图标同步失败 */ }
     // }
     // body.scrollTop = body.scrollHeight;
+=======
+    const body = director?.videoTrackBody;
+    if (!body) return;
+    const segNo = (director.timeline?.segments || []).findIndex((s) => s.id === seg.id) + 1 || 1;
+    const key = `preview-${segNo}`;
+    let holder = body.querySelector(`[data-seg="${key}"]`);
+    if (!holder) {
+      holder = document.createElement("div");
+      holder.dataset.seg = key;
+      body.appendChild(holder);
+    }
+    const rowStyle = { display: "flex", alignItems: "center", gap: "6px" };
+    render(
+      html`
+        <div class="pr-video-row" style=${rowStyle}>
+          <span class="pr-video-badge">PREVIEW seg${segNo} </span>
+          <a href=${url} target="_blank" rel="noreferrer">${fileKey}</a>
+        </div>
+      `,
+      holder,
+    );
+    // 轨道被收起时自动展开，并同步眼睛图标，确保结果可见
+    if (body.style.display === "none") {
+      body.style.display = "flex";
+      director.videoTrackEnabled = true;
+      try {
+        if (director.updateTrackIcon && director.videoTrackLabel?._eyeBtn) {
+          director.updateTrackIcon(director.videoTrackLabel._eyeBtn, "video", true);
+        }
+      } catch { /* 忽略图标同步失败 */ }
+    }
+    body.scrollTop = body.scrollHeight;
+>>>>>>> 92890455fa8445977525a2e06bd52fc367908311
   }
 
   // ---------- 预览视频生成参数 Settings 弹窗 ----------

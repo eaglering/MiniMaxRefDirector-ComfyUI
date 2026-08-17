@@ -152,10 +152,17 @@ class RefGenerateImage(io.ComfyNode):
         return float("NaN")
 
     @classmethod
+<<<<<<< HEAD
     def execute(cls, model, clip, vae, audio_vae=None, output_resolution="16:9横屏", million_pixels=0.6, prompt="",
                 seed=0, length_seconds=1.0, steps=16, cfg=1, sampler_name="res_multistep", scheduler="beta", denoise=1.0,
                 shift_video=12.0, shift_audio=3.0, filename_prefix="minimaxrefdirector/preview",
                 ref_images=None, ref_videos=None, ref_audios=None) -> io.NodeOutput:
+=======
+    def execute(cls, model, clip, vae, output_resolution="16:9横屏", million_pixels=0.6, prompt="",
+                seed=0, length_seconds=1.0, steps=16, cfg=1, sampler_name="res_multistep", scheduler="beta", denoise=1.0,
+                shift_video=12.0, shift_audio=3.0, filename_prefix="minimaxrefdirector/preview",
+                ref_images=None) -> io.NodeOutput:
+>>>>>>> 92890455fa8445977525a2e06bd52fc367908311
         # 后端控制台日志：确认到底收到了什么（前端 subgraph 提交的内容）
         print("=" * 72)
         print(f"[RefGenerateImage] 收到参数：")
@@ -202,7 +209,13 @@ class RefGenerateImage(io.ComfyNode):
             raise ValueError("RefGenerateImage needs a vae to decode the latent")
 
         width, height = calc_resolution(output_resolution, million_pixels)
+<<<<<<< HEAD
         print(f"[RefGenerateImage]   preview video: {width}x{height}, length={length_seconds}s")
+=======
+        # 视频预览：走 H3 训练网格内的视频 latent（17k+5 帧），避免 T=1 静态图质量退化
+        latent, frame_count = _empty_av_latent(width, height, int(length_seconds * FPS))
+        print(f"[RefGenerateImage]   preview video: {width}x{height}, length={length_seconds}s -> {frame_count} frames (latent_t={latent['samples'].tensors[0].shape[2]})")
+>>>>>>> 92890455fa8445977525a2e06bd52fc367908311
 
         # 参考媒体统一转为 [{label, src}]，与 guide/director 共用 build_segment_conditioning 编码
         pictures = [{"label": k, "src": v} for k, v in (ref_images or {}).items() if v]
