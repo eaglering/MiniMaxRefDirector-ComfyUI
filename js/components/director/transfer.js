@@ -814,7 +814,7 @@ export function TransferPanel({ director }) {
     return () => cancelAnimationFrame(raf);
   }, [leftText, rightText]);
 
-  // 返回 subject_definition / retention_analysis + images / audios / videos。
+  // 返回 subject_definitions / retention_analysis + images / audios / videos。
   // 替代前端 buildFirstFramePayload 中的绑定组装；绑定 prompt 中提到的主体 +
   // 当前 segment additionSubject 手动添加的主体。
   const fetchBindings = async () => {
@@ -857,33 +857,25 @@ export function TransferPanel({ director }) {
     }
   };
 
-  // 与 director.py 一致：取时间轴上第一个 / 最后一个有 imageFile 的 segment（首帧 / 尾帧锚点）
-  const sortedSegs = () => (director?.timeline?.segments || []).slice().sort((a, b) => (a.start || 0) - (b.start || 0));
+  const srcOf = (s) => s?.imageB64 || s?.imgObj?.src || "";
   const firstFramePath = () => {
-    const img = sortedSegs().find((s) => s.imageFile);
-    return img ? img.imageFile || "" : "";
+    const segs = director?.timeline?.segments || [];
+    return srcOf((segs?.[director.selectedIndex] || null));
   };
   const lastFramePath = () => {
-    const img = sortedSegs().reverse().find((s) => s.imageFile);
-    return img ? img.imageFile || "" : "";
-  };
-
-  // 当前 segment 在时间轴上的序号（第几个 shot，从 1 开始）
-  const shotNumber = (seg) => {
-    const segs = (director?.timeline?.segments || []).slice().sort((a, b) => (a.start || 0) - (b.start || 0));
-    const idx = segs.findIndex((s) => s.id === seg.id);
-    return idx >= 0 ? idx + 1 : 1;
+    const segs = director?.timeline?.segments || [];
+    return srcOf((segs?.[director.selectedIndex+1] || null));
   };
 
   // ---------- 组装 VLM 首帧 payload（供 subgraph 机制复用）----------
   // 生成 payload：
-  //   prompt   = subject_definition + retention_analysis + detailed_description
+  //   prompt   = subject_definitions + retention_analysis + detailed_description
   //            + overall_soundscape + non_diegetic_music
   //   images   = 图片文件路径列表（主体图片 + 尾帧）
   //   audios   = 音频文件路径列表
   //   videos   = 视频文件路径列表
   //   segment_data + 全局参数（start/end/frame_rate/resolution 等）
-  // 绑定部分（subject_definition / retention_analysis + images / audios / videos）
+  // 绑定部分（subject_definitions / retention_analysis + images / audios / videos）
   // 来自后端 /h3/build_subject_bindings 的返回（bindData）。
   function assembleVlmPayload(extra, bindOverride) {
     const bind = bindOverride || bindData || {};
@@ -898,12 +890,12 @@ export function TransferPanel({ director }) {
     const globalPrompt = getSubjectGlobalPrompt();
 
     // 2) prompt = subject_definitions + retention_analysis + global_prompt + detailed + soundscape + music
-    const subjectDefs = bind.subject_definition || "";
+    const subjectDefs = bind.subject_definitions || "";
     const detailSection = globalPrompt
       ? `detailed_description:\n${globalPrompt}\n${detail}`
       : `detailed_description:\n${detail}`;
     const promptParts = [
-      subjectDefs ? "subject_definition:\n" + subjectDefs : "",
+      subjectDefs ? "subject_definitions:\n" + subjectDefs : "",
       bind.retention_analysis ? "retention_analysis:\n" + bind.retention_analysis : "",
       detail ? detailSection : (globalPrompt ? `detailed_description:\n${globalPrompt}` : ""),
       soundscape ? "overall_soundscape:\n" + soundscape : "",
@@ -1026,10 +1018,14 @@ export function TransferPanel({ director }) {
       clip: [clipRef.node, clipRef.slot],
       vae: [vaeRef.node, vaeRef.slot],
       output_resolution: wVal("outpu_resolution") || "16:9横屏",
-      million_pixels: wVal("million_pixels") ?? 0.6,
+      // 首帧质量优先：首帧分辨率下限 1.0MP（16:9 → 1344x768），避免 0.6MP 下脸部像素不足；
+      // 若全局已设更高则跟随全局。回写后的首帧会被 guide 按段分辨率重采样，不会浪费。
+      million_pixels: Math.max(parseFloat(wVal("million_pixels")) || 0.6, 1.0),
       prompt: promptText || "",
       seed: Math.floor(Math.random() * 0xffffffff),
-      steps: 8,
+      // 首帧是 T=1 单帧 latent，无视频时间维信息，8 步偏少导致人脸/细节糊；
+      // 16 步质量显著提升，单帧生成耗时仍在可接受范围
+      steps: 16,
       cfg: 1,
       sampler_name: "res_multistep",
       scheduler: "simple",
@@ -1067,7 +1063,9 @@ export function TransferPanel({ director }) {
       let bind = bindData;
       if (!bind) bind = await fetchBindings();
       const payload = assembleVlmPayload({ segment_id: seg.id, segment_type: seg.type }, bind);
-      const promptText = payload?.prompt || seg.prompt || "";
+      // 首帧 prompt = 全局主体/场景描述 + 当前段 prompt（把段级镜头语言如"人物特写"带进首帧，
+      // 否则首帧只按泛化描述生成，人物容易糊）
+      const promptText = [payload?.prompt, seg.prompt].filter(Boolean).join("\n\n");
       const refSrcs = [...(payload?.images || [])];
       // 该 segment 已有的参考图（用户手动设置或先前生成的首帧）并入 refs 首位
       if (seg.imageFile) refSrcs.unshift(seg.imageFile);
@@ -1176,7 +1174,6 @@ export function TransferPanel({ director }) {
     const on = !autoEndOn;
     setAutoEndOn(on);
     seg.autoEndFrame = on; // 更新 timeline_data 对应字段
-    const n = shotNumber(seg);
     director.commitChanges();
   }
 
@@ -1295,10 +1292,8 @@ export function TransferPanel({ director }) {
 
   function parseResources(text, subjectsList) {
     const out = [];
-    const segs = director?.timeline?.segments || [];
-    const srcOf = (s) => s?.imageB64 || s?.imgObj?.src || "";
-    const first = srcOf((segs?.[director.selectedIndex] || null));
-    const last = srcOf((segs?.[director.selectedIndex+1] || null));
+    const first = firstFramePath();
+    const last = lastFramePath();
     if (first) out.push({ key: "first", label: "首帧", src: first });
     if (last) out.push({ key: "last", label: "尾帧", src: last });
     const re = /<(?:@|#)([^>:]+)(?::[^>]*)?>/g;
@@ -1373,7 +1368,7 @@ export function TransferPanel({ director }) {
   // 主体定义 / retention_analysis（来自后端 /h3/build_subject_bindings 的 debounce 结果）
   const bindings = bindData || {};
   const bindParts = [];
-  if (bindings.subject_definition) bindParts.push("subject_definition:\n" + bindings.subject_definition);
+  if (bindings.subject_definitions) bindParts.push("subject_definitions:\n" + bindings.subject_definitions);
   if (bindings.retention_analysis) bindParts.push("retention_analysis:\n" + bindings.retention_analysis);
   const bindingsText = bindParts.join("\n\n");
 

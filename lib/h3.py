@@ -85,7 +85,8 @@ class RefGenerateImage(io.ComfyNode):
                 ),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, step=1),
-                io.Int.Input("steps", default=8, min=1, max=100, step=1),
+                # 首帧为 T=1 单帧 latent，8 步偏少会糊；默认 16 步保证细节
+                io.Int.Input("steps", default=16, min=1, max=100, step=1),
                 io.Float.Input("cfg", default=1, min=0.0, max=100.0, step=0.1),
                 io.Combo.Input(
                     "sampler_name",
@@ -123,7 +124,7 @@ class RefGenerateImage(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, clip, vae, output_resolution="16:9横屏", million_pixels=0.6, prompt="",
-                seed=0, steps=8, cfg=1, sampler_name="res_multistep", scheduler="simple", denoise=1.0,
+                seed=0, steps=16, cfg=1, sampler_name="res_multistep", scheduler="simple", denoise=1.0,
                 shift_video=12.0, shift_audio=3.0, filename_prefix="minimaxrefdirector/firstframe",
                 ref_images=None) -> io.NodeOutput:
         # 后端控制台日志：确认到底收到了什么（前端 subgraph 提交的内容）
