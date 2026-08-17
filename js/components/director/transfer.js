@@ -21,7 +21,7 @@
 import { h, render } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
-import { api, app, clamp, viewUrl, viewUrlInline } from "./shared.js";
+import { api, app, clamp, viewUrl, viewUrlInline, ICONS } from "./shared.js";
 
 const html = htm.bind(h);
 
@@ -427,6 +427,47 @@ function imageFromHistory(history) {
   return null;
 }
 
+// 从 history 输出中取第一个视频（videos / gifs 产物，如预览视频 mp4）
+function videoFromHistory(history) {
+  const outputs = history?.outputs || {};
+  for (const key of Object.keys(outputs)) {
+    const o = outputs[key];
+    const list = o?.videos || o?.gifs;
+    if (list?.length) {
+      const v = list[0];
+      return { filename: v.filename, subfolder: v.subfolder || "", type: v.type || "output" };
+    }
+  }
+  return null;
+}
+
+// ---------- 预览视频生成参数（Settings 弹窗） ----------
+// 只存 localStorage，刷新后保留；不写入 timeline_data
+const PREVIEW_SETTINGS_KEY = "mmrd.previewSettings";
+const DEFAULT_PREVIEW_SETTINGS = {
+  length_seconds: 1.0, // 预览时长（秒）
+  steps: 8, // 8 步 turbo LoRA 对应 8 步；无 LoRA 建议 16+
+  million_pixels: 0.6, // 画质（百万像素）
+  sampler_name: "res_multistep",
+  scheduler: "beta",
+};
+function loadPreviewSettings() {
+  try {
+    const raw = localStorage.getItem(PREVIEW_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_PREVIEW_SETTINGS };
+    return { ...DEFAULT_PREVIEW_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_PREVIEW_SETTINGS };
+  }
+}
+function savePreviewSettings(s) {
+  try {
+    localStorage.setItem(PREVIEW_SETTINGS_KEY, JSON.stringify(s));
+  } catch {
+    /* localStorage 不可用时静默忽略 */
+  }
+}
+
 // 主体定义 / retention_analysis / 媒体列表（images / audios / videos）
 // 由后端 /h3/build_subject_bindings 接口（lib/prompt.py build_h3_subject_bindings）
 // 生成，前端不再本地组装，见 fetchBindings()。
@@ -612,6 +653,9 @@ export function TransferPanel({ director }) {
   const [addMenu, setAddMenu] = useState(null); // additionSubject 添加框下拉坐标 { x, y }（fixed 定位，避免被资源条 overflow 裁剪）
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
   const [imageVersion, setImageVersion] = useState(0); // 首帧/尾帧图回写计数（驱动资源条预览刷新）
+  const [previewSettings, setPreviewSettings] = useState(() => loadPreviewSettings()); // 预览视频生成参数（localStorage 持久化）
+  const settingsMenuRef = useRef(null); // Settings 弹窗 DOM 元素
+  const settingsDismisserRef = useRef(null); // 弹窗外点击关闭监听器
 
   const rowRef = useRef(null);
   const leftRef = useRef(null);
@@ -990,10 +1034,13 @@ export function TransferPanel({ director }) {
     return payload;
   }
 
-  // ---------- 机制 1：前端构造首帧图 subgraph（独立 prompt，与用户完整图互不冲突）----------
-  // subgraph = [loader 链] + [RefGenerateImage]（节点内完成 ref 编码 + sigma shift + KSampler
-  //            + VAEDecode + SaveImage，UI 输出保存图片的 filename 供前端回写 segment）
-  function buildFirstFrameSubgraph({ seg, promptText, refSrcs }) {
+  // ---------- 机制 1：前端构造预览视频 subgraph（独立 prompt，与用户完整图互不冲突）----------
+  // subgraph = [loader 链(含 LoRA 等中间节点)] + [RefGenerateImage]
+  // 节点内完成 ref 编码 + sigma shift + KSampler + VAEDecode + mp4 编码，
+  // UI 输出保存视频的 filename 供前端回写 segment 的 video 轨道。
+  // skipModifiers=false：把 LoRA / te-speed / SageAttention / Spectrum 等中间节点
+  // 一起搬入（其中包含 8 步 turbo LoRA，配合 Settings 里 steps=8 快速出预览）。
+  function buildPreviewSubgraph({ seg, promptText, refSrcs }) {
     const dNode = director?.node;
     if (!dNode) return null;
     const p = {};
@@ -1007,13 +1054,12 @@ export function TransferPanel({ director }) {
     // 1) 整链复制（model / clip / video_vae 三路）：加载器登记资源源、透传占位穿透、
     //    其余任何节点（LoRA / sigma shift / SageAttention patch / Spectrum Apply…）原样搬入
     const ctx = { addNode, loaderSub: new Map(), copied: new Map(), outLinks: [] };
-    // 实验模式：只保留加载器链路（跳过 LoRA / te-speed / SageAttention / Spectrum 等中间节点）
-    const modelRef = collectLoaderChain(dNode, "model", ctx, true);
-    const clipRef = collectLoaderChain(dNode, "clip", ctx, true);
-    const vaeRef = collectLoaderChain(dNode, "video_vae", ctx, true);
+    const modelRef = collectLoaderChain(dNode, "model", ctx, false);
+    const clipRef = collectLoaderChain(dNode, "clip", ctx, false);
+    const vaeRef = collectLoaderChain(dNode, "video_vae", ctx, false);
 
     if (!modelRef || !clipRef || !vaeRef) {
-      setError("首帧图需要 director 的 model / clip / video_vae 输入连接到加载器（如 CheckpointLoaderSimple / VAELoader）。");
+      setError("预览视频需要 director 的 model / clip / video_vae 输入连接到加载器（如 CheckpointLoaderSimple / VAELoader）。");
       return null;
     }
 
@@ -1035,25 +1081,22 @@ export function TransferPanel({ director }) {
       console.warn("[Transfer] 参考图为空：subjects 中没有可用的 input 图片（检查 subjects 是否上传了图片文件）");
     }
 
-    // 4) RefGenerateImage：ref 编码 + sigma shift + 采样 + 解码 + 保存全部在节点内完成
+    // 4) RefGenerateImage：ref 编码 + sigma shift + 采样 + 解码 + mp4 编码全部在节点内完成
     const segNo = (director.timeline?.segments || []).findIndex((s) => s.id === seg.id) + 1 || 1;
+    const ps = previewSettings;
     const h3Inputs = {
       model: [modelRef.node, modelRef.slot],
       clip: [clipRef.node, clipRef.slot],
       vae: [vaeRef.node, vaeRef.slot],
       output_resolution: wVal("outpu_resolution") || "16:9横屏",
-      // 首帧质量优先：首帧分辨率下限 1.0MP（16:9 → 1344x768），避免 0.6MP 下脸部像素不足。
-      million_pixels: Math.max(parseFloat(wVal("million_pixels")) || 0.6, 1.0),
+      million_pixels: parseFloat(ps.million_pixels) || 0.6,
       prompt: promptText || "",
       seed: Math.floor(Math.random() * 0xffffffff),
-      steps: 20,
-      cfg: 1,
-      sampler_name: "res_multistep",
-      scheduler: "simple",
-      denoise: 1.0,
-      shift_video: 12.0,
-      shift_audio: 3.0,
-      filename_prefix: `minimaxrefdirector/firstframe/seg${segNo}`,
+      length_seconds: parseFloat(ps.length_seconds) || 1.0,
+      steps: parseInt(ps.steps, 10) || 8,
+      sampler_name: ps.sampler_name || "res_multistep",
+      scheduler: ps.scheduler || "beta",
+      filename_prefix: `minimaxrefdirector/preview/seg${segNo}`,
     };
     // 注意：ComfyUI v3 io 的 Autogrow 输入（io.Autogrow.Input("ref_images", ...)）要求提交 key
     // 使用完整动态路径前缀 "ref_images.ref_image_{i}"，否则服务端匹配不到变体输入，
@@ -1062,7 +1105,7 @@ export function TransferPanel({ director }) {
     const refNodeId = addNode("RefGenerateImage", h3Inputs);
 
     // 5) 控制台日志：完整打印 subgraph（含传给 RefGenerateImage 的全部输入）
-    console.log(`[Transfer] 首帧 subgraph 已构造：${Object.keys(p).length} 个节点`);
+    console.log(`[Transfer] 预览视频 subgraph 已构造：${Object.keys(p).length} 个节点`);
     console.log(`[Transfer] model 链路末端 -> 节点 ${modelRef.node}[${modelRef.slot}]`);
     console.log(`[Transfer] clip 链路末端 -> 节点 ${clipRef.node}[${clipRef.slot}]`);
     console.log(`[Transfer] vae  链路末端 -> 节点 ${vaeRef.node}[${vaeRef.slot}]`);
@@ -1073,8 +1116,8 @@ export function TransferPanel({ director }) {
     return p;
   }
 
-  // 提交首帧图 subgraph → 轮询 /history → 回写 segment（type=image + imageFile + imageObj + imageB64）
-  async function submitFirstFrameSubgraph(seg) {
+  // 提交预览视频 subgraph → 轮询 /history → 回写 segment（type=video + videoFile + videoB64）
+  async function submitPreviewVideo(seg) {
     if (busy || !director) return null;
     setBusy(true);
     setError("");
@@ -1084,59 +1127,250 @@ export function TransferPanel({ director }) {
       let bind = bindData;
       if (!bind) bind = await fetchBindings();
       const payload = assembleVlmPayload({ segment_id: seg.id, segment_type: seg.type }, bind);
-      // 首帧 prompt = 全局主体/场景描述 + 当前段 prompt（把段级镜头语言如"人物特写"带进首帧，
-      // 否则首帧只按泛化描述生成，人物容易糊）
+      // 预览 prompt = 全局主体/场景描述 + 当前段 prompt（把段级镜头语言如"人物特写"带进预览，
+      // 否则只按泛化描述生成，内容容易不符合预期）
       const promptText = [payload?.prompt, seg.prompt].filter(Boolean).join("\n\n");
       const refSrcs = [...(payload?.images || [])];
-      const p = buildFirstFrameSubgraph({ seg, promptText, refSrcs });
+      const p = buildPreviewSubgraph({ seg, promptText, refSrcs });
       if (!p) return null;
-      console.log("[Transfer] submit first-frame subgraph ->", p);
+      console.log("[Transfer] submit preview-video subgraph ->", p);
 
       const resp = await api.queuePrompt(-1, { output: p, workflow: {} });
       const promptId = resp?.prompt_id;
       if (!promptId) throw new Error("提交队列失败");
-      console.log("[Transfer] 首帧 subgraph 已提交，prompt_id =", promptId);
+      console.log("[Transfer] 预览视频 subgraph 已提交，prompt_id =", promptId);
 
-      const history = await waitForPromptDone(promptId, 1800000, "首帧图");
-      console.log("[Transfer] 首帧 history status:", history?.status);
-      console.log("[Transfer] 首帧 history outputs keys:", Object.keys(history?.outputs || {}));
-      const img = imageFromHistory(history);
-      if (!img) {
-        console.error("[Transfer] history.outputs 中未找到 images，完整内容:", JSON.stringify(history?.outputs || {}));
-        throw new Error("未找到生成的首帧图");
+      const history = await waitForPromptDone(promptId, 1800000, "预览视频");
+      console.log("[Transfer] 预览 history status:", history?.status);
+      console.log("[Transfer] 预览 history outputs keys:", Object.keys(history?.outputs || {}));
+      const vid = videoFromHistory(history);
+      if (!vid) {
+        console.error("[Transfer] history.outputs 中未找到 videos，完整内容:", JSON.stringify(history?.outputs || {}));
+        throw new Error("未找到生成的预览视频");
       }
 
       // 归一化 subfolder 分隔符：Windows 后端返回的是 os.sep（反斜杠），
       // 统一转正斜杠，保证与全站路径约定一致（viewUrl 的 "/" 分割、resolve_input_path 的前缀判断）
-      const sub = (img.subfolder || "").replace(/\\/g, "/");
-      const fileKey = sub ? sub + "/" + img.filename : img.filename;
+      const sub = (vid.subfolder || "").replace(/\\/g, "/");
+      const fileKey = sub ? sub + "/" + vid.filename : vid.filename;
       // 用 inline 端点：官方 /view 返回裸 filename= 被浏览器当作附件下载，
-      // 右键“在新标签页中打开图片”会看不到；viewUrlInline 强制 inline 显示。
-      const url = viewUrlInline(img.filename, sub, img.type || "output");
-      const imgObj = new Image();
-      // 注意：这里是 TransferPanel 组件内的普通函数，this 为 undefined，
-      // 必须用外壳实例 director（TimelineEditor）的 render() 刷新画布
-      imgObj.onload = () => { seg.imgObj = imgObj; director.render(); };
-      imgObj.src = url;
+      // 右键“在新标签页中打开视频”会看不到；viewUrlInline 强制 inline 显示。
+      const url = viewUrlInline(vid.filename, sub, vid.type || "output");
 
-      // 回写 segment：imageB64 存 view URL（与手动上传图片的字段约定一致），
-      // 不存 base64 data URL，避免 timeline JSON 体积膨胀
-      seg.type = "image";
-      seg.imageFile = fileKey;
-      seg.imageB64 = url;
-      director.commitChanges();
-      if (director._transferSetSeg) director._transferSetSeg(seg);
-      // 递增资源版本号，触发右侧「首帧/尾帧」资源预览的 useEffect 重新 parseResources
-      setImageVersion((v) => v + 1);
-      return { image_file: fileKey, url };
+      // 预览视频放进 VIDEO 轨（VIDEOTrackLabel / videoTrackBody）展示，
+      // 不回写 segment 到 MAIN 轨（避免把预览结果当成正式视频素材）
+      appendPreviewToVideoTrack(seg, fileKey, url);
+      return { video_file: fileKey, url };
     } catch (e) {
-      console.error("[Transfer] submitFirstFrameSubgraph failed:", e);
+      console.error("[Transfer] submitPreviewVideo failed:", e);
       setError(String(e?.message || e));
       return null;
     } finally {
       if (aliveRef.current) setBusy(false);
     }
   }
+
+  // 把预览视频结果追加到 VIDEO 轨（VIDEOTrackLabel 下的 videoTrackBody）。
+  // 与后端 /minimax_ref/exec/video-progress 推送的逐段行同一 DOM 区域，
+  // 用 data-seg="preview-<segNo>" 隔离，避免覆盖正式生成行。
+  // 行内容用 Preact/htm 声明式渲染；仅保留一个容器锚点定位（Preact render 会整体替换 container 内容，因此每行需要独立容器）。
+  function appendPreviewToVideoTrack(seg, fileKey, url) {
+    const body = director?.videoTrackBody;
+    if (!body) return;
+    const segNo = (director.timeline?.segments || []).findIndex((s) => s.id === seg.id) + 1 || 1;
+    const key = `preview-${segNo}`;
+    let holder = body.querySelector(`[data-seg="${key}"]`);
+    if (!holder) {
+      holder = document.createElement("div");
+      holder.dataset.seg = key;
+      body.appendChild(holder);
+    }
+    const rowStyle = { display: "flex", alignItems: "center", gap: "6px" };
+    render(
+      html`
+        <div class="pr-video-row" style=${rowStyle}>
+          <span class="pr-video-badge">PREVIEW seg${segNo} </span>
+          <a href=${url} target="_blank" rel="noreferrer">${fileKey}</a>
+        </div>
+      `,
+      holder,
+    );
+    // 轨道被收起时自动展开，并同步眼睛图标，确保结果可见
+    if (body.style.display === "none") {
+      body.style.display = "flex";
+      director.videoTrackEnabled = true;
+      try {
+        if (director.updateTrackIcon && director.videoTrackLabel?._eyeBtn) {
+          director.updateTrackIcon(director.videoTrackLabel._eyeBtn, "video", true);
+        }
+      } catch { /* 忽略图标同步失败 */ }
+    }
+    body.scrollTop = body.scrollHeight;
+  }
+
+  // ---------- 预览视频生成参数 Settings 弹窗 ----------
+  // 参考 Timeline Settings（settings.js showSettingsMenu）的 DOM 弹窗模式：
+  // 固定定位 + 配置驱动行构建 + 外部点击关闭。
+  // 参数只存 localStorage（刷新后保留），不写入 timeline_data。
+  function dismissPreviewSettings() {
+    if (settingsMenuRef.current) { settingsMenuRef.current.remove(); settingsMenuRef.current = null; }
+    if (settingsDismisserRef.current) {
+      document.removeEventListener("pointerdown", settingsDismisserRef.current, true);
+      document.removeEventListener("wheel", settingsDismisserRef.current, true);
+      settingsDismisserRef.current = null;
+    }
+  }
+
+  function openPreviewSettings(anchorEl) {
+    dismissPreviewSettings();
+    const menu = document.createElement("div");
+    menu.className = "pr-settings-menu";
+
+    // 更新 state + 写 localStorage（刷新后保留；不写 timeline_data）
+    const update = (patch) => {
+      const next = { ...previewSettings, ...patch };
+      setPreviewSettings(next);
+      savePreviewSettings(next);
+    };
+
+    const divider = () => { const d = document.createElement("div"); d.className = "pr-settings-divider"; return d; };
+    const row = (label, el) => {
+      const r = document.createElement("div");
+      r.className = "pr-settings-row";
+      const lbl = document.createElement("span");
+      lbl.className = "pr-settings-label";
+      lbl.textContent = label;
+      r.appendChild(lbl);
+      r.appendChild(el);
+      return r;
+    };
+    const combo = (options, value, onChange) => {
+      const c = document.createElement("select");
+      c.className = "pr-settings-select";
+      for (const opt of options) {
+        const o = document.createElement("option");
+        o.value = String(opt.value);
+        o.textContent = opt.label;
+        if (String(opt.value) === String(value)) o.selected = true;
+        c.appendChild(o);
+      }
+      c.addEventListener("change", () => onChange(c.value));
+      return c;
+    };
+    const scrub = (value, step, min, max, isFloat, onChange) => {
+      const container = document.createElement("div");
+      container.className = "pr-number-control";
+      const mkBtn = (label, act) => {
+        const b = document.createElement("button");
+        b.className = "pr-number-btn";
+        b.textContent = label;
+        b.addEventListener("click", act);
+        container.appendChild(b);
+        return b;
+      };
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.className = "pr-settings-input";
+      inp.value = String(value);
+      inp.step = String(step);
+      inp.min = String(min);
+      inp.max = String(max);
+      const commit = (val) => {
+        const v = isFloat
+          ? Math.min(max, Math.max(min, parseFloat(val)))
+          : Math.round(Math.min(max, Math.max(min, parseInt(val, 10) || min)));
+        inp.value = String(v);
+        onChange(v);
+      };
+      const nudge = (d) => commit((isFloat ? parseFloat(inp.value) : parseInt(inp.value, 10) || min) + d * step);
+      mkBtn("-", () => nudge(-1));
+      container.appendChild(inp);
+      mkBtn("+", () => nudge(1));
+      inp.addEventListener("change", () => commit(inp.value));
+      inp.style.cursor = "ew-resize";
+      inp.addEventListener("mousedown", (e) => {
+        const startX = e.clientX;
+        const startVal = parseFloat(inp.value);
+        let dragging = false, moved = false;
+        const onMove = (me) => {
+          const dx = me.clientX - startX;
+          if (Math.abs(dx) > 3) { moved = true; dragging = true; }
+          if (dragging) {
+            me.preventDefault();
+            commit(startVal + dx * (isFloat ? 0.01 : 0.5));
+          }
+        };
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+          if (!moved) { inp.focus(); inp.select(); }
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+      return container;
+    };
+
+    // 标题 + 关闭按钮
+    const titleContainer = document.createElement("div");
+    titleContainer.className = "pr-settings-title";
+    titleContainer.style.display = "flex";
+    titleContainer.style.justifyContent = "space-between";
+    titleContainer.style.alignItems = "center";
+    const titleText = document.createElement("span");
+    titleText.textContent = "Preview Video Settings";
+    titleContainer.appendChild(titleText);
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "pr-settings-close-btn";
+    closeBtn.innerHTML = ICONS.close;
+    closeBtn.title = "Close Settings";
+    closeBtn.addEventListener("click", () => dismissPreviewSettings());
+    titleContainer.appendChild(closeBtn);
+    menu.appendChild(titleContainer);
+
+    // 生成参数行
+    const s = previewSettings;
+    menu.appendChild(row("Length (s)", scrub(s.length_seconds, 0.1, 0.2, 10, true, (v) => update({ length_seconds: v }))));
+    menu.appendChild(row("Steps", scrub(s.steps, 1, 1, 60, false, (v) => update({ steps: v }))));
+    menu.appendChild(row("Quality (MP)", scrub(s.million_pixels, 0.1, 0.1, 4, true, (v) => update({ million_pixels: v }))));
+    menu.appendChild(divider());
+    menu.appendChild(row("Sampler", combo(
+      ["res_multistep", "euler", "euler_ancestral", "dpmpp_2m", "dpmpp_3m_sde"].map((v) => ({ value: v, label: v })),
+      s.sampler_name,
+      (v) => update({ sampler_name: v }),
+    )));
+    menu.appendChild(row("Scheduler", combo(
+      ["beta", "simple", "karras", "sgm_uniform", "normal"].map((v) => ({ value: v, label: v })),
+      s.scheduler,
+      (v) => update({ scheduler: v }),
+    )));
+
+    // 定位到 anchor 下方（与 Timeline Settings 一致）
+    document.body.appendChild(menu);
+    const rect = anchorEl.getBoundingClientRect();
+    const menuW = menu.offsetWidth || 260;
+    const menuH = menu.offsetHeight || 480;
+    let left = rect.right - menuW;
+    let top = rect.bottom + 6;
+    if (left < 4) left = 4;
+    if (top + menuH > window.innerHeight - 4) {
+      top = rect.top - menuH - 6;
+    }
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    settingsMenuRef.current = menu;
+    setTimeout(() => {
+      settingsDismisserRef.current = (ev) => {
+        if (!menu.contains(ev.target) && !anchorEl.contains(ev.target)) dismissPreviewSettings();
+      };
+      document.addEventListener("pointerdown", settingsDismisserRef.current, true);
+      document.addEventListener("wheel", settingsDismisserRef.current, true);
+    }, 0);
+  }
+
+  // 组件卸载时清理 Settings 弹窗
+  useEffect(() => () => dismissPreviewSettings(), []);
 
   // Motion Context 开关：更新 timeline_data 对应字段。
   // 提示词优化后并入 detailed_description，文字 / 视频节点不再写任何 shot 字段。
@@ -1400,13 +1634,19 @@ export function TransferPanel({ director }) {
         curSeg && curSeg.type !== "audio"
           ? html`<div style=${S.buttons}>
               ${
-                curSeg.type === "text" || curSeg.type === "image"
+                curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video"
                   ? html`<button
-                      class="pr-btn"
-                      title="Generate the first frame from the selected segment (subgraph: loader + RefGenerateImage)"
+                      class="pr-btn pr-icon-btn"
+                      title="Preview video generation settings (stored in localStorage, kept after refresh)"
                       disabled=${busy}
-                      onClick=${() => submitFirstFrameSubgraph(curSeg)}
-                    >Generate First Frame</button>`
+                      onClick=${(e) => openPreviewSettings(e.currentTarget)}
+                    ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
+                  <button
+                      class="pr-btn"
+                      title="Generate a short preview video for the selected segment (subgraph: loader chain incl. LoRA + RefGenerateImage, mp4). Use Settings to tune length/steps/quality."
+                      disabled=${busy}
+                      onClick=${() => submitPreviewVideo(curSeg)}
+                    >Generate Preview Video</button>`
                   : null
               }
               ${
