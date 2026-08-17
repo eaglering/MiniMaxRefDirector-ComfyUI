@@ -123,6 +123,8 @@ const STYLES = `
 .pr-btn.toggle-on{background:#1c222d;border-color:#283142;color:#e0e0e0}
 .pr-btn.toggle-on:hover:not(:disabled){background:#2a3445;border-color:#3b4b66}
 .pr-btn-danger:hover:not(:disabled){background:#4a1515;border-color:#cc4444;color:#ffaaaa}
+.pr-icon-btn{padding:5px 8px;min-width:30px;justify-content:center;flex:0 0 auto}
+.pr-icon-btn svg{display:block}
 .pr-canvas{background:#2a2a2a;cursor:pointer;width:100%;outline:none;display:block}
 .pr-prop-container{display:flex;flex-direction:column;width:100%;flex:none;min-height:40px}
 .pr-prompt-wrapper{position:relative;display:flex;flex-direction:column;width:100%;height:auto;min-height:120px;background:#222;border:1px solid #111;border-radius:6px;box-sizing:border-box;transition:border-color 0.2s ease,opacity 0.2s ease;overflow:hidden}
@@ -175,7 +177,9 @@ const STYLES = `
 .pr-number-btn:hover{background:#444;color:#fff}
 .pr-settings-input{background:transparent;color:#e0e0e0;border:none;padding:0 4px;font-size:12px;width:50px;height:22px;text-align:center;font-family:monospace;outline:none;-moz-appearance:textfield}
 .pr-settings-input::-webkit-outer-spin-button,.pr-settings-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-.pr-settings-select{background:#2a2a2a;color:#e0e0e0;border:1px solid #444;border-radius:4px;padding:3px 4px;font-size:12px;width:98px;cursor:pointer}
+.pr-settings-select{appearance:none;-webkit-appearance:none;background:#2a2a2a url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23999999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 6px center;color:#e0e0e0;border:1px solid #444;border-radius:4px;padding:3px 22px 3px 6px;font-size:12px;width:132px;height:22px;box-sizing:border-box;cursor:pointer;outline:none;transition:border-color .15s ease}
+.pr-settings-select:hover{border-color:#666}
+.pr-settings-select:focus{border-color:#5c9dff}
 .pr-settings-divider{border:none;border-top:1px solid #333;margin:4px 0}
 .pr-settings-toggle-btn{width:100%;box-sizing:border-box;margin:0;background:#252525;color:#fff;border:1px solid #333;border-radius:4px;padding:5px 8px;font-size:11px;cursor:pointer;text-align:center;transition:all 0.15s}
 .pr-settings-toggle-btn:hover{background:#2e2e2e;color:#fff;border-color:#555}

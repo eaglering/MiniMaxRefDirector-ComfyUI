@@ -161,8 +161,8 @@ def _extract_h3_mentions(prompt_json: dict) -> dict:
     return {"names": names, "dialogues": dialogues}
 
 def build_h3_subject_bindings(
-    subject_data,
-    prompt_json: dict,
+    subject_data: dict,
+    raw_prompt: str,
     last_frame_path: str = "",
     timeline_segment: dict|None = None,
 ) -> dict:
@@ -176,7 +176,7 @@ def build_h3_subject_bindings(
                 partially_preserved / attribute_transfer / weak_reference.
             audio_relationship: audio marker, one of reference (default) /
                 fully_copy / partially_copy / weak_reference.
-        prompt_json: H3 output JSON with detailed_description /
+        raw_prompt: H3 output JSON with detailed_description /
             overall_soundscape / non_diegetic_music.
         last_frame_path: optional last-frame image, appended as <Picture N> anchor.
         timeline_segment: current timeline segment dict; its "additionSubject"
@@ -194,13 +194,8 @@ def build_h3_subject_bindings(
             "videos": [...],               # 视频文件路径列表
         }
     """
-    if isinstance(subject_data, str):
-        try:
-            subject_data = json.loads(subject_data)
-        except (json.JSONDecodeError, TypeError):
-            subject_data = {}
     subjects_in = (subject_data or {}).get("subjects", []) or []
-
+    prompt_json = _build_prompt_json(raw_prompt)
     mentions = _extract_h3_mentions(prompt_json)
     names = mentions["names"]
     dialogues = mentions["dialogues"]
@@ -322,3 +317,78 @@ def build_h3_subject_bindings(
         "videos": videos,
         "mapping": mapping,
     }
+
+def build_h3_prompt(
+    global_prompt: str,
+    subject_data: dict,
+    raw_prompt: str,
+    last_frame_path: str = "",
+    timeline_segment: dict|None = None
+) -> dict:
+    prompt_res = build_h3_subject_bindings(subject_data=subject_data, raw_prompt=raw_prompt,
+                                           last_frame_path=last_frame_path, timeline_segment=timeline_segment)
+    mapping = prompt_res.get("mapping", {})
+    subject_definitions = prompt_res.get("subject_definitions", "")
+    retention_analysis = prompt_res.get("retention_analysis", "")
+    detailed_description = prompt_res.get("detailed_description", "")
+
+    detailed_description = _replace_mapping(detailed_description, mapping)
+    overall_soundscape = prompt_res.get("overall_soundscape", "") 
+    overall_soundscape = _replace_mapping(overall_soundscape, mapping)
+    non_diegetic_music = prompt_res.get("non_diegetic_music", "")
+    non_diegetic_music = _replace_mapping(non_diegetic_music, mapping)
+
+    prompt = "subject_definitions:\n" + subject_definitions + "\n"
+    prompt += "retention_analysis:\n" + retention_analysis + "\n"
+    prompt += "detailed_description:\n" + global_prompt + "\n" + detailed_description + "\n"
+    prompt += "overall_soundscape:\n" + overall_soundscape + "\n"
+    prompt += "non_diegetic_music:\n" + non_diegetic_music
+    return {
+        "subjects": prompt_res["subjects"],
+        "prompt": prompt,
+        "images": prompt_res["images"],
+        "audios": prompt_res["audios"],
+        "videos": prompt_res["videos"],
+    }
+
+def _replace_mapping(input: str, mapping: dict) -> str:
+        for k, v in mapping.items():
+            input = input.replace(k, v)
+        return input
+
+def _build_prompt_json(raw_prompt: str) -> list:
+    lines = raw_prompt.split("\n")
+    prompt_json = {
+        "detailed_descriptions": "",
+        "overall_soundscape": "",
+        "non_diegetic_music": ""
+    }
+    section = "detail"
+    detail_lines = []
+    overall_lines = []
+    non_lines = []
+    for line in lines:
+        if line.startswith("detailed_description:"):
+            section = "detail"
+            continue
+        if line.startswith("overall_soundscape:"):
+            section = "overall"
+            continue
+        if line.startswith("non_diegetic_music:"):
+            section = "music"
+            continue
+        if section == "detail":
+            detail_lines.append(line.strip())
+        elif section == "overall":
+            overall_lines.append(line.strip())
+            if line.strip() != "" and line.strip() != "N/A":
+                overall_lines.append(line)
+        elif section == "music":
+            non_lines.append(line.strip())
+            if line.strip() != "" and line.strip() != "N/A":
+                non_lines.append(line)
+    
+    prompt_json["detailed_description"] = "\n".join(detail_lines)
+    prompt_json["overall_soundscape"] = "\n".join(overall_lines) if len(overall_lines) > 0 else "N/A"
+    prompt_json["non_diegetic_music"] = "\n".join(non_lines) if len(overall_lines) > 0 else "N/A"
+    return prompt_json

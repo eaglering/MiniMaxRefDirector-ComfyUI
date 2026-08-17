@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover
 
 from .image import calc_resolution, load_image_tensor
 from .path import resolve_input_path
-from .video import _load_wav_audio
+from .video import _load_wav_audio, encode_video_frames
 
 
 CANVAS_MULTIPLE = 32
@@ -53,21 +53,22 @@ def _resize(image, width, height, crop):
     return samples.movedim(1, -1)
 
 class RefGenerateImage(io.ComfyNode):
-    """Sample a single first-frame image and save it to the ComfyUI output directory."""
+    """Sample a short preview video (mp4, no audio) and save it to the ComfyUI output directory."""
 
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="RefGenerateImage",
-            display_name="MiniMaxRef Generate Image",
+            display_name="MiniMaxRef Generate Preview Video",
             category="minimaxrefdirector",
             # 声明为输出节点：否则 ComfyUI 提交 prompt 时校验不到输出，
             # 直接报 prompt_no_outputs 拒绝执行
             is_output_node=True,
             description=(
-                "Sample a single first-frame image from the H3 model (with sigma shift) "
-                "and save it to the ComfyUI output directory. The saved image's "
-                "filename is returned so the frontend can write it back to the segment."
+                "Sample a short preview video from the H3 model (with sigma shift, "
+                "length aligned to the 17k+5 frame grid) and save it to the ComfyUI "
+                "output directory as mp4. The saved video's filename is returned so "
+                "the frontend can write it back to the segment's video track."
             ),
             inputs=[
                 io.Model.Input("model", tooltip="UNet model used to sample the latent."),
@@ -85,9 +86,13 @@ class RefGenerateImage(io.ComfyNode):
                 ),
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True),
                 io.Int.Input("seed", default=0, min=0, max=0xffffffffffffffff, step=1),
-                # 首帧为 T=1 单帧 latent，8 步偏少会糊；默认 16 步保证细节
+                io.Float.Input(
+                    "length_seconds", default=1.0, min=0.2, max=10.0, step=0.1, optional=True,
+                    tooltip="预览视频时长（秒）。内部对齐到 H3 的 17k+5 帧网格（最短 5 帧≈0.2s）。帧数≈耗时，测试提示词有效性建议 1-3s。",
+                ),
+                # 8 步 turbo LoRA 时建议 steps=8；无 LoRA 可保持 16+
                 io.Int.Input("steps", default=16, min=1, max=100, step=1),
-                io.Float.Input("cfg", default=1, min=0.0, max=100.0, step=0.1),
+                io.Float.Input("cfg", default=1, min=0.0, max=100.0, step=0.1, optional=True),
                 io.Combo.Input(
                     "sampler_name",
                     options=comfy.samplers.KSampler.SAMPLERS,
@@ -98,9 +103,9 @@ class RefGenerateImage(io.ComfyNode):
                     options=["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform", "beta"],
                     default="beta",
                 ),
-                io.Float.Input("denoise", default=1.0, min=0.0, max=1.0, step=0.01),
-                io.Float.Input("shift_video", default=12.0, min=0.01, max=100.0, step=0.01),
-                io.Float.Input("shift_audio", default=3.0, min=0.01, max=100.0, step=0.01),
+                io.Float.Input("denoise", default=1.0, min=0.0, max=1.0, step=0.01, optional=True),
+                io.Float.Input("shift_video", default=12.0, min=0.01, max=100.0, step=0.01, optional=True),
+                io.Float.Input("shift_audio", default=3.0, min=0.01, max=100.0, step=0.01, optional=True),
                 io.String.Input("filename_prefix", default="minimaxrefdirector/firstframe"),
                 io.Autogrow.Input(
                     "ref_images",
@@ -110,6 +115,30 @@ class RefGenerateImage(io.ComfyNode):
                         prefix="ref_image_",
                         min=0,
                         max=9,
+                    ),
+                ),
+                io.Vae.Input(
+                    "audio_vae", optional=True,
+                    tooltip="VAE used to encode reference audios. Required when ref_audios are provided.",
+                ),
+                io.Autogrow.Input(
+                    "ref_videos",
+                    optional=True,
+                    template=io.Autogrow.TemplatePrefix(
+                        input=io.String.Input("ref_video", tooltip="Reference video file path (>= 5 frames, aligned to the 17k+5 grid)"),
+                        prefix="ref_video_",
+                        min=0,
+                        max=4,
+                    ),
+                ),
+                io.Autogrow.Input(
+                    "ref_audios",
+                    optional=True,
+                    template=io.Autogrow.TemplatePrefix(
+                        input=io.String.Input("ref_audio", tooltip="Reference audio file path"),
+                        prefix="ref_audio_",
+                        min=0,
+                        max=4,
                     ),
                 ),
             ],
@@ -123,14 +152,14 @@ class RefGenerateImage(io.ComfyNode):
         return float("NaN")
 
     @classmethod
-    def execute(cls, model, clip, vae, output_resolution="16:9横屏", million_pixels=0.6, prompt="",
-                seed=0, steps=16, cfg=1, sampler_name="res_multistep", scheduler="simple", denoise=1.0,
-                shift_video=12.0, shift_audio=3.0, filename_prefix="minimaxrefdirector/firstframe",
-                ref_images=None) -> io.NodeOutput:
+    def execute(cls, model, clip, vae, audio_vae=None, output_resolution="16:9横屏", million_pixels=0.6, prompt="",
+                seed=0, length_seconds=1.0, steps=16, cfg=1, sampler_name="res_multistep", scheduler="beta", denoise=1.0,
+                shift_video=12.0, shift_audio=3.0, filename_prefix="minimaxrefdirector/preview",
+                ref_images=None, ref_videos=None, ref_audios=None) -> io.NodeOutput:
         # 后端控制台日志：确认到底收到了什么（前端 subgraph 提交的内容）
         print("=" * 72)
         print(f"[RefGenerateImage] 收到参数：")
-        print(f"[RefGenerateImage]   model={type(model).__name__} clip={type(clip).__name__} vae={type(vae).__name__}")
+        print(f"[RefGenerateImage]   model={type(model).__name__} clip={type(clip).__name__} vae={type(vae).__name__} audio_vae={type(audio_vae).__name__ if audio_vae is not None else None}")
         try:
             _m_dev = getattr(model, "load_device", None)
             _m_lora = bool(getattr(model, "patches", None)) or bool(getattr(model, "weight_wrapper_patches", None))
@@ -156,11 +185,16 @@ class RefGenerateImage(io.ComfyNode):
         except Exception as _e:  # noqa: BLE001
             print(f"[RefGenerateImage]   model 信息读取失败：{_e}")
         print(f"[RefGenerateImage]   prompt={prompt!r} ref_images={json.dumps(ref_images)}")
+        print(f"[RefGenerateImage]   ref_videos={json.dumps(ref_videos)} ref_audios={json.dumps(ref_audios)}")
         print(f"[RefGenerateImage]   output_resolution={output_resolution!r} million_pixels={million_pixels}")
         print(f"[RefGenerateImage]   seed={seed} steps={steps} cfg={cfg} sampler={sampler_name}/{scheduler} denoise={denoise}")
         print(f"[RefGenerateImage]   shift_video={shift_video} shift_audio={shift_audio} filename_prefix={filename_prefix!r}")
         for k, v in sorted((ref_images or {}).items()):
-            print(f"[RefGenerateImage]   {k}={v!r}")
+            print(f"[RefGenerateImage]   image {k}={v!r}")
+        for k, v in sorted((ref_videos or {}).items()):
+            print(f"[RefGenerateImage]   video {k}={v!r}")
+        for k, v in sorted((ref_audios or {}).items()):
+            print(f"[RefGenerateImage]   audio {k}={v!r}")
         print("=" * 72)
         if model is None:
             raise ValueError("RefGenerateImage needs a model to sample")
@@ -168,60 +202,22 @@ class RefGenerateImage(io.ComfyNode):
             raise ValueError("RefGenerateImage needs a vae to decode the latent")
 
         width, height = calc_resolution(output_resolution, million_pixels)
-        latent = _image_av_latent(width, height)
+        print(f"[RefGenerateImage]   preview video: {width}x{height}, length={length_seconds}s")
 
-        ref_items = []   # tokenizer presentation, in request order
-        ref_blocks = []  # DiT payload, same order
-        for image_path in (ref_images or {}).values():
-            if not image_path:
-                continue
-            _abs = resolve_input_path(image_path)
-            print(f"[RefGenerateImage]   loading ref {image_path!r} -> abs={_abs!r}")
-            if not _abs:
-                print(f"[RefGenerateImage]   !! 参考图解析失败：{image_path!r} 在 input/output/temp 均找不到")
-            img = load_image_tensor(image_path)
-            h, w = img.shape[1], img.shape[2]
-            print(f"[RefGenerateImage]     loaded {w}x{h}")
-            # aspect-preserving scale (down only) to the output's pixel area
-            scale = min(1.0, math.sqrt((width * height) / (w * h)))
-            tw = max(CANVAS_MULTIPLE, round(w * scale / CANVAS_MULTIPLE) * CANVAS_MULTIPLE)
-            th = max(CANVAS_MULTIPLE, round(h * scale / CANVAS_MULTIPLE) * CANVAS_MULTIPLE)
-            resized = _resize(img[:1], tw, th, "disabled")
-            ref_items.append({"type": "image", "data": resized})
-            ref_blocks.append({
-                "kind": "image",
-                "latent_h": th // VAE_SPATIAL_RATIO,
-                "latent_w": tw // VAE_SPATIAL_RATIO,
-                "latent": vae.encode(resized),
-            })
+        # 参考媒体统一转为 [{label, src}]，与 guide/director 共用 build_segment_conditioning 编码
+        pictures = [{"label": k, "src": v} for k, v in (ref_images or {}).items() if v]
+        videos = [{"label": k, "src": v} for k, v in (ref_videos or {}).items() if v]
+        audios = [{"label": k, "src": v} for k, v in (ref_audios or {}).items() if v]
+        print(f"[RefGenerateImage]   refs -> pictures={len(pictures)} videos={len(videos)} audios={len(audios)}")
 
-        tokens = clip.tokenize(prompt, minimax_ref_items=ref_items)
-        print(f"[RefGenerateImage]   tokenize ref_items={len(ref_items)}")
-        cond = clip.encode_from_tokens_scheduled(tokens)
-        if ref_blocks:
-            cond = node_helpers.conditioning_set_values(cond, {"minimax_refs": ref_blocks})
-        print(f"[RefGenerateImage]   conditioning minimax_refs={len(ref_blocks)}")
-
-        # negative conditioning：空文本
-        neg_tokens = clip.tokenize("")
-        neg_cond = clip.encode_from_tokens_scheduled(neg_tokens)
+        cond, neg_cond, latent, frame_count = build_segment_conditioning(
+            clip, vae, audio_vae, prompt, width, height,
+            int(length_seconds * FPS), pictures, videos, audios, "",
+        )
+        print(f"[RefGenerateImage]   conditioning done: frame_count={frame_count}")
 
         # sigma shift（复刻 MiniMaxH3SigmaShift：video 驱动采样 sigma，audio 交给 DiT）
-        m = model.clone()
-
-        class ModelSamplingAdvanced(comfy.model_sampling.ModelSamplingDiscreteFlow, comfy.model_sampling.CONST):
-            pass
-
-        original = m.get_model_object("model_sampling")
-        model_sampling = ModelSamplingAdvanced(model.model.model_config)
-        model_sampling.set_parameters(shift=shift_video)
-        if hasattr(original, "noise_scale"):
-            model_sampling.set_noise_scale(original.noise_scale)
-        m.add_object_patch("model_sampling", model_sampling)
-
-        to = m.model_options["transformer_options"] = m.model_options.get("transformer_options", {}).copy()
-        to["minimax_h3_sigma_shift_video"] = shift_video
-        to["minimax_h3_sigma_shift_audio"] = shift_audio
+        m = apply_sigma_shift(model, shift_video, shift_audio)
 
         # KSampler 采样 → VAEDecode
         t0 = time.time()
@@ -232,17 +228,13 @@ class RefGenerateImage(io.ComfyNode):
         print(f"[RefGenerateImage]   KSampler done in {time.time() - t0:.1f}s")
         t0 = time.time()
         images = nodes.VAEDecode().decode(vae, samples)[0]
-        print(f"[RefGenerateImage]   VAEDecode done in {time.time() - t0:.1f}s")
+        print(f"[RefGenerateImage]   VAEDecode done in {time.time() - t0:.1f}s, frames={len(images)}")
 
         try:
-            # 保存首帧图片，filename 通过 ui 返回
-            ui = UI.ImageSaveHelper.get_save_images_ui(
-                images=images,
-                filename_prefix=filename_prefix,
-                cls=cls,
-            )
-            print(f"[RefGenerateImage]   saved -> {ui}")
-            return io.NodeOutput(images, ui=ui)
+            # 编码为 mp4 预览视频（无音频），filename 通过 ui 返回
+            video_info = encode_video_frames(images, FPS, filename_prefix)
+            print(f"[RefGenerateImage]   saved -> {video_info}")
+            return io.NodeOutput(images, ui={"videos": [video_info]})
         finally:
             # 首帧生成完毕后卸载模型权重并释放显存：
             # unload_all_models 卸载 current_loaded_models 中的模型，

@@ -4,7 +4,7 @@ import logging
 from comfy_api.latest import io
 
 from .lib.image import calc_resolution
-from .lib.prompt import build_h3_subject_bindings
+from .lib.prompt import build_h3_prompt
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")
@@ -178,29 +178,19 @@ class MiniMaxRefDirector(io.ComfyNode):
             if dur <= 0:
                 continue
             h3_prompt_json = seg.get("h3PromptJson", "")
-            prompt_json = cls._transfer_prompt_json(h3_prompt_json, global_prompt=global_prompt, mapping=mapping)
             last_frame_path = ""
             if i + 1 < timeline_data_len and seg.get("autoEndFrame", False):
                 last_frame_path = timeline_segments[i + 1].get("imageFile", "")
-            prompt_res = build_h3_subject_bindings(subject_data=subject, prompt_json=prompt_json,
-                                               last_frame_path=last_frame_path, timeline_segment=seg)
-            mapping = prompt_res.get("mapping", {})
-            subject_definitions = prompt_res.get("subject_definitions", "")
-            retention_analysis = prompt_res.get("retention_analysis", "")
-            detailed_description = prompt_res.get("detailed_description", "")
-            overall_soundscape = prompt_res.get("overall_soundscape", "") if prompt_res.get("detailed_description", "") else "N/A"
-            non_diegetic_music = prompt_res.get("non_diegetic_music", "") if prompt_res.get("detailed_description", "") else "N/A"
-            prompt = "subject_definitions:\n" + subject_definitions + "\n"
-            prompt += "retention_analysis:\n" + retention_analysis + "\n"
-            prompt += "detailed_description:\n" + detailed_description + "\n"
-            prompt += "overall_soundscape:\n" + overall_soundscape + "\n"
-            prompt += "non_diegetic_music:\n" + non_diegetic_music
+
+            prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
+                                         raw_prompt=h3_prompt_json, last_frame_path=last_frame_path, 
+                                         timeline_segment=seg)
             entry = {
-                "prompt": prompt,
-                "subjects": seg.get("subjects", ""),
-                "images": seg.get("images", []),
-                "audios": seg.get("audios", []),
-                "videos": seg.get("videos", []),
+                "prompt": prompt_res["prompt"],
+                "subjects": prompt_res["subjects"],
+                "images": prompt_res["images"],
+                "audios": prompt_res["audios"],
+                "videos": prompt_res["videos"],
                 "duration_frames": dur,
                 "type": seg.get("type", "text"),
                 "imageFile": seg.get("imageFile", ""),
@@ -231,38 +221,6 @@ class MiniMaxRefDirector(io.ComfyNode):
 
         return io.NodeOutput(guide_data=guide_data, segment_count=segment_count+1)
 
-    @classmethod
-    def _transfer_prompt_json(cls, h3_prompt_json: str, global_prompt: str, mapping: dict) -> list:
-        for k, v in mapping.items():
-            h3_prompt_json = h3_prompt_json.replace(k, v)
-        lines = h3_prompt_json.split("\n")
-        prompt_json = {
-            "detailed_description": "",
-            "overall_soundscape": "",
-            "non_diegetic_music": ""
-        }
-        section = "detail"
-        detail_lines = []
-        for line in lines:
-            if line.startswith("detailed_description:"):
-                section = "detail"
-                continue
-            if line.startswith("overall_soundscape:"):
-                section = "overall"
-                continue
-            if line.startswith("non_diegetic_music:"):
-                section = "music"
-                continue
-            if section == "detail":
-                detail_lines.append(line)
-            elif section == "overall":
-                if line.strip() != "" and line.strip() != "N/A":
-                    prompt_json["overall_soundscape"] = line
-            elif section == "music":
-                if line.strip() != "" and line.strip() != "N/A":
-                    prompt_json["non_diegetic_music"] = line
-        prompt_json["detailed_description"] = global_prompt + "\n" + "\n".join(detail_lines)
-        return prompt_json
 
 NODE_CLASS_MAPPINGS = {
     "MiniMaxRefDirector": MiniMaxRefDirector,

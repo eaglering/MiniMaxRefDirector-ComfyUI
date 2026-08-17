@@ -215,19 +215,21 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
         from .lib.prompt import build_h3_subject_bindings
         data = await request.json()
         subject_data = data.get("subject_data", {}) or {}
-        prompt_json = data.get("prompt_json", {}) or {}
-        if isinstance(prompt_json, str):
+        raw_prompt = data.get("raw_prompt", "") or ""
+        if isinstance(subject_data, str):
             try:
-                prompt_json = json.loads(prompt_json)
+                subject_data = json.loads(subject_data)
             except (json.JSONDecodeError, TypeError):
-                prompt_json = {}
-        if not isinstance(prompt_json, dict):
-            return web.json_response({"success": False, "error": "prompt_json must be an object"}, status=400)
+                subject_data = {}
+        if not isinstance(subject_data, dict):
+            return web.json_response({"success": False, "error": "subject_data must be an object"}, status=400)
+        if not raw_prompt.strip():
+            return web.json_response({"success": False, "error": "raw_prompt must be an object"}, status=400)
         last_frame_path = data.get("last_frame_path", "") or ""
         timeline_segment = data.get("timeline_segment", None)
         result = build_h3_subject_bindings(
             subject_data,
-            prompt_json,
+            raw_prompt,
             last_frame_path=last_frame_path,
             timeline_segment=timeline_segment,
         )
