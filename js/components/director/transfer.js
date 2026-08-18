@@ -246,6 +246,14 @@ const DRAG_MOVE_TOLERANCE = 10; // 长按期间移动超过该像素视为放弃
 // 将后端 send_sync("minimax_ref_video_progress", ...) 通知里的 imageFile
 // （VHS_FILENAMES：字符串 / 单对象 / 对象数组）解析为视频素材项 { id, label, src }。
 // 基础 id 取文件 URL；实际 id 在追加时附加自增序号保证唯一（不做 URL/文件名去重）。
+// 取文件名（兼容 Windows 反斜杠与 POSIX 斜杠）：
+// VHS/输出目录返回的可能是绝对路径 D:\...\xx.mp4，若只用 "/" 分割，
+// 整个绝对路径会变成 label 并被当作文件名上传到服务器。
+function basename(p) {
+  const parts = String(p || "").split(/[\\/]/);
+  return parts.pop() || "";
+}
+
 function toVideoItems(imageFile) {
   const list = Array.isArray(imageFile) ? imageFile : [imageFile];
   const out = [];
@@ -253,7 +261,8 @@ function toVideoItems(imageFile) {
     if (!f) continue;
     if (typeof f === "string") {
       if (!f.trim()) continue;
-      out.push({ id: viewUrl(f, "", "output"), label: f.split("/").pop(), src: viewUrl(f, "", "output"), vw: null, vh: null });
+      const name = basename(f);
+      out.push({ id: viewUrl(f, "", "output"), label: name, src: viewUrl(f, "", "output"), vw: null, vh: null });
     } else if (typeof f === "object") {
       const fn = f.filename || "";
       if (!fn) continue;
@@ -1099,7 +1108,7 @@ export function TransferPanel({ director }) {
         if (!filePath) continue;
         const src = viewUrl(filePath);
         materialSeq += 1;
-        added.push({ id: src + "#" + materialSeq, label: filePath.split("/").pop(), src, vw: null, vh: null });
+        added.push({ id: src + "#" + materialSeq, label: basename(filePath) || filePath, src, vw: null, vh: null });
       } catch (err) {
         console.error("[Transfer] 素材拖放上传失败:", err);
       }
@@ -1115,6 +1124,7 @@ export function TransferPanel({ director }) {
   // 流程：pointerdown 起 ~400ms 长按 -> fetch 视频 URL 预取 Blob 并缓存为 File
   //       （卡片出现“可拖出”角标）-> 继续按住拖动，dragstart 中同步注入
   //       e.dataTransfer.items，目标上传框的 drop 事件即可在 files 里拿到该文件。
+  // 已缓存时无需等待：按下后直接拖动，dragstart 同步读缓存注入，长按只是可选的就绪反馈。
   const cacheMaterialFile = async (m) => {
     if (materialFileCache.has(m.id)) return materialFileCache.get(m.id);
     try {
@@ -1126,7 +1136,9 @@ export function TransferPanel({ director }) {
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         blob = await resp.blob();
       }
-      const file = new File([blob], m.label || "video.mp4", { type: blob.type || "video/mp4" });
+      // File.name 必须用干净的 basename：若沿用绝对路径 label，
+      // 后续 handleVideoUpload 上传时会把它整个当作文件名传到服务器。
+      const file = new File([blob], basename(m.label) || "video.mp4", { type: blob.type || "video/mp4" });
       materialFileCache.set(m.id, file);
       return file;
     } catch (err) {
@@ -1150,26 +1162,29 @@ export function TransferPanel({ director }) {
 
   const onMaterialPointerDown = (m, e) => {
     clearLongPress();
-    // 已缓存（本次会话预取过）直接进入就绪态，无需再次长按
-    if (materialFileCache.has(m.id)) {
-      longPressRef.current = { id: m.id, fired: true, x: e.clientX, y: e.clientY, timer: null };
-      setDragReadyId(m.id);
-      showDragHint("已就绪：按住并拖动即可把视频拖到其他上传框");
-      return;
-    }
+    // 统一走 ~400ms 长按计时：fired 只在按住满 LONG_PRESS_MS 后置真，
+    // 快速单击/双击不会触发，避免吞掉 click（双击打开播放器）造成冲突。
+    // 已缓存时 timer 到点直接就绪（无需再 fetch）；未缓存则异步预取。
+    // 已缓存的素材不必等角标：按下后直接拖动，dragstart 会同步取缓存注入。
     longPressRef.current = {
       id: m.id,
       fired: false,
       x: e.clientX,
       y: e.clientY,
-      timer: setTimeout(async () => {
+      timer: setTimeout(() => {
         const lp = longPressRef.current;
         if (!lp || lp.id !== m.id) return;
         lp.fired = true;
-        const file = await cacheMaterialFile(m);
-        if (longPressRef.current && longPressRef.current.id === m.id && file) {
-          setDragReadyId(m.id);
-          showDragHint("已就绪：按住并拖动即可把视频拖到其他上传框");
+        const done = (file) => {
+          if (longPressRef.current && longPressRef.current.id === m.id && file) {
+            setDragReadyId(m.id);
+            showDragHint("已就绪：按住并拖动即可把视频拖到其他上传框");
+          }
+        };
+        if (materialFileCache.has(m.id)) {
+          done(materialFileCache.get(m.id));
+        } else {
+          cacheMaterialFile(m).then(done);
         }
       }, LONG_PRESS_MS),
     };
@@ -1214,6 +1229,8 @@ export function TransferPanel({ director }) {
           "DownloadURL", (file.type || "video/mp4") + ":" + (m.label || "video.mp4") + ":" + m.src
         );
       } catch (err) { /* 忽略 */ }
+    } else if (longPressRef.current && longPressRef.current.id === m.id && longPressRef.current.fired) {
+      showDragHint("正在预取视频，请稍候再拖动");
     } else {
       showDragHint("请先长按素材约 0.4 秒，出现“可拖出”角标后再拖动");
     }
@@ -1246,9 +1263,9 @@ export function TransferPanel({ director }) {
                   curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video"
                     ? html`<button
                         class=${motionCtxOn ? "mrd-pr-btn toggle-on" : "mrd-pr-btn"}
-                        title="Toggle Motion Context for the selected segment"
+                        title="Toggle Auto First Frame for the selected segment"
                         onClick=${toggleMotionContext}
-                      >Motion Context</button>`
+                      >Auto First Frame</button>`
                     : null
                 }
                 ${

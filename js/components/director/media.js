@@ -594,6 +594,13 @@ export const media = {
 
   async _uploadVideoFile(file) {
     const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB
+    // File.name 可能携带 Windows 绝对路径（如素材长按拖出、VHS 输出），
+    // 若直接上传会把整个路径当作文件名存到服务器（出现 D:workspace... 之类），
+    // 统一先取 basename（兼容 "/" 与 "\"）再走上传逻辑。
+    const cleanName = (file.name || "").split(/[\\/]/).pop() || "video.mp4";
+    if (cleanName !== file.name) {
+      file = new File([file], cleanName, { type: file.type });
+    }
     const safeFileName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
 
     // First check if the file already exists on the server to de-duplicate

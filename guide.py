@@ -35,6 +35,7 @@ from comfy_api.latest import io
 from comfy_execution.graph import ExecutionBlocker
 
 from .lib.llm import unload_llama_models
+from .lib.path import resolve_input_path
 
 from .lib import h3 as h3lib
 from .lib.image import load_image_tensor
@@ -175,9 +176,23 @@ def _load_prev_tail_frames(prev_tail, max_frames=56):
         if isinstance(prev_tail, VideoFromFile):
             frames = prev_tail.get_components().images  # [N, H, W, C]
         elif isinstance(prev_tail, (tuple, list)) and len(prev_tail) >= 1:
-            frames = VideoFromFile(_vhs_tuple_path(prev_tail)).get_components().images
+            # _vhs_tuple_path 在 get_annotated_filepath 解析失败时会退回原始相对路径，
+            # 统一再走 resolve_input_path 兜底（input→output→temp），仍失败则明确告警。
+            path = _vhs_tuple_path(prev_tail)
+            resolved = resolve_input_path(path)
+            if not resolved:
+                log.warning(f"[MiniMaxRefGuide] prev_tail video not found: {path!r}")
+                return None
+            frames = VideoFromFile(resolved).get_components().images
         elif isinstance(prev_tail, str):
-            frames = VideoFromFile(prev_tail).get_components().images
+            # 兼容相对 output 目录的路径（如 VHS 输出 "subfolder/xx.mp4"）：
+            # 直接交给 VideoFromFile 会按 CWD 解析导致 FileNotFoundError，
+            # 先用 resolve_input_path（裸相对路径依次尝试 input→output→temp）转绝对路径。
+            path = resolve_input_path(prev_tail)
+            if not path:
+                log.warning(f"[MiniMaxRefGuide] prev_tail video not found: {prev_tail!r}")
+                return None
+            frames = VideoFromFile(path).get_components().images
         else:
             log.warning(f"[MiniMaxRefGuide] unsupported prev_tail type: "
                         f"{type(prev_tail).__name__}")
@@ -301,9 +316,9 @@ class MiniMaxRefGuide(io.ComfyNode):
         prompt = entry.get("prompt", "")
         width = int(guide_data.get("width", 1024))
         height = int(guide_data.get("height", 576))
-        length = int(entry.get("duration_frames", 0))
+        length = int(entry.get("durationFrames", 0))
         if length <= 0:
-            raise ValueError(f"[MiniMaxRefGuide] segment {idx} has invalid duration_frames={length}.")
+            raise ValueError(f"[MiniMaxRefGuide] segment {idx} has invalid durationFrames={length}.")
 
         images = entry.get("images") or []
         videos = entry.get("videos") or []
@@ -328,7 +343,7 @@ class MiniMaxRefGuide(io.ComfyNode):
         # 图片段 + imageFile：把静态图重复成 8 帧作为 motion context pinned 帧，
         # 让本段从该图开始运动（H3 节点会按 VAE 网格把帧数吸附到合法值，如 5 帧）。
         if entry.get("type") == "image" and entry.get("imageFile"):
-            img_src = entry["first_frame_path"]
+            img_src = entry["imageFile"]
             if isinstance(img_src, (tuple, list)):  # VHS_FILENAMES 元组
                 img_src = _vhs_tuple_path(img_src)
             img_frames = load_image_tensor(img_src)
@@ -343,14 +358,18 @@ class MiniMaxRefGuide(io.ComfyNode):
             else:
                 log.warning(f"[MiniMaxRefGuide] guide_index={idx} image motion context "
                             f"skipped: failed to load image {img_src!r}")
-
+        
         use_motion_context = False
         if entry.get("type") == "video" and entry.get("imageFile"):
             prev_tail = entry.get("imageFile")
             use_motion_context = True
 
+        if entry.get("type") == "text" and entry.get("motionContext"):
+            prev_tail = entry.get("prevImageFile") if not prev_tail else prev_tail
+            use_motion_context = True
+
         # 文本段 + motionContext：用 prev_tail 视频，motion context 处理
-        if (entry.get("type") == "text" and prev_tail and entry.get("motionContext")) or use_motion_context:
+        if use_motion_context and prev_tail:
             log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail={prev_tail}")
             frames = _load_prev_tail_frames(prev_tail)
             if frames is not None and frames.shape[0] >= 1:

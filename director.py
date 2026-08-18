@@ -194,9 +194,8 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "images": prompt_res["images"],
                 "audios": prompt_res["audios"],
                 "videos": prompt_res["videos"],
-                "first_frame_path": seg.get("first_frame_path", ""),
-                "last_frame_path": seg.get("last_frame_path", ""),
-                "duration_frames": dur,
+                "prevImageFile": prompt_res["prevImageFile"],
+                "durationFrames": dur,
                 "type": seg.get("type", "text"),
                 "imageFile": seg.get("imageFile", ""),
                 "motionContext": seg.get("motionContext", False)

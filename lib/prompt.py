@@ -390,6 +390,7 @@ def build_h3_prompt(
     first_frame_pic = ""
     # 尾帧图片对应的 <Picture N> 标签（视频段尾帧 / autoEndFrame 段），追加到详细描述末尾作为结束锚点
     last_frame_pic = ""
+    prev_image_file = ""
 
     if timeline_segment.get("type", "text") == "video":
         video_path = timeline_segment.get("imageFile", "")
@@ -419,13 +420,13 @@ def build_h3_prompt(
             retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
             index += 1
             images.append(timeline_segment.get("imageFile"))
-        elif timeline_segment.get("motionContext", True) and previous_timeline_segment is not None:
-            if previous_timeline_segment.get("type", "text") == "video" and previous_timeline_segment.get("imageFile", ""):
-                video_path = previous_timeline_segment.get("imageFile", "")
+        elif timeline_segment.get("motionContext", False) and previous_timeline_segment is not None:
+            if previous_timeline_segment.get("type") == "video" and previous_timeline_segment.get("imageFile"):
+                prev_image_file = previous_timeline_segment.get("imageFile", "")
                 video_start = previous_timeline_segment.get("trimStart", 1)
                 video_duration = previous_timeline_segment.get("length", 1)
                 # 视频段：获取 mp4 的首帧和尾帧图片路径（首帧位置=video_start，尾帧位置=video_start+video_duration）
-                video_first_frame_path, video_last_frame_path = _extract_video_frames(video_path, video_start, video_duration)
+                video_first_frame_path, video_last_frame_path = _extract_video_frames(prev_image_file, video_start, video_duration)
                 if video_last_frame_path:
                     label = f"<Picture {index}>"
                     first_frame_pic = label
@@ -434,12 +435,13 @@ def build_h3_prompt(
                     index += 1
                     images.append(video_last_frame_path)
             elif previous_timeline_segment.get("type", "text") == "image" and previous_timeline_segment.get("imageFile", ""):
+                prev_image_file = previous_timeline_segment.get("imageFile", "")
                 label = f"<Picture {index}>"
                 first_frame_pic = label
                 subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
                 retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
                 index += 1
-                images.append(previous_timeline_segment.get("imageFile"))
+                images.append(prev_image_file)
 
         if timeline_segment.get("autoEndFrame", False) and next_timeline_segment is not None:
             if next_timeline_segment.get("type", "text") == "video" and next_timeline_segment.get("imageFile", ""):
@@ -508,8 +510,7 @@ def build_h3_prompt(
         "images": prompt_res["images"],
         "audios": prompt_res["audios"],
         "videos": prompt_res["videos"],
-        "first_frame_pic": first_frame_pic,
-        "last_frame_pic": last_frame_pic,
+        "prevImageFile": prev_image_file,
     }
 
 def _replace_mapping(input: str, mapping: dict) -> str:
