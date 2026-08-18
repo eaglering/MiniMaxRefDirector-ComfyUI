@@ -374,10 +374,10 @@ def build_h3_prompt(
     global_prompt: str,
     subject_data: dict,
     raw_prompt: str,
+    previous_timeline_segment: dict|None = None,
     timeline_segment: dict|None = None,
     next_timeline_segment: dict|None = None
 ) -> dict:
-    log.info(f">>>>>>>>>>>>>>>>>>>>>>>>>>>next_timeline_segment: {json.dumps(next_timeline_segment, indent=2)}")
     prompt_res = build_h3_subject_bindings(subject_data=subject_data, raw_prompt=raw_prompt, timeline_segment=timeline_segment)
 
     subject_definitions = prompt_res.get("subject_definitions", "")
@@ -419,9 +419,30 @@ def build_h3_prompt(
             retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
             index += 1
             images.append(timeline_segment.get("imageFile"))
+        elif timeline_segment.get("motionContext", True) and previous_timeline_segment is not None:
+            if previous_timeline_segment.get("type", "text") == "video" and previous_timeline_segment.get("imageFile", ""):
+                video_path = previous_timeline_segment.get("imageFile", "")
+                video_start = previous_timeline_segment.get("trimStart", 1)
+                video_duration = previous_timeline_segment.get("length", 1)
+                # 视频段：获取 mp4 的首帧和尾帧图片路径（首帧位置=video_start，尾帧位置=video_start+video_duration）
+                video_first_frame_path, video_last_frame_path = _extract_video_frames(video_path, video_start, video_duration)
+                if video_last_frame_path:
+                    label = f"<Picture {index}>"
+                    first_frame_pic = label
+                    subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
+                    retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
+                    index += 1
+                    images.append(video_last_frame_path)
+            elif previous_timeline_segment.get("type", "text") == "image" and previous_timeline_segment.get("imageFile", ""):
+                label = f"<Picture {index}>"
+                first_frame_pic = label
+                subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
+                retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
+                index += 1
+                images.append(previous_timeline_segment.get("imageFile"))
 
         if timeline_segment.get("autoEndFrame", False) and next_timeline_segment is not None:
-            if next_timeline_segment.get("type", "text") == "video":
+            if next_timeline_segment.get("type", "text") == "video" and next_timeline_segment.get("imageFile", ""):
                     video_path = next_timeline_segment.get("imageFile", "")
                     video_start = next_timeline_segment.get("trimStart", 1)
                     video_duration = next_timeline_segment.get("length", 1)
@@ -434,7 +455,7 @@ def build_h3_prompt(
                         retention_analysis = retention_analysis + f"\n{label} (last frame of the target video): fully_preserved."
                         index += 1
                         images.append(video_first_frame_path)
-            elif next_timeline_segment.get("type", "text") == "image":
+            elif next_timeline_segment.get("type", "text") == "image" and next_timeline_segment.get("imageFile", ""):
                 label = f"<Picture {index}>"
                 last_frame_pic = label
                 subject_definitions = subject_definitions + f"\n{label} is the last frame of the target video."
@@ -447,14 +468,14 @@ def build_h3_prompt(
 
     # 首帧图作为 reference 分镜：detailed_description 已含 [Shot N] 时全部 +1，
     # 且原 [Shot 1] 移位为 [Shot 2] 后附上动画起点时间戳 At 00:00.330；
-    # 否则直接补 [Shot 2] At 00:00.330 时间戳，再在最前插入 [Shot 1] <Picture N> is reference.
+    # 否则直接补 [Shot 2] At 00:00.330 时间戳，再在最前插入 [Shot 1] <Picture N> is fully referenced.
     if first_frame_pic:
         if _SHOT_MARK_RE.search(detailed_description):
             detailed_description = _shift_shots(detailed_description, 1)
             detailed_description = re.sub(r"\[Shot 2\]", "[Shot 2] At 00:00.330", detailed_description, count=1)
-            prefix = f"[Shot 1] {first_frame_pic} is reference.\n"
+            prefix = f"[Shot 1] {first_frame_pic} is fully referenced.\n"
         else:
-            prefix = f"[Shot 1] {first_frame_pic} is reference.\n[Shot 2] At 00:00.330\n"
+            prefix = f"[Shot 1] {first_frame_pic} is fully referenced.\n[Shot 2] At 00:00.330\n"
         detailed_description = prefix + detailed_description
 
     # 尾帧作为结束锚点：追加到最后一个分镜上；详细描述不含分镜时先给内容补 [Shot 1] 开头
@@ -487,6 +508,8 @@ def build_h3_prompt(
         "images": prompt_res["images"],
         "audios": prompt_res["audios"],
         "videos": prompt_res["videos"],
+        "first_frame_pic": first_frame_pic,
+        "last_frame_pic": last_frame_pic,
     }
 
 def _replace_mapping(input: str, mapping: dict) -> str:

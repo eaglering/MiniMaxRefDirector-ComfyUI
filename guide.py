@@ -327,8 +327,8 @@ class MiniMaxRefGuide(io.ComfyNode):
         trim_frames: int = 0
         # 图片段 + imageFile：把静态图重复成 8 帧作为 motion context pinned 帧，
         # 让本段从该图开始运动（H3 节点会按 VAE 网格把帧数吸附到合法值，如 5 帧）。
-        if entry.get("type") == "image" and entry.get("imageFile"):
-            img_src = entry["imageFile"]
+        if entry.get("type") in ["image", "video"] and entry.get("first_frame_path"):
+            img_src = entry["first_frame_path"]
             if isinstance(img_src, (tuple, list)):  # VHS_FILENAMES 元组
                 img_src = _vhs_tuple_path(img_src)
             img_frames = load_image_tensor(img_src)
