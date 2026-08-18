@@ -76,7 +76,13 @@ _H3_SKILLS_TEMPLATE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "prompt", "minimaxh3_custom_ref2v_prompt_writing.txt",
 )
-
+# 音频关系 -> retention_analysis 文案模板（{n} 为 Audio 编号）
+_AUDIO_RELATION_TEXT = {
+    "fully_copy": "<Audio {n}> is reused 1:1 as the target video's complete final audio track.",
+    "partially_copy": "Only part of the timeline or selected audio layers of <Audio {n}> are copied.",
+    "reference": "the target speaker follows <Audio {n}>'s voice timbre and measured delivery without copying the original signal.",
+    "weak_reference": "Only broad similarity in category or atmosphere from <Audio {n}> is retained.",
+}
 
 def _load_h3_skills_template() -> str:
     """Load the custom H3 skills template (three-field output only)."""
@@ -181,6 +187,14 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
 # 匹配 <@角色名称> 与 <#角色名称:对话内容> 占位符
 _H3_NAME_RE = re.compile(r"<@([^>]+)>")
 _H3_DIALOGUE_RE = re.compile(r"<#([^>:]+):([^>]+)>")
+# 匹配 [Shot N] 分镜标记
+_SHOT_MARK_RE = re.compile(r"\[Shot (\d+)\]")
+
+def _shift_shots(text: str, delta: int = 1) -> str:
+    """将文本中的 [Shot N] 编号整体偏移 delta（默认 +1），用于首帧 reference 分镜插入后重编号。"""
+    if not text:
+        return text
+    return _SHOT_MARK_RE.sub(lambda m: f"[Shot {int(m.group(1)) + delta}]", text)
 
 def _extract_h3_mentions(prompt_json: dict) -> dict:
     """Extract <@name> and <#name:dialogue> mentions from all H3 prompt fields.
@@ -363,13 +377,19 @@ def build_h3_prompt(
     timeline_segment: dict|None = None,
     next_timeline_segment: dict|None = None
 ) -> dict:
+    log.info(f">>>>>>>>>>>>>>>>>>>>>>>>>>>next_timeline_segment: {json.dumps(next_timeline_segment, indent=2)}")
     prompt_res = build_h3_subject_bindings(subject_data=subject_data, raw_prompt=raw_prompt, timeline_segment=timeline_segment)
 
     subject_definitions = prompt_res.get("subject_definitions", "")
     retention_analysis = prompt_res.get("retention_analysis", "")
+    detailed_description = prompt_res.get("detailed_description", "")
     images = prompt_res.get("images", [])
     # Picture 编号延续 Subject/Audio 编号：绑定完成后 index = 主体数 + 1
     index = len(prompt_res.get("subjects", []) or []) + 1
+    # 首帧图片对应的 <Picture N> 标签（视频段首帧 / 图片段图），供 detailed_description reference 分镜使用
+    first_frame_pic = ""
+    # 尾帧图片对应的 <Picture N> 标签（视频段尾帧 / autoEndFrame 段），追加到详细描述末尾作为结束锚点
+    last_frame_pic = ""
 
     if timeline_segment.get("type", "text") == "video":
         video_path = timeline_segment.get("imageFile", "")
@@ -379,12 +399,14 @@ def build_h3_prompt(
         video_first_frame_path, video_last_frame_path = _extract_video_frames(video_path, video_start, video_duration)
         if video_first_frame_path:
             label = f"<Picture {index}>"
+            first_frame_pic = label
             subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
             retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
             index += 1
             images.append(video_first_frame_path)
         if video_last_frame_path:
             label = f"<Picture {index}>"
+            last_frame_pic = label
             subject_definitions = subject_definitions + f"\n{label} is the last frame of the target video."
             retention_analysis = retention_analysis + f"\n{label}(last frame of the target video): fully_preserved."
             index += 1
@@ -392,6 +414,7 @@ def build_h3_prompt(
     else:
         if timeline_segment.get("type", "text") == "image":
             label = f"<Picture {index}>"
+            first_frame_pic = label
             subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
             retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
             index += 1
@@ -406,20 +429,43 @@ def build_h3_prompt(
                     video_first_frame_path, video_last_frame_path = _extract_video_frames(video_path, video_start, video_duration)
                     if video_first_frame_path:
                         label = f"<Picture {index}>"
+                        last_frame_pic = label
                         subject_definitions = subject_definitions + f"\n{label} is the last frame of the target video."
                         retention_analysis = retention_analysis + f"\n{label} (last frame of the target video): fully_preserved."
                         index += 1
                         images.append(video_first_frame_path)
             elif next_timeline_segment.get("type", "text") == "image":
                 label = f"<Picture {index}>"
+                last_frame_pic = label
                 subject_definitions = subject_definitions + f"\n{label} is the last frame of the target video."
                 retention_analysis = retention_analysis + f"\n{label} (last frame of the target video): fully_preserved."
                 index += 1
-                images.append(timeline_segment.get("imageFile"))
+                images.append(next_timeline_segment.get("imageFile"))
 
     mapping = prompt_res.get("mapping", {})
-    detailed_description = prompt_res.get("detailed_description", "")
     detailed_description = _replace_mapping(detailed_description, mapping)
+
+    # 首帧图作为 reference 分镜：detailed_description 已含 [Shot N] 时全部 +1，
+    # 且原 [Shot 1] 移位为 [Shot 2] 后附上动画起点时间戳 At 00:00.330；
+    # 否则直接补 [Shot 2] At 00:00.330 时间戳，再在最前插入 [Shot 1] <Picture N> is reference.
+    if first_frame_pic:
+        if _SHOT_MARK_RE.search(detailed_description):
+            detailed_description = _shift_shots(detailed_description, 1)
+            detailed_description = re.sub(r"\[Shot 2\]", "[Shot 2] At 00:00.330", detailed_description, count=1)
+            prefix = f"[Shot 1] {first_frame_pic} is reference.\n"
+        else:
+            prefix = f"[Shot 1] {first_frame_pic} is reference.\n[Shot 2] At 00:00.330\n"
+        detailed_description = prefix + detailed_description
+
+    # 尾帧作为结束锚点：追加到最后一个分镜上；详细描述不含分镜时先给内容补 [Shot 1] 开头
+    if last_frame_pic:
+        shot_numbers = [int(n) for n in _SHOT_MARK_RE.findall(detailed_description)]
+        if shot_numbers:
+            max_shot = max(shot_numbers)
+            detailed_description = detailed_description + f"\n[Shot {max_shot}] without a cut and the final composition settles precisely into {last_frame_pic}."
+        else:
+            detailed_description = "[Shot 1] " + detailed_description + ("\n[Shot 2] " if detailed_description else "")
+            detailed_description = detailed_description + f"\nwithout a cut and the final composition settles precisely into {last_frame_pic}."
     
     overall_soundscape = prompt_res.get("overall_soundscape", "") or "N/A"
     overall_soundscape = _replace_mapping(overall_soundscape, mapping)
