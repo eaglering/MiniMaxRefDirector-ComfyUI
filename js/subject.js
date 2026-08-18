@@ -205,6 +205,7 @@ const MSCSS = `
     padding: 6px 8px;
     box-sizing: border-box;
     flex-shrink: 0;
+    flex: 1;
 }
 .ref-ms-global-prompt-label {
     font-size: 10px;

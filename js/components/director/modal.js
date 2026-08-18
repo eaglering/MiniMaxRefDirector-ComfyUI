@@ -70,11 +70,12 @@ export function RefModal({ open, title, width, height, onClose, children, footer
   // 拖拽 / resize：window 级 pointermove/up 跟随
   useEffect(() => {
     if (!drag) return;
+    const scale = drag.scale || 1;
     const onMove = (e) => {
       if (drag.mode === "move") {
         setStyle({
-          left: drag.baseLeft + (e.clientX - drag.startX),
-          top: drag.baseTop + (e.clientY - drag.startY),
+          left: drag.baseLeft + (e.clientX - drag.startX) / scale,
+          top: drag.baseTop + (e.clientY - drag.startY) / scale,
           width: drag.baseW,
           height: drag.baseH,
         });
@@ -82,8 +83,8 @@ export function RefModal({ open, title, width, height, onClose, children, footer
         setStyle({
           left: drag.baseLeft,
           top: drag.baseTop,
-          width: Math.max(minWidth, drag.baseW + (e.clientX - drag.startX)),
-          height: Math.max(minHeight, drag.baseH + (e.clientY - drag.startY)),
+          width: Math.max(minWidth, drag.baseW + (e.clientX - drag.startX) / scale),
+          height: Math.max(minHeight, drag.baseH + (e.clientY - drag.startY) / scale),
         });
       }
     };
@@ -116,18 +117,24 @@ export function RefModal({ open, title, width, height, onClose, children, footer
     // 坐标，窗体瞬间偏移一个"包含块偏移量 + 缩放倍数"。
     const cb = (box.offsetParent && box.offsetParent !== document.body) ? box.offsetParent : box.parentElement;
     const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
-    const left = rect.left - cbRect.left;
-    const top = rect.top - cbRect.top;
+    // 包含块若在 ComfyUI 图容器（transform 平移/缩放）内，getBoundingClientRect 返回的
+    // 是视口坐标（已含 scale 系数），而 offsetWidth 是布局宽，两者之比即缩放系数 scale。
+    // 写入 fixed 定位的必须是布局值，故 left/top/width/height 及后续移动增量全部除以 scale，
+    // 否则点击瞬间窗体尺寸会被再乘一次 scale 而变小、resize 拖动也不跟手。
+    const scale = cb && cb.offsetWidth > 0 && cbRect.width > 0 ? cbRect.width / cb.offsetWidth : 1;
+    const left = (rect.left - cbRect.left) / scale;
+    const top = (rect.top - cbRect.top) / scale;
     // 先把当前渲染位置固化为 fixed 定位，避免从 flex 居中切换到 fixed 时跳动
-    setStyle({ left, top, width: rect.width, height: rect.height });
+    setStyle({ left, top, width: rect.width / scale, height: rect.height / scale });
     setDrag({
       mode,
       startX: e.clientX,
       startY: e.clientY,
       baseLeft: left,
       baseTop: top,
-      baseW: rect.width,
-      baseH: rect.height,
+      baseW: rect.width / scale,
+      baseH: rect.height / scale,
+      scale,
     });
     document.body.style.userSelect = "none";
     document.body.style.cursor = mode === "move" ? "move" : "nwse-resize";
