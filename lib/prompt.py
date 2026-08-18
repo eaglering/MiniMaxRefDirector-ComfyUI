@@ -462,10 +462,13 @@ def build_h3_prompt(
         shot_numbers = [int(n) for n in _SHOT_MARK_RE.findall(detailed_description)]
         if shot_numbers:
             max_shot = max(shot_numbers)
-            detailed_description = detailed_description + f"\n[Shot {max_shot}] without a cut and the final composition settles precisely into {last_frame_pic}."
+            detailed_description = detailed_description + f"\n[Shot {max_shot + 1}] without a cut and the final composition settles precisely into {last_frame_pic}."
         else:
-            detailed_description = "[Shot 1] " + detailed_description + ("\n[Shot 2] " if detailed_description else "")
-            detailed_description = detailed_description + f"\nwithout a cut and the final composition settles precisely into {last_frame_pic}."
+            if detailed_description:
+                detailed_description = "[Shot 1] " + detailed_description
+                detailed_description = detailed_description + f"\n[Shot 2] without a cut and the final composition settles precisely into {last_frame_pic}."
+            else:
+                detailed_description = f"[Shot 1] without a cut and the final composition settles precisely into {last_frame_pic}."
     
     overall_soundscape = prompt_res.get("overall_soundscape", "") or "N/A"
     overall_soundscape = _replace_mapping(overall_soundscape, mapping)
