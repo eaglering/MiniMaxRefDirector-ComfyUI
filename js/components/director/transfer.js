@@ -1070,6 +1070,12 @@ export function TransferPanel({ director }) {
   // 删除选中的素材（Del 键 / 头部的删除按钮）
   const deleteSelectedMaterials = () => {
     if (!selIds.size) return;
+    // 同步清理长按预取的文件缓存（含全局注册表），避免内存残留与误用
+    for (const id of selIds) {
+      materialFileCache.delete(id);
+      if (window.__mrdMaterialCache) window.__mrdMaterialCache.delete(id);
+    }
+    if (dragReadyId && selIds.has(dragReadyId)) setDragReadyId(null);
     setMaterials((prev) => prev.filter((m) => !selIds.has(m.id)));
     setSelIds(new Set());
     setAnchorId(null);
@@ -1192,8 +1198,16 @@ export function TransferPanel({ director }) {
     e.stopPropagation();
     e.dataTransfer.effectAllowed = "copy";
     e.dataTransfer.setData("text/plain", m.src);
+    // 同文档拖拽（素材条与目标上传区同在一个页面）时，Chromium 不会把
+    // items.add(file) 注入的文件传输给 drop 端（dataTransfer.files / items 均读不到文件），
+    // 因此额外用自定义 MIME 传素材 id，drop 端从 window.__mrdMaterialCache 取回 File。
+    e.dataTransfer.setData("application/x-mrd-material", m.id);
     const file = materialFileCache.get(m.id);
     if (file) {
+      window.__mrdMaterialCache = window.__mrdMaterialCache || new Map();
+      window.__mrdMaterialCache.set(m.id, file);
+      // 跨窗口/跨页面拖拽（把素材拖出浏览器再拖回来）时 items.add 会被传输，
+      // 目标端 files 可直接读到；同文档场景则走上面的自定义类型兜底。
       try { e.dataTransfer.items.add(file); } catch (err) { /* 不支持则忽略 */ }
       try {
         e.dataTransfer.setData(

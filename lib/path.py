@@ -45,4 +45,9 @@ def resolve_input_path(filename: str) -> str:
     fallback = os.path.join(folder_paths.get_input_directory(), "minimaxrefdirector", basename)
     if os.path.isfile(fallback):
         return os.path.abspath(fallback)
+
+    # 全部失败：若入参为绝对路径则原样返回，让上层（如 Image.open）抛出带真实路径的
+    # 错误便于排查，而不是退化成 open("") 的 "No such file or directory: ''"。
+    if os.path.isabs(filename):
+        return filename
     return ""

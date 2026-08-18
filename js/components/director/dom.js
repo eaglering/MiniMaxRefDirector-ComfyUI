@@ -551,11 +551,40 @@ export const dom = {
       this._previewSegments = null;
       this.render();
 
+      // 兼容同文档拖拽（素材条与时间线在同一页面）：Chromium 不会把
+      // dragstart 中 items.add(File) 注入的文件传输给 drop 端——dataTransfer.files
+      // 为空，items 里也没有 file 项。因此三级兜底取文件：
+      //   1) files（系统文件拖入 / 跨窗口拖拽的 items.add 文件）
+      //   2) items.getAsFile()
+      //   3) dragstart 写入的自定义 MIME 素材 id → window.__mrdMaterialCache 取回 File
+      const droppedFiles = [];
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        for (const f of e.dataTransfer.files) droppedFiles.push(f);
+      }
+      if (droppedFiles.length === 0 && e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+        for (const item of e.dataTransfer.items) {
+          if (item.kind === "file") {
+            const f = item.getAsFile();
+            if (f) droppedFiles.push(f);
+          }
+        }
+      }
+      if (droppedFiles.length === 0) {
+        try {
+          const matId = e.dataTransfer.getData("application/x-mrd-material");
+          if (matId) {
+            const cache = window.__mrdMaterialCache;
+            const f = cache && cache.get(matId);
+            if (f) droppedFiles.push(f);
+          }
+        } catch (err) { /* 忽略 */ }
+      }
+
+      if (droppedFiles.length > 0) {
         const imageFiles = [];
         const audioFiles = [];
         const videoFiles = [];
-        for (let file of e.dataTransfer.files) {
+        for (let file of droppedFiles) {
           const nameLower = file.name.toLowerCase();
           const isVideo = file.type.startsWith("video/") || nameLower.match(/\.(mp4|webm|mkv|avi|mov|m4v|flv|wmv)$/);
           const isAudio = file.type.startsWith("audio/") || nameLower.match(/\.(mp3|wav|ogg|flac|m4a|aac)$/);

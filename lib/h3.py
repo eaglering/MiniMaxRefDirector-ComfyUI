@@ -1,4 +1,5 @@
 import math
+import logging
 import torch
 
 import comfy.model_management
@@ -16,6 +17,7 @@ except ImportError:  # pragma: no cover
 from .image import load_image_tensor
 from .video import _load_wav_audio
 
+log = logging.getLogger(__name__)
 
 CANVAS_MULTIPLE = 32
 VAE_SPATIAL_RATIO = 16
@@ -160,6 +162,9 @@ def build_segment_conditioning(
         if not src:
             continue
         img = load_image_tensor(src)
+        if img is None:
+            log.warning("skipped unavailable reference image: %r", src)
+            continue
         h, w = img.shape[1], img.shape[2]
         scale = min(1.0, math.sqrt((width * height) / (w * h)))
         tw = max(CANVAS_MULTIPLE, round(w * scale / CANVAS_MULTIPLE) * CANVAS_MULTIPLE)
