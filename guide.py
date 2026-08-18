@@ -34,6 +34,8 @@ import folder_paths
 from comfy_api.latest import io
 from comfy_execution.graph import ExecutionBlocker
 
+from lib.llm import unload_llama_models
+
 from .lib import h3 as h3lib
 from .lib.image import load_image_tensor
 
@@ -315,6 +317,7 @@ class MiniMaxRefGuide(io.ComfyNode):
         log.info(f"[MiniMaxRefGuide] guide_index={idx} prompt={prompt} "
                  f"images={images} videos={videos} audios={audios} seed={seed}")
 
+        unload_llama_models()
         # 基础条件：普通 refs（图片/视频/音频）Reference-to-video 编码
         cond, _neg_cond, latent, _frame_count = h3lib.build_segment_conditioning(
             clip, video_vae, audio_vae, prompt, width, height, length,

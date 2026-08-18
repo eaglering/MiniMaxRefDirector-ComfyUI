@@ -117,11 +117,12 @@ Output ONLY a JSON object with exactly these keys:
   - "non_diegetic_music": string
 ## Placeholder Rules
 In "detailed_description", "overall_soundscape" and "non_diegetic_music":
-1. Wrap every character name as <@角色名称>, e.g. <@Zhang San>.
+1. Wrap every character name as <@角色名称>, e.g. <@Zhang San>. This applies even if the user wrote the name as a bare word (e.g. "小李做了什么" must become "<@小李>做了什么").
 2. Wrap every dialogue as <#角色名称:对话内容>, e.g. <#Zhang San:Hello!> or <#李四:你好！>.
 3. Keep character names and dialogue in their original language, never translate them.
 
 ## Strictness
+- "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".
 - Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
 {image_note}## User Input Prompt
 {prompt}
@@ -180,6 +181,72 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
 # 匹配 <@角色名称> 与 <#角色名称:对话内容> 占位符
 _H3_NAME_RE = re.compile(r"<@([^>]+)>")
 _H3_DIALOGUE_RE = re.compile(r"<#([^>:]+):([^>]+)>")
+# 匹配 [Shot N] 分镜标记（用于保证 detailed_description 以 [Shot 1] 开头）
+_SHOT_MARK_RE = re.compile(r"\[Shot \d+\]")
+
+
+def _auto_wrap_names(text: str, subject_names) -> str:
+    """把文本中裸出现的已定义主体名自动包裹为 <@名>。
+
+    LLM 常漏掉 <@> 包裹，直接写"小李做了什么"。此函数把文本里裸出现的
+    subject 名字替换成 <@小李>，使后续提取/绑定/占位符替换一致命中。
+    - 已包裹的 <@名> / <#名:对话> 先替换为占位符保护，还原后不被二次包裹；
+    - 按名字长度降序替换，避免短名命中长名子串（"小李" 先于 "李"）；
+    - 名字前后要求边界（非汉字/字母数字/@#/>），避免命中词中片段。
+    """
+    if not text or not subject_names:
+        return text
+    protected: dict[str, str] = {}
+    counter = 0
+
+    def _protect(m: re.Match) -> str:
+        nonlocal counter
+        key = f"\x00P{counter:04d}\x01"  # 控制字符占位，正常文本不会出现
+        counter += 1
+        protected[key] = m.group(0)
+        return key
+
+    text = _H3_NAME_RE.sub(_protect, text)
+    text = _H3_DIALOGUE_RE.sub(_protect, text)
+    for name in sorted(subject_names, key=lambda x: -len(x)):
+        if not name:
+            continue
+        if len(name) >= 2:
+            # 多字名：中文句子中名字后常紧跟动词/助词（"小李做了什么"），
+            # 故放开后边界；已包裹的 <@名>/<#名:...> 已被占位符保护不会二次命中。
+            text = re.sub(
+                rf"(?<![@#A-Za-z0-9]){re.escape(name)}", f"<@{name}>", text)
+        else:
+            # 单字名：前后都要求严格边界，避免命中其他词（"小学里" 中的 "李"）
+            text = re.sub(
+                rf"(?<![@#\u4e00-\u9fffA-Za-z0-9]){re.escape(name)}"
+                rf"(?![@#\u4e00-\u9fffA-Za-z0-9>])",
+                f"<@{name}>",
+                text,
+            )
+    for key, val in protected.items():
+        text = text.replace(key, val)
+    return text
+
+
+def _ensure_shot1(text: str) -> str:
+    """保证 detailed_description 以 [Shot 1] 开头。
+
+    - 已以 [Shot 1] 开头：原样返回；
+    - 缺失 [Shot N] 标记：在开头补 [Shot 1]；
+    - 第一个 shot 标记前有文字：删除前缀；若第一个标记不是 [Shot 1]
+      （如 [Shot 2]），重编号为 [Shot 1]。
+    """
+    text = (text or "").strip()
+    if not text:
+        return text
+    m = _SHOT_MARK_RE.search(text)
+    if not m:
+        return "[Shot 1] " + text
+    head = text[m.start():]
+    if not head.startswith("[Shot 1]"):
+        head = _SHOT_MARK_RE.sub("[Shot 1]", head, count=1)
+    return head
 
 # 官方 retention_analysis 支持的类型与关系标记
 _H3_TYPES = ("Subject", "Picture", "Video", "Audio")
@@ -255,6 +322,20 @@ def build_h3_subject_bindings(
     mentions = _extract_h3_mentions(prompt_json)
     names = mentions["names"]
     dialogues = mentions["dialogues"]
+
+    # LLM 常漏掉 <@> 包裹、直接写裸名（如"小李做了什么"）。
+    # 扫描三个字段中裸出现的已定义主体名，自动补 <@> 使其参与绑定与替换。
+    subject_names_all = [s.get("name") for s in subjects_in if s.get("name")]
+    if subject_names_all:
+        merged_text = "\n".join(
+            str(prompt_json.get(f) or "") for f in
+            ("detailed_description", "overall_soundscape", "non_diegetic_music")
+        )
+        auto_text = _auto_wrap_names(merged_text, subject_names_all)
+        for m in _H3_NAME_RE.finditer(auto_text):
+            name = m.group(1).strip()
+            if name and name not in names and name not in dialogues:
+                names[name] = m.group(0).strip()
 
     subject_definitions = []
     retention_analysis = []
@@ -433,10 +514,18 @@ def build_h3_prompt(
                 images.append(timeline_segment.get("imageFile"))
 
     mapping = prompt_res.get("mapping", {})
+    # 只对成功绑定为 <Subject N> / <Audio N> 的名字做自动包裹，
+    # 避免未绑定主体（如 unmatched）残留未解析的 <@xxx> 占位符。
+    bound_names = [k[2:-1] for k in mapping if k.startswith("<@") and k.endswith(">")]
+    detailed_description = _auto_wrap_names(detailed_description, bound_names)
     detailed_description = _replace_mapping(detailed_description, mapping)
+    # 保证描述以 [Shot 1] 开头：LLM 可能在 [Shot 1] 前写引导语或漏写分镜标记
+    detailed_description = _ensure_shot1(detailed_description)
     overall_soundscape = prompt_res.get("overall_soundscape", "") or "N/A"
+    overall_soundscape = _auto_wrap_names(overall_soundscape, bound_names)
     overall_soundscape = _replace_mapping(overall_soundscape, mapping)
     non_diegetic_music = prompt_res.get("non_diegetic_music", "") or "N/A"
+    non_diegetic_music = _auto_wrap_names(non_diegetic_music, bound_names)
     non_diegetic_music = _replace_mapping(non_diegetic_music, mapping)
 
     prompt = "subject_definitions:\n" + subject_definitions + "\n"
