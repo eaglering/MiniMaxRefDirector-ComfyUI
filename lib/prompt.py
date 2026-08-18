@@ -383,6 +383,8 @@ def build_h3_prompt(
     retention_analysis = prompt_res.get("retention_analysis", "")
     detailed_description = prompt_res.get("detailed_description", "")
     images = prompt_res.get("images", [])
+    # Picture 编号延续 Subject/Audio 编号：绑定完成后 index = 主体数 + 1
+    index = len(prompt_res.get("subjects", []) or []) + 1
 
     if timeline_segment.get("type", "text") == "video":
         video_path = timeline_segment.get("imageFile", "")

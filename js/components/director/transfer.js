@@ -232,6 +232,29 @@ function removeShotField(text, key) {
   return formatPromptJson(obj);
 }
 
+// 将后端 send_sync("minimax_ref_video_progress", ...) 通知里的 imageFile
+// （VHS_FILENAMES：字符串 / 单对象 / 对象数组）解析为视频素材项 { id, label, src }。
+// 素材 id 取文件 URL 保证唯一（同时用于去重与多选集合）。
+function toVideoItems(imageFile) {
+  const list = Array.isArray(imageFile) ? imageFile : [imageFile];
+  const out = [];
+  for (const f of list) {
+    if (!f) continue;
+    if (typeof f === "string") {
+      if (!f.trim()) continue;
+      out.push({ id: viewUrl(f, "", "output"), label: f.split("/").pop(), src: viewUrl(f, "", "output") });
+    } else if (typeof f === "object") {
+      const fn = f.filename || "";
+      if (!fn) continue;
+      const sub = f.subfolder || "";
+      const type = f.type || "output";
+      const src = viewUrl(fn, sub, type);
+      out.push({ id: src, label: sub ? sub + "/" + fn : fn, src });
+    }
+  }
+  return out;
+}
+
 // ---------- 样式 ----------
 const S = {
   panel: {
@@ -308,6 +331,28 @@ const S = {
   },
   refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" },
   refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
+  // 视频素材条（接收后端 minimax_ref_video_progress 通知）：面板底部、x 轴排列、可横向滚动
+  materialsWrap: {
+    borderTop: "1px solid #333", padding: "6px 0 2px", flex: "0 0 auto",
+    display: "flex", flexDirection: "column", gap: "4px",
+  },
+  materialsHead: { display: "flex", alignItems: "center", gap: "8px", padding: "0 2px", flex: "0 0 auto" },
+  materialsTitle: { fontSize: "10px", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", userSelect: "none" },
+  materialsSel: { fontSize: "11px", color: "#5c9dff", userSelect: "none" },
+  materialsDelBtn: { padding: "2px 8px", fontSize: "11px", marginLeft: "auto" },
+  materialsStrip: {
+    display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
+    gap: "6px", padding: "2px 2px 6px", alignItems: "stretch",
+    outline: "none", scrollbarWidth: "thin",
+  },
+  materialCard: {
+    flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
+    background: "#222", border: "1px solid #444", borderRadius: "6px", padding: "3px",
+    width: "96px", cursor: "pointer", userSelect: "none",
+  },
+  materialCardSel: { borderColor: "#5c9dff", boxShadow: "0 0 0 1px #5c9dff" },
+  materialVideo: { width: "90px", height: "50px", objectFit: "cover", borderRadius: "3px", background: "#000", pointerEvents: "none", display: "block" },
+  materialLabel: { fontSize: "9px", color: "#aaa", maxWidth: "90px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 };
 
 // ---------- 全局参数 ----------
@@ -355,8 +400,13 @@ export function TransferPanel({ director }) {
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
+  // 视频素材条：接收后端 minimax_ref_video_progress 通知（status=add_material）
+  const [materials, setMaterials] = useState([]); // [{ id, label, src }]
+  const [selIds, setSelIds] = useState(() => new Set()); // 多选选中的素材 id 集合
+  const [anchorId, setAnchorId] = useState(null); // Shift 范围选择锚点
 
   const leftRef = useRef(null);
+  const stripRef = useRef(null); // 素材条横向滚动容器
   const rightRef = useRef(null);
   const debounceRef = useRef(null);
   const bindDebounceRef = useRef(null); // 主体绑定接口请求防抖
@@ -430,6 +480,57 @@ export function TransferPanel({ director }) {
       }
     };
   }, [director]);
+
+  // 接收后端 send_sync("minimax_ref_video_progress", ...) 通知：
+  //  status="add_material" & type="video" 时把 imageFile（VHS_FILENAMES）追加到视频素材条。
+  // 新视频沿 x 轴依次添加（追加到末尾），并自动滚动到最新素材使其可见。
+  useEffect(() => {
+    const onAddMaterial = (e) => {
+      if (!aliveRef.current) return;
+      const d = e && e.detail ? e.detail : {};
+      if (d.status !== "add_material" || d.type !== "video") return;
+      const items = toVideoItems(d.imageFile);
+      if (!items.length) return;
+      setMaterials((prev) => {
+        const next = prev.slice();
+        for (const it of items) {
+          if (next.some((x) => x.id === it.id)) continue; // 去重：同 URL 不重复添加
+          next.push(it);
+        }
+        return next;
+      });
+      // 渲染后滚动到最右端，展示最新添加的视频
+      requestAnimationFrame(() => {
+        if (stripRef.current) stripRef.current.scrollLeft = stripRef.current.scrollWidth;
+      });
+    };
+    if (api && typeof api.addEventListener === "function") {
+      api.addEventListener("minimax_ref_video_progress", onAddMaterial);
+      return () => {
+        if (typeof api.removeEventListener === "function") {
+          api.removeEventListener("minimax_ref_video_progress", onAddMaterial);
+        }
+      };
+    }
+    return undefined;
+  }, []);
+
+  // Del 键删除选中的视频素材（焦点在输入框 / textarea 时不触发，避免误删）
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== "Delete") return;
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (!selIds.size) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setMaterials((prev) => prev.filter((m) => !selIds.has(m.id)));
+      setSelIds(new Set());
+      setAnchorId(null);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [selIds]);
 
   // 右侧内容持久化：每次编辑写回当前 segment 的 h3PromptJson，
   // 随 commitChanges 的 ...rest 序列化进 timeline_data（per-segment 存储）。
@@ -802,6 +903,42 @@ export function TransferPanel({ director }) {
     director.commitChanges(true);
   };
 
+  // ---------- 视频素材条 ----------
+  // 点击选中素材：单击单选；Ctrl/Cmd 点击切换；Shift 点击从锚点到当前项范围选择。
+  // 新素材固定宽度沿 x 轴吸附排列（见 JSX 中 flex 布局 + 滚动容器）。
+  const selectMaterial = (id, e) => {
+    e.stopPropagation();
+    const ctrl = e.ctrlKey || e.metaKey;
+    const shift = e.shiftKey;
+    const ids = materials.map((m) => m.id);
+    setSelIds((prev) => {
+      const next = new Set(prev);
+      if (shift && anchorId && prev.size > 0 && ids.includes(anchorId)) {
+        // Shift 范围选择：anchorId -> id
+        const i0 = ids.indexOf(anchorId);
+        const i1 = ids.indexOf(id);
+        const [a, b] = i0 < i1 ? [i0, i1] : [i1, i0];
+        for (let i = a; i <= b; i++) next.add(ids[i]);
+        return next;
+      }
+      if (ctrl) {
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }
+      return new Set([id]);
+    });
+    if (!shift) setAnchorId(id);
+  };
+
+  // 删除选中的素材（Del 键 / 头部的删除按钮）
+  const deleteSelectedMaterials = () => {
+    if (!selIds.size) return;
+    setMaterials((prev) => prev.filter((m) => !selIds.has(m.id)));
+    setSelIds(new Set());
+    setAnchorId(null);
+  };
+
   // ---------- 渲染 ----------
   // 主体定义 / retention_analysis（来自后端 /h3/build_subject_bindings 的 debounce 结果）
   const bindings = bindData || {};
@@ -916,6 +1053,57 @@ export function TransferPanel({ director }) {
                   }
                 </div>`
               : null
+          }
+        </div>
+      </div>
+
+      <div class="tr-materials" style=${S.materialsWrap}>
+        <div style=${S.materialsHead}>
+          <span style=${S.materialsTitle}>视频素材</span>
+          ${
+            selIds.size
+              ? html`<span style=${S.materialsSel}>已选 ${selIds.size} 项</span>`
+              : null
+          }
+          ${
+            selIds.size
+              ? html`<button
+                  class="mrd-pr-btn"
+                  style=${S.materialsDelBtn}
+                  onClick=${deleteSelectedMaterials}
+                  onMouseDown=${(e) => e.preventDefault()}
+                >删除</button>`
+              : null
+          }
+        </div>
+        <div
+          class="tr-materials-strip"
+          ref=${stripRef}
+          style=${S.materialsStrip}
+          tabindex=${0}
+          onKeyDown=${(e) => { if (e.key === "Delete") { e.preventDefault(); deleteSelectedMaterials(); } }}
+          onMouseDown=${(e) => { if (e.target === e.currentTarget) { setSelIds(new Set()); setAnchorId(null); } }}
+        >
+          ${
+            materials.length === 0
+              ? html`<div style=${S.hint}>运行 MiniMaxRefGuide 后，各段生成的视频（prev_tail）会显示在这里</div>`
+              : materials.map((m) => {
+                  const sel = selIds.has(m.id);
+                  return html`
+                    <div
+                      class="tr-material${sel ? " selected" : ""}"
+                      style=${sel ? Object.assign({}, S.materialCard, S.materialCardSel) : S.materialCard}
+                      key=${m.id}
+                      title=${m.label}
+                      onClick=${(e) => selectMaterial(m.id, e)}
+                      onMouseEnter=${(e) => { const v = e.currentTarget.querySelector("video"); if (v) v.play().catch(() => {}); }}
+                      onMouseLeave=${(e) => { const v = e.currentTarget.querySelector("video"); if (v) { v.pause(); v.currentTime = 0; } }}
+                    >
+                      <video src=${m.src} muted preload="metadata" playsinline style=${S.materialVideo}></video>
+                      <span style=${S.materialLabel}>${m.label}</span>
+                    </div>
+                  `;
+                })
           }
         </div>
       </div>

@@ -65,41 +65,7 @@ def _vhs_tuple_path(item):
         return folder_paths.get_annotated_filepath(filename, subfolder, ftype)
     except Exception:
         return filename
-
-
-def _path_to_meta(path):
-    """本地绝对路径 → (filename, subfolder, type)，用于前端展示链接。"""
-    filename = os.path.basename(path)
-    out_root = folder_paths.get_output_directory()
-    try:
-        subfolder = os.path.dirname(os.path.relpath(path, out_root))
-    except Exception:
-        subfolder = ""
-    if subfolder == ".":
-        subfolder = ""
-    return {"filename": filename, "subfolder": subfolder, "type": "output"}
-
-
-def _vhs_meta(prev_tail):
-    """从 prev_tail 提取第一段视频的 (filename, subfolder, type)，无则返回 None。"""
-    if not prev_tail:
-        return None
-    # VHS_FILENAMES: (bool_save_output, [full_paths])
-    if isinstance(prev_tail, (list, tuple)) and len(prev_tail) == 2 \
-            and isinstance(prev_tail[0], bool) and isinstance(prev_tail[1], list):
-        for p in prev_tail[1]:
-            if isinstance(p, str):
-                return _path_to_meta(p)
-        return None
-    # VHS_FILENAME: (filename, subfolder, type[, path])
-    if isinstance(prev_tail, (list, tuple)) and len(prev_tail) >= 3 \
-            and all(isinstance(x, str) for x in prev_tail[:3]):
-        return {"filename": prev_tail[0], "subfolder": prev_tail[1], "type": prev_tail[2]}
-    # 裸路径字符串
-    if isinstance(prev_tail, str):
-        return _path_to_meta(prev_tail)
-    return None
-
+    
 
 def _send_progress(payload):
     """send_sync 通知 director 前端更新 video track（失败仅告警，不影响执行）。"""
@@ -244,12 +210,6 @@ class MiniMaxRefGuide(io.ComfyNode):
             inputs=[
                 GuideData.Input("guide_data",
                                 tooltip="MiniMaxRefDirector 输出的 guide_data。"),
-                io.Int.Input("guide_index", optional=True, default=None, min=0, step=1,
-                             tooltip="0-based 段索引，接 easy forLoopStart 的 index。"
-                             "建议断开此输入，节点会自动按 guide_data 段顺序取段，"
-                             "避免 Easy-Use 循环展开导致的 index 错乱（如 0,0,1）。"),
-                io.Int.Input("seed", default=-1, min=-1, step=1,
-                             tooltip="采样种子（-1 表示随机）。传入后用于后续采样链路，实现跨段可复现。"),
                 io.Model.Input("model", optional=True,
                                tooltip="采样模型（透传保留，供外部采样链路使用；sigma shift 请自行处理）。"),
                 io.Clip.Input("clip", optional=True,
@@ -263,17 +223,25 @@ class MiniMaxRefGuide(io.ComfyNode):
                     optional=True,
                     tooltip="上一段生成完成的视频路径；文本段开启 motionContext 时作为 motion context 实现跨段衔接；收到时通知前端该段完成。",
                 ),
+                io.Int.Input("context_length", optional=True, default=22, min=0, step=1,
+                    tooltip="尾帧参考帧数。"
+                ),
+                io.Int.Input("guide_index", optional=True, default=None, min=0, step=1,
+                    tooltip="0-based 段索引，接 easy forLoopStart 的 index。"
+                    "建议断开此输入，节点会自动按 guide_data 段顺序取段，"
+                    "避免 Easy-Use 循环展开导致的 index 错乱（如 0,0,1）。"),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
                 io.Latent.Output(display_name="latent"),
+                io.Int.Output(display_name="trim_frames"),
                 io.Float.Output(display_name="frame_rate"),
             ],
         )
 
     @classmethod
-    def execute(cls, guide_data=None, guide_index=None, seed=-1, model=None, clip=None,
-                video_vae=None, audio_vae=None, prev_tail=None) -> io.NodeOutput:
+    def execute(cls, guide_data=None, model=None, clip=None, video_vae=None, 
+                audio_vae=None, prev_tail=None, context_length=22, guide_index=None) -> io.NodeOutput:
         """按 guide_index 取段 → 条件编码 → 输出 positive/latent；并按 prev_tail/越界发送通知。
 
         guide_index 未连接（None）时自动按 timeline 段顺序取段（模块级计数器，
@@ -288,33 +256,22 @@ class MiniMaxRefGuide(io.ComfyNode):
         idx = int(guide_index)
         total = len(timeline)
 
-        # 防御：guide_index 越界。Director 的 segment_count 已输出精确段数，
+        # 资源更新通知
+        if prev_tail:
+            _send_progress({
+                "status": "add_material",
+                "type": "video",
+                "imageFile": prev_tail
+            })
+
         # 正常循环（total=段数）不会走到这里；触发说明 forLoop 接线/段数配置有误。
         if idx >= total:
-            log.warning(f"[MiniMaxRefGuide] guide_index={idx} >= {total} -> out of range")
-            # _send_progress({
-            #     "seg_no": total,
-            #     "total": total,
-            #     "status": "exception",
-            #     "message": "loop_end",
-            # })
             raise ValueError(
                 f"[MiniMaxRefGuide] guide_index {idx} out of range (0..{total - 1}); "
                 f"check forLoopStart.total is connected to MiniMaxRefDirector's segment_count."
             )
-
+        
         entry = timeline[idx]
-        # prev_tail 已传入（上一段视频保存完成）→ 通知前端更新 video track
-        if prev_tail:
-            # meta = _vhs_meta(prev_tail) or {}
-            # _send_progress({
-            #     "seg_no": idx,  # 上一段（0-based idx-1）的 1-based 编号
-            #     "total": total,
-            #     "status": "done",
-            #     **meta,
-            # })
-            log.info(f"[MiniMaxRefGuide] guide_index={idx} received prev_tail -> notify segment {idx} done")
-
         prompt = entry.get("prompt", "")
         width = int(guide_data.get("width", 1024))
         height = int(guide_data.get("height", 576))
@@ -331,7 +288,7 @@ class MiniMaxRefGuide(io.ComfyNode):
         if video_vae is None:
             raise ValueError("[MiniMaxRefGuide] needs a VIDEO_VAE input to prepare the latent.")
 
-        log.info(f"[MiniMaxRefGuide] guide_index={idx} seed={seed} prompt={prompt} "
+        log.info(f"[MiniMaxRefGuide] guide_index={idx} prompt={prompt} "
                  f"images={images} videos={videos} audios={audios}")
 
         # 基础条件：普通 refs（图片/视频/音频）Reference-to-video 编码
@@ -340,13 +297,15 @@ class MiniMaxRefGuide(io.ComfyNode):
             images, videos, audios,
         )
 
+        trim_frames: int = 0
         # 文本段 + motionContext：用 prev_tail 视频，motion context 处理
         if entry.get("type") == "text" and prev_tail and entry.get("motionContext"):
+            log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail={prev_tail}")
             frames = _load_prev_tail_frames(prev_tail)
             if frames is not None and frames.shape[0] >= 1:
-                cond, _trim = _apply_motion_context(
+                cond, trim_frames = _apply_motion_context(
                     cond, latent, video_vae, frames,
-                    context_length="22", audio_vae=audio_vae,
+                    context_length=context_length, audio_vae=audio_vae,
                 )
                 log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
                          f"({frames.shape[0]} frames)")
@@ -356,4 +315,4 @@ class MiniMaxRefGuide(io.ComfyNode):
                     f"skipped: {prev_tail} could not be decoded")
 
         # 3) 其他段：不处理 prev_tail，直接输出普通条件
-        return io.NodeOutput(cond, latent, frame_rate)
+        return io.NodeOutput(cond, latent, trim_frames, frame_rate)

@@ -220,7 +220,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
         )
 
-        result = io.NodeOutput(guide_data, segment_count)
+        result = io.NodeOutput(guide_data, segment_count + 1)
         _director_cache[cache_key] = result
         return result
 
