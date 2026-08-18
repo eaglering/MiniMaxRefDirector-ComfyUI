@@ -236,6 +236,13 @@ function removeShotField(text, key) {
 // id 需唯一（同时用作 React key 与多选集合依据），故在 URL 后附加自增序号。
 let materialSeq = 0;
 
+// 长按拖出预取缓存：素材 id -> File。
+// HTML5 DnD 的 dataTransfer.files 只能在 dragstart 里同步写入，而视频是异步 fetch 得到的
+// Blob，因此先长按 ~400ms 触发预取并缓存为 File，随后原生拖动时在 dragstart 中同步注入。
+const materialFileCache = new Map();
+const LONG_PRESS_MS = 400; // 长按阈值
+const DRAG_MOVE_TOLERANCE = 10; // 长按期间移动超过该像素视为放弃长按（改为直接拖动/滑动）
+
 // 将后端 send_sync("minimax_ref_video_progress", ...) 通知里的 imageFile
 // （VHS_FILENAMES：字符串 / 单对象 / 对象数组）解析为视频素材项 { id, label, src }。
 // 基础 id 取文件 URL；实际 id 在追加时附加自增序号保证唯一（不做 URL/文件名去重）。
@@ -360,9 +367,22 @@ const S = {
   materialCard: {
     flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
     background: "rgb(30, 30, 30)", border: "1px solid #444", borderRadius: "6px", padding: "3px",
-    width: "186px", cursor: "pointer", userSelect: "none",
+    width: "186px", cursor: "pointer", userSelect: "none", position: "relative",
   },
   materialCardSel: { borderColor: "#5c9dff", boxShadow: "0 0 0 1px #5c9dff" },
+  materialCardReady: { borderColor: "#3ecf5f", boxShadow: "0 0 0 1px #3ecf5f" },
+  materialReadyBadge: {
+    position: "absolute", top: "4px", right: "4px", zIndex: 2,
+    background: "rgba(40, 167, 69, .92)", color: "#fff", fontSize: "9px",
+    lineHeight: "14px", padding: "0 5px", borderRadius: "8px", pointerEvents: "none",
+    boxShadow: "0 0 4px rgba(0,0,0,.5)",
+  },
+  dragHint: {
+    margin: "0 8px 4px", fontSize: "11px", color: "#7fd88a",
+    background: "rgba(40, 167, 69, .12)", border: "1px solid rgba(62, 207, 95, .35)",
+    borderRadius: "4px", padding: "3px 8px", whiteSpace: "nowrap", overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
   // 16:9 预览区（180x101，宽度为原 90px 的 2 倍）：横屏视频单屏铺满；
   // 竖屏（如 9:16）视频在区域内横向重复平铺填满（materialTiles + materialTileVid）
   materialVideo: { width: "180px", height: "101px", objectFit: "cover", borderRadius: "3px", background: "#000", pointerEvents: "none", display: "block" },
@@ -439,11 +459,39 @@ export function TransferPanel({ director }) {
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
-  // 视频素材条：接收后端 minimax_ref_video_progress 通知（status=add_material）
-  const [materials, setMaterials] = useState([]); // [{ id, label, src }]
+  // 视频素材条：接收后端 minimax_ref_video_progress 通知（status=add_material）。
+  // 初始化时从 localStorage 恢复上次会话的素材（key 按节点 id 隔离），刷新页面后保留，
+  // 只有点击删除才会移除。
+  const [materials, setMaterials] = useState(() => {
+    try {
+      const key = "mrd_materials_" + (director?.node?.id || "default");
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          // 恢复自增序号，避免与后续追加素材的 id 冲突
+          let maxSeq = 0;
+          for (const m of list) {
+            const n = parseInt(String(m.id).split("#").pop(), 10);
+            if (!isNaN(n) && n > maxSeq) maxSeq = n;
+          }
+          if (maxSeq > materialSeq) materialSeq = maxSeq;
+          return list;
+        }
+      }
+    } catch (e) {
+      console.warn("[Transfer] 素材恢复失败:", e);
+    }
+    return [];
+  }); // [{ id, label, src }]
   const [selIds, setSelIds] = useState(() => new Set()); // 多选选中的素材 id 集合
   const [anchorId, setAnchorId] = useState(null); // Shift 范围选择锚点
   const [viewer, setViewer] = useState(null); // 双击素材打开的播放器弹窗（当前查看的素材对象）
+  const [dragReadyId, setDragReadyId] = useState(null); // 长按预取完成、可拖出到其他上传框的素材 id
+  const [dragHint, setDragHint] = useState(""); // 长按拖出操作提示（自动消失）
+  const longPressRef = useRef(null); // 长按状态 { id, fired, x, y, timer }
+  const suppressClickRef = useRef(false); // 长按松手后抑制随后的 click（避免误改选中）
+  const dragHintTimerRef = useRef(null); // 提示自动消失定时器
 
   const leftRef = useRef(null);
   const stripRef = useRef(null); // 素材条横向滚动容器
@@ -556,6 +604,16 @@ export function TransferPanel({ director }) {
     }
     return undefined;
   }, []);
+
+  // 素材持久化：materials 变化（追加 / 删除 / metadata 更新）时写回 localStorage
+  useEffect(() => {
+    if (!aliveRef.current || !director?.node?.id) return;
+    try {
+      localStorage.setItem("mrd_materials_" + director.node.id, JSON.stringify(materials));
+    } catch (e) {
+      console.warn("[Transfer] 素材保存失败:", e);
+    }
+  }, [materials, director]);
 
   // Del 键删除选中的视频素材（焦点在输入框 / textarea 时不触发，避免误删）
   useEffect(() => {
@@ -1002,6 +1060,8 @@ export function TransferPanel({ director }) {
         else next.add(id);
         return next;
       }
+      // 单击：若当前已仅选中该素材，再点一次取消选中；否则单选它
+      if (prev.size === 1 && prev.has(id)) return new Set();
       return new Set([id]);
     });
     if (!shift) setAnchorId(id);
@@ -1013,6 +1073,140 @@ export function TransferPanel({ director }) {
     setMaterials((prev) => prev.filter((m) => !selIds.has(m.id)));
     setSelIds(new Set());
     setAnchorId(null);
+  };
+
+  // 拖放上传：把本地视频文件拖入素材条，上传到后端 input 目录后追加为素材
+  const handleStripDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!director) return;
+    const files = e.dataTransfer?.files;
+    if (!files || !files.length) return;
+    const videoFiles = Array.from(files).filter(
+      (f) => f.type.startsWith("video/") || /\.(mp4|webm|mkv|mov|m4v|flv|wmv|avi)$/i.test(f.name)
+    );
+    if (!videoFiles.length) return;
+    const added = [];
+    for (const f of videoFiles) {
+      try {
+        const filePath = await director._uploadVideoFile(f);
+        if (!filePath) continue;
+        const src = viewUrl(filePath);
+        materialSeq += 1;
+        added.push({ id: src + "#" + materialSeq, label: filePath.split("/").pop(), src, vw: null, vh: null });
+      } catch (err) {
+        console.error("[Transfer] 素材拖放上传失败:", err);
+      }
+    }
+    if (!added.length) return;
+    setMaterials((prev) => prev.concat(added));
+    requestAnimationFrame(() => {
+      if (stripRef.current) stripRef.current.scrollLeft = stripRef.current.scrollWidth;
+    });
+  };
+
+  // ---------- 长按拖出：把素材视频以文件形式拖到其他上传框 ----------
+  // 流程：pointerdown 起 ~400ms 长按 -> fetch 视频 URL 预取 Blob 并缓存为 File
+  //       （卡片出现“可拖出”角标）-> 继续按住拖动，dragstart 中同步注入
+  //       e.dataTransfer.items，目标上传框的 drop 事件即可在 files 里拿到该文件。
+  const cacheMaterialFile = async (m) => {
+    if (materialFileCache.has(m.id)) return materialFileCache.get(m.id);
+    try {
+      let blob;
+      if (m.src.startsWith("data:")) {
+        blob = await (await fetch(m.src)).blob();
+      } else {
+        const resp = await fetch(m.src, { credentials: "include" });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        blob = await resp.blob();
+      }
+      const file = new File([blob], m.label || "video.mp4", { type: blob.type || "video/mp4" });
+      materialFileCache.set(m.id, file);
+      return file;
+    } catch (err) {
+      console.error("[Transfer] 长按预取视频失败:", err);
+      return null;
+    }
+  };
+
+  const showDragHint = (msg) => {
+    setDragHint(msg);
+    clearTimeout(dragHintTimerRef.current);
+    dragHintTimerRef.current = setTimeout(() => setDragHint(""), 3000);
+  };
+
+  const clearLongPress = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current.timer);
+      longPressRef.current = null;
+    }
+  };
+
+  const onMaterialPointerDown = (m, e) => {
+    clearLongPress();
+    // 已缓存（本次会话预取过）直接进入就绪态，无需再次长按
+    if (materialFileCache.has(m.id)) {
+      longPressRef.current = { id: m.id, fired: true, x: e.clientX, y: e.clientY, timer: null };
+      setDragReadyId(m.id);
+      showDragHint("已就绪：按住并拖动即可把视频拖到其他上传框");
+      return;
+    }
+    longPressRef.current = {
+      id: m.id,
+      fired: false,
+      x: e.clientX,
+      y: e.clientY,
+      timer: setTimeout(async () => {
+        const lp = longPressRef.current;
+        if (!lp || lp.id !== m.id) return;
+        lp.fired = true;
+        const file = await cacheMaterialFile(m);
+        if (longPressRef.current && longPressRef.current.id === m.id && file) {
+          setDragReadyId(m.id);
+          showDragHint("已就绪：按住并拖动即可把视频拖到其他上传框");
+        }
+      }, LONG_PRESS_MS),
+    };
+  };
+
+  const onMaterialPointerMove = (m, e) => {
+    const lp = longPressRef.current;
+    if (!lp || lp.id !== m.id || lp.fired) return;
+    if (
+      Math.abs(e.clientX - lp.x) > DRAG_MOVE_TOLERANCE ||
+      Math.abs(e.clientY - lp.y) > DRAG_MOVE_TOLERANCE
+    ) {
+      clearLongPress(); // 移动过多：视为直接拖动/滑动，放弃长按
+    }
+  };
+
+  const onMaterialPointerEnd = (m, e) => {
+    const lp = longPressRef.current;
+    if (lp && lp.id === m.id) {
+      if (lp.fired) suppressClickRef.current = true; // 长按松手后抑制随后的 click 选中
+      clearLongPress();
+    }
+  };
+
+  const onMaterialDragStart = (m, e) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = "copy";
+    e.dataTransfer.setData("text/plain", m.src);
+    const file = materialFileCache.get(m.id);
+    if (file) {
+      try { e.dataTransfer.items.add(file); } catch (err) { /* 不支持则忽略 */ }
+      try {
+        e.dataTransfer.setData(
+          "DownloadURL", (file.type || "video/mp4") + ":" + (m.label || "video.mp4") + ":" + m.src
+        );
+      } catch (err) { /* 忽略 */ }
+    } else {
+      showDragHint("请先长按素材约 0.4 秒，出现“可拖出”角标后再拖动");
+    }
+  };
+
+  const onMaterialDragEnd = (m, e) => {
+    setDragReadyId(null);
   };
 
   // ---------- 渲染 ----------
@@ -1163,6 +1357,8 @@ export function TransferPanel({ director }) {
           tabindex=${0}
           onKeyDown=${(e) => { if (e.key === "Delete") { e.preventDefault(); deleteSelectedMaterials(); } }}
           onMouseDown=${(e) => { if (e.target === e.currentTarget) { setSelIds(new Set()); setAnchorId(null); } }}
+          onDragOver=${(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDrop=${(e) => handleStripDrop(e)}
         >
           ${
             materials.length === 0
@@ -1195,6 +1391,7 @@ export function TransferPanel({ director }) {
                         muted=${i > 0}
                         preload="metadata"
                         playsinline
+                        draggable="false"
                         style=${Object.assign({}, S.materialTileVid, { width: perW + "px" })}
                         onLoadedMetadata=${updateMeta}
                       ></video>`)}
@@ -1204,17 +1401,30 @@ export function TransferPanel({ director }) {
                       src=${m.src}
                       preload="metadata"
                       playsinline
+                      draggable="false"
                       style=${S.materialVideo}
                       onLoadedMetadata=${updateMeta}
                     ></video>`;
                   }
+                  const dragReady = dragReadyId === m.id;
                   return html`
                     <div
-                      class="tr-material${sel ? " selected" : ""}"
-                      style=${sel ? Object.assign({}, S.materialCard, S.materialCardSel) : S.materialCard}
+                      class="tr-material${sel ? " selected" : ""}${dragReady ? " drag-ready" : ""}"
+                      style=${Object.assign(
+                        {},
+                        S.materialCard,
+                        sel ? S.materialCardSel : null,
+                        dragReady ? S.materialCardReady : null
+                      )}
                       key=${m.id}
-                      title=${m.label}
+                      title=${m.label + "\n长按约 0.4 秒后可把视频拖到其他文件上传框"}
+                      draggable="true"
                       onClick=${(e) => {
+                        // 长按松手后抑制一次 click，避免误改选中状态
+                        if (suppressClickRef.current) {
+                          suppressClickRef.current = false;
+                          return;
+                        }
                         // 双击检测用 e.detail：onClick 中 setSelIds 会触发重渲染替换卡片 DOM，
                         // 浏览器派发的 dblclick 事件会因此丢失，故不用 onDoubleClick。
                         if (e.detail >= 2) {
@@ -1224,9 +1434,17 @@ export function TransferPanel({ director }) {
                           selectMaterial(m.id, e);
                         }
                       }}
+                      onPointerDown=${(e) => onMaterialPointerDown(m, e)}
+                      onPointerMove=${(e) => onMaterialPointerMove(m, e)}
+                      onPointerUp=${(e) => onMaterialPointerEnd(m, e)}
+                      onPointerLeave=${(e) => onMaterialPointerEnd(m, e)}
+                      onPointerCancel=${(e) => onMaterialPointerEnd(m, e)}
+                      onDragStart=${(e) => onMaterialDragStart(m, e)}
+                      onDragEnd=${(e) => onMaterialDragEnd(m, e)}
                       onMouseEnter=${playAll}
                       onMouseLeave=${stopAll}
                     >
+                      ${dragReady ? html`<span style=${S.materialReadyBadge}>可拖出</span>` : null}
                       ${preview}
                       <span style=${S.materialLabel}>${m.label}</span>
                     </div>
@@ -1235,6 +1453,8 @@ export function TransferPanel({ director }) {
           }
         </div>
       </div>
+
+      ${dragHint ? html`<div style=${S.dragHint}>${dragHint}</div>` : null}
 
       ${
         viewer
