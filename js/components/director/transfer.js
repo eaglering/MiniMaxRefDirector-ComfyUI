@@ -232,9 +232,13 @@ function removeShotField(text, key) {
   return formatPromptJson(obj);
 }
 
+// 素材追加计数器：每次 add_material 通知都会追加素材（不去重），
+// id 需唯一（同时用作 React key 与多选集合依据），故在 URL 后附加自增序号。
+let materialSeq = 0;
+
 // 将后端 send_sync("minimax_ref_video_progress", ...) 通知里的 imageFile
 // （VHS_FILENAMES：字符串 / 单对象 / 对象数组）解析为视频素材项 { id, label, src }。
-// 素材 id 取文件 URL 保证唯一（同时用于去重与多选集合）。
+// 基础 id 取文件 URL；实际 id 在追加时附加自增序号保证唯一（不做 URL/文件名去重）。
 function toVideoItems(imageFile) {
   const list = Array.isArray(imageFile) ? imageFile : [imageFile];
   const out = [];
@@ -242,14 +246,14 @@ function toVideoItems(imageFile) {
     if (!f) continue;
     if (typeof f === "string") {
       if (!f.trim()) continue;
-      out.push({ id: viewUrl(f, "", "output"), label: f.split("/").pop(), src: viewUrl(f, "", "output") });
+      out.push({ id: viewUrl(f, "", "output"), label: f.split("/").pop(), src: viewUrl(f, "", "output"), vw: null, vh: null });
     } else if (typeof f === "object") {
       const fn = f.filename || "";
       if (!fn) continue;
       const sub = f.subfolder || "";
       const type = f.type || "output";
       const src = viewUrl(fn, sub, type);
-      out.push({ id: src, label: sub ? sub + "/" + fn : fn, src });
+      out.push({ id: src, label: sub ? sub + "/" + fn : fn, src, vw: null, vh: null });
     }
   }
   return out;
@@ -260,7 +264,7 @@ const S = {
   panel: {
     boxSizing: "border-box", width: "100%", height: "100%",
     display: "flex", flexDirection: "column", gap: "4px",
-    fontFamily: "inherit",
+    fontFamily: "inherit", overflow: "hidden",
   },
   area: {
     flex: 1, resize: "none", boxSizing: "border-box", width: "100%", minHeight: 0,
@@ -268,11 +272,14 @@ const S = {
     padding: "6px", fontFamily: "monospace", fontSize: "12px", lineHeight: "1.5", outline: "none",
   },
   col: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
-  buttons: { display: "flex", gap: "6px", padding: "4px 0" },
+  buttons: { display: "flex", gap: "6px", padding: "4px 0", flex: "0 0 auto" },
   resources: {
-    display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
-    gap: "8px", padding: "4px 0", minHeight: "450px", alignItems: "flex-start",
-    borderTop: "1px solid #333", scrollbarWidth: "thin",
+    display: "flex", flexDirection: "row", flexWrap: "nowrap", overflow: "auto",
+    gap: "8px", padding: "4px 0", flex: "1 1 0", minHeight: "0",
+    alignItems: "flex-start", borderTop: "1px solid #333", scrollbarWidth: "thin",
+  },
+  resourcesList: {
+    display: "flex", flexWrap: "wrap", gap: "8px"
   },
   res: {
     flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
@@ -299,7 +306,7 @@ const S = {
   },
   defsWrap: {
     position: "relative", flex: "0 0 auto", display: "flex", alignItems: "center",
-    alignSelf: "flex-start", padding: "6px 4px", cursor: "help",
+    alignSelf: "flex-start", padding: "0 4px", cursor: "help",
   },
   defsIcon: { fontSize: "13px", color: "#5c9dff", lineHeight: 1, userSelect: "none" },
   defsTip: {
@@ -316,7 +323,7 @@ const S = {
   h3PreviewWrap: {
     flex: "0 0 50%", width: "50%", display: "flex", flexDirection: "column",
     alignSelf: "stretch", marginLeft: "auto", borderLeft: "1px solid #333",
-    paddingLeft: "8px", minHeight: "450px", cursor: "pointer",
+    paddingLeft: "8px", minHeight: "0", cursor: "pointer",
   },
   h3PreviewLabel: {
     fontSize: "10px", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px",
@@ -324,7 +331,7 @@ const S = {
   },
   h3PreviewArea: {
     flex: "1 1 0", minHeight: "0", width: "100%", boxSizing: "border-box",
-    background: "rgba(30,30,30,.55)", color: "#9e9e9e", border: "1px dashed #444",
+    background: "rgba(30,30,30,.55)", color: "#fff", border: "1px dashed #444",
     borderRadius: "4px", padding: "4px 6px", fontFamily: "monospace", fontSize: "10px",
     lineHeight: "1.4", resize: "none", outline: "none", cursor: "pointer",
     overflowY: "auto", scrollbarWidth: "thin", whiteSpace: "pre-wrap",
@@ -334,25 +341,37 @@ const S = {
   // 视频素材条（接收后端 minimax_ref_video_progress 通知）：面板底部、x 轴排列、可横向滚动
   materialsWrap: {
     borderTop: "1px solid #333", padding: "6px 0 2px", flex: "0 0 auto",
-    display: "flex", flexDirection: "column", gap: "4px",
+    display: "flex", flexDirection: "column", gap: "4px", backgroundColor: "rgb(30, 30, 30)"
   },
-  materialsHead: { display: "flex", alignItems: "center", gap: "8px", padding: "0 2px", flex: "0 0 auto" },
-  materialsTitle: { fontSize: "10px", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", userSelect: "none" },
+  materialsHead: { display: "flex", alignItems: "center", gap: "8px", padding: "0 2px", flex: "0 0 auto", margin: "6px 0px 2px 8px", color: "#666" },
+  // 标题采用 .mrd-pr-prompt-label 样式（shared.js 中定义）
+  materialsTitle: {
+    fontSize: "9px", fontWeight: "bold", color: "#666",
+    textTransform: "uppercase", letterSpacing: "0.5px",
+    pointerEvents: "none", userSelect: "none", flex: "0 0 auto",
+  },
   materialsSel: { fontSize: "11px", color: "#5c9dff", userSelect: "none" },
   materialsDelBtn: { padding: "2px 8px", fontSize: "11px", marginLeft: "auto" },
   materialsStrip: {
     display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
-    gap: "6px", padding: "2px 2px 6px", alignItems: "stretch",
+    gap: "6px", padding: "2px 8px 6px", alignItems: "stretch",
     outline: "none", scrollbarWidth: "thin",
   },
   materialCard: {
     flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
-    background: "#222", border: "1px solid #444", borderRadius: "6px", padding: "3px",
-    width: "96px", cursor: "pointer", userSelect: "none",
+    background: "rgb(30, 30, 30)", border: "1px solid #444", borderRadius: "6px", padding: "3px",
+    width: "186px", cursor: "pointer", userSelect: "none",
   },
   materialCardSel: { borderColor: "#5c9dff", boxShadow: "0 0 0 1px #5c9dff" },
-  materialVideo: { width: "90px", height: "50px", objectFit: "cover", borderRadius: "3px", background: "#000", pointerEvents: "none", display: "block" },
-  materialLabel: { fontSize: "9px", color: "#aaa", maxWidth: "90px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  // 16:9 预览区（180x101，宽度为原 90px 的 2 倍）：横屏视频单屏铺满；
+  // 竖屏（如 9:16）视频在区域内横向重复平铺填满（materialTiles + materialTileVid）
+  materialVideo: { width: "180px", height: "101px", objectFit: "cover", borderRadius: "3px", background: "#000", pointerEvents: "none", display: "block" },
+  materialTiles: {
+    width: "180px", height: "101px", overflow: "hidden", borderRadius: "3px", background: "#000",
+    display: "flex", flexDirection: "row", flexWrap: "nowrap", pointerEvents: "none",
+  },
+  materialTileVid: { height: "101px", objectFit: "cover", flex: "0 0 auto", display: "block", pointerEvents: "none" },
+  materialLabel: { fontSize: "9px", color: "#aaa", maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 };
 
 // ---------- 全局参数 ----------
@@ -494,8 +513,10 @@ export function TransferPanel({ director }) {
       setMaterials((prev) => {
         const next = prev.slice();
         for (const it of items) {
-          if (next.some((x) => x.id === it.id)) continue; // 去重：同 URL 不重复添加
-          next.push(it);
+          // 不去重：后端每次 add_material 通知都追加（guide 正常轮与越界轮会各发一次同 URL）。
+          // id 附加自增序号保证唯一，避免 React key / 多选集合冲突。
+          materialSeq += 1;
+          next.push({ ...it, id: it.id + "#" + materialSeq });
         }
         return next;
       });
@@ -904,6 +925,32 @@ export function TransferPanel({ director }) {
   };
 
   // ---------- 视频素材条 ----------
+  // 记录素材视频原始宽高（metadata 加载后），用于竖屏/横屏差异化平铺预览
+  const setMaterialMeta = (id, vw, vh) => {
+    setMaterials((prev) =>
+      prev.map((m) => (m.id === id && (m.vw !== vw || m.vh !== vh) ? { ...m, vw, vh } : m))
+    );
+  };
+  // 右键下载视频：fetch 原始字节 → Blob → a[download] 触发，确保下载到的是视频
+  // 文件而非 HTML 页面（直接 href 在新标签打开可能被当作 inline 播放）。
+  const downloadMaterial = async (m) => {
+    try {
+      const res = await fetch(m.src, { credentials: "same-origin" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = m.label || "video.mp4";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      // 兜底：同域直开（浏览器会按 Content-Disposition 处理）
+      window.open(m.src, "_blank");
+    }
+  };
   // 点击选中素材：单击单选；Ctrl/Cmd 点击切换；Shift 点击从锚点到当前项范围选择。
   // 新素材固定宽度沿 x 轴吸附排列（见 JSX 中 flex 布局 + 滚动容器）。
   const selectMaterial = (id, e) => {
@@ -989,33 +1036,35 @@ export function TransferPanel({ director }) {
       }
 
       <div class="tr-resources" style=${S.resources}>
-        ${
-          resources.length === 0
-            ? html`<div style=${S.hint}>资源引用（主体 / 手动添加主体）会显示在这里</div>`
-            : resources.map(r => {
-                const hasImg = !!r.src;
-                const isAudio = !hasImg || !!r.audio;
-                return html`
-                <div style=${S.res} key=${r.key}>
-                  ${
-                    hasImg
-                      ? html`<img style=${S.img} src=${r.src} alt=${r.label} />`
-                      : html`<span style=${S.resAudio} title="音频主体">♪</span>`
-                  }
-                  ${
-                    r.kind === "addition"
-                      ? html`<span style=${{ display: "inline-flex", alignItems: "center", gap: "3px", maxWidth: "64px", overflow: "hidden", whiteSpace: "nowrap" }}>
-                          <span style=${isAudio ? S.audioIcon : Object.assign({}, S.label, { color: "#a5d6a7" })}>${isAudio ? "♪ " : "＋"}${r.label}</span>
-                          <span title="移除" style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }} onClick=${() => removeAddedSubject(r.label)}>×</span>
-                        </span>`
-                      : (isAudio
-                          ? html`<span style=${S.audioIcon}>♪ ${r.label}</span>`
-                          : html`<span style=${S.label}>${r.label}</span>`)
-                  }
-                </div>
-              `;
-              })
-        }
+        <div style=${S.resourcesList}>
+          ${
+            resources.length === 0
+              ? html`<div style=${S.hint}>资源引用（主体 / 手动添加主体）会显示在这里</div>`
+              : resources.map(r => {
+                  const hasImg = !!r.src;
+                  const isAudio = !hasImg || !!r.audio;
+                  return html`
+                  <div style=${S.res} key=${r.key}>
+                    ${
+                      hasImg
+                        ? html`<img style=${S.img} src=${r.src} alt=${r.label} />`
+                        : html`<span style=${S.resAudio} title="音频主体">♪</span>`
+                    }
+                    ${
+                      r.kind === "addition"
+                        ? html`<span style=${{ display: "inline-flex", alignItems: "center", gap: "3px", maxWidth: "64px", overflow: "hidden", whiteSpace: "nowrap" }}>
+                            <span style=${isAudio ? S.audioIcon : Object.assign({}, S.label, { color: "#a5d6a7" })}>${isAudio ? "♪ " : "＋"}${r.label}</span>
+                            <span title="移除" style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }} onClick=${() => removeAddedSubject(r.label)}>×</span>
+                          </span>`
+                        : (isAudio
+                            ? html`<span style=${S.audioIcon}>♪ ${r.label}</span>`
+                            : html`<span style=${S.label}>${r.label}</span>`)
+                    }
+                  </div>
+                `;
+                })
+          }
+        </div>
         <div
           class="tr-h3-preview"
           style=${S.h3PreviewWrap}
@@ -1023,7 +1072,32 @@ export function TransferPanel({ director }) {
           onClick=${() => setEditorOpen(true)}
           onMouseDown=${(e) => e.preventDefault()}
         >
-          <span style=${S.h3PreviewLabel}>Minimax H3 Prompt</span>
+          <div style="display:flex;align-items:center">
+            <div style=${S.h3PreviewLabel}>Minimax H3 Prompt</div>
+            <div
+              class="tr-defs"
+              style=${S.defsWrap}
+              onMouseEnter=${openDefsTip}
+              onMouseLeave=${() => setDefsOpen(false)}
+            >
+              <span style=${S.defsIcon}>ℹ</span>
+              ${
+                defsOpen && defsPos
+                  ? html`<div
+                      style=${Object.assign({}, S.defsTip, { left: defsPos.left, top: defsPos.top }, defsPos.up ? { transform: "translateY(-100%)" } : null)}
+                      onMouseEnter=${() => setDefsOpen(true)}
+                      onMouseLeave=${() => setDefsOpen(false)}
+                    >
+                      ${
+                        bindingsText
+                          ? html`<div style=${{ whiteSpace: "pre-wrap" }}>${bindingsText}</div>`
+                          : html`<div style=${S.defsTipEmpty}>暂无主体定义</div>`
+                      }
+                    </div>`
+                  : null
+              }
+            </div>
+          </div>
           <textarea
             class="mrd-h3-preview-area"
             style=${S.h3PreviewArea}
@@ -1031,29 +1105,6 @@ export function TransferPanel({ director }) {
             readOnly
             spellcheck=${false}
           ></textarea>
-        </div>
-        <div
-          class="tr-defs"
-          style=${S.defsWrap}
-          onMouseEnter=${openDefsTip}
-          onMouseLeave=${() => setDefsOpen(false)}
-        >
-          <span style=${S.defsIcon}>ℹ</span>
-          ${
-            defsOpen && defsPos
-              ? html`<div
-                  style=${Object.assign({}, S.defsTip, { left: defsPos.left, top: defsPos.top }, defsPos.up ? { transform: "translateY(-100%)" } : null)}
-                  onMouseEnter=${() => setDefsOpen(true)}
-                  onMouseLeave=${() => setDefsOpen(false)}
-                >
-                  ${
-                    bindingsText
-                      ? html`<div style=${{ whiteSpace: "pre-wrap" }}>${bindingsText}</div>`
-                      : html`<div style=${S.defsTipEmpty}>暂无主体定义</div>`
-                  }
-                </div>`
-              : null
-          }
         </div>
       </div>
 
@@ -1089,6 +1140,45 @@ export function TransferPanel({ director }) {
               ? html`<div style=${S.hint}>运行 MiniMaxRefGuide 后，各段生成的视频（prev_tail）会显示在这里</div>`
               : materials.map((m) => {
                   const sel = selIds.has(m.id);
+                  const metaKnown = m.vw > 0 && m.vh > 0;
+                  const isPortrait = metaKnown && m.vh > m.vw; // 竖屏（9:16 等）→ 重复平铺
+                  const updateMeta = (e) => {
+                    const v = e.currentTarget;
+                    if (v.videoWidth > 0 && (m.vw !== v.videoWidth || m.vh !== v.videoHeight)) {
+                      setMaterialMeta(m.id, v.videoWidth, v.videoHeight);
+                    }
+                  };
+                  const playAll = (e) => {
+                    e.currentTarget.querySelectorAll("video").forEach((v) => v.play().catch(() => {}));
+                  };
+                  const stopAll = (e) => {
+                    e.currentTarget.querySelectorAll("video").forEach((v) => { v.pause(); v.currentTime = 0; });
+                  };
+                  let preview;
+                  if (isPortrait) {
+                    // 竖屏视频：按原比例缩到区域高度 101px，横向重复铺满 180px 宽
+                    const perW = Math.max(20, Math.round((101 * m.vw) / m.vh));
+                    const count = Math.max(2, Math.ceil(180 / perW));
+                    preview = html`<div style=${S.materialTiles}>
+                      ${Array.from({ length: count }, (_, i) => html`<video
+                        key=${m.id + "_" + i}
+                        src=${m.src}
+                        muted=${i > 0}
+                        preload="metadata"
+                        playsinline
+                        style=${Object.assign({}, S.materialTileVid, { width: perW + "px" })}
+                        onLoadedMetadata=${updateMeta}
+                      ></video>`)}
+                    </div>`;
+                  } else {
+                    preview = html`<video
+                      src=${m.src}
+                      preload="metadata"
+                      playsinline
+                      style=${S.materialVideo}
+                      onLoadedMetadata=${updateMeta}
+                    ></video>`;
+                  }
                   return html`
                     <div
                       class="tr-material${sel ? " selected" : ""}"
@@ -1096,10 +1186,11 @@ export function TransferPanel({ director }) {
                       key=${m.id}
                       title=${m.label}
                       onClick=${(e) => selectMaterial(m.id, e)}
-                      onMouseEnter=${(e) => { const v = e.currentTarget.querySelector("video"); if (v) v.play().catch(() => {}); }}
-                      onMouseLeave=${(e) => { const v = e.currentTarget.querySelector("video"); if (v) { v.pause(); v.currentTime = 0; } }}
+                      onContextMenu=${(e) => { e.preventDefault(); e.stopPropagation(); downloadMaterial(m); }}
+                      onMouseEnter=${playAll}
+                      onMouseLeave=${stopAll}
                     >
-                      <video src=${m.src} muted preload="metadata" playsinline style=${S.materialVideo}></video>
+                      ${preview}
                       <span style=${S.materialLabel}>${m.label}</span>
                     </div>
                   `;

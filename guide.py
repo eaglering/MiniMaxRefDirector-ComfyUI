@@ -18,10 +18,11 @@ model/clip/vae 由外部自行接入）。
 - 其他段不处理 prev_tail 视频。
 
 通知机制（send_sync("minimax_ref_video_progress", ...)）：
-- 当 prev_tail 传入（VHS_FILENAMES，说明上一段视频已保存完成）时，通知前端
-  更新该段 video track（status="done"，附带上一段视频的 filename/subfolder/type）。
-- 当 guide_index 越界（>= len(timeline)，即 forLoop 循环结束轮）时，发送
-  status="exception" 通知并抛出异常，让 Easy-Use forLoop 结束循环。
+- 当 prev_tail 传入（说明上一段视频已保存完成）时，通知前端把该视频加入素材条
+  （status="add_material"，附带 VHS_FILENAMES / 路径 / VideoFromFile）。
+- 当 guide_index 越界（>= len(timeline)，即 forLoop 多出的最后 1 轮，
+  total = segment_count+1）时，只发送 add_material 通知并返回 ExecutionBlocker
+  阻断采样链路，让 Easy-Use forLoop 正常结束（不抛异常）。
 """
 
 import importlib.util
@@ -160,12 +161,27 @@ def _get_motion_context_module():
     return mod
 
 
-def _load_prev_tail_frames(path, max_frames=56):
-    """解码上一段视频，截取尾部至多 max_frames 帧，供 motion context 使用。"""
+def _load_prev_tail_frames(prev_tail, max_frames=56):
+    """解码上一段视频，截取尾部至多 max_frames 帧，供 motion context 使用。
+
+    兼容三种输入：
+    - str：本地路径（VHS VideoCombine 的 filename / 绝对路径）
+    - tuple/list：VHS_FILENAMES（(filename, subfolder, type[, path])）
+    - comfy_api VideoFromFile 对象（ComfyUI 0.33+ 视频输入自动转换）
+    """
     try:
-        frames = VideoFromFile(path).get_components().images  # [N, H, W, C]
+        if isinstance(prev_tail, VideoFromFile):
+            frames = prev_tail.get_components().images  # [N, H, W, C]
+        elif isinstance(prev_tail, (tuple, list)) and len(prev_tail) >= 1:
+            frames = VideoFromFile(_vhs_tuple_path(prev_tail)).get_components().images
+        elif isinstance(prev_tail, str):
+            frames = VideoFromFile(prev_tail).get_components().images
+        else:
+            log.warning(f"[MiniMaxRefGuide] unsupported prev_tail type: "
+                        f"{type(prev_tail).__name__}")
+            return None
     except Exception:
-        log.warning(f"[MiniMaxRefGuide] failed to load prev_tail video {path!r}",
+        log.warning(f"[MiniMaxRefGuide] failed to load prev_tail video {prev_tail!r}",
                     exc_info=True)
         return None
     if frames.shape[0] > max_frames:
@@ -204,8 +220,8 @@ class MiniMaxRefGuide(io.ComfyNode):
                 "Reference-to-video 功能构建 positive conditioning 与 latent。视频采样/解码/保存"
                 "由你自己连接 KSampler → VAEDecode → VHS VideoCombine 完成（model/clip/vae 自行接入）。"
                 "放在 Easy-Use forLoop 内，guide_index 接 forLoopStart 的 index；当上一段视频"
-                "（prev_tail, VHS_FILENAMES）传入时通知 director 前端更新 video track；"
-                "guide_index 越界时发送 exception 通知并抛异常结束循环。"
+                "（prev_tail）传入时通知 director 前端把视频加入素材条；guide_index 越界"
+                "（total=segment_count+1 的最后一轮）时仅发通知并阻断输出，正常结束循环。"
             ),
             inputs=[
                 GuideData.Input("guide_data",
@@ -226,6 +242,9 @@ class MiniMaxRefGuide(io.ComfyNode):
                 io.Int.Input("context_length", optional=True, default=22, min=0, step=1,
                     tooltip="尾帧参考帧数。"
                 ),
+                io.Int.Input("seed", optional=True, default=0, min=0, step=1,
+                    tooltip="随机种子，透传给外部 KSampler 以复现每段生成；"
+                    "本节点仅记录并在日志中展示。"),
                 io.Int.Input("guide_index", optional=True, default=None, min=0, step=1,
                     tooltip="0-based 段索引，接 easy forLoopStart 的 index。"
                     "建议断开此输入，节点会自动按 guide_data 段顺序取段，"
@@ -241,7 +260,8 @@ class MiniMaxRefGuide(io.ComfyNode):
 
     @classmethod
     def execute(cls, guide_data=None, model=None, clip=None, video_vae=None, 
-                audio_vae=None, prev_tail=None, context_length=22, guide_index=None) -> io.NodeOutput:
+                audio_vae=None, prev_tail=None, context_length=22, seed=None, 
+                guide_index=None) -> io.NodeOutput:
         """按 guide_index 取段 → 条件编码 → 输出 positive/latent；并按 prev_tail/越界发送通知。
 
         guide_index 未连接（None）时自动按 timeline 段顺序取段（模块级计数器，
@@ -251,8 +271,8 @@ class MiniMaxRefGuide(io.ComfyNode):
             raise ValueError("[MiniMaxRefGuide] guide_data is required "
                              "(connect MiniMaxRefDirector's guide_data output).")
 
-        timeline = guide_data.get("timeline_data")
-        frame_rate = float(guide_data["frame_rate"])
+        timeline = guide_data.get("timeline_data", [])
+        frame_rate = float(guide_data.get("frame_rate", 24))
         idx = int(guide_index)
         total = len(timeline)
 
@@ -264,12 +284,16 @@ class MiniMaxRefGuide(io.ComfyNode):
                 "imageFile": prev_tail
             })
 
-        # 正常循环（total=段数）不会走到这里；触发说明 forLoop 接线/段数配置有误。
+        # 越界轮：MiniMaxRefDirector 故意把 segment_count+1 接到 forLoopStart.total，
+        # 多出的这一轮只用于在 prev_tail 传入时发送 add_material 通知（见上方）。
+        # 这里返回 ExecutionBlocker 阻断采样链路，让 forLoop 正常结束而不抛异常。
         if idx >= total:
-            raise ValueError(
-                f"[MiniMaxRefGuide] guide_index {idx} out of range (0..{total - 1}); "
-                f"check forLoopStart.total is connected to MiniMaxRefDirector's segment_count."
+            log.info(
+                f"[MiniMaxRefGuide] guide_index={idx} out of range (0..{total - 1}); "
+                f"final notify-only iteration, blocking outputs to end the loop."
             )
+            return io.NodeOutput(ExecutionBlocker(None), ExecutionBlocker(None),
+                                 ExecutionBlocker(None), ExecutionBlocker(None))
         
         entry = timeline[idx]
         prompt = entry.get("prompt", "")
@@ -289,7 +313,7 @@ class MiniMaxRefGuide(io.ComfyNode):
             raise ValueError("[MiniMaxRefGuide] needs a VIDEO_VAE input to prepare the latent.")
 
         log.info(f"[MiniMaxRefGuide] guide_index={idx} prompt={prompt} "
-                 f"images={images} videos={videos} audios={audios}")
+                 f"images={images} videos={videos} audios={audios} seed={seed}")
 
         # 基础条件：普通 refs（图片/视频/音频）Reference-to-video 编码
         cond, _neg_cond, latent, _frame_count = h3lib.build_segment_conditioning(
