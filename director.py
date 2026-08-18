@@ -183,13 +183,10 @@ class MiniMaxRefDirector(io.ComfyNode):
             if dur <= 0:
                 continue
             h3_prompt_json = seg.get("h3PromptJson", "")
-            last_frame_path = ""
-            if i + 1 < timeline_data_len and seg.get("autoEndFrame", False):
-                last_frame_path = timeline_segments[i + 1].get("imageFile", "")
-
+            next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
             prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
-                                         raw_prompt=h3_prompt_json, last_frame_path=last_frame_path, 
-                                         timeline_segment=seg)
+                                         raw_prompt=h3_prompt_json, 
+                                         timeline_segment=seg, next_timeline_segment=next_seg)
             entry = {
                 "prompt": prompt_res["prompt"],
                 "subjects": prompt_res["subjects"],

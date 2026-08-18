@@ -67,32 +67,6 @@ def _vhs_tuple_path(item):
         return filename
 
 
-def _vhs_paths(prev_tail):
-    """把 VHS_FILENAMES / VHS_FILENAME / 路径字符串解析为本地绝对路径列表。"""
-    if not prev_tail:
-        return []
-    if isinstance(prev_tail, str):
-        return [prev_tail]
-    if isinstance(prev_tail, (list, tuple)):
-        # VHS_FILENAMES: (bool_save_output, [full_paths])
-        if len(prev_tail) == 2 and isinstance(prev_tail[0], bool) and isinstance(prev_tail[1], list):
-            return [p for p in prev_tail[1] if isinstance(p, str)]
-        # 纯字符串列表
-        if prev_tail and isinstance(prev_tail[0], str):
-            return list(prev_tail)
-        # 每项是 (filename, subfolder, type[, path]) 元组
-        paths = []
-        for item in prev_tail:
-            if isinstance(item, str):
-                paths.append(item)
-            elif isinstance(item, (list, tuple)):
-                paths.append(_vhs_tuple_path(item))
-        return paths
-    if isinstance(prev_tail, (list, tuple)):
-        return [_vhs_tuple_path(prev_tail)]
-    return []
-
-
 def _path_to_meta(path):
     """本地绝对路径 → (filename, subfolder, type)，用于前端展示链接。"""
     filename = os.path.basename(path)
@@ -284,11 +258,10 @@ class MiniMaxRefGuide(io.ComfyNode):
                              tooltip="latent 与参考视频编码必需。"),
                 io.Vae.Input("audio_vae", optional=True,
                              tooltip="有参考音频时必需。"),
-                io.MultiType.Input(
+                io.String.Input(
                     "prev_tail",
-                    types=[VhsFilenames, VhsFilename],
                     optional=True,
-                    tooltip="上一段生成完成的视频（VHS VideoCombine 的 Filenames 输出）；文本段开启 motionContext 时作为 motion context 实现跨段衔接；收到时通知前端该段完成。",
+                    tooltip="上一段生成完成的视频路径；文本段开启 motionContext 时作为 motion context 实现跨段衔接；收到时通知前端该段完成。",
                 ),
             ],
             outputs=[
@@ -310,44 +283,36 @@ class MiniMaxRefGuide(io.ComfyNode):
             raise ValueError("[MiniMaxRefGuide] guide_data is required "
                              "(connect MiniMaxRefDirector's guide_data output).")
 
-        timeline = guide_data["timeline_data"]
+        timeline = guide_data.get("timeline_data")
         frame_rate = float(guide_data["frame_rate"])
-        if guide_index is None:
-            key = id(guide_data)
-            idx = _guide_auto_index.get(key, 0)
-            _guide_auto_index[key] = idx + 1
-            log.info(f"[MiniMaxRefGuide] guide_index auto -> {idx}")
-        else:
-            idx = int(guide_index)
+        idx = int(guide_index)
         total = len(timeline)
 
         # 防御：guide_index 越界。Director 的 segment_count 已输出精确段数，
         # 正常循环（total=段数）不会走到这里；触发说明 forLoop 接线/段数配置有误。
         if idx >= total:
             log.warning(f"[MiniMaxRefGuide] guide_index={idx} >= {total} -> out of range")
-            _send_progress({
-                "seg_no": total,
-                "total": total,
-                "status": "exception",
-                "message": "loop_end",
-            })
+            # _send_progress({
+            #     "seg_no": total,
+            #     "total": total,
+            #     "status": "exception",
+            #     "message": "loop_end",
+            # })
             raise ValueError(
                 f"[MiniMaxRefGuide] guide_index {idx} out of range (0..{total - 1}); "
                 f"check forLoopStart.total is connected to MiniMaxRefDirector's segment_count."
             )
 
         entry = timeline[idx]
-
         # prev_tail 已传入（上一段视频保存完成）→ 通知前端更新 video track
-        prev_paths = _vhs_paths(prev_tail)
-        if prev_paths:
-            meta = _vhs_meta(prev_tail) or {}
-            _send_progress({
-                "seg_no": idx,  # 上一段（0-based idx-1）的 1-based 编号
-                "total": total,
-                "status": "done",
-                **meta,
-            })
+        if prev_tail:
+            # meta = _vhs_meta(prev_tail) or {}
+            # _send_progress({
+            #     "seg_no": idx,  # 上一段（0-based idx-1）的 1-based 编号
+            #     "total": total,
+            #     "status": "done",
+            #     **meta,
+            # })
             log.info(f"[MiniMaxRefGuide] guide_index={idx} received prev_tail -> notify segment {idx} done")
 
         prompt = entry.get("prompt", "")
@@ -375,23 +340,9 @@ class MiniMaxRefGuide(io.ComfyNode):
             images, videos, audios,
         )
 
-        # 1) 图片段 + imageFile：图片做成 8 帧视频，用 motion context 处理
-        if entry.get("type") == "image" and entry.get("imageFile"):
-            img = load_image_tensor(entry.get("imageFile"))
-            if img is None:
-                raise ValueError(
-                    f"[MiniMaxRefGuide] segment {idx} imageFile not found: "
-                    f"{entry.get('imageFile')!r}")
-            frames = img.repeat(8, 1, 1, 1)  # 图片 -> 8 帧视频 [8, H, W, C]
-            cond, _trim = _apply_motion_context(
-                cond, latent, video_vae, frames,
-                context_length="8", audio_vae=audio_vae,
-            )
-            log.info(f"[MiniMaxRefGuide] guide_index={idx} image -> 8-frame motion context")
-
-        # 2) 文本段 + motionContext：用 prev_tail 视频，motion context 处理
-        elif entry.get("type") == "text" and prev_paths and entry.get("motionContext"):
-            frames = _load_prev_tail_frames(prev_paths[0])
+        # 文本段 + motionContext：用 prev_tail 视频，motion context 处理
+        if entry.get("type") == "text" and prev_tail and entry.get("motionContext"):
+            frames = _load_prev_tail_frames(prev_tail)
             if frames is not None and frames.shape[0] >= 1:
                 cond, _trim = _apply_motion_context(
                     cond, latent, video_vae, frames,
@@ -402,7 +353,7 @@ class MiniMaxRefGuide(io.ComfyNode):
             else:
                 log.warning(
                     f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
-                    f"skipped: {prev_paths[0]!r} could not be decoded")
+                    f"skipped: {prev_tail} could not be decoded")
 
         # 3) 其他段：不处理 prev_tail，直接输出普通条件
         return io.NodeOutput(cond, latent, frame_rate)

@@ -226,12 +226,10 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
             return web.json_response({"success": False, "error": "subject_data must be an object"}, status=400)
         if not raw_prompt.strip():
             return web.json_response({"success": False, "error": "raw_prompt must be an object"}, status=400)
-        last_frame_path = data.get("last_frame_path", "") or ""
         timeline_segment = data.get("timeline_segment", None)
         result = build_h3_subject_bindings(
-            subject_data,
-            raw_prompt,
-            last_frame_path=last_frame_path,
+            subject_data=subject_data,
+            raw_prompt=raw_prompt,
             timeline_segment=timeline_segment,
         )
         return web.json_response({"success": True, "data": result})

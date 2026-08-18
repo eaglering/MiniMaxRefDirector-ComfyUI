@@ -355,7 +355,6 @@ export function TransferPanel({ director }) {
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
-  const [imageVersion, setImageVersion] = useState(0); // 首帧/尾帧图回写计数（驱动资源条预览刷新）
 
   const leftRef = useRef(null);
   const rightRef = useRef(null);
@@ -471,7 +470,7 @@ export function TransferPanel({ director }) {
       setResources(parseResources(rightText, subjects));
     }, 500);
     return () => clearTimeout(debounceRef.current);
-  }, [rightText, subjects, addVersion, imageVersion]);
+  }, [rightText, subjects, addVersion]);
 
   // 右侧 H3 JSON / 主体 / 当前选中段 / 时间轴变化时 debounce 请求后端
   // /h3/build_subject_bindings（替代前端 buildFirstFramePayload 的绑定组装）。
@@ -522,7 +521,6 @@ export function TransferPanel({ director }) {
       const body = {
         subject_data: { subjects: subjects || [] },
         raw_prompt: rightText,
-        last_frame_path: lastFramePath(),
         timeline_segment: seg
           ? {
               type: seg.type,
@@ -552,18 +550,13 @@ export function TransferPanel({ director }) {
     }
   };
 
-  const srcOf = (s) => s?.imageB64 || s?.imgObj?.src || "";
+      const srcOf = (s) => s?.imageB64 || s?.imgObj?.src || "";
   const firstFramePath = () => {
     const segs = director?.timeline?.segments || [];
-    return srcOf((segs?.[director.selectedIndex] || null));
+    if (segs?.[director.selectedIndex]?.type === "image")
+      return srcOf((segs?.[director.selectedIndex] || null));
+    return null;
   };
-  const lastFramePath = () => {
-    const segs = director?.timeline?.segments || [];
-    return srcOf((segs?.[director.selectedIndex+1] || null));
-  };
-
-
-
 
   // Motion Context 开关：更新 timeline_data 对应字段。
   // 提示词优化后并入 detailed_description，文字 / 视频节点不再写任何 shot 字段。
@@ -755,10 +748,6 @@ export function TransferPanel({ director }) {
 
   function parseResources(text, subjectsList) {
     const out = [];
-    const first = firstFramePath();
-    const last = lastFramePath();
-    if (first) out.push({ key: "first", label: "首帧", src: first });
-    if (last) out.push({ key: "last", label: "尾帧", src: last });
     const re = /<(?:@|#)([^>:]+)(?::[^>]*)?>/g;
     const used = new Set();
     let m;
@@ -865,7 +854,7 @@ export function TransferPanel({ director }) {
       <div class="tr-resources" style=${S.resources}>
         ${
           resources.length === 0
-            ? html`<div style=${S.hint}>资源引用（首帧 / 尾帧 / 主体 / 手动添加主体）会显示在这里</div>`
+            ? html`<div style=${S.hint}>资源引用（主体 / 手动添加主体）会显示在这里</div>`
             : resources.map(r => {
                 const hasImg = !!r.src;
                 const isAudio = !hasImg || !!r.audio;

@@ -4,11 +4,65 @@ import os
 import re
 import logging
 
+import folder_paths
+import torch
+from PIL import Image
+
 from .image import load_image_tensor
 from .llm import generate_prompt_with_api, generate_prompt_with_llama
+from .path import resolve_input_path
 from .utils import find_index, parse_generated_json
 
+try:
+    from comfy_api.latest import VideoFromFile
+except ImportError:  # pragma: no cover
+    from comfy_api.latest._input_impl import VideoFromFile
+
 log = logging.getLogger(__name__)
+
+def _save_frame_tensor(frame, out_path: str) -> None:
+    """把 H3 解码出的一帧 [H, W, C] float 张量保存为 PNG。"""
+    arr = (frame.clamp(0.0, 1.0) * 255.0).round().to(torch.uint8).cpu().numpy()
+    Image.fromarray(arr).save(out_path)
+
+def _extract_video_frames(video_path: str, video_start: int, video_duration: int):
+    """从视频文件中提取首帧和尾帧图片路径。
+
+    首帧位置 = video_start，尾帧位置 = video_start + video_duration（越界时取最后一帧）。
+    返回 (首帧路径, 尾帧路径)；任一提取/保存失败时对应路径返回 ""。
+    """
+    try:
+        abs_path = resolve_input_path(video_path)
+        if not abs_path:
+            log.warning(f"[MiniMaxRefDirector] video file not found: {video_path!r}")
+            return "", ""
+        frames = VideoFromFile(abs_path).get_components().images  # [N, H, W, C]
+    except Exception as exc:
+        log.warning(f"[MiniMaxRefDirector] failed to load video {video_path!r}: {exc}")
+        return "", ""
+
+    total = frames.shape[0]
+    if total <= 0:
+        return "", ""
+
+    first_idx = max(0, min(int(video_start or 0), total - 1))
+    last_idx = max(0, min(int(video_start or 0) + int(video_duration or 0), total - 1))
+
+    try:
+        out_dir = os.path.join(folder_paths.get_temp_directory(), "minimaxrefdirector")
+        os.makedirs(out_dir, exist_ok=True)
+        stem = os.path.splitext(os.path.basename(abs_path))[0]
+        first_path = os.path.join(out_dir, f"{stem}_first.png")
+        last_path = os.path.join(out_dir, f"{stem}_last.png")
+        _save_frame_tensor(frames[first_idx], first_path)
+        if last_idx == first_idx:
+            last_path = ""
+        else:
+            _save_frame_tensor(frames[last_idx], last_path)
+        return first_path, last_path
+    except Exception as exc:
+        log.warning(f"[MiniMaxRefDirector] failed to save extracted frames from {video_path!r}: {exc}")
+        return "", ""
 
 # 图像分析
 def image_analysis(gguf_path: str, mmproj_path: str, prompt: str, 
@@ -166,7 +220,6 @@ def _extract_h3_mentions(prompt_json: dict) -> dict:
 def build_h3_subject_bindings(
     subject_data: dict,
     raw_prompt: str,
-    last_frame_path: str = "",
     timeline_segment: dict|None = None,
 ) -> dict:
     """Match <@name> / <#name:dialogue> placeholders against subject data and build H3 bindings.
@@ -301,13 +354,6 @@ def build_h3_subject_bindings(
         index += 1
         subjects_out.append(subj)
 
-    if last_frame_path:
-        label = f"<Picture {index}>"
-        subject_definitions.append(f"{label} is the last frame of the target video.")
-        retention_analysis.append(f"{label} (last frame of the target video): fully_preserved.")
-        index += 1
-        images.append(last_frame_path)
-
     data = {
         "subjects": subjects_out,
         "subject_definitions": "\n".join(subject_definitions),
@@ -328,16 +374,63 @@ def build_h3_prompt(
     global_prompt: str,
     subject_data: dict,
     raw_prompt: str,
-    last_frame_path: str = "",
-    timeline_segment: dict|None = None
+    timeline_segment: dict|None = None,
+    next_timeline_segment: dict|None = None
 ) -> dict:
-    prompt_res = build_h3_subject_bindings(subject_data=subject_data, raw_prompt=raw_prompt,
-                                           last_frame_path=last_frame_path, timeline_segment=timeline_segment)
-    mapping = prompt_res.get("mapping", {})
+    prompt_res = build_h3_subject_bindings(subject_data=subject_data, raw_prompt=raw_prompt, timeline_segment=timeline_segment)
+
     subject_definitions = prompt_res.get("subject_definitions", "")
     retention_analysis = prompt_res.get("retention_analysis", "")
     detailed_description = prompt_res.get("detailed_description", "")
+    images = prompt_res.get("images", [])
 
+    if timeline_segment.get("type", "text") == "video":
+        video_path = timeline_segment.get("imageFile", "")
+        video_start = timeline_segment.get("trimStart", 1)
+        video_duration = timeline_segment.get("length", 1)
+        # 视频段：获取 mp4 的首帧和尾帧图片路径（首帧位置=video_start，尾帧位置=video_start+video_duration）
+        video_first_frame_path, video_last_frame_path = _extract_video_frames(video_path, video_start, video_duration)
+        if video_first_frame_path:
+            label = f"<Picture {index}>"
+            subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
+            retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
+            index += 1
+            images.append(video_first_frame_path)
+        if video_last_frame_path:
+            label = f"<Picture {index}>"
+            subject_definitions = subject_definitions + f"\n{label} is the last frame of the target video."
+            retention_analysis = retention_analysis + f"\n{label}(last frame of the target video): fully_preserved."
+            index += 1
+            images.append(video_last_frame_path)
+    else:
+        if timeline_segment.get("type", "text") == "image":
+            label = f"<Picture {index}>"
+            subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
+            retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
+            index += 1
+            images.append(timeline_segment.get("imageFile"))
+
+        if timeline_segment.get("autoEndFrame", False) and next_timeline_segment is not None:
+            if next_timeline_segment.get("type", "text") == "video":
+                    video_path = next_timeline_segment.get("imageFile", "")
+                    video_start = next_timeline_segment.get("trimStart", 1)
+                    video_duration = next_timeline_segment.get("length", 1)
+                    # 视频段：获取 mp4 的首帧和尾帧图片路径（首帧位置=video_start，尾帧位置=video_start+video_duration）
+                    video_first_frame_path, video_last_frame_path = _extract_video_frames(video_path, video_start, video_duration)
+                    if video_first_frame_path:
+                        label = f"<Picture {index}>"
+                        subject_definitions = subject_definitions + f"\n{label} is the last frame of the target video."
+                        retention_analysis = retention_analysis + f"\n{label} (last frame of the target video): fully_preserved."
+                        index += 1
+                        images.append(video_first_frame_path)
+            elif next_timeline_segment.get("type", "text") == "image":
+                label = f"<Picture {index}>"
+                subject_definitions = subject_definitions + f"\n{label} is the last frame of the target video."
+                retention_analysis = retention_analysis + f"\n{label} (last frame of the target video): fully_preserved."
+                index += 1
+                images.append(timeline_segment.get("imageFile"))
+
+    mapping = prompt_res.get("mapping", {})
     detailed_description = _replace_mapping(detailed_description, mapping)
     overall_soundscape = prompt_res.get("overall_soundscape", "") or "N/A"
     overall_soundscape = _replace_mapping(overall_soundscape, mapping)
