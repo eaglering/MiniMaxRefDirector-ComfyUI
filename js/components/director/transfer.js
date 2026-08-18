@@ -372,6 +372,26 @@ const S = {
   },
   materialTileVid: { height: "101px", objectFit: "cover", flex: "0 0 auto", display: "block", pointerEvents: "none" },
   materialLabel: { fontSize: "9px", color: "#aaa", maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  // 双击素材打开的播放器弹窗（暗色风格，仿 Comfy 媒体查看器）
+  viewerOverlay: {
+    position: "fixed", inset: 0, zIndex: 100000,
+    background: "rgba(0,0,0,.75)", display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  viewerBox: {
+    maxWidth: "86vw", maxHeight: "86vh", background: "#1e1e1e", border: "1px solid #555",
+    borderRadius: "8px", boxShadow: "0 8px 30px rgba(0,0,0,.6)", overflow: "hidden",
+    display: "flex", flexDirection: "column",
+  },
+  viewerHead: {
+    display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px",
+    borderBottom: "1px solid #333", flex: "0 0 auto",
+  },
+  viewerTitle: {
+    flex: "1", fontSize: "12px", color: "#ccc", overflow: "hidden",
+    textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  viewerBtn: { padding: "4px 10px", fontSize: "11px", flex: "0 0 auto" },
+  viewerVideo: { maxWidth: "82vw", maxHeight: "74vh", display: "block", background: "#000" },
 };
 
 // ---------- 全局参数 ----------
@@ -423,6 +443,7 @@ export function TransferPanel({ director }) {
   const [materials, setMaterials] = useState([]); // [{ id, label, src }]
   const [selIds, setSelIds] = useState(() => new Set()); // 多选选中的素材 id 集合
   const [anchorId, setAnchorId] = useState(null); // Shift 范围选择锚点
+  const [viewer, setViewer] = useState(null); // 双击素材打开的播放器弹窗（当前查看的素材对象）
 
   const leftRef = useRef(null);
   const stripRef = useRef(null); // 素材条横向滚动容器
@@ -552,6 +573,14 @@ export function TransferPanel({ director }) {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [selIds]);
+
+  // 播放器弹窗：Esc 关闭（在弹窗打开期间全局监听）
+  useEffect(() => {
+    if (!viewer) return;
+    const onKey = (e) => { if (e.key === "Escape") setViewer(null); };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [viewer]);
 
   // 右侧内容持久化：每次编辑写回当前 segment 的 h3PromptJson，
   // 随 commitChanges 的 ...rest 序列化进 timeline_data（per-segment 存储）。
@@ -931,7 +960,7 @@ export function TransferPanel({ director }) {
       prev.map((m) => (m.id === id && (m.vw !== vw || m.vh !== vh) ? { ...m, vw, vh } : m))
     );
   };
-  // 右键下载视频：fetch 原始字节 → Blob → a[download] 触发，确保下载到的是视频
+  // 播放器弹窗里的下载：fetch 原始字节 → Blob → a[download] 触发，确保下载到的是视频
   // 文件而非 HTML 页面（直接 href 在新标签打开可能被当作 inline 播放）。
   const downloadMaterial = async (m) => {
     try {
@@ -1185,8 +1214,16 @@ export function TransferPanel({ director }) {
                       style=${sel ? Object.assign({}, S.materialCard, S.materialCardSel) : S.materialCard}
                       key=${m.id}
                       title=${m.label}
-                      onClick=${(e) => selectMaterial(m.id, e)}
-                      onContextMenu=${(e) => { e.preventDefault(); e.stopPropagation(); downloadMaterial(m); }}
+                      onClick=${(e) => {
+                        // 双击检测用 e.detail：onClick 中 setSelIds 会触发重渲染替换卡片 DOM，
+                        // 浏览器派发的 dblclick 事件会因此丢失，故不用 onDoubleClick。
+                        if (e.detail >= 2) {
+                          e.stopPropagation();
+                          setViewer(m);
+                        } else {
+                          selectMaterial(m.id, e);
+                        }
+                      }}
                       onMouseEnter=${playAll}
                       onMouseLeave=${stopAll}
                     >
@@ -1198,6 +1235,24 @@ export function TransferPanel({ director }) {
           }
         </div>
       </div>
+
+      ${
+        viewer
+          ? html`
+            <div class="tr-viewer-overlay" style=${S.viewerOverlay} onClick=${(e) => { if (e.target === e.currentTarget) setViewer(null); }}>
+              <div class="tr-viewer-box" style=${S.viewerBox}>
+                <div style=${S.viewerHead}>
+                  <span style=${S.viewerTitle} title=${viewer.label}>${viewer.label}</span>
+                  <button class="mrd-pr-btn" style=${S.viewerBtn} title="下载视频" onClick=${() => downloadMaterial(viewer)}>下载</button>
+                  <button class="mrd-pr-btn" style=${S.viewerBtn} title="在新标签页打开" onClick=${() => window.open(viewer.src, "_blank")}>打开</button>
+                  <button class="mrd-pr-btn" style=${S.viewerBtn} title="关闭 (Esc)" onClick=${() => setViewer(null)}>关闭</button>
+                </div>
+                <video src=${viewer.src} controls autoplay playsinline style=${S.viewerVideo}></video>
+              </div>
+            </div>
+          `
+          : null
+      }
 
       ${
         menu
