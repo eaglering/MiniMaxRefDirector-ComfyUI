@@ -325,6 +325,25 @@ class MiniMaxRefGuide(io.ComfyNode):
         )
 
         trim_frames: int = 0
+        # 图片段 + imageFile：把静态图重复成 8 帧作为 motion context pinned 帧，
+        # 让本段从该图开始运动（H3 节点会按 VAE 网格把帧数吸附到合法值，如 5 帧）。
+        if entry.get("type") == "image" and entry.get("imageFile"):
+            img_src = entry["imageFile"]
+            if isinstance(img_src, (tuple, list)):  # VHS_FILENAMES 元组
+                img_src = _vhs_tuple_path(img_src)
+            img_frames = load_image_tensor(img_src)
+            if img_frames is not None and img_frames.shape[0] >= 1:
+                img_frames = img_frames.repeat(context_length, 1, 1, 1)  # [8, H, W, C]
+                cond, trim_frames = _apply_motion_context(
+                    cond, latent, video_vae, img_frames,
+                    context_length=context_length, audio_vae=audio_vae,
+                )
+                log.info(f"[MiniMaxRefGuide] guide_index={idx} image motion context "
+                         f"({img_frames.shape[0]} frames from {img_src})")
+            else:
+                log.warning(f"[MiniMaxRefGuide] guide_index={idx} image motion context "
+                            f"skipped: failed to load image {img_src!r}")
+
         # 文本段 + motionContext：用 prev_tail 视频，motion context 处理
         if entry.get("type") == "text" and prev_tail and entry.get("motionContext"):
             log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail={prev_tail}")

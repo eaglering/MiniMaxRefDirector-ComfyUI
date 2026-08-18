@@ -340,7 +340,7 @@ const S = {
   refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
   // 视频素材条（接收后端 minimax_ref_video_progress 通知）：面板底部、x 轴排列、可横向滚动
   materialsWrap: {
-    borderTop: "1px solid #333", padding: "6px 0 2px", flex: "0 0 auto",
+    borderTop: "1px solid #333", padding: "6px 0 2px", flex: "0 0 auto", marginBottom: "20px",
     display: "flex", flexDirection: "column", gap: "4px", backgroundColor: "rgb(30, 30, 30)"
   },
   materialsHead: { display: "flex", alignItems: "center", gap: "8px", padding: "0 2px", flex: "0 0 auto", margin: "6px 0px 2px 8px", color: "#666" },
