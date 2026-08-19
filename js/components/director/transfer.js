@@ -236,6 +236,35 @@ function removeShotField(text, key) {
 // id 需唯一（同时用作 React key 与多选集合依据），故在 URL 后附加自增序号。
 let materialSeq = 0;
 
+// 素材持久化 key：按 Director 节点 id 隔离（单 tab / 多 tab 均适用）。
+// 多 tab 间的串扰由通知层的 director_node_id 精确过滤解决（见 onAddMaterial），
+// 不再依赖不稳定的 workflow/tab 探测（探测依赖全局激活 tab，多 tab 下各组件
+// 拿到的标识不一致，反而导致 key 错乱、素材互相覆盖）。
+function materialStorageKey(director) {
+  return "mrd_materials_" + (director?.node?.id || "default");
+}
+
+// 兼容旧版本迁移：上一版曾用 `mrd_materials_<nodeId>_<tabKey>` 存储，
+// 升级后新 key 读不到时，从旧 key 迁移（避免素材“丢失”）。
+function migrateLegacyMaterials(director) {
+  try {
+    const prefix = "mrd_materials_" + (director?.node?.id || "default") + "_";
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf(prefix) === 0) {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) return { raw, list };
+        }
+      }
+    }
+  } catch (e) {
+    // 迁移失败按无旧数据处理
+  }
+  return null;
+}
+
 // 长按拖出预取缓存：素材 id -> File。
 // HTML5 DnD 的 dataTransfer.files 只能在 dragstart 里同步写入，而视频是异步 fetch 得到的
 // Blob，因此先长按 ~400ms 触发预取并缓存为 File，随后原生拖动时在 dragstart 中同步注入。
@@ -482,7 +511,7 @@ export function TransferPanel({ director }) {
   // 只有点击删除才会移除。
   const [materials, setMaterials] = useState(() => {
     try {
-      const key = "mrd_materials_" + (director?.node?.id || "default");
+      const key = materialStorageKey(director);
       const raw = localStorage.getItem(key);
       if (raw) {
         const list = JSON.parse(raw);
@@ -496,6 +525,19 @@ export function TransferPanel({ director }) {
           if (maxSeq > materialSeq) materialSeq = maxSeq;
           return list;
         }
+      }
+      // 兼容上一版带 tab 后缀的 key：读到后迁移到当前 key，避免素材“丢失”
+      const legacy = migrateLegacyMaterials(director);
+      if (legacy) {
+        const list = legacy.list;
+        let maxSeq = 0;
+        for (const m of list) {
+          const n = parseInt(String(m.id).split("#").pop(), 10);
+          if (!isNaN(n) && n > maxSeq) maxSeq = n;
+        }
+        if (maxSeq > materialSeq) materialSeq = maxSeq;
+        try { localStorage.setItem(key, JSON.stringify(list)); } catch (e2) { /* ignore */ }
+        return list;
       }
     } catch (e) {
       console.warn("[Transfer] 素材恢复失败:", e);
@@ -594,11 +636,32 @@ export function TransferPanel({ director }) {
   // 接收后端 send_sync("minimax_ref_video_progress", ...) 通知：
   //  status="add_material" & type="video" 时把 imageFile（VHS_FILENAMES）追加到视频素材条。
   // 新视频沿 x 轴依次添加（追加到末尾），并自动滚动到最新素材使其可见。
+  // 多 tab / 多节点过滤：后端通知携带 director_node_id（即本 Director 节点 id），
+  // 精确匹配才接收；旧版后端无该字段时回退为“当前 graph 中存在来源节点”才接收，
+  // 避免 ComfyUI 工作台其他 tab 的节点执行/合并时把视频串收到本素材条。
   useEffect(() => {
     const onAddMaterial = (e) => {
       if (!aliveRef.current) return;
       const d = e && e.detail ? e.detail : {};
       if (d.status !== "add_material" || d.type !== "video") return;
+      const myNodeId = director?.node?.id;
+      const hasMine = myNodeId !== undefined && myNodeId !== null;
+      if (d.director_node_id !== undefined && d.director_node_id !== null) {
+        // 新后端：精确匹配 Director 节点 id
+        if (!hasMine || String(d.director_node_id) !== String(myNodeId)) return;
+      } else if (d.node_id !== undefined && d.node_id !== null && hasMine) {
+        // 旧版后端兜底：node_id 是 Guide 节点 id，无法直接比对，
+        // 仅当当前 graph 中存在该节点时接收（来源属于本工作流）
+        let found = false;
+        try {
+          const g = (typeof window !== "undefined" && window.app) ? window.app.graph : null;
+          if (g && Array.isArray(g._nodes)) {
+            found = g._nodes.some((n) => String(n.id) === String(d.node_id));
+          }
+        } catch (_e) { /* ignore */ }
+        if (!found) return;
+      }
+      // 无任何来源标识的极旧版本通知：直接接收（单 tab 正常行为）
       const items = toVideoItems(d.imageFile);
       if (!items.length) return;
       setMaterials((prev) => {
@@ -631,7 +694,7 @@ export function TransferPanel({ director }) {
   useEffect(() => {
     if (!aliveRef.current || !director?.node?.id) return;
     try {
-      localStorage.setItem("mrd_materials_" + director.node.id, JSON.stringify(materials));
+      localStorage.setItem(materialStorageKey(director), JSON.stringify(materials));
     } catch (e) {
       console.warn("[Transfer] 素材保存失败:", e);
     }
@@ -1133,7 +1196,10 @@ export function TransferPanel({ director }) {
       const res = await api.fetchApi("/minimax_ref/api/h3/merge_videos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths: sel.map((m) => m.src) }),
+        body: JSON.stringify({
+          paths: sel.map((m) => m.src),
+          node_id: director?.node?.id,
+        }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "合并失败");
@@ -1639,7 +1705,13 @@ export function TransferPanel({ director }) {
             ></textarea>
           </div>
         </div>
-
+        ${
+          busy
+            ? html`<div style=${S.status}>生成中…</div>`
+            : error
+              ? html`<div style=${S.error}>${error}</div>`
+              : html`<div style=${S.status}></div>`
+        }
         <div style=${{ borderTop: "1px solid #333", marginTop: "8px", paddingTop: "6px", display: "flex", flexDirection: "column", gap: "4px" }}>
           <div style=${{ fontSize: "10px", fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 2px 2px" }}>添加主体（additionSubject）</div>
           <div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>

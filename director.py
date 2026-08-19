@@ -124,7 +124,21 @@ class MiniMaxRefDirector(io.ComfyNode):
         ).hexdigest()
         if cache_key in _director_cache:
             log.info("[MiniMaxRefDirector] cache hit (loop re-reference) -> skip recompute")
-            return _director_cache[cache_key]
+            cached = _director_cache[cache_key]
+            # 缓存可能来自同一次 prompt 内较早的调度（同节点），无需修正；
+            # 若被不同节点复用（多实例同输入），仍按当前执行节点修正归属
+            try:
+                from comfy_execution.utils import get_executing_context
+                _ctx = get_executing_context()
+                if _ctx is not None and getattr(_ctx, "node_id", None) is not None:
+                    guide = cached.args[0]
+                    if isinstance(guide, dict) and guide.get("_director_node_id") != _ctx.node_id:
+                        guide = dict(guide)
+                        guide["_director_node_id"] = _ctx.node_id
+                        cached = io.NodeOutput(guide, *cached.args[1:])
+            except Exception:
+                pass
+            return cached
 
         # config 是可选输入：前端首帧 subgraph 中 director 不连接 config，需容错
         global_prompt = config.get("global_prompt", "") if config else ""
@@ -208,6 +222,16 @@ class MiniMaxRefDirector(io.ComfyNode):
         out_w, out_h = calc_resolution(outpu_resolution, million_pixels)
 
         # --- Assemble guide_data ---
+        # 附带 Director 自身节点 id：Guide 节点执行时可借此把进度/素材通知关联回
+        # 前端对应的 Director 节点，多 tab / 多实例时按节点精确过滤，避免串收。
+        director_node_id = None
+        try:
+            from comfy_execution.utils import get_executing_context
+            _ctx = get_executing_context()
+            if _ctx is not None:
+                director_node_id = getattr(_ctx, "node_id", None)
+        except Exception:
+            director_node_id = None
         guide_data = {
             "width": out_w,
             "height": out_h,
@@ -215,6 +239,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             "global_prompt": global_prompt,
             "subject_data": subject,
             "timeline_data": guide_timeline,
+            "_director_node_id": director_node_id,
         }
 
         log.info(

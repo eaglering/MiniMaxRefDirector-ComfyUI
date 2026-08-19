@@ -71,11 +71,12 @@ def _vhs_tuple_path(item):
         return filename
     
 
-def _send_progress(payload):
+def _send_progress(payload, director_node_id=None):
     """send_sync 通知 director 前端更新 video track（失败仅告警，不影响执行）。
 
-    通知会附加当前执行节点的 node_id；前端据此过滤，避免 ComfyUI 工作台
-    多 tab / 多节点同时监听同一事件时互相串收素材。
+    通知携带 director_node_id（由 Director 写入 guide_data["_director_node_id"]，
+    调用方从 guide_data 取出后传入），前端 Director 组件据此精确过滤，
+    避免 ComfyUI 工作台多 tab / 多节点同时监听同一事件时互相串收素材。
     """
     try:
         from server import PromptServer
@@ -83,15 +84,19 @@ def _send_progress(payload):
         from comfy_api.latest import server as _comfy_server
         PromptServer = _comfy_server.PromptServer
     try:
-        # 在节点 execute 期间能拿到当前执行上下文（含 node_id）
-        try:
-            from comfy_execution.utils import get_executing_context
-            ctx = get_executing_context()
-            if ctx is not None and getattr(ctx, "node_id", None) is not None:
-                payload = dict(payload)
-                payload["node_id"] = ctx.node_id
-        except Exception:
-            pass
+        payload = dict(payload)
+        if director_node_id is not None:
+            payload["director_node_id"] = director_node_id
+        else:
+            # 兜底：旧版 guide_data（无 _director_node_id）时，附加当前执行节点 id
+            # （Guide 节点 id），前端若无法匹配仍能拿到来源节点信息
+            try:
+                from comfy_execution.utils import get_executing_context
+                ctx = get_executing_context()
+                if ctx is not None and getattr(ctx, "node_id", None) is not None:
+                    payload["node_id"] = ctx.node_id
+            except Exception:
+                pass
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
     except Exception:
         log.warning("[MiniMaxRefGuide] failed to send progress notification", exc_info=True)
@@ -306,13 +311,14 @@ class MiniMaxRefGuide(io.ComfyNode):
         idx = int(guide_index)
         total = len(timeline)
 
-        # 资源更新通知
+        # 资源更新通知：把生成/合并的视频追加到对应 Director 前端素材条
+        _director_id = guide_data.get("_director_node_id") if isinstance(guide_data, dict) else None
         if prev_tail:
             _send_progress({
                 "status": "add_material",
                 "type": "video",
                 "imageFile": prev_tail
-            })
+            }, director_node_id=_director_id)
 
         # 越界轮：MiniMaxRefDirector 故意把 segment_count+1 接到 forLoopStart.total，
         # 多出的这一轮只用于在 prev_tail 传入时发送 add_material 通知（见上方）。

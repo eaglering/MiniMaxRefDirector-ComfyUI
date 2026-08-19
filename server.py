@@ -746,7 +746,7 @@ async def merge_videos_api(request: web.Request) -> web.Response:
         if not isinstance(srcs, list) or len(srcs) < 2:
             return web.json_response({"success": False, "error": "请至少选择 2 段视频素材"}, status=400)
 
-        # 前端传入的节点 id：合并产物的 add_material 通知仅该节点接收，
+        # 前端传入的 Director 节点 id：合并产物的 add_material 通知仅该节点接收，
         # 避免多 tab / 多节点串收
         node_id = data.get("node_id")
 
@@ -797,7 +797,7 @@ async def merge_videos_api(request: web.Request) -> web.Response:
         file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
         payload = {"status": "add_material", "type": "video", "imageFile": file_info}
         if node_id is not None:
-            payload["node_id"] = node_id
+            payload["director_node_id"] = node_id
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
         return web.json_response({"success": True, "name": f"whatdreamscost/{name}", "file": file_info})
     except Exception as e:
