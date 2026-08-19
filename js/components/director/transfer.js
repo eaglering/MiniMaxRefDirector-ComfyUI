@@ -387,6 +387,14 @@ const S = {
     lineHeight: "14px", padding: "0 5px", borderRadius: "8px", pointerEvents: "none",
     boxShadow: "0 0 4px rgba(0,0,0,.5)",
   },
+  // 合并选中序号角标：视频卡片左上角，按用户点击选中的先后顺序显示 1/2/3…
+  materialOrderBadge: {
+    position: "absolute", top: "4px", left: "4px", zIndex: 2,
+    background: "rgba(92, 157, 255, .92)", color: "#fff", fontSize: "10px",
+    fontWeight: "bold", lineHeight: "16px", minWidth: "16px", textAlign: "center",
+    padding: "0 5px", borderRadius: "8px", pointerEvents: "none",
+    boxShadow: "0 0 4px rgba(0,0,0,.5)",
+  },
   dragHint: {
     margin: "0 8px 4px", fontSize: "11px", color: "#7fd88a",
     background: "rgba(40, 167, 69, .12)", border: "1px solid rgba(62, 207, 95, .35)",
@@ -495,6 +503,9 @@ export function TransferPanel({ director }) {
     return [];
   }); // [{ id, label, src }]
   const [selIds, setSelIds] = useState(() => new Set()); // 多选选中的素材 id 集合
+  // 选中顺序数组：按用户点击选中的先后顺序记录 id，作为合并时的拼接顺序；
+  // Shift 范围选择 / Ctrl 追加的 id 追加到末尾，取消选中则移除。
+  const [selOrder, setSelOrder] = useState(() => []);
   const [anchorId, setAnchorId] = useState(null); // Shift 范围选择锚点
   const [viewer, setViewer] = useState(null); // 双击素材打开的播放器弹窗（当前查看的素材对象）
   const [dragReadyId, setDragReadyId] = useState(null); // 长按预取完成、可拖出到其他上传框的素材 id
@@ -637,6 +648,7 @@ export function TransferPanel({ director }) {
       e.stopPropagation();
       setMaterials((prev) => prev.filter((m) => !selIds.has(m.id)));
       setSelIds(new Set());
+      setSelOrder([]);
       setAnchorId(null);
     };
     window.addEventListener("keydown", onKeyDown, true);
@@ -1049,32 +1061,42 @@ export function TransferPanel({ director }) {
       window.open(m.src, "_blank");
     }
   };
+  // 根据新选中集合维护顺序数组：保留原顺序中仍选中的 id，
+  // 新加入的 id 按追加顺序排到末尾，取消选中的 id 移除。
+  const recomputeSelOrder = (next, prevOrder) => {
+    const out = prevOrder.filter((x) => next.has(x));
+    for (const x of next) {
+      if (!out.includes(x)) out.push(x);
+    }
+    return out;
+  };
+
   // 点击选中素材：单击单选；Ctrl/Cmd 点击切换；Shift 点击从锚点到当前项范围选择。
+  // 选中顺序（selOrder）即合并时的拼接顺序，序号显示在视频卡片左上角。
   // 新素材固定宽度沿 x 轴吸附排列（见 JSX 中 flex 布局 + 滚动容器）。
   const selectMaterial = (id, e) => {
     e.stopPropagation();
     const ctrl = e.ctrlKey || e.metaKey;
     const shift = e.shiftKey;
     const ids = materials.map((m) => m.id);
-    setSelIds((prev) => {
-      const next = new Set(prev);
-      if (shift && anchorId && prev.size > 0 && ids.includes(anchorId)) {
-        // Shift 范围选择：anchorId -> id
-        const i0 = ids.indexOf(anchorId);
-        const i1 = ids.indexOf(id);
-        const [a, b] = i0 < i1 ? [i0, i1] : [i1, i0];
-        for (let i = a; i <= b; i++) next.add(ids[i]);
-        return next;
-      }
-      if (ctrl) {
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      }
+    const prev = new Set(selIds);
+    const next = new Set(prev);
+    if (shift && anchorId && prev.size > 0 && ids.includes(anchorId)) {
+      // Shift 范围选择：anchorId -> id（范围外的选中保持原顺序）
+      const i0 = ids.indexOf(anchorId);
+      const i1 = ids.indexOf(id);
+      const [a, b] = i0 < i1 ? [i0, i1] : [i1, i0];
+      for (let i = a; i <= b; i++) next.add(ids[i]);
+    } else if (ctrl) {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
       // 单击：若当前已仅选中该素材，再点一次取消选中；否则单选它
-      if (prev.size === 1 && prev.has(id)) return new Set();
-      return new Set([id]);
-    });
+      if (prev.size === 1 && prev.has(id)) { next.clear(); }
+      else { next.clear(); next.add(id); }
+    }
+    setSelIds(next);
+    setSelOrder(recomputeSelOrder(next, selOrder));
     if (!shift) setAnchorId(id);
   };
 
@@ -1089,6 +1111,7 @@ export function TransferPanel({ director }) {
     if (dragReadyId && selIds.has(dragReadyId)) setDragReadyId(null);
     setMaterials((prev) => prev.filter((m) => !selIds.has(m.id)));
     setSelIds(new Set());
+    setSelOrder([]);
     setAnchorId(null);
   };
 
@@ -1097,7 +1120,14 @@ export function TransferPanel({ director }) {
   // 素材条会自动追加合并结果（无需手动 setMaterials）。
   const mergeSelectedMaterials = async () => {
     if (selIds.size < 2 || mergeBusy) return;
-    const sel = materials.filter((m) => selIds.has(m.id));
+    // 按用户选中顺序（selOrder）取素材，保证合并拼接顺序与序号一致
+    const byId = new Map(materials.map((m) => [m.id, m]));
+    const sel = selOrder.map((x) => byId.get(x)).filter(Boolean);
+    // 兜底：selOrder 中缺失的选中素材按素材条顺序补到末尾（正常流程不会出现）
+    for (const m of materials) {
+      if (selIds.has(m.id) && !sel.some((s) => s.id === m.id)) sel.push(m);
+    }
+    if (sel.length < 2) return;
     setMergeBusy(true);
     try {
       const res = await api.fetchApi("/minimax_ref/api/h3/merge_videos", {
@@ -1424,7 +1454,7 @@ export function TransferPanel({ director }) {
           style=${S.materialsStrip}
           tabindex=${0}
           onKeyDown=${(e) => { if (e.key === "Delete") { e.preventDefault(); deleteSelectedMaterials(); } }}
-          onMouseDown=${(e) => { if (e.target === e.currentTarget) { setSelIds(new Set()); setAnchorId(null); } }}
+          onMouseDown=${(e) => { if (e.target === e.currentTarget) { setSelIds(new Set()); setSelOrder([]); setAnchorId(null); } }}
           onDragOver=${(e) => { e.preventDefault(); e.stopPropagation(); }}
           onDrop=${(e) => handleStripDrop(e)}
         >
@@ -1433,6 +1463,7 @@ export function TransferPanel({ director }) {
               ? html`<div style=${S.hint}>运行 MiniMaxRefGuide 后，各段生成的视频（prev_tail）会显示在这里</div>`
               : materials.map((m) => {
                   const sel = selIds.has(m.id);
+                  const orderNum = selOrder.indexOf(m.id) + 1; // 合并序号：0 表示未选中
                   const metaKnown = m.vw > 0 && m.vh > 0;
                   const isPortrait = metaKnown && m.vh > m.vw; // 竖屏（9:16 等）→ 重复平铺
                   const updateMeta = (e) => {
@@ -1512,6 +1543,7 @@ export function TransferPanel({ director }) {
                       onMouseEnter=${playAll}
                       onMouseLeave=${stopAll}
                     >
+                      ${orderNum > 0 ? html`<span style=${S.materialOrderBadge}>${orderNum}</span>` : null}
                       ${dragReady ? html`<span style=${S.materialReadyBadge}>可拖出</span>` : null}
                       ${preview}
                       <span style=${S.materialLabel}>${m.label}</span>

@@ -702,13 +702,23 @@ def _material_src_to_local_path(src: str) -> str | None:
 
 
 def _extract_merged_video_path(result) -> str | None:
-    """从 RefMergeVideosFromPaths.execute 的 io.NodeOutput 提取合并后视频路径。"""
-    raw = None
+    """从 RefMergeVideosFromPaths.execute 的 io.NodeOutput 提取合并后视频路径。
+
+    io.NodeOutput 没有 outputs 属性，其输出参数通过 .result（即 .args）暴露，
+    第一个参数是 Input.Video（VideoFromFile），真实文件路径取自 get_stream_source()。
+    """
+    raw = result
     try:
         if hasattr(result, "outputs") and result.outputs:
             raw = result.outputs[0]
+        elif hasattr(result, "result"):
+            res = result.result
+            if isinstance(res, (list, tuple)) and res:
+                raw = res[0]
     except Exception:
         pass
+    if isinstance(raw, str) and os.path.isfile(raw):
+        return raw
     if isinstance(raw, dict):
         p = raw.get("path")
         if isinstance(p, str) and os.path.isfile(p):
