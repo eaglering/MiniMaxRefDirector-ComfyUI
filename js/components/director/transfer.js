@@ -271,6 +271,7 @@ function migrateLegacyMaterials(director) {
 const materialFileCache = new Map();
 const LONG_PRESS_MS = 400; // 长按阈值
 const DRAG_MOVE_TOLERANCE = 10; // 长按期间移动超过该像素视为放弃长按（改为直接拖动/滑动）
+const CLICK_MOVE_TOLERANCE = 6; // 卡片 click 位移容忍：按下/松开位移超过该像素视为滑动而非点击
 
 // 将后端 send_sync("minimax_ref_video_progress", ...) 通知里的 imageFile
 // （VHS_FILENAMES：字符串 / 单对象 / 对象数组）解析为视频素材项 { id, label, src }。
@@ -556,6 +557,8 @@ export function TransferPanel({ director }) {
   const longPressRef = useRef(null); // 长按状态 { id, fired, x, y, timer }
   const suppressClickRef = useRef(false); // 长按松手后抑制随后的 click（避免误改选中）
   const dragHintTimerRef = useRef(null); // 提示自动消失定时器
+  const downPosRef = useRef(null); // 卡片 pointerdown 位置 { x, y }：区分点击与滑动/拖动（见卡片 onClick）
+  const stripDownPosRef = useRef(null); // 素材条空白处 pointerdown 位置：区分点击与滑动/拖动滚动
 
   const leftRef = useRef(null);
   const stripRef = useRef(null); // 素材条横向滚动容器
@@ -699,24 +702,6 @@ export function TransferPanel({ director }) {
       console.warn("[Transfer] 素材保存失败:", e);
     }
   }, [materials, director]);
-
-  // Del 键删除选中的视频素材（焦点在输入框 / textarea 时不触发，避免误删）
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.key !== "Delete") return;
-      const t = e.target;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (!selIds.size) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setMaterials((prev) => prev.filter((m) => !selIds.has(m.id)));
-      setSelIds(new Set());
-      setSelOrder([]);
-      setAnchorId(null);
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [selIds]);
 
   // 播放器弹窗：Esc 关闭（在弹窗打开期间全局监听）
   useEffect(() => {
@@ -1284,6 +1269,9 @@ export function TransferPanel({ director }) {
 
   const onMaterialPointerDown = (m, e) => {
     clearLongPress();
+    // 记录按下位置：click 时位移超过 CLICK_MOVE_TOLERANCE 视为滑动/拖动（如横向滚动素材条），
+    // 忽略该次 click，避免误取消/误改选中状态。
+    downPosRef.current = { x: e.clientX, y: e.clientY };
     // 统一走 ~400ms 长按计时：fired 只在按住满 LONG_PRESS_MS 后置真，
     // 快速单击/双击不会触发，避免吞掉 click（双击打开播放器）造成冲突。
     // 已缓存时 timer 到点直接就绪（无需再 fetch）；未缓存则异步预取。
@@ -1520,7 +1508,26 @@ export function TransferPanel({ director }) {
           style=${S.materialsStrip}
           tabindex=${0}
           onKeyDown=${(e) => { if (e.key === "Delete") { e.preventDefault(); deleteSelectedMaterials(); } }}
-          onMouseDown=${(e) => { if (e.target === e.currentTarget) { setSelIds(new Set()); setSelOrder([]); setAnchorId(null); } }}
+          onPointerDown=${(e) => {
+            if (e.target === e.currentTarget) {
+              stripDownPosRef.current = { x: e.clientX, y: e.clientY };
+            }
+          }}
+          onPointerUp=${(e) => {
+            const p = stripDownPosRef.current;
+            if (p) {
+              stripDownPosRef.current = null;
+              if (
+                e.target === e.currentTarget &&
+                Math.abs(e.clientX - p.x) <= CLICK_MOVE_TOLERANCE &&
+                Math.abs(e.clientY - p.y) <= CLICK_MOVE_TOLERANCE
+              ) {
+                setSelIds(new Set());
+                setSelOrder([]);
+                setAnchorId(null);
+              }
+            }
+          }}
           onDragOver=${(e) => { e.preventDefault(); e.stopPropagation(); }}
           onDrop=${(e) => handleStripDrop(e)}
         >
@@ -1588,6 +1595,17 @@ export function TransferPanel({ director }) {
                         // 长按松手后抑制一次 click，避免误改选中状态
                         if (suppressClickRef.current) {
                           suppressClickRef.current = false;
+                          return;
+                        }
+                        // 滑动/拖动（如横向滚动素材条、拖滚动条）时浏览器仍可能派发 click，
+                        // 按下/松开位移超过 CLICK_MOVE_TOLERANCE 则视为滑动而非点击，忽略本次 click。
+                        const dp = downPosRef.current;
+                        downPosRef.current = null;
+                        if (
+                          dp &&
+                          (Math.abs(e.clientX - dp.x) > CLICK_MOVE_TOLERANCE ||
+                            Math.abs(e.clientY - dp.y) > CLICK_MOVE_TOLERANCE)
+                        ) {
                           return;
                         }
                         // 双击检测用 e.detail：onClick 中 setSelIds 会触发重渲染替换卡片 DOM，

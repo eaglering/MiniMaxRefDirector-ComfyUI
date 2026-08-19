@@ -223,6 +223,7 @@ const MSCSS = `
     line-height: 1.4;
     box-sizing: border-box;
     outline: none;
+    height: 100%;
 }
 .ref-ms-global-prompt-input:focus {
     border-color: #888;
