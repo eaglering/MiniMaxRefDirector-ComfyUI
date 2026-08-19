@@ -1,75 +1,26 @@
+import hashlib
 import json
 import os
 import logging
 from comfy_api.latest import io
 
-from .lib import resolve_input_path
+from .lib.image import calc_resolution
+from .lib.prompt import build_h3_prompt
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")
+SubjectConfig = io.Custom("SUBJECT_CONFIG")
 
 log = logging.getLogger(__name__)
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_TEMPLATE = os.path.join(_PROJECT_ROOT, "prompt", "minimax_ref2v_template.txt")
 
-# Aspect ratio presets: (width_ratio, height_ratio)
-RESOLUTION_PRESETS = {
-    "1:1方形":   (1, 1),
-    "9:16竖屏":  (9, 16),
-    "16:9横屏":  (16, 9),
-    "3:2横屏":   (3, 2),
-    "2:3竖屏":   (2, 3),
-    "4:3横屏":   (4, 3),
-    "3:4竖屏":   (3, 4),
-    "21:9超宽":  (21, 9),
-}
+# director 是纯函数（同一组输入必得同一输出）。
+# 缓存兜底：Easy-Use forLoop 展开时，director 输出可能被 compare 的 link 引用而重复调度执行。
+# 同一次 prompt 内同一输入直接返回缓存，避免 build_h3_prompt / LLM 生成被重复计算。
+_director_cache: dict[str, io.NodeOutput] = {}
 
-
-def _calc_resolution(preset: str, million_pixels: float, divide_by=32) -> tuple[int, int]:
-    """Calculate width/height from aspect ratio and target megapixels.
-
-    Computes the long side first: long = sqrt(total_pixels * long_ratio / short_ratio),
-    snaps it to divide_by, then derives the short side from the snapped long side.
-    Uses round-half-up to avoid Python's banker's rounding.
-    """
-    ratios = RESOLUTION_PRESETS.get(preset, RESOLUTION_PRESETS["16:9横屏"])
-    w_ratio, h_ratio = ratios
-    total_pixels = million_pixels * 1_000_000
-
-    if total_pixels <= 0:
-        return divide_by, divide_by
-
-    def snap(v: float) -> int:
-        """Round-half-up and snap to nearest multiple of divide_by."""
-        return max(divide_by, int(v / divide_by + 0.5) * divide_by)
-
-    if w_ratio >= h_ratio:
-        # Landscape or square: width is the long side
-        w = (total_pixels * w_ratio / h_ratio) ** 0.5
-        w = snap(w)
-        h = snap(w * h_ratio / w_ratio)
-    else:
-        # Portrait: height is the long side
-        h = (total_pixels * h_ratio / w_ratio) ** 0.5
-        h = snap(h)
-        w = snap(h * w_ratio / h_ratio)
-
-    return int(w), int(h)
-
-
-def _read_template_file(path: str) -> str:
-    search_path = resolve_input_path(path) if path else _DEFAULT_TEMPLATE
-    if not search_path:
-        return "{user_prompt}"
-    try:
-        if os.path.isfile(search_path):
-            with open(search_path, "r", encoding="utf-8") as f:
-                result = f.read()
-                return result if result.find("{user_prompt}") != -1 else "{user_prompt}"
-    except Exception:
-        log.error("[MiniMaxRefDirector] Failed to read prompt_template file.")
-    return "{user_prompt}"
 
 class MiniMaxRefDirector(io.ComfyNode):
     """Timeline director with resolution config and guide_data output for MiniMax pipelines."""
@@ -79,16 +30,15 @@ class MiniMaxRefDirector(io.ComfyNode):
         return io.Schema(
             node_id="MiniMaxRefDirector",
             display_name="MiniMax Reference Director",
-            category="minimax",
+            category="minimaxrefdirector",
             description=(
                 "Timeline director that combines prompt scheduling, subject data, "
                 "resolution configuration, and prompt templates into a unified guide_data output."
             ),
             inputs=[
-                SubjectData.Input("subject_data"),
-                io.String.Input(
-                    "global_prompt", multiline=True, default="", force_input=True, optional=True,
-                    tooltip="Conditions the entire video. Anchors persistent characters, objects, and scene context.",
+                SubjectConfig.Input(
+                    "config", optional=True,
+                    tooltip="Unified config from MiniMax Reference Subject (VLM opts + subject data).",
                 ),
                 io.Float.Input(
                     "start_second", default=0.0, min=0.0, max=1000.0, step=0.01,
@@ -113,10 +63,6 @@ class MiniMaxRefDirector(io.ComfyNode):
                 io.Int.Input(
                     "duration_frames", default=120, min=1, max=10000, step=1,
                     tooltip="Total timeline length in pixel-space frames. Used by the editor for visual scale only.",
-                ),
-                io.String.Input(
-                    "prompt_template", default="",
-                    tooltip="Path to a prompt template file. Defaults to prompt/minimax_ref2v_template.txt if empty. Use {user_prompt} placeholder where the assembled prompt should be inserted.",
                 ),
                 io.String.Input(
                     "timeline_data", default="",
@@ -148,26 +94,61 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "million_pixels", default=0.6, min=0.1, max=4.0, step=0.1, optional=True,
                     tooltip="Million pixels target. 1.0 MP ≈ 1024×1024.",
                 ),
+                # --- 视频生成已迁移到 MiniMaxRefGuide 节点（Easy-Use forLoop 内按段调用） ---
+                # director 仅负责组装 guide_data；model/clip/video_vae/audio_vae 由外部自行接入采样链路。
             ],
             outputs=[
                 GuideData.Output(display_name="guide_data"),
-                io.Int.Output(display_name="segment_count", tooltip="Number of timeline segments."),
+                io.Int.Output(display_name="segment_count"),
             ],
         )
 
     @classmethod
-    def execute(cls, subject_data=None, global_prompt="", start_second=0.0, end_second=5.0,
-                duration_seconds=5.0, start_frame=0, end_frame=120, duration_frames=120,
-                prompt_template="", timeline_data="", local_prompts="", segment_lengths="",
-                frame_rate=24, display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
+    def execute(cls, config=None,
+                start_second=0.0, end_second=5.0, duration_seconds=5.0, 
+                start_frame=0, end_frame=120, duration_frames=120, timeline_data="", 
+                local_prompts="", segment_lengths="", frame_rate=24, 
+                display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
+        # --- 缓存键：全量输入序列化（director 为纯函数，同一输入必得同一输出） ---
+        key_data = {
+            "config": config,
+            "start_second": start_second, "end_second": end_second, "duration_seconds": duration_seconds,
+            "start_frame": start_frame, "end_frame": end_frame, "duration_frames": duration_frames,
+            "timeline_data": timeline_data, "local_prompts": local_prompts, "segment_lengths": segment_lengths,
+            "frame_rate": frame_rate, "display_mode": display_mode,
+            "outpu_resolution": outpu_resolution, "million_pixels": million_pixels,
+        }
+        cache_key = hashlib.md5(
+            json.dumps(key_data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        ).hexdigest()
+        if cache_key in _director_cache:
+            log.info("[MiniMaxRefDirector] cache hit (loop re-reference) -> skip recompute")
+            cached = _director_cache[cache_key]
+            # 缓存可能来自同一次 prompt 内较早的调度（同节点），无需修正；
+            # 若被不同节点复用（多实例同输入），仍按当前执行节点修正归属
+            try:
+                from comfy_execution.utils import get_executing_context
+                _ctx = get_executing_context()
+                if _ctx is not None and getattr(_ctx, "node_id", None) is not None:
+                    guide = cached.args[0]
+                    if isinstance(guide, dict) and guide.get("_director_node_id") != _ctx.node_id:
+                        guide = dict(guide)
+                        guide["_director_node_id"] = _ctx.node_id
+                        cached = io.NodeOutput(guide, *cached.args[1:])
+            except Exception:
+                pass
+            return cached
+
+        # config 是可选输入：前端首帧 subgraph 中 director 不连接 config，需容错
+        global_prompt = config.get("global_prompt", "") if config else ""
+        subject_data = config.get("subject_data", {}) if config else {}
         subject = subject_data.get("subjects", []) if subject_data else []
+        if not subject:
+            subject = subject_data.get("subjects", []) if isinstance(subject_data, dict) else []
 
         if not timeline_data or not timeline_data.strip():
             raise ValueError("[MiniMaxRefDirector] timeline_data is required and must not be empty.")
-
-        # --- Read prompt_template file ---
-        template_content = _read_template_file(prompt_template)
 
         # --- Parse timeline segments ---
         tdata = {}
@@ -191,9 +172,10 @@ class MiniMaxRefDirector(io.ComfyNode):
         # --- Build timeline_data array for guide_data ---
         guide_timeline = []
         segment_count = 0
-        prev_prompt = ""
+        timeline_data_len = len(timeline_segments)
+        last_frame_path = ""
 
-        if len(timeline_segments) == 0:
+        if timeline_data_len == 0:
             timeline_segments = [{
                 "length": duration_frames,
                 "start": 0,
@@ -201,7 +183,7 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "imageFile": "",
             }]
         
-        for seg in timeline_segments:
+        for i, seg in enumerate(timeline_segments):
             dur = int(seg.get("length", 1))
             seg_start_frames = int(seg.get("start", 0))
             seg_end_frames = seg_start_frames + dur
@@ -214,43 +196,64 @@ class MiniMaxRefDirector(io.ComfyNode):
             dur = seg_end_frames - seg_start_frames
             if dur <= 0:
                 continue
-            first_frame = seg.get("imageFile", "") if seg.get("type", "text") == "image" else ""
-            prompt = seg.get("prompt", "").replace("@", "")
-            prompt = template_content.replace("{user_prompt}", prompt)
-            guide_timeline.append({
-                "prompt": prompt,
-                "prev_prompt": prev_prompt,
-                "first_frame": first_frame,
-                "duration_frames": dur,
-                "prompt_enhance": seg.get("prompt_enhance", "Default"),
-                "is_end_frame": seg.get("isEndFrame", False)
-            })
-            prev_prompt = prompt
+            h3_prompt_json = seg.get("h3PromptJson", "")
+            prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
+            next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
+            prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
+                                         raw_prompt=h3_prompt_json, previous_timeline_segment=prev_seg,
+                                         timeline_segment=seg, next_timeline_segment=next_seg)
+            entry = {
+                "prompt": prompt_res["prompt"],
+                "subjects": prompt_res["subjects"],
+                "images": prompt_res["images"],
+                "audios": prompt_res["audios"],
+                "videos": prompt_res["videos"],
+                "prevImageFile": prompt_res["prevImageFile"],
+                "prevType": prompt_res["prevType"],
+                "durationFrames": dur,
+                "type": seg.get("type", "text"),
+                "imageFile": seg.get("imageFile", ""),
+                "motionContext": seg.get("motionContext", False)
+            }
+            guide_timeline.append(entry)
             segment_count += 1
 
         # --- Resolve output resolution ---
-        out_w, out_h = _calc_resolution(outpu_resolution, million_pixels)
+        out_w, out_h = calc_resolution(outpu_resolution, million_pixels)
 
         # --- Assemble guide_data ---
+        # 附带 Director 自身节点 id：Guide 节点执行时可借此把进度/素材通知关联回
+        # 前端对应的 Director 节点，多 tab / 多实例时按节点精确过滤，避免串收。
+        director_node_id = None
+        try:
+            from comfy_execution.utils import get_executing_context
+            _ctx = get_executing_context()
+            if _ctx is not None:
+                director_node_id = getattr(_ctx, "node_id", None)
+        except Exception:
+            director_node_id = None
         guide_data = {
             "width": out_w,
             "height": out_h,
-            "global_prompt": global_prompt,
             "frame_rate": float(frame_rate),
+            "global_prompt": global_prompt,
             "subject_data": subject,
             "timeline_data": guide_timeline,
+            "_director_node_id": director_node_id,
         }
 
         log.info(
-            f"[MiniMaxRefDirector] {segment_count} segments | timeline: {timeline_data} "
+            f"[MiniMaxRefDirector] {segment_count} segments | timeline: {timeline_data} | "
+            f"start_second: {start_second} | end_second: {end_second} | duration_seconds: {duration_seconds} | "
+            f"start_frane: {start_frame} | end_frame: {end_frame} | duration_frames: {duration_frames} | "
             f"{out_w}×{out_h} ({outpu_resolution}, {million_pixels}MP) | "
-            f"{len(subject)} subjects | template: {len(template_content)} chars"
+            f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
         )
 
-        return io.NodeOutput(
-            guide_data,
-            segment_count,
-        )
+        result = io.NodeOutput(guide_data, segment_count + 1)
+        _director_cache[cache_key] = result
+        return result
+
 
 NODE_CLASS_MAPPINGS = {
     "MiniMaxRefDirector": MiniMaxRefDirector,

@@ -1,15 +1,15 @@
 from . import server  # registers /minimax_ref/api routes
 
-from .minimax_ref_subject import MiniMaxRefSubject
-from .minimax_ref_director import MiniMaxRefDirector
-from .minimax_ref_director_guide import MiniMaxRefDirectorGuide
-from .minimax_ref_prompt_enhance import MinimaxRefPromptEnhance
-from .minimax_ref_tools import (
-    MiniMaxRefJoinString,
-    MiniMaxRefMergeVideosFromPaths,
-    MiniMaxRefSaveAudio,
-    MiniMaxRefSaveImage,
-)
+from .subject import MiniMaxRefSubject
+from .director import MiniMaxRefDirector
+from .guide import MiniMaxRefGuide
+from .lib.utils import RefJoinString
+from .lib.video import RefMergeVideosFromPaths
+from .lib.audio import RefSaveAudio
+from .lib.image import RefSaveImage
+from .lib.hybrid import RefHybridLoader
+from .lib.utils import RefPureVRAM
+
 from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
 
@@ -18,13 +18,13 @@ class PromptRelay(ComfyExtension):
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
             MiniMaxRefDirector,
-            MiniMaxRefDirectorGuide,
+            MiniMaxRefGuide,
             MiniMaxRefSubject,
-            MinimaxRefPromptEnhance,
-            MiniMaxRefMergeVideosFromPaths,
-            MiniMaxRefSaveImage,
-            MiniMaxRefSaveAudio,
-            MiniMaxRefJoinString,
+            RefJoinString,
+            RefMergeVideosFromPaths,
+            RefSaveAudio,
+            RefSaveImage,
+            RefPureVRAM,
         ]
 
 async def comfy_entrypoint() -> PromptRelay:
@@ -33,25 +33,34 @@ async def comfy_entrypoint() -> PromptRelay:
 NODE_CLASS_MAPPINGS = {
     "MiniMaxRefSubject": MiniMaxRefSubject,
     "MiniMaxRefDirector": MiniMaxRefDirector,
-    "MiniMaxRefDirectorGuide": MiniMaxRefDirectorGuide,
-    "MiniMaxRefPromptEnhance": MinimaxRefPromptEnhance,
-    "MiniMaxRefMergeVideosFromPaths": MiniMaxRefMergeVideosFromPaths,
-    "MiniMaxRefSaveImage": MiniMaxRefSaveImage,
-    "MiniMaxRefSaveAudio": MiniMaxRefSaveAudio,
-    "MiniMaxRefJoinString": MiniMaxRefJoinString,
+    "MiniMaxRefGuide": MiniMaxRefGuide,
+    "MiniMaxRefMergeVideosFromPaths": RefMergeVideosFromPaths,
+    "MiniMaxRefSaveImage": RefSaveImage,
+    "MiniMaxRefSaveAudio": RefSaveAudio,
+    "MiniMaxRefJoinString": RefJoinString,
+    "MiniMaxRefHybridLoader": RefHybridLoader,
+    "MiniMaxRefPureVRAM": RefPureVRAM
 }
-
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefSubject": "MiniMax Subject",
     "MiniMaxRefDirector": "MiniMax Super Director",
-    "MiniMaxRefDirectorGuide": "MiniMax Super Director Guide",
-    "MiniMaxRefPromptEnhance": "MiniMax Ref Prompt Enhance",
-    "MiniMaxRefMergeVideosFromPaths": "MiniMaxRef Merge Videos From Paths",
-    "MiniMaxRefSaveImage": "MiniMaxRef Save Image",
-    "MiniMaxRefSaveAudio": "MiniMaxRef Save Audio",
-    "MiniMaxRefJoinString": "MiniMaxRef Join Strings",
+    "MiniMaxRefGuide": "MiniMax Ref Guide",
+    "MiniMaxRefMergeVideosFromPaths": "Merge Videos From Paths",
+    "MiniMaxRefSaveImage": "Save Image",
+    "MiniMaxRefSaveAudio": "Save Audio",
+    "MiniMaxRefJoinString": "Join Strings",
+    "MiniMaxRefHybridLoader": "MiniMax Ref Hybrid Loader",
+    "MiniMaxRefPureVRAM": "MiniMax Ref Pure VRAM"
 }
 
 WEB_DIRECTORY = "./js"
+
+# 若 server 模块导入时 PromptServer.instance 尚未就绪，其惰性收集的路由
+# 会在本包导入完成后由 server._LazyRoutes.flush() 注册到 PromptServer。
+try:
+    from .server import _LazyRoutes
+    _LazyRoutes.flush()
+except Exception:
+    pass
 
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']

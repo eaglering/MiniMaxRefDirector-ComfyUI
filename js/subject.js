@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { viewUrl } from "./components/director/shared.js";
 import { api } from "../../scripts/api.js";
 
 function hideWidget(w) {
@@ -39,19 +40,23 @@ const MSCSS = `
     border-radius: 3px;
 }
 .ref-ms-subject-list {
-    display: flex;
-    flex-direction: column;
+    /* 流式 grid：列数按容器宽度自适应，列宽填满不留空
+       （≥686px 排 2 列，≥1032px 排 3 列，即 760 两列一行、1080 三列一行） */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
     gap: 6px;
+    align-items: start;
 }
 .ref-ms-subject-card {
     background: #1e1e1e;
     border: 1px solid #333;
     border-radius: 6px;
-    padding: 10px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     transition: border-color 0.2s;
+    min-width: 0;
 }
 .ref-ms-subject-card:hover {
     border-color: #555;
@@ -92,13 +97,17 @@ const MSCSS = `
     gap: 6px;
     align-items: center;
 }
-.ref-ms-label {
+.ref-ms-label,.ref-ms-label-sm {
     font-size: 10px;
     color: #888;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    min-width: 60px;
-    flex-shrink: 0;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    line-height: 1.5;
+    text-align: left;
+    user-select: none;
+    min-width: 40px;
 }
 .ref-ms-input {
     flex: 1;
@@ -116,34 +125,113 @@ const MSCSS = `
 .ref-ms-input:focus {
     border-color: #888;
 }
-.ref-ms-textarea {
+.ref-ms-select {
     flex: 1;
+    min-width: 0;
     background: #2a2a2a;
     border: 1px solid #444;
     border-radius: 4px;
     color: #e0e0e0;
-    padding: 4px 8px;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+.ref-ms-select:focus {
+    border-color: #888;
+}
+.ref-ms-select option {
+    background: #1e1e1e;
+    color: #e0e0e0;
+}
+.ref-ms-textarea {
+    flex: 1;
+    min-width: 0;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    padding: 3px 8px;
     font-size: 11px;
     font-family: inherit;
     outline: none;
     resize: vertical;
-    min-height: 40px;
+    min-height: 60px;
     box-sizing: border-box;
     transition: border-color 0.2s;
 }
 .ref-ms-textarea:focus {
     border-color: #888;
 }
-/* --- Media box styles (right-aligned image & audio) --- */
-.ref-ms-media-row {
+/* --- Type tabs --- */
+.ref-ms-tabs {
     display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: 4px;
+    gap: 4px;
+    margin-bottom: 8px;
 }
+.ref-ms-tab {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 11px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.ref-ms-tab:hover {
+    border-color: #38bdf8;
+    color: #fff;
+}
+.ref-ms-tab.active {
+    background: #38bdf8;
+    border-color: #38bdf8;
+    color: #0b1220;
+    font-weight: 600;
+}
+/* --- Global Prompt area --- */
+.ref-ms-global-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    flex: 1;
+}
+.ref-ms-global-prompt-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.ref-ms-global-prompt-input {
+    width: 100%;
+    background: transparent;
+    color: #e0e0e0;
+    border: none;
+    resize: none;
+    font-size: 12px;
+    line-height: 1.4;
+    box-sizing: border-box;
+    outline: none;
+    height: 100%;
+}
+.ref-ms-global-prompt-input:focus {
+    border-color: #888;
+}
+/* --- Media box styles (attached to desc row, right-aligned image & audio) --- */
 .ref-ms-media-box {
-    width: 72px;
-    height: 72px;
+    width: 56px;
+    height: 56px;
     border: 1px dashed #444;
     border-radius: 6px;
     display: flex;
@@ -171,6 +259,75 @@ const MSCSS = `
     height: 100%;
     object-fit: cover;
     display: block;
+}
+.ref-ms-media-box video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    background: #000;
+    cursor: pointer;
+}
+/* 视频单独一行：大图预览，支持播放/替换/删除 */
+.ref-ms-video-row {
+    position: relative;
+    height: 136px;
+    width: 100%;
+    border: 1px dashed rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.03);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 6px;
+    cursor: pointer;
+}
+.ref-ms-video-row.has-file {
+    border-style: solid;
+    background: #000;
+}
+.ref-ms-video-row video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    background: #000;
+}
+/* 视频右下角浮动按钮：不遮挡视频主体，悬停显示，可正常播放 */
+.ref-ms-video-actions {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 2;
+    pointer-events: none;
+}
+.ref-ms-video-row:hover .ref-ms-video-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+.ref-ms-video-action {
+    padding: 2px 8px;
+    font-size: 10px;
+    line-height: 1.4;
+    border: none;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    cursor: pointer;
+    backdrop-filter: blur(2px);
+}
+.ref-ms-video-action:hover {
+    background: #38bdf8;
+    color: #0b1220;
+}
+.ref-ms-video-action.del:hover {
+    background: #ef5350;
+    color: #fff;
 }
 .ref-ms-media-icon {
     display: flex;
@@ -206,6 +363,7 @@ const MSCSS = `
     opacity: 1;
     pointer-events: auto;
 }
+
 .ref-ms-media-action {
     background: transparent;
     border: 1px solid #888;
@@ -275,6 +433,43 @@ if (!styleEl) {
 }
 styleEl.textContent = MSCSS;
 
+// 图像类主体（Subject / Picture / Video）的关系选项
+const REF_RELATIONSHIPS_PRESERVED = [
+    ["fully_preserved", "fully preserved"],
+    ["partially_preserved", "partially preserved"],
+    ["attribute_transfer", "attribute transfer"],
+    ["weak_reference", "weak reference"],
+];
+
+// Audio 的关系选项
+const REF_RELATIONSHIPS_COPY = [
+    ["fully_copy", "fully copy"],
+    ["partially_copy", "partially copy"],
+    ["reference", "reference"],
+    ["weak_reference", "weak reference"],
+];
+
+// type → 关系选项组（联动）
+const REF_TYPE_RELATIONSHIPS = {
+    Subject: REF_RELATIONSHIPS_PRESERVED,
+    Picture: REF_RELATIONSHIPS_PRESERVED,
+    Video: REF_RELATIONSHIPS_PRESERVED,
+    Audio: REF_RELATIONSHIPS_COPY,
+};
+
+// type → relationship 默认值
+function refDefaultRelationship(type) {
+    return (REF_TYPE_RELATIONSHIPS[type || "Subject"] || REF_RELATIONSHIPS_PRESERVED)[0][0];
+}
+
+// type → 可上传的媒体类型（联动显示）
+const REF_TYPE_MEDIA = {
+    Subject: { image: true, audio: true, video: false },
+    Picture: { image: true, audio: false, video: false },
+    Audio: { image: false, audio: true, video: false },
+    Video: { image: false, audio: false, video: true },
+};
+
 app.registerExtension({
     name: "Comfy.MiniMaxRefSubject",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
@@ -288,12 +483,46 @@ app.registerExtension({
                 // Hide default widgets
                 const subjectDataWidget = node.widgets.find(w => w.name === "subject_data");
                 const subjectCountWidget = node.widgets.find(w => w.name === "subject_count");
+                const globalPromptWidget = node.widgets.find(w => w.name === "global_prompt");
                 if (subjectDataWidget) hideWidget(subjectDataWidget);
                 if (subjectCountWidget) hideWidget(subjectCountWidget);
+                if (globalPromptWidget) hideWidget(globalPromptWidget);
 
                 // --- Build Custom UI ---
                 const wrapper = document.createElement("div");
                 wrapper.className = "ref-ms-wrapper";
+
+                const globalPromptBox = document.createElement("div");
+                globalPromptBox.className = "ref-ms-global-prompt";
+                const globalPromptLabel = document.createElement("div");
+                globalPromptLabel.className = "ref-ms-global-prompt-label";
+                globalPromptLabel.textContent = "Global Prompt";
+                const globalPromptInput = document.createElement("textarea");
+                globalPromptInput.className = "ref-ms-global-prompt-input";
+                globalPromptInput.placeholder = "Conditions the entire video (anchors persistent characters, objects, scene context)...";
+                globalPromptInput.spellcheck = false;
+                globalPromptBox.appendChild(globalPromptLabel);
+                globalPromptBox.appendChild(globalPromptInput);
+
+                // --- Type tabs (Subject / Picture / Video / Audio) ---
+                let activeTab = "Subject"; // 当前 tab，替代卡片内 type 选择
+                const TYPE_TABS = ["Subject", "Picture", "Video", "Audio"];
+                const tabBar = document.createElement("div");
+                tabBar.className = "ref-ms-tabs";
+                const tabBtns = {};
+                TYPE_TABS.forEach(t => {
+                    const btn = document.createElement("button");
+                    btn.className = "ref-ms-tab";
+                    btn.textContent = t;
+                    btn.addEventListener("click", () => {
+                        if (activeTab === t) return;
+                        activeTab = t;
+                        renderSubjects();
+                        updateNodeSize();
+                    });
+                    tabBar.appendChild(btn);
+                    tabBtns[t] = btn;
+                });
 
                 const subjectList = document.createElement("div");
                 subjectList.className = "ref-ms-subject-list";
@@ -306,6 +535,8 @@ app.registerExtension({
                 footer.className = "ref-ms-footer";
                 footer.textContent = "Up 9 subjects，3 audios per shot";
 
+                wrapper.appendChild(globalPromptBox);
+                wrapper.appendChild(tabBar);
                 wrapper.appendChild(subjectList);
                 wrapper.appendChild(addBtn);
                 wrapper.appendChild(footer);
@@ -318,21 +549,47 @@ app.registerExtension({
                 
                 domWidget.computeSize = function (width) {
                     const nodeWidth = node.size?.[0] || 475;
-                    const estCardHeight = 200; // per subject card
-                    const extras = 128; // add button + footer + gaps
-                    const total = subjects.length * estCardHeight + extras;
-                    const height = Math.max(estCardHeight + extras, total);
-                    return [Math.max(10, nodeWidth - 30), height];
+                    const innerWidth = Math.max(10, nodeWidth - 30); // DOM widget 内容宽（与 .ref-ms-wrapper 一致）
+                    const listWidth = Math.max(1, innerWidth - 12); // 列表可用宽（wrapper padding 6px ×2）
+                    const estCardHeight = 215; // per subject card (image/audio boxes + video row)
+                    const extras = 206; // global prompt area + tabs + add button + footer + gaps
+                    const visibleCount = subjects.filter(s => (s.type || "Subject") === activeTab).length;
+                    if (visibleCount === 0) return [innerWidth, extras];
+                    // 与 CSS .ref-ms-subject-list 的 minmax(340px, 1fr) 对齐：最小列宽 340 + 间隙 6
+                    const cols = Math.max(1, Math.floor((listWidth + 6) / 346));
+                    const rows = Math.ceil(visibleCount / cols);
+                    const height = rows * estCardHeight + extras;
+                    return [innerWidth, height];
                 };
 
+                // 上次触发重算时的节点宽度，用于判断是否跨列档
+                let lastNodeWidth = node.size?.[0] || 475;
                 node.syncLayoutToNode = function () {
-                    // const nodeWidth = this.size?.[0] || 475;
-                    // const targetWidth = Math.max(10, nodeWidth - 30);
-                    // if (wrapper) {
-                    //     wrapper.style.width = `${targetWidth}px`;
-                    //     wrapper.style.maxWidth = `${targetWidth}px`;
-                    // }
+                    // grid 列数跨档时自动重算高度（多列并排后高度收缩，不留大片空白）；
+                    // 同列数内的宽度/高度微调不干预，保留用户手动调整的高度。
+                    const w = this.size?.[0] || 475;
+                    const listWidth = Math.max(1, w - 42); // 节点宽 - 30 内容区 - 12 padding
+                    const colsNow = Math.max(1, Math.floor((listWidth + 6) / 346));
+                    const colsPrev = Math.max(1, Math.floor((lastNodeWidth - 42 + 6) / 346));
+                    lastNodeWidth = w;
+                    if (colsNow !== colsPrev) updateNodeSize();
                 };
+
+                // 将当前主体列表发布到全局缓存并通知外部（如 Transfer mention 菜单刷新）
+                function publishSubjects() {
+                    try {
+                        window.__refSubjects = subjects.map(s => ({
+                            name: s.name || "",
+                            description: s.description || "",
+                            type: s.type || "Subject",
+                            relationship: s.relationship || refDefaultRelationship(s.type),
+                            imageFile: s.imageFile || "",
+                            audioFile: s.audioFile || "",
+                            videoFile: s.videoFile || "",
+                        }));
+                        window.dispatchEvent(new CustomEvent("ref:subjects-changed"));
+                    } catch (e) { /* 事件派发失败忽略 */ }
+                }
 
                 function loadStateFromWidget() {
                     subjects.length = 0;
@@ -345,25 +602,35 @@ app.registerExtension({
                                     subjects.push({
                                         name: s.name || "",
                                         description: s.description || "",
+                                        type: s.type || "Subject",
+                                        relationship: s.relationship || refDefaultRelationship(s.type),
                                         imageFile: s.imageFile || "",
-                                        imageB64: s.imageB64 || api.apiURL(`/view?filename=${encodeURIComponent(s.imageFile)}&type=input&subfolder=${encodeURIComponent("minimaxrefdirector")}`),
+                                        imageB64: s.imageB64 || viewUrl(s.imageFile, "minimaxrefdirector"),
                                         audioFile: s.audioFile || "",
+                                        videoFile: s.videoFile || "",
+                                        videoB64: s.videoB64 || viewUrl(s.videoFile, "minimaxrefdirector"),
                                     });
                                 });
                             }
                         }
                     } catch (_) { }
 
+                    // Sync global prompt from widget
+                    if (globalPromptWidget && globalPromptInput) {
+                        globalPromptInput.value = globalPromptWidget.value || "";
+                    }
+
                     const countVal = subjectCountWidget ? parseInt(subjectCountWidget.value) || 1 : 1;
                     subjectCount = Math.max(1, countVal);
 
                     if (subjects.length === 0) {
                         while (subjects.length < subjectCount) {
-                            subjects.push({ name: "", description: "", imageFile: "", audioFile: "" });
+                            subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", imageFile: "", audioFile: "", videoFile: "" });
                         }
                     } else {
                         subjectCount = subjects.length;
                     }
+                    publishSubjects();
                 }
 
                 // Initial load (may be overwritten on page reload by onConfigure below)
@@ -391,7 +658,7 @@ app.registerExtension({
                             const filename = data.name;
                             const subfolder = data.subfolder || "";
                             const imageFile = subfolder ? subfolder + "/" + filename : filename;
-                            const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+                            const imgUrl = viewUrl(filename, subfolder);
                             callback(imageFile, imgUrl);
                         } else {
                             console.error("[MiniMaxRefSubject] Upload failed:", resp.status);
@@ -461,7 +728,7 @@ app.registerExtension({
                         const parts = audioFile.replace(/\\/g, "/").split("/");
                         const filename = parts.pop();
                         const subfolder = parts.join("/");
-                        url = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+                        url = viewUrl(filename, subfolder);
                     }
                     _audioEl = new Audio(url);
                     _audioPlayBtn = btnEl;
@@ -485,8 +752,11 @@ app.registerExtension({
                         subjects: subjects.map(s => ({
                             name: s.name,
                             description: s.description,
+                            type: s.type || "Subject",
+                            relationship: s.relationship || refDefaultRelationship(s.type),
                             imageFile: s.imageFile,
                             audioFile: s.audioFile,
+                            videoFile: s.videoFile,
                         }))
                     };
                     const jsonStr = JSON.stringify(data);
@@ -505,11 +775,19 @@ app.registerExtension({
                     if (app.graph) {
                         app.graph.setDirtyCanvas(true, false);
                     }
+                    publishSubjects();
                 }
 
                 function renderSubjects() {
                     subjectList.innerHTML = "";
-                    subjects.forEach((subj, idx) => {
+                    // tab 高亮
+                    TYPE_TABS.forEach(t => {
+                        tabBtns[t].classList.toggle("active", t === activeTab);
+                    });
+                    // 仅渲染当前 tab 类型的卡片
+                    const visible = subjects.filter(s => (s.type || "Subject") === activeTab);
+                    visible.forEach((subj, i) => {
+                        const idx = subjects.indexOf(subj); // 原数组真实索引
                         const card = document.createElement("div");
                         card.className = "ref-ms-subject-card";
 
@@ -518,7 +796,7 @@ app.registerExtension({
                         header.className = "ref-ms-card-header";
                         const indexLabel = document.createElement("span");
                         indexLabel.className = "ref-ms-card-index";
-                        indexLabel.textContent = `Subject ${idx + 1}`;
+                        indexLabel.textContent = `${subj.type || activeTab} ${i + 1}`;
                         header.appendChild(indexLabel);
 
                         const removeBtn = document.createElement("button");
@@ -559,6 +837,31 @@ app.registerExtension({
                         nameRow.appendChild(nameInput);
                         card.appendChild(nameRow);
 
+                        // Relationship（选项组随当前 tab 类型固定：Subject/Picture/Video 用 preserved 系，Audio 用 copy 系）
+                        const metaRow = document.createElement("div");
+                        metaRow.className = "ref-ms-row";
+                        const relLabel = document.createElement("span");
+                        relLabel.className = "ref-ms-label-sm";
+                        relLabel.textContent = "Rel";
+                        const relSelect = document.createElement("select");
+                        relSelect.className = "ref-ms-select";
+                        const relOptions = REF_TYPE_RELATIONSHIPS[activeTab] || REF_RELATIONSHIPS_PRESERVED;
+                        const relDefault = relOptions[0][0];
+                        relOptions.forEach(([val, label]) => {
+                            const opt = document.createElement("option");
+                            opt.value = val;
+                            opt.textContent = label;
+                            opt.selected = (subj.relationship || relDefault) === val;
+                            relSelect.appendChild(opt);
+                        });
+                        relSelect.addEventListener("change", () => {
+                            subjects[idx].relationship = relSelect.value;
+                            saveState();
+                        });
+                        metaRow.appendChild(relLabel);
+                        metaRow.appendChild(relSelect);
+                        card.appendChild(metaRow);
+
                         // Description
                         const descRow = document.createElement("div");
                         descRow.className = "ref-ms-row";
@@ -569,7 +872,7 @@ app.registerExtension({
                         descInput.className = "ref-ms-textarea";
                         descInput.placeholder = "Subject description...";
                         descInput.value = subj.description || "";
-                        descInput.rows = 2;
+                        descInput.rows = 1;
                         descInput.addEventListener("input", () => {
                             subjects[idx].description = descInput.value;
                             saveState();
@@ -578,9 +881,10 @@ app.registerExtension({
                         descRow.appendChild(descInput);
                         card.appendChild(descRow);
 
-                        // --- Media boxes (right-aligned image & audio) ---
-                        const mediaRow = document.createElement("div");
-                        mediaRow.className = "ref-ms-media-row";
+                        // --- Media boxes (attached to the desc row for a compact layout) ---
+                        // 可上传的媒体随 type 联动（REF_TYPE_MEDIA）
+                        const typeMedia = REF_TYPE_MEDIA[subj.type || "Subject"] || REF_TYPE_MEDIA.Subject;
+                        const mediaRow = descRow;
 
                         // ----- Image box -----
                         const imgBox = document.createElement("div");
@@ -629,6 +933,7 @@ app.registerExtension({
                             imgOverlay.appendChild(imgDelBtn);
                         }
                         imgBox.appendChild(imgOverlay);
+                        if (!typeMedia.image) imgBox.style.display = "none";
                         mediaRow.appendChild(imgBox);
 
                         // ----- Audio box -----
@@ -656,7 +961,7 @@ app.registerExtension({
                         audAddBtn.textContent = subj.audioFile ? "Change" : "Add";
                         audAddBtn.addEventListener("click", (e) => {
                             e.stopPropagation();
-                            createFileInput("audio/*,video/*", (filename) => {
+                            createFileInput("audio/*", (filename) => {
                                 subjects[idx].audioFile = filename;
                                 saveState();
                                 renderSubjects();
@@ -686,17 +991,73 @@ app.registerExtension({
                             audioOverlay.appendChild(audDelBtn);
                         }
                         audioBox.appendChild(audioOverlay);
+                        if (!typeMedia.audio) audioBox.style.display = "none";
                         mediaRow.appendChild(audioBox);
 
+                        // ----- Video row (type=Video, 单独一行大图预览/替换/删除) -----
+                        const videoRow = document.createElement("div");
+                        videoRow.className = "ref-ms-video-row";
+                        if (subj.videoFile) {
+                            videoRow.classList.add("has-file");
+                            const vEl = document.createElement("video");
+                            vEl.src = subj.videoB64 || subj.videoFile;
+                            vEl.controls = true;
+                            vEl.preload = "metadata";
+                            vEl.addEventListener("click", (e) => e.stopPropagation());
+                            videoRow.appendChild(vEl);
+                        } else {
+                            const icon = document.createElement("div");
+                            icon.className = "ref-ms-media-icon";
+                            icon.style.cssText = "flex-direction: row; gap: 8px;";
+                            icon.innerHTML = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg><span>Upload Video</span>`;
+                            videoRow.appendChild(icon);
+                        }
+
+                        // 右下角浮动按钮组：不覆盖视频主体，可正常播放/预览
+                        const videoActions = document.createElement("div");
+                        videoActions.className = "ref-ms-video-actions";
+
+                        const vidAddBtn = document.createElement("button");
+                        vidAddBtn.className = "ref-ms-video-action";
+                        vidAddBtn.textContent = subj.videoFile ? "Change" : "Add";
+                        vidAddBtn.title = "替换视频";
+                        vidAddBtn.addEventListener("click", (e) => {
+                            e.stopPropagation();
+                            createFileInput("video/*", (filename, videoUrl) => {
+                                subjects[idx].videoFile = filename;
+                                subjects[idx].videoB64 = videoUrl;
+                                saveState();
+                                renderSubjects();
+                            });
+                        });
+                        videoActions.appendChild(vidAddBtn);
+
+                        if (subj.videoFile) {
+                            const vidDelBtn = document.createElement("button");
+                            vidDelBtn.className = "ref-ms-video-action del";
+                            vidDelBtn.textContent = "Delete";
+                            vidDelBtn.title = "删除视频";
+                            vidDelBtn.addEventListener("click", (e) => {
+                                e.stopPropagation();
+                                subjects[idx].videoFile = null;
+                                subjects[idx].videoB64 = null;
+                                saveState();
+                                renderSubjects();
+                            });
+                            videoActions.appendChild(vidDelBtn);
+                        }
+                        videoRow.appendChild(videoActions);
+                        if (!typeMedia.video) videoRow.style.display = "none";
                         card.appendChild(mediaRow);
+                        card.appendChild(videoRow);
 
                         subjectList.appendChild(card);
                     });
 
                     // Update add button state
                     addBtn.disabled = false;
-                    addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add Subject`;
-                    footer.textContent = `${subjects.length} subject${subjects.length !== 1 ? "s" : ""}`;
+                    addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add ${activeTab}`;
+                    footer.textContent = `${visible.length} ${activeTab}${visible.length !== 1 ? "s" : ""}`;
                 }
 
                 function basename(path) {
@@ -715,8 +1076,30 @@ app.registerExtension({
                     }
                 }
 
+                // Global Prompt input → widget sync
+                let gpSaveTimeout = null;
+                globalPromptInput.addEventListener("input", () => {
+                    const val = globalPromptInput.value;
+                    if (globalPromptWidget) {
+                        globalPromptWidget.value = val;
+                        if (globalPromptWidget.callback) {
+                            globalPromptWidget.callback(val);
+                        }
+                    }
+                    if (app.graph) {
+                        app.graph.setDirtyCanvas(true, false);
+                    }
+                    if (gpSaveTimeout) clearTimeout(gpSaveTimeout);
+                    gpSaveTimeout = setTimeout(() => {
+                        if (app.graph && app.graph.change) app.graph.change();
+                        if (window.LiteGraph && window.LiteGraph.fireEvent) {
+                            window.LiteGraph.fireEvent("onSaveState");
+                        }
+                    }, 300);
+                });
+
                 addBtn.addEventListener("click", () => {
-                    subjects.push({ name: "", description: "", imageFile: "", audioFile: "" });
+                    subjects.push({ name: "", description: "", type: activeTab, relationship: refDefaultRelationship(activeTab), imageFile: "", audioFile: "", videoFile: "" });
                     subjectCount = subjects.length;
                     renderSubjects();
                     saveState();
@@ -740,22 +1123,35 @@ app.registerExtension({
                     wrapper.style.outline = "";
                     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
                         const file = e.dataTransfer.files[0];
-                        uploadFile(file, (filename, imgUrl) => {
-                            // Add dropped file as image for the first empty image slot
-                            // or create a new subject
+                        const nameLower = file.name.toLowerCase();
+                        const isImage = file.type.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(nameLower);
+                        const isAudio = file.type.startsWith("audio/") || /\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(nameLower);
+                        const isVideo = file.type.startsWith("video/") || /\.(mp4|webm|mkv|mov|m4v|flv|wmv)$/i.test(nameLower);
+                        if (!isImage && !isAudio && !isVideo) return;
+
+                        const field = isVideo ? "videoFile" : isAudio ? "audioFile" : "imageFile";
+                        const type = isVideo ? "Video" : isAudio ? "Audio" : "Picture";
+
+                        uploadFile(file, (filename, mediaUrl) => {
+                            // 按文件类型分发到最后一个空卡片，否则新建对应类型的卡片
                             const last = subjects[subjects.length - 1];
-                            if (!last || last.imageFile || last.name) {
-                                subjects.push({ name: "", description: "", imageFile: filename, imageB64: imgUrl, audioFile: "" });
+                            if (!last || last.name || last[field]) {
+                                subjects.push({ name: "", description: "", type, relationship: refDefaultRelationship(type), imageFile: "", imageB64: "", audioFile: "", videoFile: "", videoB64: "" });
                                 subjectCount = subjects.length;
-                                renderSubjects();
-                                saveState();
-                                updateNodeSize();
-                            } else {
-                                last.imageFile = filename;
-                                last.imageB64 = imgUrl;
-                                renderSubjects();
-                                saveState();
                             }
+                            const target = subjects[subjects.length - 1];
+                            if (!REF_TYPE_MEDIA[target.type] || !REF_TYPE_MEDIA[target.type][isVideo ? "video" : isAudio ? "audio" : "image"]) {
+                                target.type = type; // 空卡片类型不支持该媒体时联动切换
+                                target.relationship = refDefaultRelationship(type);
+                            }
+                            target[field] = filename;
+                            if (isImage) target.imageB64 = mediaUrl;
+                            else if (isVideo) target.videoB64 = mediaUrl;
+                            // 切换到对应类型 tab，让新卡片可见
+                            activeTab = type;
+                            renderSubjects();
+                            saveState();
+                            updateNodeSize();
                         });
                     }
                 });

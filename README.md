@@ -1,6 +1,6 @@
 # MiniMaxRefDirector-ComfyUI
 
-**v2.1.0** — MiniMax 导演台参考图生视频工作流。提供可视化时间线编辑器、多主体管理、基于 VLM 的智能提示词增强，以及尾帧自动转首帧参考、循环内尾帧跳过（continue）功能。
+**v3.0.0** — MiniMax 导演台参考图生视频工作流。提供可视化时间线编辑器、多主体管理、基于 VLM 的智能提示词增强，以及尾帧自动转首帧参考、循环内尾帧跳过（continue）功能。
 
 ## 目录
 
@@ -12,7 +12,6 @@
   - [MiniMax Reference Subject](#minimax-reference-subject)
   - [MiniMax Reference Director](#minimax-reference-director)
   - [MiniMax Reference Director Guide](#minimax-reference-director-guide)
-  - [MiniMax Ref Prompt Enhance](#minimax-ref-prompt-enhance) 调试节点
 - [工作流连接](#工作流连接)
 - [依赖](#依赖)
 - [常见问题](#常见问题)
@@ -26,7 +25,6 @@
 | **MiniMax Reference Subject** | `minimax` | 可视化配置最多 9 个主体（名称、描述、参考图、音频） |
 | **MiniMax Reference Director** | `minimax` | 时间线编辑器，整合分镜提示词、主体数据、尾帧标记和分辨率配置 |
 | **MiniMax Reference Director Guide** | `minimaxrefdirector` | 按分镜索引提取段数据，调用 VLM 增强提示词，输出主体图片/音频张量，支持尾帧跳过与自动拼接 |
-| **MiniMax Ref Prompt Enhance** | `minimaxrefdirector/prompt` | 独立 VLM 节点：输入图片/文本，输出 JSON 格式的镜头描述与占位符映射 |
 
 ---
 

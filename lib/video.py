@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import glob
 import io as _io
 import json
@@ -10,161 +8,21 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
-from dataclasses import dataclass
-from fractions import Fraction
-from pathlib import Path
-from typing import Any, Mapping, Optional
-
 import folder_paths
 import torch
-import torch.nn.functional as F
-from comfy_api.latest import Input, InputImpl, Types, io, UI
+
+from dataclasses import dataclass
+from fractions import Fraction
+from typing import Any, Optional
 from comfy.utils import ProgressBar
+from comfy_api.latest import Input, InputImpl, Types, io, UI
+
+from .audio import merge_two_audio, save_audio_to_temp_wav
 
 logger = logging.getLogger(__name__)
 
 _FFMPEG_INSTALL_URL = "https://ffmpeg.org/download.html"
 _VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"})
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Inline helpers (originally from ComfyUI-Easy-Media utils/audio.py & utils/video.py)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# ── audio helpers ──────────────────────────────────────────────────────────
-
-def save_audio_to_temp_wav(audio: Mapping[str, Any]) -> Path | None:
-    """Serialize the first batch of a ComfyUI AUDIO value to a temporary WAV file."""
-    waveform = audio.get("waveform")
-    sample_rate = audio.get("sample_rate")
-    if not isinstance(waveform, torch.Tensor) or sample_rate is None:
-        return None
-    if waveform.dim() == 3:
-        waveform = waveform[0]
-    if waveform.dim() != 2:
-        return None
-
-    def temporary_path() -> Path:
-        file_descriptor, raw_path = tempfile.mkstemp(
-            prefix="easy_media_audio_",
-            suffix=".wav",
-            dir=folder_paths.get_temp_directory(),
-        )
-        os.close(file_descriptor)
-        return Path(raw_path)
-
-    output = temporary_path()
-    try:
-        import torchaudio  # type: ignore[import]
-
-        torchaudio.save(str(output), waveform.cpu().float(), int(sample_rate))
-        return output
-    except Exception:
-        output.unlink(missing_ok=True)
-
-    output = temporary_path()
-    try:
-        import soundfile as sf  # type: ignore[import]
-
-        sf.write(str(output), waveform.cpu().float().numpy().T, int(sample_rate))
-        return output
-    except Exception:
-        output.unlink(missing_ok=True)
-        return None
-
-
-def match_audio_sample_rates(
-    waveform_1: torch.Tensor,
-    sample_rate_1: int,
-    waveform_2: torch.Tensor,
-    sample_rate_2: int,
-) -> tuple[torch.Tensor, torch.Tensor, int]:
-    """Resample the lower-rate waveform to the higher sample rate."""
-    if sample_rate_1 == sample_rate_2:
-        return waveform_1, waveform_2, sample_rate_1
-
-    try:
-        import torchaudio  # type: ignore[import]
-    except ImportError as exc:
-        raise RuntimeError("Merging audio with different sample rates requires torchaudio.") from exc
-
-    if sample_rate_1 > sample_rate_2:
-        logger.info("Resampling audio2 from %sHz to %sHz for merging.", sample_rate_2, sample_rate_1)
-        return (
-            waveform_1,
-            torchaudio.functional.resample(waveform_2, sample_rate_2, sample_rate_1),
-            sample_rate_1,
-        )
-
-    logger.info("Resampling audio1 from %sHz to %sHz for merging.", sample_rate_1, sample_rate_2)
-    return (
-        torchaudio.functional.resample(waveform_1, sample_rate_1, sample_rate_2),
-        waveform_2,
-        sample_rate_2,
-    )
-
-
-def merge_two_audio(audio1: dict | None, audio2: dict | None, merge_method: str = "add") -> dict | None:
-    """Merge two AUDIO dicts, matching ComfyUI's core AudioMerge behavior."""
-    if audio1 is None and audio2 is None:
-        return None
-    if audio1 is None:
-        return audio2
-    if audio2 is None:
-        return audio1
-    if merge_method not in {"add", "mean", "subtract", "multiply"}:
-        raise ValueError(f"Unsupported audio merge method: {merge_method}")
-
-    waveform_1 = audio1["waveform"]
-    waveform_2 = audio2["waveform"]
-    sample_rate_1 = int(audio1["sample_rate"])
-    sample_rate_2 = int(audio2["sample_rate"])
-
-    waveform_1, waveform_2, output_sample_rate = match_audio_sample_rates(
-        waveform_1,
-        sample_rate_1,
-        waveform_2,
-        sample_rate_2,
-    )
-
-    length_1 = waveform_1.shape[-1]
-    length_2 = waveform_2.shape[-1]
-
-    if length_1 == 0 or length_2 == 0:
-        return {"waveform": waveform_1, "sample_rate": output_sample_rate}
-
-    if length_2 > length_1:
-        logger.info(
-            "Audio merge: Trimming audio2 from %s to %s samples to match audio1 length.",
-            length_2,
-            length_1,
-        )
-        waveform_2 = waveform_2[..., :length_1]
-    elif length_2 < length_1:
-        logger.info(
-            "Audio merge: Padding audio2 from %s to %s samples to match audio1 length.",
-            length_2,
-            length_1,
-        )
-        waveform_2 = F.pad(waveform_2, (0, length_1 - length_2))
-
-    if merge_method == "add":
-        waveform = waveform_1 + waveform_2
-    elif merge_method == "subtract":
-        waveform = waveform_1 - waveform_2
-    elif merge_method == "multiply":
-        waveform = waveform_1 * waveform_2
-    else:
-        waveform = (waveform_1 + waveform_2) / 2
-
-    max_val = waveform.abs().max()
-    if max_val > 1.0:
-        waveform = waveform / max_val
-
-    return {"waveform": waveform, "sample_rate": output_sample_rate}
-
-
-# ── video helpers ──────────────────────────────────────────────────────────
 
 def _video_output_suffix(path: str) -> str:
     """Return a standard video suffix, ignoring ComfyUI URL-style annotations."""
@@ -566,6 +424,95 @@ def ffmpeg_replace_audio(
             f"FFmpeg replace-audio failed:\n{result.stderr.decode(errors='replace')[-600:]}"
         )
     return True
+
+
+def _next_video_filename(folder: str, prefix: str, ext: str) -> str:
+    """Pick the next free video filename in folder, e.g. prefix_00000.mp4."""
+    n = 0
+    while True:
+        name = f"{prefix}_{n:05d}.{ext}"
+        if not os.path.exists(os.path.join(folder, name)):
+            return name
+        n += 1
+
+
+def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
+    """Local fallback: encode a [B,H,W,C] float frame batch to a video file with ffmpeg."""
+    import folder_paths
+    from PIL import Image
+
+    fmt_map = {
+        "video/h264-mp4": ("libx264", "mp4"),
+        "video/h265-mp4": ("libx265", "mp4"),
+        "video/vp9": ("libvpx-vp9", "webm"),
+        "video/av1": ("libaom-av1", "webm"),
+        "video/h264-webm": ("libx264", "webm"),
+    }
+    codec, ext = fmt_map.get(format, ("libx264", "mp4"))
+
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found; install ffmpeg or VideoHelperSuite to encode videos")
+
+    out_dir = folder_paths.get_output_directory()
+    subfolder = os.path.dirname(os.path.normpath(filename_prefix))
+    full_out_dir = os.path.join(out_dir, subfolder)
+    os.makedirs(full_out_dir, exist_ok=True)
+    prefix = os.path.basename(os.path.normpath(filename_prefix))
+    filename = _next_video_filename(full_out_dir, prefix, ext)
+    full_out = os.path.join(full_out_dir, filename)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(frames.shape[0]):
+            frame = frames[i]
+            if frame.ndim == 4:  # [1,H,W,C] -> [H,W,C]
+                frame = frame[0]
+            img = Image.fromarray((frame.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy()))
+            img.save(os.path.join(tmpdir, f"frame_{i:05d}.png"))
+        cmd = [
+            ffmpeg, "-y", "-framerate", str(fps),
+            "-i", os.path.join(tmpdir, "frame_%05d.png"),
+            "-c:v", codec, "-pix_fmt", "yuv420p", full_out,
+        ]
+        res = subprocess.run(cmd, capture_output=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"ffmpeg encode failed: {res.stderr.decode(errors='replace')[:2000]}")
+
+    return {"filename": filename, "subfolder": subfolder, "type": "output"}
+
+
+def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
+    """Encode a [B,H,W,C] float frame batch into a video file.
+
+    Returns {"filename", "subfolder", "type"} suitable for send_sync / /view.
+    Uses VideoHelperSuite when installed (soft dependency), otherwise falls back
+    to local ffmpeg (lib.video._encode_video_frames_ffmpeg).
+    """
+    try:
+        from videohelpersuite.videohelpersuite.nodes import VideoCombine
+    except ImportError:
+        VideoCombine = None
+
+    if VideoCombine is not None:
+        try:
+            vc = VideoCombine()
+            out = vc.combine_video(
+                frame_rate=float(fps),
+                loop_count=1,
+                images=frames,
+                format=format,
+                filename_prefix=filename_prefix,
+            )
+            preview = out["ui"]["gifs"][0]
+            return {
+                "filename": preview["filename"],
+                "subfolder": preview.get("subfolder", ""),
+                "type": preview.get("type", "output"),
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("VideoCombine encode failed, falling back to local ffmpeg: %s", exc)
+
+    return _encode_video_frames_ffmpeg(frames, fps, filename_prefix, format)
 
 
 def _load_wav_audio(path: str) -> dict:
@@ -1067,10 +1014,7 @@ def _normalize_video_fps_list(
             normalized.append(resolved[i])
     return normalized
 
-
-# ── Node ──────────────────────────────────────────────────────────────────
-
-class MiniMaxRefMergeVideosFromPaths(io.ComfyNode):
+class RefMergeVideosFromPaths(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
@@ -1135,7 +1079,14 @@ class MiniMaxRefMergeVideosFromPaths(io.ComfyNode):
         pbar = ProgressBar(total + 2)
 
         def _progress(step: int, _msg: str) -> None:
-            pbar.update_absolute(step, total + 2)
+            # ProgressBar relies on the global PROGRESS_BAR_HOOK, which is only
+            # registered while a prompt is executing. When this method runs from
+            # the custom-node API route (no prompt active), the hook references
+            # PromptServer.instance.last_prompt_id which is unset -> swallow.
+            try:
+                pbar.update_absolute(step, total + 2)
+            except Exception:
+                pass
 
         def _cleanup_owned(paths_to_clean: set[str], keep: str | None = None) -> None:
             for path in paths_to_clean:
@@ -1302,235 +1253,3 @@ class MiniMaxRefMergeVideosFromPaths(io.ComfyNode):
                     os.unlink(f)
                 except OSError:
                     pass
-
-class MiniMaxRefSaveImage(io.ComfyNode):
-    """Save images to the ComfyUI output directory."""
-
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="MiniMaxRefSaveImage",
-            display_name="MiniMaxRef Save Image",
-            category="minimax",
-            description=(
-                "Saves the input images to the ComfyUI output directory "
-                "(ComfyUI/output) with the given filename prefix."
-            ),
-            inputs=[
-                io.String.Input(
-                    "filename_prefix",
-                    default="Tenz",
-                    tooltip=(
-                        "The filename prefix for the saved files. "
-                        "Images are saved to the ComfyUI output directory."
-                    ),
-                ),
-                io.Image.Input("images", tooltip="The images to save."),
-            ],
-            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
-            is_output_node=True,
-            outputs=[io.Image.Output(display_name="images", tooltip="The saved images.")],
-        )
-
-    @classmethod
-    def fingerprint_inputs(cls, **kwargs):
-        # Force execution on every iteration so a changing filename_prefix
-        # (e.g. from MiniMaxRefJoinString inside a loop) is picked up each pass.
-        return float("NaN")
-
-    @classmethod
-    def execute(cls, images, filename_prefix="Tenz") -> io.NodeOutput:
-        if images is None:
-            return io.NodeOutput(None)
-        return io.NodeOutput(
-            images,
-            ui=UI.ImageSaveHelper.get_save_images_ui(
-                images=images,
-                filename_prefix=filename_prefix,
-                cls=cls,
-            ),
-        )
-
-
-class MiniMaxRefSaveAudio(io.ComfyNode):
-    """Save audio to the ComfyUI output directory."""
-
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="MiniMaxRefSaveAudio",
-            search_aliases=[
-                "save audio", "export audio", "output audio", "write audio",
-                "flac", "mp3", "opus",
-            ],
-            display_name="MiniMaxRef Save Audio",
-            description=(
-                "Saves the input audio to the ComfyUI output directory "
-                "(ComfyUI/output) with the given filename prefix."
-            ),
-            category="minimax",
-            inputs=[
-                io.String.Input(
-                    "filename_prefix",
-                    default="Tenz/audio",
-                    tooltip=(
-                        "The prefix for the file to save. "
-                        "Audio is saved to the ComfyUI output directory."
-                    ),
-                ),
-                io.DynamicCombo.Input(
-                    "format",
-                    options=[
-                        io.DynamicCombo.Option("flac", []),
-                        io.DynamicCombo.Option("mp3", [
-                            io.Combo.Input(
-                                "quality",
-                                options=["V0", "128k", "320k"],
-                                default="V0",
-                            ),
-                        ]),
-                        io.DynamicCombo.Option("opus", [
-                            io.Combo.Input(
-                                "quality",
-                                options=["64k", "96k", "128k", "192k", "320k"],
-                                default="128k",
-                            ),
-                        ]),
-                    ],
-                    tooltip="The file format in which to save the audio.",
-                ),
-                io.Audio.Input("audio", tooltip="The audio to save."),
-            ],
-            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
-            is_output_node=True,
-            outputs=[io.Audio.Output("audio", tooltip="The saved audio.")],
-        )
-
-    @classmethod
-    def fingerprint_inputs(cls, **kwargs):
-        # Force execution on every iteration so a changing filename_prefix
-        # (e.g. from MiniMaxRefJoinString inside a loop) is picked up each pass.
-        return float("NaN")
-
-    @classmethod
-    def execute(cls, audio, filename_prefix: str, format: dict) -> io.NodeOutput:
-        if audio is None:
-            return io.NodeOutput(None)
-        file_format = format.get("format", "flac")
-        quality = format.get("quality", None)
-        if quality:
-            ui = UI.AudioSaveHelper.get_save_audio_ui(
-                audio,
-                filename_prefix=filename_prefix,
-                cls=cls,
-                format=file_format,
-                quality=quality,
-            )
-        else:
-            ui = UI.AudioSaveHelper.get_save_audio_ui(
-                audio,
-                filename_prefix=filename_prefix,
-                cls=cls,
-                format=file_format,
-            )
-        return io.NodeOutput(audio, ui=ui)
-
-
-class MiniMaxRefJoinString(io.ComfyNode):
-    """Replace placeholders in an expression with up to 4 fixed values.
-
-    Example:
-        value1 = "内容1", value2 = 2, value3 = 3.5, value4 = "内容4"
-        expression = "{value1}/{value2}/{value3}/{value4}"
-        output = "内容1/2/3.5/内容4"
-
-    Values accept STRING, INT or FLOAT. Unused placeholders can simply be
-    left out of the expression, and unconnected inputs are substituted as
-    empty strings.
-    """
-
-    @classmethod
-    def define_schema(cls):
-        value_types = [io.String, io.Int, io.Float]
-        return io.Schema(
-            node_id="MiniMaxRefJoinString",
-            display_name="MiniMaxRef Join Strings",
-            category="minimax",
-            search_aliases=["join", "concatenate", "combine", "merge strings", "template"],
-            description=(
-                "Replaces {value1}..{value4} placeholders in an expression with "
-                "the connected values (STRING, INT or FLOAT). Placeholders left "
-                "out of the expression are ignored; unconnected inputs become "
-                "empty strings."
-            ),
-            inputs=[
-                io.MultiType.Input(
-                    "value1",
-                    value_types,
-                    optional=True,
-                    tooltip="First value. Accepts STRING, INT or FLOAT.",
-                ),
-                io.MultiType.Input(
-                    "value2",
-                    value_types,
-                    optional=True,
-                    tooltip="Second value. Accepts STRING, INT or FLOAT.",
-                ),
-                io.MultiType.Input(
-                    "value3",
-                    value_types,
-                    optional=True,
-                    tooltip="Third value. Accepts STRING, INT or FLOAT.",
-                ),
-                io.MultiType.Input(
-                    "value4",
-                    value_types,
-                    optional=True,
-                    tooltip="Fourth value. Accepts STRING, INT or FLOAT.",
-                ),
-                io.String.Input(
-                    "expression",
-                    default="{value1}/{value2}/{value3}/{value4}",
-                    multiline=False,
-                    tooltip=(
-                        "Expression with {value1}..{value4} placeholders that get "
-                        "replaced by the connected values."
-                    ),
-                ),
-            ],
-            outputs=[
-                io.String.Output("output", tooltip="The substituted string."),
-            ],
-            is_output_node=True,
-        )
-
-    @classmethod
-    def fingerprint_inputs(cls, **kwargs):
-        # Force execution on every loop iteration. Easy-Use's while-loop cache
-        # signature only tracks connection endpoints, not actual values, so a
-        # node whose input values change every pass would otherwise be skipped
-        # and keep returning the first iteration's string.
-        return float("NaN")
-
-    @classmethod
-    def execute(
-        cls,
-        value1: io.MultiType.Type = None,
-        value2: io.MultiType.Type = None,
-        value3: io.MultiType.Type = None,
-        value4: io.MultiType.Type = None,
-        expression: str = "",
-    ) -> io.NodeOutput:
-        values = {
-            "value1": "" if value1 is None else str(value1),
-            "value2": "" if value2 is None else str(value2),
-            "value3": "" if value3 is None else str(value3),
-            "value4": "" if value4 is None else str(value4),
-        }
-        try:
-            return io.NodeOutput(expression.format(**values))
-        except KeyError as exc:
-            raise ValueError(
-                f"MiniMaxRefJoinString: expression references unknown placeholder "
-                f"{exc}. Available placeholders: {sorted(values)}"
-            ) from exc
