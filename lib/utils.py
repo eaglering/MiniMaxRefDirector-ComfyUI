@@ -1,6 +1,11 @@
+import gc
 import json
 import re
 from comfy_api.latest import io, UI
+import torch
+import comfy.model_management
+
+from .llm import unload_llama_models
 
 def find_index(list: list, func: callable):
     for i, v in enumerate(list):
@@ -130,3 +135,59 @@ class RefJoinString(io.ComfyNode):
                 f"MiniMaxRefJoinString: expression references unknown placeholder "
                 f"{exc}. Available placeholders: {sorted(values)}"
             ) from exc
+
+class RefPureVRAM(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MiniMaxRefPureVRAM",
+            display_name="MiniMaxRef Pure VRAM",
+            category="minimaxrefdirector",
+            search_aliases=["pure vram", "vram", "gpu"],
+            description=(
+                "Purge all models and GPU memory, for testing VRAM usage."
+            ),
+            inputs=[
+                io.AnyType.Input(
+                    "anything",
+                    tooltip="Any input to trigger the purge.",
+                ),
+                io.Boolean.Input(
+                    "purge_vram",
+                    default=True,
+                    tooltip="Whether to purge GPU memory.",
+                ),
+                io.Boolean.Input(
+                    "purge_models",
+                    default=True,
+                    tooltip="Whether to purge all models.",
+                ),
+            ],
+            outputs=[
+                io.AnyType.Output("anything", tooltip="Any output to trigger the purge."),
+            ],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        # Force execution on every loop iteration. 
+        return float("NaN")
+    
+    @classmethod
+    def execute(
+            cls,
+            anything: any = None,
+            purge_vram: bool = True,
+            purge_models: bool = True,
+    ) -> io.NodeOutput:
+        if purge_vram:
+            unload_llama_models()
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        if purge_models:
+            comfy.model_management.unload_all_models()
+            comfy.model_management.soft_empty_cache()
+        return io.NodeOutput(anything)

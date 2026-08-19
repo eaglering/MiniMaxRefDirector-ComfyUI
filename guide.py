@@ -340,10 +340,19 @@ class MiniMaxRefGuide(io.ComfyNode):
         )
 
         trim_frames: int = 0
+        prev_is_video = False
+
+        if entry.get("type") == "text":
+            if prev_tail:
+                prev_is_video = True
+            elif entry.get("prevType") == "video":
+                prev_tail = entry.get("prevImageFile", "")
+                prev_is_video = True
+
         # 图片段 + imageFile：把静态图重复成 8 帧作为 motion context pinned 帧，
         # 让本段从该图开始运动（H3 节点会按 VAE 网格把帧数吸附到合法值，如 5 帧）。
-        if entry.get("type") == "image" and entry.get("imageFile"):
-            img_src = entry["imageFile"]
+        if entry.get("type") in ["text", "image", "video"] and entry.get("prevImageFile") and not prev_is_video:
+            img_src = entry.get("prevImageFile")
             if isinstance(img_src, (tuple, list)):  # VHS_FILENAMES 元组
                 img_src = _vhs_tuple_path(img_src)
             img_frames = load_image_tensor(img_src)
@@ -358,18 +367,9 @@ class MiniMaxRefGuide(io.ComfyNode):
             else:
                 log.warning(f"[MiniMaxRefGuide] guide_index={idx} image motion context "
                             f"skipped: failed to load image {img_src!r}")
-        
-        use_motion_context = False
-        if entry.get("type") == "video" and entry.get("imageFile"):
-            prev_tail = entry.get("imageFile")
-            use_motion_context = True
-
-        if entry.get("type") == "text" and entry.get("motionContext"):
-            prev_tail = entry.get("prevImageFile") if not prev_tail else prev_tail
-            use_motion_context = True
 
         # 文本段 + motionContext：用 prev_tail 视频，motion context 处理
-        if use_motion_context and prev_tail:
+        if entry.get("motionContext") and prev_tail and prev_is_video:
             log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail={prev_tail}")
             frames = _load_prev_tail_frames(prev_tail)
             if frames is not None and frames.shape[0] >= 1:

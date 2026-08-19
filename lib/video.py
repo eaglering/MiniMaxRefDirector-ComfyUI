@@ -1079,7 +1079,14 @@ class RefMergeVideosFromPaths(io.ComfyNode):
         pbar = ProgressBar(total + 2)
 
         def _progress(step: int, _msg: str) -> None:
-            pbar.update_absolute(step, total + 2)
+            # ProgressBar relies on the global PROGRESS_BAR_HOOK, which is only
+            # registered while a prompt is executing. When this method runs from
+            # the custom-node API route (no prompt active), the hook references
+            # PromptServer.instance.last_prompt_id which is unset -> swallow.
+            try:
+                pbar.update_absolute(step, total + 2)
+            except Exception:
+                pass
 
         def _cleanup_owned(paths_to_clean: set[str], keep: str | None = None) -> None:
             for path in paths_to_clean:

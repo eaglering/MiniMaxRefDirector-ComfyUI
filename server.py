@@ -19,6 +19,42 @@ from .api_config import api_config_manager
 
 API_PREFIX = "/minimax_ref/api"
 
+# --- 惰性路由注册 ---
+# `PromptServer.instance` 要到 ComfyUI 真正构造 PromptServer() 后才被赋值。
+# 本模块可能在 instance 就绪之前被导入（例如被其他自定义节点提前 import），
+# 若在模块顶层直接 `@PromptServer.instance.routes.get(...)` 会抛
+# AttributeError 导致整个插件加载失败。这里用一个代理收集所有路由，待
+# PromptServer.instance 可用时再统一注册（见模块末尾 _flush_routes()）。
+class _LazyRoutes:
+    _pending: list = []
+
+    def get(self, path, **kwargs):
+        return self._decorate("get", path, kwargs)
+
+    def post(self, path, **kwargs):
+        return self._decorate("post", path, kwargs)
+
+    def _decorate(self, method, path, kwargs):
+        def wrapper(func):
+            self._pending.append((method, path, kwargs, func))
+            return func
+        return wrapper
+
+    @classmethod
+    def flush(cls):
+        if not cls._pending:
+            return
+        ps = getattr(PromptServer, "instance", None)
+        if ps is None or getattr(ps, "routes", None) is None:
+            return  # 尚未就绪，保持 pending，待后续再次尝试
+        table = ps.routes
+        for method, path, kwargs, func in cls._pending:
+            getattr(table, method)(path, **kwargs)(func)
+        cls._pending = []
+
+
+_routes = _LazyRoutes()
+
 # --- 开发期扩展资源缓存失效 ---
 # ComfyUI 对 /extensions/ 静态资源可能带 ETag / 启发式缓存，改 JS/CSS 后浏览器
 # 仍可能使用旧模块，导致新增样式/逻辑不生效。这里对本节点的 web 资源强制
@@ -63,7 +99,7 @@ def _resolve_llm_file(name: str) -> str:
     return os.path.join(folder_paths.models_dir, "llm", name)
 
 
-@PromptServer.instance.routes.get(f"{API_PREFIX}/view_image")
+@_routes.get(f"{API_PREFIX}/view_image")
 async def view_image_inline(request: web.Request) -> web.Response:
     """与 ComfyUI 官方 /view 等价，但强制 Content-Disposition: inline。
 
@@ -104,7 +140,7 @@ async def view_image_inline(request: web.Request) -> web.Response:
     )
 
 
-@PromptServer.instance.routes.get(f"{API_PREFIX}/config")
+@_routes.get(f"{API_PREFIX}/config")
 async def get_api_config(request: web.Request) -> web.Response:
     """Return the full API configuration (API keys are returned as-is to the owner)."""
     try:
@@ -115,7 +151,13 @@ async def get_api_config(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
-@PromptServer.instance.routes.post(f"{API_PREFIX}/config")
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()
+
+
+@_routes.post(f"{API_PREFIX}/config")
 async def save_api_config(request: web.Request) -> web.Response:
     """Persist the full API configuration from the Settings panel."""
     try:
@@ -128,7 +170,13 @@ async def save_api_config(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
-@PromptServer.instance.routes.post(f"{API_PREFIX}/llm/unload")
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()
+
+
+@_routes.post(f"{API_PREFIX}/llm/unload")
 async def unload_llama_models_api(request: web.Request) -> web.Response:
     """Unload all cached local GGUF (llama-cpp) models to free RAM/VRAM.
 
@@ -144,7 +192,13 @@ async def unload_llama_models_api(request: web.Request) -> web.Response:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
-@PromptServer.instance.routes.post(f"{API_PREFIX}/llm/generate_image_analysis")
+
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()
+
+@_routes.post(f"{API_PREFIX}/llm/generate_image_analysis")
 async def generate_image_analysis_api(request: web.Request) -> web.Response:
     try:
         data = await request.json()
@@ -175,7 +229,13 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
-@PromptServer.instance.routes.post(f"{API_PREFIX}/llm/generate_prompt_json")
+
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()
+
+@_routes.post(f"{API_PREFIX}/llm/generate_prompt_json")
 async def generate_prompt_json_api(request: web.Request) -> web.Response:
     try:
         data = await request.json()
@@ -208,7 +268,13 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
-@PromptServer.instance.routes.post(f"{API_PREFIX}/h3/build_subject_bindings")
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()
+
+
+@_routes.post(f"{API_PREFIX}/h3/build_subject_bindings")
 async def build_subject_bindings_api(request: web.Request) -> web.Response:
     """构建 H3 主体绑定（subject_definition / retention_analysis
     + images / audios / videos），替代前端 buildFirstFramePayload 中的组装逻辑。"""
@@ -236,6 +302,12 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()
 
 
 # ── 迁移自 WhatDreamsCost-ComfyUI/ltx_director.py：/ltx_director_get_audio ──
@@ -390,7 +462,7 @@ def _get_audio_peaks(audio_path: str):
         return None
 
 
-@PromptServer.instance.routes.get(f"{API_PREFIX}/h3/ltx_director_get_audio")
+@_routes.get(f"{API_PREFIX}/h3/ltx_director_get_audio")
 async def get_audio_file(request):
     """从视频/音频文件提取波形峰值（迁移自 WhatDreamsCost 插件）。"""
     filename = request.query.get("filename")
@@ -431,7 +503,7 @@ async def get_audio_file(request):
 
 
 # ── 迁移自 WhatDreamsCost-ComfyUI/ltx_director.py：文件去重 / 分块上传 ──
-@PromptServer.instance.routes.get(f"{API_PREFIX}/h3/ltx_director_check_file")
+@_routes.get(f"{API_PREFIX}/h3/ltx_director_check_file")
 async def ltx_director_check_file(request):
     """检查文件是否已存在（去重），返回 {"exists": bool, "name": rel_path}。"""
     filename = request.query.get("filename", "")
@@ -502,7 +574,7 @@ def _read_and_write_file_chunk(file, file_path, mode):
         f.write(chunk_bytes)
 
 
-@PromptServer.instance.routes.post(f"{API_PREFIX}/h3/ltx_director_upload_chunk")
+@_routes.post(f"{API_PREFIX}/h3/ltx_director_upload_chunk")
 async def ltx_director_upload_chunk(request):
     """分块上传视频以绕过 413 限制；最后一块完成后提取音频波形。"""
     post = await request.post()
@@ -540,7 +612,7 @@ async def ltx_director_upload_chunk(request):
 
 
 # ── 迁移自 WhatDreamsCost-ComfyUI/ltx_director.py：/ltx_director_open_folder ──
-@PromptServer.instance.routes.get(f"{API_PREFIX}/h3/ltx_director_open_folder")
+@_routes.get(f"{API_PREFIX}/h3/ltx_director_open_folder")
 async def ltx_director_open_folder(request):
     """打开本扩展视频上传目录。"""
     upload_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
@@ -556,3 +628,176 @@ async def ltx_director_open_folder(request):
     except Exception as e:
         print(f"[MiniMaxRefDirector] Failed to open workspace folder: {e}")
         return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()
+
+
+# ── 视频素材合并：素材条多选 → RefMergeVideosFromPaths → 通知前端追加素材 ──
+
+def _material_src_to_local_path(src: str) -> str | None:
+    """把前端素材条的 viewUrl 解析为本地视频文件绝对路径。
+
+    素材 src 形如 /view?filename=...&subfolder=...&type=... 或
+    /minimax_ref/api/view_image?filename=...&subfolder=...&type=...，
+    也可能是绝对/相对本地路径。解析 query 后按命中目录 + 兜底目录逐级查找。
+    """
+    if not src or not isinstance(src, str):
+        return None
+    # 1. 本地文件路径直接命中
+    if os.path.isfile(src):
+        return src
+
+    filename, subfolder, typ = "", "", "output"
+    try:
+        from urllib.parse import parse_qs, urlparse
+
+        qs = parse_qs(urlparse(src).query)
+        filename = (qs.get("filename") or [""])[0]
+        subfolder = (qs.get("subfolder") or [""])[0] or ""
+        typ = (qs.get("type") or ["output"])[0] or "output"
+    except Exception:
+        pass
+    if not filename:
+        return None
+
+    def _dirs() -> list[str]:
+        dirs = []
+        if typ == "input":
+            dirs.append(folder_paths.get_input_directory())
+        elif typ == "temp":
+            dirs.append(folder_paths.get_temp_directory())
+        else:
+            dirs.append(folder_paths.get_output_directory())
+        for d in (
+            folder_paths.get_input_directory(),
+            folder_paths.get_output_directory(),
+            folder_paths.get_temp_directory(),
+        ):
+            if d not in dirs:
+                dirs.append(d)
+        return dirs
+
+    subs = [subfolder, ""]
+    if "whatdreamscost" not in subs:
+        subs.append("whatdreamscost")
+    for base in _dirs():
+        for sf in subs:
+            p = os.path.normpath(os.path.join(base, sf, filename))
+            if not os.path.realpath(p).startswith(os.path.realpath(base)):
+                continue
+            if os.path.isfile(p):
+                return p
+    # 2. ComfyUI annotated path 兜底
+    try:
+        p = folder_paths.get_annotated_filepath(filename, subfolder, typ)
+        if os.path.isfile(p):
+            return p
+    except Exception:
+        pass
+    return None
+
+
+def _extract_merged_video_path(result) -> str | None:
+    """从 RefMergeVideosFromPaths.execute 的 io.NodeOutput 提取合并后视频路径。"""
+    raw = None
+    try:
+        if hasattr(result, "outputs") and result.outputs:
+            raw = result.outputs[0]
+    except Exception:
+        pass
+    if isinstance(raw, dict):
+        p = raw.get("path")
+        if isinstance(p, str) and os.path.isfile(p):
+            return p
+    try:
+        source = raw.get_stream_source() if hasattr(raw, "get_stream_source") else None
+        if isinstance(source, str) and os.path.isfile(source):
+            return source
+    except Exception:
+        pass
+    return None
+
+
+@_routes.post(f"{API_PREFIX}/h3/merge_videos")
+async def merge_videos_api(request: web.Request) -> web.Response:
+    """合并多段视频素材为一段。
+
+    请求体：{"paths": [素材 viewUrl / 本地路径, ...]}（至少 2 段）。
+    流程：解析为本地路径 → 调用 RefMergeVideosFromPaths.execute →
+    产物复制到 input/whatdreamscost/ → send_sync 通知前端追加素材。
+    """
+    try:
+        data = await request.json()
+        srcs = data.get("paths") or []
+        if not isinstance(srcs, list) or len(srcs) < 2:
+            return web.json_response({"success": False, "error": "请至少选择 2 段视频素材"}, status=400)
+
+        from .lib.video import RefMergeVideosFromPaths
+
+        local_paths: list[str] = []
+        for src in srcs:
+            p = _material_src_to_local_path(src)
+            if p is None:
+                return web.json_response({"success": False, "error": f"无法解析素材路径: {src}"}, status=400)
+            if p not in local_paths:
+                local_paths.append(p)
+
+        def _run_merge():
+            return RefMergeVideosFromPaths.execute(
+                paths="\n".join(local_paths),
+                frame_count=-1,
+                audio_mode="merge",
+                audio=None,
+            )
+
+        result = await asyncio.to_thread(_run_merge)
+        merged_path = _extract_merged_video_path(result)
+        if not merged_path or not os.path.isfile(merged_path):
+            return web.json_response({"success": False, "error": "合并失败：未生成输出文件"}, status=500)
+
+        # 复制到素材库目录 input/whatdreamscost/，保证前端可预览、可再参与合并
+        import shutil
+
+        input_dir = folder_paths.get_input_directory()
+        mat_dir = os.path.join(input_dir, "whatdreamscost")
+        os.makedirs(mat_dir, exist_ok=True)
+        ext = os.path.splitext(merged_path)[1] or ".mp4"
+        if ext.lower() not in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"):
+            ext = ".mp4"
+        import datetime
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"merge_{ts}{ext}"
+        dst = os.path.join(mat_dir, name)
+        n = 1
+        while os.path.exists(dst):
+            name = f"merge_{ts}_{n}{ext}"
+            dst = os.path.join(mat_dir, name)
+            n += 1
+        shutil.copy2(merged_path, dst)
+
+        file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
+        PromptServer.instance.send_sync(
+            "minimax_ref_video_progress",
+            {"status": "add_material", "type": "video", "imageFile": file_info},
+        )
+        return web.json_response({"success": True, "name": f"whatdreamscost/{name}", "file": file_info})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()
+
+
+# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
+# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
+# __init__.py 末尾再次调用 _LazyRoutes.flush()。
+_LazyRoutes.flush()

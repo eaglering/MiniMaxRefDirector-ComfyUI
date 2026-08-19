@@ -368,6 +368,7 @@ const S = {
   },
   materialsSel: { fontSize: "11px", color: "#5c9dff", userSelect: "none" },
   materialsDelBtn: { padding: "2px 8px", fontSize: "11px", marginLeft: "auto" },
+  materialsMergeBtn: { padding: "2px 8px", fontSize: "11px" },
   materialsStrip: {
     display: "flex", flexDirection: "row", flexWrap: "nowrap", overflowX: "auto",
     gap: "6px", padding: "2px 8px 6px", alignItems: "stretch",
@@ -498,6 +499,7 @@ export function TransferPanel({ director }) {
   const [viewer, setViewer] = useState(null); // 双击素材打开的播放器弹窗（当前查看的素材对象）
   const [dragReadyId, setDragReadyId] = useState(null); // 长按预取完成、可拖出到其他上传框的素材 id
   const [dragHint, setDragHint] = useState(""); // 长按拖出操作提示（自动消失）
+  const [mergeBusy, setMergeBusy] = useState(false); // 素材合并请求进行中
   const longPressRef = useRef(null); // 长按状态 { id, fired, x, y, timer }
   const suppressClickRef = useRef(false); // 长按松手后抑制随后的 click（避免误改选中）
   const dragHintTimerRef = useRef(null); // 提示自动消失定时器
@@ -1090,6 +1092,30 @@ export function TransferPanel({ director }) {
     setAnchorId(null);
   };
 
+  // 合并选中的素材视频：请求后端 /minimax_ref/api/h3/merge_videos，
+  // 后端调用 RefMergeVideosFromPaths 合并后 send_sync 通知（status=add_material），
+  // 素材条会自动追加合并结果（无需手动 setMaterials）。
+  const mergeSelectedMaterials = async () => {
+    if (selIds.size < 2 || mergeBusy) return;
+    const sel = materials.filter((m) => selIds.has(m.id));
+    setMergeBusy(true);
+    try {
+      const res = await api.fetchApi("/minimax_ref/api/h3/merge_videos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: sel.map((m) => m.src) }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "合并失败");
+      showDragHint(`已合并 ${sel.length} 段视频，结果已加入素材条`);
+    } catch (err) {
+      console.error("[Transfer] 合并失败:", err);
+      showDragHint(`合并失败：${err.message || "未知错误"}`);
+    } finally {
+      setMergeBusy(false);
+    }
+  };
+
   // 拖放上传：把本地视频文件拖入素材条，上传到后端 input 目录后追加为素材
   const handleStripDrop = async (e) => {
     e.preventDefault();
@@ -1371,6 +1397,17 @@ export function TransferPanel({ director }) {
               : null
           }
           ${
+            selIds.size >= 2
+              ? html`<button
+                  class="mrd-pr-btn"
+                  style=${S.materialsMergeBtn}
+                  disabled=${mergeBusy}
+                  onClick=${mergeSelectedMaterials}
+                  onMouseDown=${(e) => e.preventDefault()}
+                >${mergeBusy ? "合并中…" : "合并"}</button>`
+              : null
+          }
+          ${
             selIds.size
               ? html`<button
                   class="mrd-pr-btn"
@@ -1634,11 +1671,15 @@ export function GlobalParamsPanel({ director }) {
   const mode = getMode();
   const defs = [...(TIME_PARAM_DEFS[mode] || TIME_PARAM_DEFS.seconds), ...OTHER_GLOBAL_DEFS];
 
-  // 监听 display_mode 变化刷新面板（由 director.js 的 displayModeWidget callback 触发）
+  // 监听全局参数变化刷新面板：
+  // - display_mode 切换（director.js displayModeWidget callback -> _onDisplayModeChange）
+  // - start/end/duration/frame_rate 联动更新（director.js 各全局 widget callback -> _onGlobalChange）
   useEffect(() => {
     director._onDisplayModeChange = () => setGp(readGlobal());
+    director._onGlobalChange = () => setGp(readGlobal());
     return () => {
       if (director._onDisplayModeChange) director._onDisplayModeChange = null;
+      if (director._onGlobalChange) director._onGlobalChange = null;
     };
   }, [director]);
 

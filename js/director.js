@@ -165,11 +165,11 @@ class TimelineEditor {
             newDurationFrames = 1;
           }
 
-          this.startSecondsWidget.value = parseFloat((newStartFrames / this.getFrameRate()).toFixed(3));
+          this.startSecondsWidget.value = parseFloat((newStartFrames / this.getFrameRate()).toFixed(2));
 
           this.durationFramesWidget.value = newDurationFrames;
           if (this.durationSecondsWidget) {
-            this.durationSecondsWidget.value = parseFloat((newDurationFrames / this.getFrameRate()).toFixed(3));
+            this.durationSecondsWidget.value = parseFloat((newDurationFrames / this.getFrameRate()).toFixed(2));
           }
 
           this._prevStartFrames = newStartFrames;
@@ -178,6 +178,7 @@ class TimelineEditor {
           isSyncing = false;
         }
 
+        this._notifyGlobalChange();
         this.commitChanges();
       };
     }
@@ -199,7 +200,7 @@ class TimelineEditor {
           if (newDurationFrames <= 1) {
             newStartFrames = endFrame - 1;
             newStartSeconds = newStartFrames / this.getFrameRate();
-            this.startSecondsWidget.value = parseFloat(newStartSeconds.toFixed(3));
+            this.startSecondsWidget.value = parseFloat(newStartSeconds.toFixed(2));
             newDurationFrames = 1;
           }
 
@@ -207,7 +208,7 @@ class TimelineEditor {
 
           this.durationFramesWidget.value = newDurationFrames;
           if (this.durationSecondsWidget) {
-            this.durationSecondsWidget.value = parseFloat((newDurationFrames / this.getFrameRate()).toFixed(3));
+            this.durationSecondsWidget.value = parseFloat((newDurationFrames / this.getFrameRate()).toFixed(2));
           }
 
           this._prevStartFrames = newStartFrames;
@@ -216,6 +217,7 @@ class TimelineEditor {
           isSyncing = false;
         }
 
+        this._notifyGlobalChange();
         this.commitChanges();
       };
     }
@@ -239,16 +241,17 @@ class TimelineEditor {
             newDurationFrames = 1;
           }
 
-          this.endSecondsWidget.value = parseFloat((newEndFrames / this.getFrameRate()).toFixed(3));
+          this.endSecondsWidget.value = parseFloat((newEndFrames / this.getFrameRate()).toFixed(2));
 
           this.durationFramesWidget.value = newDurationFrames;
           if (this.durationSecondsWidget) {
-            this.durationSecondsWidget.value = parseFloat((newDurationFrames / this.getFrameRate()).toFixed(3));
+            this.durationSecondsWidget.value = parseFloat((newDurationFrames / this.getFrameRate()).toFixed(2));
           }
 
           isSyncing = false;
         }
 
+        this._notifyGlobalChange();
         this.commitChanges();
       };
     }
@@ -270,7 +273,7 @@ class TimelineEditor {
           if (newDurationFrames <= 1) {
             newEndFrames = startFrame + 1;
             newEndSeconds = newEndFrames / this.getFrameRate();
-            this.endSecondsWidget.value = parseFloat(newEndSeconds.toFixed(3));
+            this.endSecondsWidget.value = parseFloat(newEndSeconds.toFixed(2));
             newDurationFrames = 1;
           }
 
@@ -278,12 +281,13 @@ class TimelineEditor {
 
           this.durationFramesWidget.value = newDurationFrames;
           if (this.durationSecondsWidget) {
-            this.durationSecondsWidget.value = parseFloat((newDurationFrames / this.getFrameRate()).toFixed(3));
+            this.durationSecondsWidget.value = parseFloat((newDurationFrames / this.getFrameRate()).toFixed(2));
           }
 
           isSyncing = false;
         }
 
+        this._notifyGlobalChange();
         this.commitChanges();
       };
     }
@@ -296,15 +300,16 @@ class TimelineEditor {
 
         if (!isSyncing && this.durationSecondsWidget && this.startFramesWidget && this.endFramesWidget) {
           isSyncing = true;
-          this.durationSecondsWidget.value = parseFloat((this.getDurationFrames() / this.getFrameRate()).toFixed(3));
+          this.durationSecondsWidget.value = parseFloat((this.getDurationFrames() / this.getFrameRate()).toFixed(2));
 
           const newEndFrames = this.startFramesWidget.value + this.getDurationFrames();
           this.endFramesWidget.value = newEndFrames;
-          this.endSecondsWidget.value = parseFloat((newEndFrames / this.getFrameRate()).toFixed(3));
+          this.endSecondsWidget.value = parseFloat((newEndFrames / this.getFrameRate()).toFixed(2));
 
           isSyncing = false;
         }
 
+        this._notifyGlobalChange();
         this.commitChanges();
       };
     }
@@ -321,11 +326,12 @@ class TimelineEditor {
 
           const newEndFrames = this.startFramesWidget.value + newFrames;
           this.endFramesWidget.value = newEndFrames;
-          this.endSecondsWidget.value = parseFloat((newEndFrames / this.getFrameRate()).toFixed(3));
+          this.endSecondsWidget.value = parseFloat((newEndFrames / this.getFrameRate()).toFixed(2));
 
           isSyncing = false;
         }
 
+        this._notifyGlobalChange();
         this.commitChanges();
       };
     }
@@ -364,6 +370,7 @@ class TimelineEditor {
           isSyncing = false;
         }
 
+        this._notifyGlobalChange();
         this.commitChanges();
       };
     }
@@ -462,6 +469,13 @@ class TimelineEditor {
       return dropSuffix ? secs.toFixed(2) : secs.toFixed(2) + "s";
     }
     return dropSuffix ? Math.round(frames).toString() : Math.round(frames) + " frames";
+  }
+
+  // 通知 GlobalParamsPanel：start/end/duration/frame_rate 等全局参数发生联动更新
+  _notifyGlobalChange() {
+    if (typeof this._onGlobalChange === "function") {
+      this._onGlobalChange();
+    }
   }
 
   get _settingsWidgetNames() {

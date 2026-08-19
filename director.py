@@ -195,6 +195,7 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "audios": prompt_res["audios"],
                 "videos": prompt_res["videos"],
                 "prevImageFile": prompt_res["prevImageFile"],
+                "prevType": prompt_res["prevType"],
                 "durationFrames": dur,
                 "type": seg.get("type", "text"),
                 "imageFile": seg.get("imageFile", ""),
@@ -217,7 +218,9 @@ class MiniMaxRefDirector(io.ComfyNode):
         }
 
         log.info(
-            f"[MiniMaxRefDirector] {segment_count} segments | timeline: {timeline_data} "
+            f"[MiniMaxRefDirector] {segment_count} segments | timeline: {timeline_data} | "
+            f"start_second: {start_second} | end_second: {end_second} | duration_seconds: {duration_seconds} | "
+            f"start_frane: {start_frame} | end_frame: {end_frame} | duration_frames: {duration_frames} | "
             f"{out_w}×{out_h} ({outpu_resolution}, {million_pixels}MP) | "
             f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
         )

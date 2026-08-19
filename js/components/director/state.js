@@ -112,7 +112,7 @@ export const state = {
       this.durationFramesWidget.value = newFrames;
     }
     if (this.durationSecondsWidget) {
-      this.durationSecondsWidget.value = parseFloat((newFrames / this.getFrameRate()).toFixed(3));
+      this.durationSecondsWidget.value = parseFloat((newFrames / this.getFrameRate()).toFixed(2));
     }
     // Notify ComfyUI that the widget value changed so it serialises correctly.
     if (window.app && window.app.graph) {

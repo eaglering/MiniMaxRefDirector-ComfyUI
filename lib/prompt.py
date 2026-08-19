@@ -391,6 +391,7 @@ def build_h3_prompt(
     # 尾帧图片对应的 <Picture N> 标签（视频段尾帧 / autoEndFrame 段），追加到详细描述末尾作为结束锚点
     last_frame_pic = ""
     prev_image_file = ""
+    prev_type = "image"
 
     if timeline_segment.get("type", "text") == "video":
         video_path = timeline_segment.get("imageFile", "")
@@ -401,6 +402,7 @@ def build_h3_prompt(
         if video_first_frame_path:
             label = f"<Picture {index}>"
             first_frame_pic = label
+            prev_image_file = video_first_frame_path
             subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
             retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
             index += 1
@@ -416,13 +418,15 @@ def build_h3_prompt(
         if timeline_segment.get("type", "text") == "image":
             label = f"<Picture {index}>"
             first_frame_pic = label
+            prev_image_file = timeline_segment.get("imageFile")
             subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
             retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
             index += 1
-            images.append(timeline_segment.get("imageFile"))
+            images.append(prev_image_file)
         elif timeline_segment.get("motionContext", False) and previous_timeline_segment is not None:
             if previous_timeline_segment.get("type") == "video" and previous_timeline_segment.get("imageFile"):
                 prev_image_file = previous_timeline_segment.get("imageFile", "")
+                prev_type = "video"
                 video_start = previous_timeline_segment.get("trimStart", 1)
                 video_duration = previous_timeline_segment.get("length", 1)
                 # 视频段：获取 mp4 的首帧和尾帧图片路径（首帧位置=video_start，尾帧位置=video_start+video_duration）
@@ -511,8 +515,8 @@ def build_h3_prompt(
         "audios": prompt_res["audios"],
         "videos": prompt_res["videos"],
         "prevImageFile": prev_image_file,
+        "prevType": prev_type
     }
-
 def _replace_mapping(input: str, mapping: dict) -> str:
         for k, v in mapping.items():
             input = input.replace(k, v)
