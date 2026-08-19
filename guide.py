@@ -72,13 +72,26 @@ def _vhs_tuple_path(item):
     
 
 def _send_progress(payload):
-    """send_sync 通知 director 前端更新 video track（失败仅告警，不影响执行）。"""
+    """send_sync 通知 director 前端更新 video track（失败仅告警，不影响执行）。
+
+    通知会附加当前执行节点的 node_id；前端据此过滤，避免 ComfyUI 工作台
+    多 tab / 多节点同时监听同一事件时互相串收素材。
+    """
     try:
         from server import PromptServer
     except ImportError:
         from comfy_api.latest import server as _comfy_server
         PromptServer = _comfy_server.PromptServer
     try:
+        # 在节点 execute 期间能拿到当前执行上下文（含 node_id）
+        try:
+            from comfy_execution.utils import get_executing_context
+            ctx = get_executing_context()
+            if ctx is not None and getattr(ctx, "node_id", None) is not None:
+                payload = dict(payload)
+                payload["node_id"] = ctx.node_id
+        except Exception:
+            pass
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
     except Exception:
         log.warning("[MiniMaxRefGuide] failed to send progress notification", exc_info=True)

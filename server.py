@@ -702,13 +702,23 @@ def _material_src_to_local_path(src: str) -> str | None:
 
 
 def _extract_merged_video_path(result) -> str | None:
-    """从 RefMergeVideosFromPaths.execute 的 io.NodeOutput 提取合并后视频路径。"""
-    raw = None
+    """从 RefMergeVideosFromPaths.execute 的 io.NodeOutput 提取合并后视频路径。
+
+    io.NodeOutput 没有 outputs 属性，其输出参数通过 .result（即 .args）暴露，
+    第一个参数是 Input.Video（VideoFromFile），真实文件路径取自 get_stream_source()。
+    """
+    raw = result
     try:
         if hasattr(result, "outputs") and result.outputs:
             raw = result.outputs[0]
+        elif hasattr(result, "result"):
+            res = result.result
+            if isinstance(res, (list, tuple)) and res:
+                raw = res[0]
     except Exception:
         pass
+    if isinstance(raw, str) and os.path.isfile(raw):
+        return raw
     if isinstance(raw, dict):
         p = raw.get("path")
         if isinstance(p, str) and os.path.isfile(p):
@@ -735,6 +745,10 @@ async def merge_videos_api(request: web.Request) -> web.Response:
         srcs = data.get("paths") or []
         if not isinstance(srcs, list) or len(srcs) < 2:
             return web.json_response({"success": False, "error": "请至少选择 2 段视频素材"}, status=400)
+
+        # 前端传入的节点 id：合并产物的 add_material 通知仅该节点接收，
+        # 避免多 tab / 多节点串收
+        node_id = data.get("node_id")
 
         from .lib.video import RefMergeVideosFromPaths
 
@@ -781,10 +795,10 @@ async def merge_videos_api(request: web.Request) -> web.Response:
         shutil.copy2(merged_path, dst)
 
         file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
-        PromptServer.instance.send_sync(
-            "minimax_ref_video_progress",
-            {"status": "add_material", "type": "video", "imageFile": file_info},
-        )
+        payload = {"status": "add_material", "type": "video", "imageFile": file_info}
+        if node_id is not None:
+            payload["node_id"] = node_id
+        PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
         return web.json_response({"success": True, "name": f"whatdreamscost/{name}", "file": file_info})
     except Exception as e:
         traceback.print_exc()

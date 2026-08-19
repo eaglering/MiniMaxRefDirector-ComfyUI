@@ -116,6 +116,9 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool) -> str:
 ## Task
 Rewrite the user's input prompt into a full-reference video prompt.
 
+## Output Language
+Write every field in the same language as the user's input (Chinese input -> Chinese output, English input -> English output; follow any other input language accordingly). Keep only fixed structural markers ("[Shot N]", "At MM:SS.mmm", "<@...>", "<#...>") and field names unchanged. Character names, dialogue, and text visible in the scene always stay in their original language.
+
 ## Output Format
 Output ONLY a JSON object with exactly these keys:
   - "detailed_description": string
