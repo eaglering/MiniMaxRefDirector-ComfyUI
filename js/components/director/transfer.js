@@ -489,34 +489,53 @@ const OTHER_GLOBAL_DEFS = [
   { name: "million_pixels", label: "Million Pixels", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1, digits: 1 },
 ];
 
-// ---------- 数字输入框（失焦/回车提交，允许输入中间态） ----------
-// 本地文本 state 保留用户正在输入的原始内容（如 "0."、"0.05"），只在
-// 失焦/回车时解析并提交：按 digits 四舍五入、clamp 到 [min,max]。
-// 避免受控组件在每次击键时强制重渲染，吞掉小数点 / 前导 0。
+// ---------- 数字输入框（输入即限制精度，失焦/回车提交） ----------
+// 本地文本 state 保留输入中间态；onInput 用正则按 digits 实时过滤，
+// 多余的小数位 / 非法字符直接打不进去（手动回滚 DOM 值）。
+// 失焦/回车时解析提交：四舍五入到 digits、clamp 到 [min,max]（兜底粘贴等绕过）。
 function NumInput({ def, value, onCommit }) {
-  const [text, setText] = useState(() => String(value ?? def.fallback ?? ""));
-  // 外部值变化（FPS 联动、显示模式切换等）时同步显示
+  const digits = def.digits ?? (def.step < 1 ? 2 : 0);
+  // digits=0 只允许整数；digits>0 最多 digits 位小数（整数部分最多 6 位）
+  const pat = digits > 0
+    ? new RegExp(`^\\d{0,6}(\\.\\d{0,${digits}})?$`)
+    : new RegExp(`^\\d{0,6}$`);
+
+  const fmt = (v) => {
+    const nv = Number(v ?? def.fallback ?? "");
+    return Number.isFinite(nv) ? String(Number(nv.toFixed(digits))) : String(def.fallback ?? "");
+  };
+
+  const [text, setText] = useState(() => fmt(value));
+  // 外部值变化（FPS 联动、显示模式切换等）时同步显示，并格式化为目标精度
   useEffect(() => {
-    setText(String(value ?? def.fallback ?? ""));
-  }, [value, def]);
+    setText(fmt(value));
+  }, [value, def, digits]);
+
+  const handleInput = (e) => {
+    const raw = e.target.value;
+    if (raw === "" || pat.test(raw)) {
+      setText(raw);
+    } else {
+      // 超出精度的输入：回滚 DOM 值，该字符不显示
+      e.target.value = text;
+    }
+  };
 
   const commit = () => {
     let nv = parseFloat(text);
     if (Number.isNaN(nv)) nv = def.fallback;
     nv = Math.min(Math.max(nv, def.min), def.max);
-    const digits = def.digits ?? (def.step < 1 ? 2 : 0);
     nv = digits > 0 ? Number(nv.toFixed(digits)) : Math.round(nv);
     onCommit(def.name, nv);
   };
 
   return html`<input
     class="tr-gp-input"
-    type="number"
-    min=${def.min}
-    max=${def.max}
-    step=${def.step}
+    type="text"
+    inputmode="decimal"
+    autocomplete="off"
     value=${text}
-    onInput=${(e) => setText(e.target.value)}
+    onInput=${handleInput}
     onBlur=${commit}
     onKeyDown=${(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
   />`;
