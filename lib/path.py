@@ -51,3 +51,19 @@ def resolve_input_path(filename: str) -> str:
     if os.path.isabs(filename):
         return filename
     return ""
+
+
+def vhs_tuple_path(item):
+    """VHS_FILENAMES 元组 (filename, subfolder, type[, path]) → 本地绝对路径。
+
+    解析失败时退回原始 filename（可能是相对路径，上层可再走 resolve_input_path 兜底）。
+    """
+    if len(item) >= 4 and item[3]:
+        return item[3]
+    filename = item[0]
+    subfolder = item[1] if len(item) > 1 else ""
+    ftype = item[2] if len(item) > 2 else "output"
+    try:
+        return folder_paths.get_annotated_filepath(filename, subfolder, ftype)
+    except Exception:
+        return filename

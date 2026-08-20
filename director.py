@@ -4,6 +4,7 @@ import os
 import logging
 from comfy_api.latest import io
 
+from .lib.audio import fill_audio_gaps
 from .lib.image import calc_resolution
 from .lib.prompt import build_h3_prompt
 
@@ -14,7 +15,6 @@ SubjectConfig = io.Custom("SUBJECT_CONFIG")
 log = logging.getLogger(__name__)
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-_DEFAULT_TEMPLATE = os.path.join(_PROJECT_ROOT, "prompt", "minimax_ref2v_template.txt")
 
 # director 是纯函数（同一组输入必得同一输出）。
 # 缓存兜底：Easy-Use forLoop 展开时，director 输出可能被 compare 的 link 引用而重复调度执行。
@@ -94,8 +94,6 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "million_pixels", default=0.6, min=0.1, max=4.0, step=0.1, optional=True,
                     tooltip="Million pixels target. 1.0 MP ≈ 1024×1024.",
                 ),
-                # --- 视频生成已迁移到 MiniMaxRefGuide 节点（Easy-Use forLoop 内按段调用） ---
-                # director 仅负责组装 guide_data；model/clip/video_vae/audio_vae 由外部自行接入采样链路。
             ],
             outputs=[
                 GuideData.Output(display_name="guide_data"),
@@ -158,7 +156,8 @@ class MiniMaxRefDirector(io.ComfyNode):
             log.warning("[MiniMaxRefDirector] Failed to parse timeline_data.")
 
         timeline_segments = tdata.get("segments", [])
-
+        audio_segments = tdata.get("audioSegments", [])
+        
         # --- Determine effective frame range based on display_mode ---
         if display_mode == "seconds":
             range_start = int(start_second * frame_rate)
@@ -211,9 +210,11 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "prevImageFile": prompt_res["prevImageFile"],
                 "prevType": prompt_res["prevType"],
                 "durationFrames": dur,
+                "startFrames": seg_start_frames,
                 "type": seg.get("type", "text"),
                 "imageFile": seg.get("imageFile", ""),
-                "motionContext": seg.get("motionContext", False)
+                "upscale": seg.get("upscale", False),
+                "guideStrength": seg.get("guideStrength", 16),
             }
             guide_timeline.append(entry)
             segment_count += 1
@@ -236,9 +237,12 @@ class MiniMaxRefDirector(io.ComfyNode):
             "width": out_w,
             "height": out_h,
             "frame_rate": float(frame_rate),
+            "range_start": int(range_start),
+            "range_end": int(range_end),
             "global_prompt": global_prompt,
             "subject_data": subject,
             "timeline_data": guide_timeline,
+            "audio_segments": fill_audio_gaps(audio_segments, range_start, range_end),
             "_director_node_id": director_node_id,
         }
 

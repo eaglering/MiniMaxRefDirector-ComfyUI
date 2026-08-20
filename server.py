@@ -805,6 +805,173 @@ async def merge_videos_api(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+# ── 无损合并：选中素材 latent 像素域交叉淡化 → VHS 编码 → 通知前端追加素材 ──
+
+@_routes.post(f"{API_PREFIX}/h3/merge_latents")
+async def merge_latents_api(request: web.Request) -> web.Response:
+    """无损合并：按选中顺序加载 joint latent，像素域交叉淡化拼接后编码视频。
+
+    请求体：
+    {
+      "materials": [
+        {"src": viewUrl, "imageLatent": path, "audioLatent": path,
+         "clipAudio": path | null, "meta": {...} | null}
+      ],
+      "node_id": str | null,        # Director 节点 id（通知定向）
+      "context_frames": int         # 兜底 context 帧数（素材 meta 优先），默认 39
+    }
+
+    音频策略（用户确认）：每段 clip_audio 优先，否则 audio_latent + audio_vae
+    解码；各段按绝对帧边界拼接为 master_audio 随视频一起编码。
+    产物复制到 input/whatdreamscost/merge_latent_{ts}.mp4 并 send_sync 通知。
+    """
+    try:
+        data = await request.json()
+        materials = data.get("materials") or []
+        if not isinstance(materials, list) or len(materials) < 2:
+            return web.json_response(
+                {"success": False, "error": "请至少选择 2 段含 latent 的素材"},
+                status=400,
+            )
+
+        node_id = data.get("node_id")
+        default_context = int(data.get("context_frames") or 39)
+
+        from .lib import latent as latent_lib
+        from .lib import latent_merge as latent_merge_lib
+
+        # 1) 校验每段均有 latent 文件，解析为本地绝对路径
+        entries: list[dict] = []
+        for i, mat in enumerate(materials):
+            image_latent = _material_src_to_local_path(mat.get("imageLatent") or "")
+            audio_latent = _material_src_to_local_path(mat.get("audioLatent") or "")
+            if image_latent is None or audio_latent is None:
+                return web.json_response(
+                    {"success": False, "error": f"素材 {i + 1} 缺少 image_latent / audio_latent 文件"},
+                    status=400,
+                )
+            clip_audio = None
+            if mat.get("clipAudio"):
+                clip_audio = _material_src_to_local_path(str(mat["clipAudio"]))
+            entries.append({
+                "image_latent": image_latent,
+                "audio_latent": audio_latent,
+                "clip_audio": clip_audio,
+            })
+
+        # 2) 首段 meta 提供 VAE 文件名；后续段以首段 VAE 为准（工作流同一组 VAE）
+        first_meta = latent_lib.load_joint_latent_files(
+            entries[0]["image_latent"], entries[0]["audio_latent"]
+        )[1]
+        video_vae_name = first_meta.get("video_vae") or ""
+        audio_vae_name = first_meta.get("audio_vae") or ""
+        if not video_vae_name:
+            return web.json_response(
+                {"success": False,
+                 "error": "素材缺少 video_vae 信息，无法解码。请在 Combine 节点连接 "
+                          "video_vae / audio_vae 后重新生成素材。"},
+                status=400,
+            )
+
+        def _run_merge():
+            video_vae = latent_lib.load_vae_by_name(video_vae_name)
+            audio_vae = latent_lib.load_vae_by_name(audio_vae_name) if audio_vae_name else None
+
+            videos: list[dict] = []
+            clip_audios: list[dict | None] = []
+            raw_frames: list[int] = []
+            contexts: list[int] = []
+            for entry in entries:
+                joint_latent, meta = latent_lib.load_joint_latent_files(
+                    entry["image_latent"], entry["audio_latent"]
+                )
+                videos.append(joint_latent)
+                clip_audios.append(
+                    latent_lib.load_audio_from_file(entry["clip_audio"])
+                    if entry["clip_audio"] else None
+                )
+                video_t, _audio_t = latent_lib.split_joint_latent(joint_latent)
+                tokens = int(meta.get("frame_count") or video_t.shape[2])
+                raw_frames.append(latent_lib.pixel_frames(tokens))
+
+            # contexts 必须吸附为精确 AV 网格（39/90/141...），且 ≤ min(请求,
+            # 前段可用帧, 本段帧数-1)，保证重叠切片不越界、AV 相位对齐。
+            # 首段作为 base，其 context 不参与接缝（占位 = min(请求, 自身帧数)）。
+            from .lib import timing as timing_lib
+
+            contexts = []
+            available = raw_frames[0]
+            for i, frames in enumerate(raw_frames):
+                meta = latent_lib.load_joint_latent_files(
+                    entries[i]["image_latent"], entries[i]["audio_latent"]
+                )[1]
+                requested = int(meta.get("context_frames") or default_context)
+                if i == 0:
+                    contexts.append(min(requested, frames))
+                else:
+                    contexts.append(timing_lib.snap_av_context_length(requested, available, frames))
+                available = frames
+
+            overlap = contexts[0] if contexts else default_context
+            return latent_merge_lib.merge_latents_to_video(
+                video_vae=video_vae,
+                audio_vae=audio_vae,
+                videos=videos,
+                clip_audios=clip_audios,
+                raw_frames=raw_frames,
+                contexts=contexts,
+                overlap=overlap,
+                filename_prefix="MiniMaxRef/merge_latent",
+                frame_rate=float(first_meta.get("fps") or 24.0),
+                lazy=True,
+            )
+
+        meta_out = await asyncio.to_thread(_run_merge)
+        merged_path = meta_out.get("full_path")
+        if not merged_path or not os.path.isfile(merged_path):
+            return web.json_response(
+                {"success": False, "error": "无损合并失败：未生成输出文件"}, status=500
+            )
+
+        # 3) 复制到素材库目录 input/whatdreamscost/，保证可预览、可再参与合并
+        import datetime
+        import shutil
+
+        input_dir = folder_paths.get_input_directory()
+        mat_dir = os.path.join(input_dir, "whatdreamscost")
+        os.makedirs(mat_dir, exist_ok=True)
+        ext = os.path.splitext(merged_path)[1] or ".mp4"
+        if ext.lower() not in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"):
+            ext = ".mp4"
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"merge_latent_{ts}{ext}"
+        dst = os.path.join(mat_dir, name)
+        n = 1
+        while os.path.exists(dst):
+            name = f"merge_latent_{ts}_{n}{ext}"
+            dst = os.path.join(mat_dir, name)
+            n += 1
+        shutil.copy2(merged_path, dst)
+
+        file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
+        payload = {
+            "status": "add_material",
+            "type": "video",
+            "imageFile": file_info,
+            "image_latent": None,
+            "audio_latent": None,
+        }
+        if node_id is not None:
+            payload["director_node_id"] = node_id
+        PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
+        return web.json_response(
+            {"success": True, "name": f"whatdreamscost/{name}", "file": file_info}
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
 # 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
 # PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
 # __init__.py 末尾再次调用 _LazyRoutes.flush()。

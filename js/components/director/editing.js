@@ -713,7 +713,6 @@ export const editing = {
       id: genId(),
       start: frameStart, length: frameEnd - frameStart,
       prompt: "", type,
-      motionContext: type == "text",
       autoEndFrame: true,
     };
     this.timeline.segments.push(seg);

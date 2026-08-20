@@ -204,7 +204,7 @@ def _extract_h3_mentions(prompt_json: dict) -> dict:
 
     Returns {"names": {name: "<@name>"}, "dialogues": {name: {"<#name:dialogue>":dialogue, ...}}}.
     """
-    names: dict[str, int] = {}
+    names: dict[str, str] = {}
     dialogues: dict[str, dict[str, str]] = {}
     for field in ("detailed_description", "overall_soundscape", "non_diegetic_music"):
         text = prompt_json.get(field) or ""
@@ -220,6 +220,15 @@ def _extract_h3_mentions(prompt_json: dict) -> dict:
                 dialogue = m.group(2).strip()
                 dialogues.setdefault(name, {})[m.group(0).strip()] = dialogue
     return {"names": names, "dialogues": dialogues}
+
+def _extract_h3_mentions_from_descriptions(descriptions: list[str]) -> dict:
+    names: dict[str, str] = {}
+    for description in descriptions:
+        for m in _H3_NAME_RE.finditer(description):
+            name = m.group(1).strip()
+            if name:
+                names[name] = m.group(0).strip()
+    return names
 
 def build_h3_subject_bindings(
     subject_data: dict,
@@ -257,6 +266,7 @@ def build_h3_subject_bindings(
     subjects_in = (subject_data or {}).get("subjects", []) or []
     prompt_json = _build_prompt_json(raw_prompt)
     mentions = _extract_h3_mentions(prompt_json)
+    descriptions: list[str] = []
     names = mentions["names"]
     dialogues = mentions["dialogues"]
     subject_definitions = []
@@ -287,10 +297,13 @@ def build_h3_subject_bindings(
         subject_definitions.append(f"<Subject {index}> {description}")
         retention_analysis.append(f"<Subject {index}>: {relationship}")
         images.append(image_file)
+        descriptions.append(description)
+
+        audio_relationship = subj.get("audio_relationship", "")
         subject_definitions.append(f"<Audio {index}> is the voice-timbre reference for <Subject {index}>")
-        text = _AUDIO_RELATION_TEXT.get(relationship, _AUDIO_RELATION_TEXT["reference"])
+        text = _AUDIO_RELATION_TEXT.get(audio_relationship, _AUDIO_RELATION_TEXT["reference"])
         retention_analysis.append(
-            f"<Audio {index}>: {relationship} - {text.format(n=index)}"
+            f"<Audio {index}>: {audio_relationship} - {text.format(n=index)}"
         )
         audios.append(audio_file)
         seen.add(name)
@@ -325,6 +338,7 @@ def build_h3_subject_bindings(
             audios.append(audio_file)
         elif dType == "Video":
             videos.append(video_file)
+        descriptions.append(description)
         seen.add(name)
         index += 1
         subjects_out.append(subj)
@@ -353,9 +367,40 @@ def build_h3_subject_bindings(
             audios.append(audio_file)
         elif dType == "Video":
             videos.append(video_file)
+        descriptions.append(description)
         seen.add(name)
         index += 1
         subjects_out.append(subj)
+
+    names = _extract_h3_mentions_from_descriptions(descriptions)
+    for name, pattern in names.items():
+        if name in seen or name in unmatched:
+            continue
+        idx = find_index(subjects_in, func=lambda x, y=name: x.get("name") == y)
+        if idx == -1:
+            unmatched.append(name)
+            continue
+        subj = subjects_in[idx]
+        image_file = subj.get("imageFile", "")
+        audio_file = subj.get("audioFile", "")
+        video_file = subj.get("videoFile", "")
+        description = subj.get("description", "")
+        dType = subj.get("type", "") or "Subject"
+        relationship = subj.get("relationship", "")
+        label = f"<{dType} {index}>"
+        subject_definitions.append(f"{label} {description}")
+        retention_analysis.append(f"{label}: {relationship}")
+        if dType == "Picture" or dType == "Subject":
+            images.append(image_file)
+        elif dType == "Audio":
+            audios.append(audio_file)
+        elif dType == "Video":
+            videos.append(video_file)
+        descriptions.append(description)
+        seen.add(name)
+        index += 1
+        subjects_out.append(subj)
+        mapping[pattern] = label
 
     data = {
         "subjects": subjects_out,
@@ -426,7 +471,7 @@ def build_h3_prompt(
             retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
             index += 1
             images.append(prev_image_file)
-        elif timeline_segment.get("motionContext", False) and previous_timeline_segment is not None:
+        elif int(timeline_segment.get("guideStrength", 16)) > 0 and previous_timeline_segment is not None:
             if previous_timeline_segment.get("type") == "video" and previous_timeline_segment.get("imageFile"):
                 prev_image_file = previous_timeline_segment.get("imageFile", "")
                 prev_type = "video"
@@ -473,6 +518,8 @@ def build_h3_prompt(
                 images.append(next_timeline_segment.get("imageFile"))
 
     mapping = prompt_res.get("mapping", {})
+    subject_definitions = _replace_mapping(subject_definitions, mapping)
+    retention_analysis = _replace_mapping(retention_analysis, mapping)
     detailed_description = _replace_mapping(detailed_description, mapping)
 
     # 首帧图作为 reference 分镜：detailed_description 已含 [Shot N] 时全部 +1，

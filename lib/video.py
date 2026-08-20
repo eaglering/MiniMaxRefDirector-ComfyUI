@@ -489,7 +489,7 @@ def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = 
     to local ffmpeg (lib.video._encode_video_frames_ffmpeg).
     """
     try:
-        from videohelpersuite.videohelpersuite.nodes import VideoCombine
+        from videohelpersuite.nodes import VideoCombine
     except ImportError:
         VideoCombine = None
 

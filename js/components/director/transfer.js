@@ -26,6 +26,66 @@ import { RefModal } from "./modal.js";
 
 const html = htm.bind(h);
 
+// mention 选择器样式：与 subject.js 的 @mention 弹层保持一致（幂等注入）
+if (!document.getElementById("ref-ms-mention-styles")) {
+  const st = document.createElement("style");
+  st.id = "ref-ms-mention-styles";
+  st.textContent = `
+.ref-ms-mention-popup {
+    position: fixed;
+    z-index: 100000;
+    min-width: 170px;
+    max-width: 280px;
+    max-height: 190px;
+    overflow-y: auto;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    padding: 4px;
+    box-sizing: border-box;
+}
+.ref-ms-mention-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ref-ms-mention-item:hover,
+.ref-ms-mention-item.active {
+    background: #333;
+}
+.ref-ms-mention-item img,
+.ref-ms-mention-item video {
+    display: block;
+}
+.ref-ms-mention-type {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex: 0 0 auto;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+.ref-ms-mention-empty {
+    font-size: 11px;
+    color: #777;
+    padding: 6px 8px;
+    white-space: nowrap;
+}
+`;
+  document.head.appendChild(st);
+}
+
 // ---------- 工具函数 ----------
 
 function getSubjectsFromGraph() {
@@ -132,33 +192,18 @@ function subjectMediaPreview(s) {
   return { kind: "none" };
 }
 
-// 下拉菜单里的媒体缩略图：图片/视频显示资源，音频用图标占位
+// 下拉菜单里的媒体缩略图：
+//   audio → 音频图标；video → 视频图标；image → 图片；无媒体 → "T"（文本主体）
 // size：缩略图边长（px），默认 22（mention 菜单）；弹窗"添加主体"列表放大一倍用 44
 function subjectMediaThumb(s, size = 22) {
   const p = subjectMediaPreview(s);
   const base = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", objectFit: "cover" };
+  const iconBase = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: Math.round(size * 0.5) + "px", fontStyle: "normal", lineHeight: 1, background: "#1e3a5f", color: "#38bdf8" };
   if (p.kind === "image") return html`<img src=${p.src} alt="" style=${base} />`;
-  if (p.kind === "video") return html`<video src=${p.src} muted preload="metadata" style=${Object.assign({}, base, { background: "#000" })} />`;
-  if (p.kind === "audio") return html`<span title="音频" style=${{ width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#1e3a5f", color: "#38bdf8", fontSize: Math.round(size * 0.5) + "px", fontStyle: "normal" }}>♪</span>`;
-  return null;
-}
-
-// 从 H3 prompt 文本提取 <@name> / <#name:dialogue> 提及
-function extractH3Mentions(text) {
-  const names = new Set();
-  const dialogues = new Set();
-  const nameRe = /<@([^>]+)>/g;
-  const diaRe = /<#([^>:]+):/g;
-  let m;
-  while ((m = nameRe.exec(text || ""))) {
-    const n = m[1].trim();
-    if (n) names.add(n);
-  }
-  while ((m = diaRe.exec(text || ""))) {
-    const n = m[1].trim();
-    if (n) dialogues.add(n);
-  }
-  return { names, dialogues };
+  if (p.kind === "video") return html`<span title="视频" style=${Object.assign({}, iconBase, { color: "#a5d6a7" })}>▶</span>`;
+  if (p.kind === "audio") return html`<span title="音频" style=${iconBase}>♪</span>`;
+  // 无媒体（纯文本主体）：T 徽标
+  return html`<span title="文本" style=${Object.assign({}, iconBase, { background: "#333", color: "#ccc", fontSize: Math.round(size * 0.5) + "px" })}>T</span>`;
 }
 
 // 主体定义 / retention_analysis / 媒体列表（images / audios / videos）
@@ -329,9 +374,9 @@ const S = {
   },
   res: {
     flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
-    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "64px",
+    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "120px",
   },
-  img: { width: "48px", height: "48px", objectFit: "cover", borderRadius: "4px", background: "#111" },
+  img: { width: "100%", height: "auto", objectFit: "cover", borderRadius: "4px", background: "#111" },
   label: {
     fontSize: "10px", color: "#aaa", maxWidth: "64px", overflow: "hidden",
     textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -417,6 +462,13 @@ const S = {
     lineHeight: "14px", padding: "0 5px", borderRadius: "8px", pointerEvents: "none",
     boxShadow: "0 0 4px rgba(0,0,0,.5)",
   },
+  // 无损素材角标：素材携带 image_latent / audio_latent，可参与「无损合并」
+  materialLatentBadge: {
+    position: "absolute", top: "4px", left: "4px", zIndex: 2,
+    background: "rgba(92, 157, 255, .92)", color: "#fff", fontSize: "9px",
+    lineHeight: "14px", padding: "0 5px", borderRadius: "8px", pointerEvents: "none",
+    boxShadow: "0 0 4px rgba(0,0,0,.5)",
+  },
   // 合并选中序号角标：视频卡片左上角，按用户点击选中的先后顺序显示 1/2/3…
   materialOrderBadge: {
     position: "absolute", top: "4px", left: "4px", zIndex: 2,
@@ -472,22 +524,55 @@ const RESOLUTION_OPTIONS = ["1:1方形", "9:16竖屏", "16:9横屏", "3:2横屏"
 //   frames  -> start_frame/end_frame/duration_frames（Start(f)/End(f)/Duration(f)）
 const TIME_PARAM_DEFS = {
   seconds: [
-    { name: "start_second", label: "Start(s)", type: "number", fallback: 0, min: 0, max: 1000, step: 0.01 },
-    { name: "end_second", label: "End(s)", type: "number", fallback: 5, min: 0, max: 1000, step: 0.01 },
-    { name: "duration_seconds", label: "Duration(s)", type: "number", fallback: 5, min: 0.1, max: 1000, step: 0.01 },
+    { name: "start_second", label: "Start(s)", type: "number", fallback: 0, min: 0, max: 1000, step: 0.01, digits: 2 },
+    { name: "end_second", label: "End(s)", type: "number", fallback: 5, min: 0, max: 1000, step: 0.01, digits: 2 },
+    { name: "duration_seconds", label: "Duration(s)", type: "number", fallback: 5, min: 0.1, max: 1000, step: 0.01, digits: 2 },
   ],
   frames: [
-    { name: "start_frame", label: "Start(f)", type: "number", fallback: 0, min: 0, max: 100000, step: 1 },
-    { name: "end_frame", label: "End(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1 },
-    { name: "duration_frames", label: "Duration(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1 },
+    { name: "start_frame", label: "Start(f)", type: "number", fallback: 0, min: 0, max: 100000, step: 1, digits: 0 },
+    { name: "end_frame", label: "End(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1, digits: 0 },
+    { name: "duration_frames", label: "Duration(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1, digits: 0 },
   ],
 };
 
 const OTHER_GLOBAL_DEFS = [
-  { name: "frame_rate", label: "FPS", type: "number", fallback: 24, min: 1, max: 240, step: 1 },
+  { name: "frame_rate", label: "FPS", type: "number", fallback: 24, min: 1, max: 240, step: 1, digits: 0 },
   { name: "outpu_resolution", label: "Resolution", type: "select", fallback: "16:9横屏", options: RESOLUTION_OPTIONS },
-  { name: "million_pixels", label: "Million Pixels", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1 },
+  { name: "million_pixels", label: "Million Pixels", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1, digits: 1 },
 ];
+
+// ---------- 数字输入框（失焦/回车提交，允许输入中间态） ----------
+// 本地文本 state 保留用户正在输入的原始内容（如 "0."、"0.05"），只在
+// 失焦/回车时解析并提交：按 digits 四舍五入、clamp 到 [min,max]。
+// 避免受控组件在每次击键时强制重渲染，吞掉小数点 / 前导 0。
+function NumInput({ def, value, onCommit }) {
+  const [text, setText] = useState(() => String(value ?? def.fallback ?? ""));
+  // 外部值变化（FPS 联动、显示模式切换等）时同步显示
+  useEffect(() => {
+    setText(String(value ?? def.fallback ?? ""));
+  }, [value, def]);
+
+  const commit = () => {
+    let nv = parseFloat(text);
+    if (Number.isNaN(nv)) nv = def.fallback;
+    nv = Math.min(Math.max(nv, def.min), def.max);
+    const digits = def.digits ?? (def.step < 1 ? 2 : 0);
+    nv = digits > 0 ? Number(nv.toFixed(digits)) : Math.round(nv);
+    onCommit(def.name, nv);
+  };
+
+  return html`<input
+    class="tr-gp-input"
+    type="number"
+    min=${def.min}
+    max=${def.max}
+    step=${def.step}
+    value=${text}
+    onInput=${(e) => setText(e.target.value)}
+    onBlur=${commit}
+    onKeyDown=${(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+  />`;
+}
 
 // ---------- Preact 组件 ----------
 
@@ -501,7 +586,6 @@ export function TransferPanel({ director }) {
   const [resources, setResources] = useState([]);
   const [editorOpen, setEditorOpen] = useState(false); // 统一弹窗（Segment Prompt / H3 Prompt / 添加主体）
   const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
-  const [motionCtxOn, setMotionCtxOn] = useState(false); // Motion Context 开关
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
@@ -554,6 +638,7 @@ export function TransferPanel({ director }) {
   const [dragReadyId, setDragReadyId] = useState(null); // 长按预取完成、可拖出到其他上传框的素材 id
   const [dragHint, setDragHint] = useState(""); // 长按拖出操作提示（自动消失）
   const [mergeBusy, setMergeBusy] = useState(false); // 素材合并请求进行中
+  const [losslessMergeBusy, setLosslessMergeBusy] = useState(false); // 无损合并请求进行中
   const longPressRef = useRef(null); // 长按状态 { id, fired, x, y, timer }
   const suppressClickRef = useRef(false); // 长按松手后抑制随后的 click（避免误改选中）
   const dragHintTimerRef = useRef(null); // 提示自动消失定时器
@@ -584,7 +669,6 @@ export function TransferPanel({ director }) {
       director._transferSetLeft = setLeftText;
       director._transferSetSeg = (seg) => {
         setCurSeg(seg);
-        setMotionCtxOn(!!(seg && seg.motionContext));
         setAutoEndOn(!!(seg && seg.autoEndFrame));
         // 切换 segment 时加载该 segment 独立的 H3 prompt JSON（右侧）。
         // 同一 segment 的 UI 刷新（如生成首帧成功后回推）不重置右侧内容。
@@ -665,7 +749,13 @@ export function TransferPanel({ director }) {
         if (!found) return;
       }
       // 无任何来源标识的极旧版本通知：直接接收（单 tab 正常行为）
-      const items = toVideoItems(d.imageFile);
+      let items = toVideoItems(d.imageFile);
+      // latent 素材：Combine 节点保存了 latent 但未解码视频时 imageFile 缺失，
+      // 仍以 latent 素材项加入素材条（可参与无损合并）
+      if (!items.length && d.image_latent) {
+        const latentLabel = basename(String(d.image_latent)) || "latent";
+        items = [{ id: "latent-" + String(d.image_latent), label: latentLabel, src: "", vw: null, vh: null }];
+      }
       if (!items.length) return;
       setMaterials((prev) => {
         const next = prev.slice();
@@ -673,7 +763,16 @@ export function TransferPanel({ director }) {
           // 不去重：后端每次 add_material 通知都追加（guide 正常轮与越界轮会各发一次同 URL）。
           // id 附加自增序号保证唯一，避免 React key / 多选集合冲突。
           materialSeq += 1;
-          next.push({ ...it, id: it.id + "#" + materialSeq });
+          next.push({
+            ...it,
+            id: it.id + "#" + materialSeq,
+            // 无损合并素材字段：Combine 节点保存的 latent / clip_audio / meta；
+            // 旧素材无这些字段 → 视为像素素材，不参与无损合并
+            imageLatent: d.image_latent || null,
+            audioLatent: d.audio_latent || null,
+            clipAudio: d.clip_audio || null,
+            meta: d.meta || null,
+          });
         }
         return next;
       });
@@ -736,21 +835,22 @@ export function TransferPanel({ director }) {
   useEffect(() => {
     if (!menu) return;
     const onDown = (e) => {
-      if (e.target.closest && !e.target.closest(".tr-menu")) setMenu(null);
+      if (e.target.closest && !e.target.closest(".ref-ms-mention-popup")) setMenu(null);
     };
     window.addEventListener("mousedown", onDown, true);
     return () => window.removeEventListener("mousedown", onDown, true);
   }, [menu]);
 
-  // 右侧内容 debounce 解析资源引用
+  // 资源引用条：优先使用后端 /h3/build_subject_bindings 返回的 subjects
+  // （已包含 prompt 提及 + additionSubject 手动添加的主体，媒体字段权威），
+  // 不再本地正则解析 prompt；bindData 未就绪（未加载/请求失败）时 fallback 到 parseResources。
   useEffect(() => {
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      if (!aliveRef.current) return;
-      setResources(parseResources(rightText, subjects));
-    }, 500);
-    return () => clearTimeout(debounceRef.current);
-  }, [rightText, subjects, addVersion]);
+    if (bindData && Array.isArray(bindData.subjects)) {
+      setResources(resourcesFromBindings(bindData, curSeg));
+      return;
+    }
+    setResources(parseResources(rightText, subjects));
+  }, [bindData, rightText, subjects, addVersion, curSeg]);
 
   // 右侧 H3 JSON / 主体 / 当前选中段 / 时间轴变化时 debounce 请求后端
   // /h3/build_subject_bindings（替代前端 buildFirstFramePayload 的绑定组装）。
@@ -798,6 +898,14 @@ export function TransferPanel({ director }) {
     try {
       // timeline_segment：当前选中 segment（含 additionSubject，供后端追加绑定未提及的主体）
       const seg = curSeg;
+      // 过滤 prompt 中已提及（<@name> 会由 prompt 绑定，后端将其写入 mapping）的主体，避免重复追加。
+      // 注意：additionSubject 手动添加的主体不会被写入 mapping，必须保留发送，
+      // 否则"已绑定→从 additionSubject 移除→解除绑定→回到候选"循环。
+      const boundMentions = new Set();
+      for (const k of Object.keys(bindData?.mapping || {})) {
+        const mm = /^<@([^>]+)>$/.exec(k);
+        if (mm) boundMentions.add(mm[1]);
+      }
       const body = {
         subject_data: { subjects: subjects || [] },
         raw_prompt: rightText,
@@ -807,7 +915,7 @@ export function TransferPanel({ director }) {
               start: seg.start,
               videoFile: seg.videoFile || "",
               audioFile: seg.audioFile || "",
-              additionSubject: Array.isArray(seg.additionSubject) ? seg.additionSubject : [],
+              additionSubject: (Array.isArray(seg.additionSubject) ? seg.additionSubject : []).filter((n) => !boundMentions.has(n)),
             }
           : {},
       };
@@ -837,17 +945,6 @@ export function TransferPanel({ director }) {
       return srcOf((segs?.[director.selectedIndex] || null));
     return null;
   };
-
-  // Motion Context 开关：更新 timeline_data 对应字段。
-  // 提示词优化后并入 detailed_description，文字 / 视频节点不再写任何 shot 字段。
-  function toggleMotionContext() {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    const on = !motionCtxOn;
-    setMotionCtxOn(on);
-    seg.motionContext = on; // 更新 timeline_data 对应字段
-    director.commitChanges();
-  }
 
   // 图片节点：调用 /llm/generate_image_analysis 分析图片，图片内容 + 提示词合并优化后
   async function analyzeImageForDetailed(seg) {
@@ -973,11 +1070,15 @@ export function TransferPanel({ director }) {
     const charW = 7.5;
     // fixed 定位实际以最近 transform 祖先（图容器）为包含块解析，rect 是视口坐标，
     // 需减去包含块左上角，否则菜单整体偏移（可能移出可视区，表现为输入 @/# 无反应）。
+    // 注意与 modal.js 拖动定位一致：包含块在 ComfyUI 图容器（transform 平移/缩放）内时，
+    // getBoundingClientRect 是已含 scale 的视口坐标，写入 fixed 定位必须是布局值，
+    // 故差值必须除以缩放系数，否则画布缩放 ≠1 时菜单位置会被 scale 二次放大而偏离光标。
     const cb = getFixedCb(el);
     const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
-    const vw = cb ? cbRect.width : window.innerWidth;
-    const x = Math.max(4, Math.min(rect.left + col * charW - cbRect.left, vw - 200));
-    const y = rect.top + (line + 1) * lineHeight + 6 - cbRect.top;
+    const scale = cb && cb.offsetWidth > 0 && cbRect.width > 0 ? cbRect.width / cb.offsetWidth : 1;
+    const vw = cb ? cbRect.width / scale : window.innerWidth;
+    const x = Math.max(4, Math.min((rect.left - cbRect.left) / scale + col * charW, vw - 200));
+    const y = (rect.top - cbRect.top) / scale + (line + 1) * lineHeight + 6;
     // 打开菜单前刷新一次主体列表，确保新增的主体立即可选
     setSubjects(getSubjectsLatest());
     setMenu({ side, trigger: ch, caret, x, y });
@@ -1026,6 +1127,27 @@ export function TransferPanel({ director }) {
     setMenu(null);
   }
 
+  // 资源引用条数据：直接使用后端 /h3/build_subject_bindings 返回的 subjects
+  // （后端已按 prompt 提及 + additionSubject 手动添加过滤，媒体字段为权威来源）。
+  // kind 依据当前 segment 的 additionSubject 区分，用于展示"＋"与移除按钮。
+  function resourcesFromBindings(bindData, seg) {
+    const out = [];
+    const added = new Set(Array.isArray(seg?.additionSubject) ? seg.additionSubject : []);
+    for (const s of bindData.subjects || []) {
+      if (!s || !s.name) continue;
+      const kind = added.has(s.name) ? "addition" : "subject";
+      out.push({
+        key: (kind === "addition" ? "add-" : "subj-") + s.name,
+        label: s.name,
+        src: subjectImgSrc(s),
+        audio: s.audioFile,
+        kind,
+      });
+    }
+    return out;
+  }
+
+  // 本地兜底解析：bindData 未就绪（未加载/请求失败）时从 prompt 文本提取引用
   function parseResources(text, subjectsList) {
     const out = [];
     const re = /<(?:@|#)([^>:]+)(?::[^>]*)?>/g;
@@ -1050,13 +1172,13 @@ export function TransferPanel({ director }) {
   }
 
   // ---------- additionSubject 添加框 ----------
-  // 候选主体：未在右侧 prompt 中提及、且尚未添加的主体
-  const mentionNames = (() => {
-    const m = extractH3Mentions(rightText);
-    return new Set([...m.names, ...m.dialogues]);
-  })();
+  // 已绑定主体：后端 /h3/build_subject_bindings 返回的 subjects（= prompt 提及 + additionSubject 添加），
+  // 不再本地解析 prompt 文本
+  const boundNames = new Set((bindData?.subjects || []).map((s) => s?.name).filter(Boolean));
   const addedNames = Array.isArray(curSeg?.additionSubject) ? curSeg.additionSubject : [];
-  const addCandidates = subjects.filter((s) => !mentionNames.has(s.name) && !addedNames.includes(s.name));
+  // 已被绑定的主体不再作为 additionSubject 展示
+  const visibleAdded = addedNames.filter((n) => !boundNames.has(n));
+  const addCandidates = subjects.filter((s) => !boundNames.has(s.name) && !addedNames.includes(s.name));
   const addSubject = (name) => {
     if (!curSeg || !director) return;
     if (!Array.isArray(curSeg.additionSubject)) curSeg.additionSubject = [];
@@ -1065,15 +1187,41 @@ export function TransferPanel({ director }) {
     setAddVersion((v) => v + 1);
     director.commitChanges(true);
   };
-  // 信息图标 tooltip：fixed 定位避免被 .tr-resources 的 overflow 裁剪；按视口空间决定向上/向下弹出
+  // 信息图标 tooltip：fixed 定位避免被 .tr-resources 的 overflow 裁剪；跟随鼠标坐标移动，
+  // 带 6px 移动阈值（鼠标慢速移动/停顿时 tooltip 留在原地，方便移入内部滚动），按包含块空间决定向上/向下弹出
+  const defsTimer = useRef(null); // 延迟关闭定时器：鼠标从图标滑向 tooltip 的间隙不关闭
+  const defsLastXY = useRef(null); // 上次定位的鼠标坐标，用于移动阈值判断
   const openDefsTip = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const up = rect.top > window.innerHeight * 0.55;
-    const left = Math.max(4, Math.min(rect.left, window.innerWidth - 300));
-    const top = up ? rect.top - 6 : rect.bottom + 6;
+    if (e.target && e.target.closest && e.target.closest(".tr-defs-tip")) return; // 鼠标在 tooltip 上时停止跟随，允许滚动内容
+    const last = defsLastXY.current;
+    if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 6) return; // 移动不足阈值：tooltip 原地不动，鼠标可移入
+    defsLastXY.current = { x: e.clientX, y: e.clientY };
+    // fixed 定位实际以最近 transform 祖先（图容器，带平移/缩放）为包含块解析，clientX/Y 是视口坐标，
+    // 需减包含块左上角并除以缩放系数，否则画布缩放 ≠1 时 tooltip 偏离鼠标、根本点不到。
+    // 与 openMenu / modal.js 拖动定位同一套换算。
+    const cb = getFixedCb(e.currentTarget);
+    const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
+    const scale = cb && cb.offsetWidth > 0 && cbRect.width > 0 ? cbRect.width / cb.offsetWidth : 1;
+    const cx = (e.clientX - cbRect.left) / scale;
+    const cy = (e.clientY - cbRect.top) / scale;
+    const cw = cb ? cbRect.width / scale : window.innerWidth;
+    const ch = cb ? cbRect.height / scale : window.innerHeight;
+    const up = cy > ch * 0.55;
+    const left = Math.max(4, Math.min(cx, cw - 300));
+    const top = up ? cy - 6 : cy + 14;
     setDefsPos({ left: left + "px", top: top + "px", up });
     setDefsOpen(true);
   };
+  // 延迟关闭：鼠标从图标移向 tooltip（中间空隙）时不关闭；进入 tooltip 后由 keepDefsOpen 取消
+  const delayCloseDefs = () => {
+    clearTimeout(defsTimer.current);
+    defsTimer.current = setTimeout(() => setDefsOpen(false), 150);
+  };
+  const keepDefsOpen = () => {
+    clearTimeout(defsTimer.current);
+    setDefsOpen(true);
+  };
+  useEffect(() => () => clearTimeout(defsTimer.current), []);
   const removeAddedSubject = (name) => {
     if (!curSeg || !director) return;
     if (!Array.isArray(curSeg.additionSubject)) return;
@@ -1194,6 +1342,53 @@ export function TransferPanel({ director }) {
       showDragHint(`合并失败：${err.message || "未知错误"}`);
     } finally {
       setMergeBusy(false);
+    }
+  };
+
+  // 无损合并选中的素材：请求后端 /minimax_ref/api/h3/merge_latents，
+  // 后端按选中顺序加载 joint latent → 像素域交叉淡化拼接 → VHS 编码，
+  // 完成后 send_sync 通知，素材条自动追加合并结果（无需手动 setMaterials）。
+  // 音频：每段 clip_audio 优先，否则 audio_latent 解码，拼接为 master_audio。
+  const losslessMergeSelectedMaterials = async () => {
+    if (selIds.size < 2 || losslessMergeBusy) return;
+    // 按用户选中顺序（selOrder）取素材，保证合并拼接顺序与序号一致
+    const byId = new Map(materials.map((m) => [m.id, m]));
+    let sel = selOrder.map((x) => byId.get(x)).filter(Boolean);
+    // 兜底：selOrder 中缺失的选中素材按素材条顺序补到末尾（正常流程不会出现）
+    for (const m of materials) {
+      if (selIds.has(m.id) && !sel.some((s) => s.id === m.id)) sel.push(m);
+    }
+    // 无损合并要求每段都有 image_latent / audio_latent（Combine 节点保存的 latent）
+    sel = sel.filter((m) => m.imageLatent && m.audioLatent);
+    if (sel.length < 2) {
+      showDragHint("无损合并需要至少 2 段含 latent 的素材（请用 Combine 节点保存 latent）");
+      return;
+    }
+    setLosslessMergeBusy(true);
+    try {
+      const res = await api.fetchApi("/minimax_ref/api/h3/merge_latents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          materials: sel.map((m) => ({
+            src: m.src,
+            imageLatent: m.imageLatent,
+            audioLatent: m.audioLatent,
+            clipAudio: m.clipAudio || null,
+            meta: m.meta || null,
+          })),
+          node_id: director?.node?.id,
+          context_frames: 39,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "无损合并失败");
+      showDragHint(`已无损合并 ${sel.length} 段，结果已加入素材条`);
+    } catch (err) {
+      console.error("[Transfer] 无损合并失败:", err);
+      showDragHint(`无损合并失败：${err.message || "未知错误"}`);
+    } finally {
+      setLosslessMergeBusy(false);
     }
   };
 
@@ -1370,15 +1565,6 @@ export function TransferPanel({ director }) {
           curSeg && curSeg.type !== "audio"
             ? html`
                 ${
-                  curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video"
-                    ? html`<button
-                        class=${motionCtxOn ? "mrd-pr-btn toggle-on" : "mrd-pr-btn"}
-                        title="Toggle Auto First Frame for the selected segment"
-                        onClick=${toggleMotionContext}
-                      >Auto First Frame</button>`
-                    : null
-                }
-                ${
                   curSeg.type !== "audio"
                     ? html`<button
                         class=${autoEndOn ? "mrd-pr-btn toggle-on" : "mrd-pr-btn"}
@@ -1442,15 +1628,17 @@ export function TransferPanel({ director }) {
               class="tr-defs"
               style=${S.defsWrap}
               onMouseEnter=${openDefsTip}
-              onMouseLeave=${() => setDefsOpen(false)}
+              onMouseMove=${openDefsTip}
+              onMouseLeave=${delayCloseDefs}
             >
               <span style=${S.defsIcon}>ℹ</span>
               ${
                 defsOpen && defsPos
                   ? html`<div
+                      class="tr-defs-tip"
                       style=${Object.assign({}, S.defsTip, { left: defsPos.left, top: defsPos.top }, defsPos.up ? { transform: "translateY(-100%)" } : null)}
-                      onMouseEnter=${() => setDefsOpen(true)}
-                      onMouseLeave=${() => setDefsOpen(false)}
+                      onMouseEnter=${keepDefsOpen}
+                      onMouseLeave=${delayCloseDefs}
                     >
                       ${
                         bindingsText
@@ -1489,6 +1677,18 @@ export function TransferPanel({ director }) {
                   onClick=${mergeSelectedMaterials}
                   onMouseDown=${(e) => e.preventDefault()}
                 >${mergeBusy ? "合并中…" : "合并"}</button>`
+              : null
+          }
+          ${
+            selIds.size >= 2
+              ? html`<button
+                  class="mrd-pr-btn"
+                  style=${S.materialsMergeBtn}
+                  disabled=${losslessMergeBusy}
+                  onClick=${losslessMergeSelectedMaterials}
+                  onMouseDown=${(e) => e.preventDefault()}
+                  title="按选中顺序把各段 latent 像素域交叉淡化拼接（clip_audio 优先，否则解码 audio_latent 拼接 master_audio）"
+                >${losslessMergeBusy ? "无损合并中…" : "无损合并"}</button>`
               : null
           }
           ${
@@ -1628,6 +1828,7 @@ export function TransferPanel({ director }) {
                       onMouseLeave=${stopAll}
                     >
                       ${orderNum > 0 ? html`<span style=${S.materialOrderBadge}>${orderNum}</span>` : null}
+                      ${m.imageLatent ? html`<span style=${S.materialLatentBadge}>无损</span>` : null}
                       ${dragReady ? html`<span style=${S.materialReadyBadge}>可拖出</span>` : null}
                       ${preview}
                       <span style=${S.materialLabel}>${m.label}</span>
@@ -1661,18 +1862,22 @@ export function TransferPanel({ director }) {
       ${
         menu
           ? html`
-            <div class="tr-menu" style=${Object.assign({}, S.menu, { left: menu.x + "px", top: menu.y + "px" })}>
+            <div class="ref-ms-mention-popup open" style=${{ left: menu.x + "px", top: menu.y + "px", zIndex: 100000 }}>
               ${
                 subjects.length === 0
-                  ? html`<div style=${{ padding: "6px 10px", color: "#888", fontSize: "12px" }}>没有可用主体（请先在主体节点中添加）</div>`
+                  ? html`<div class="ref-ms-mention-empty">暂无可用主体（请先在主体节点中添加）</div>`
                   : subjects.map(h => html`
-                      <button
-                        class="mrd-pr-btn"
-                        style=${Object.assign({}, S.trBtn, { display: "flex", alignItems: "center", gap: "6px", textAlign: "left", padding: "3px 6px" })}
+                      <div
+                        class="ref-ms-mention-item"
                         key=${h.name}
                         onMouseDown=${(e) => e.preventDefault()}
                         onClick=${() => pickSubject(h)}
-                      >${subjectMediaThumb(h)}<span>${h.name}</span></button>
+                        title="插入 ${menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:对话内容>`}"
+                      >
+                        ${subjectMediaThumb(h, 22)}
+                        <span class="ref-ms-mention-type">${h.type || "Subject"}</span>
+                        <span>${h.name}</span>
+                      </div>
                     `)
               }
             </div>
@@ -1686,6 +1891,7 @@ export function TransferPanel({ director }) {
         width="1500px"
         height="720px"
         onClose=${() => { setEditorOpen(false); setMenu(null); }}
+        help=${bindingsText || "暂无主体定义"}
       >
         <div style=${{ display: "flex", gap: "6px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
           <div class="mrd-pr-prompt-wrapper" style=${S.col}>
@@ -1734,11 +1940,11 @@ export function TransferPanel({ director }) {
           <div style=${{ fontSize: "10px", fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 2px 2px" }}>添加主体（additionSubject）</div>
           <div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
             ${
-              addedNames.length === 0 && addCandidates.length === 0
+              visibleAdded.length === 0 && addCandidates.length === 0
                 ? html`<div style=${{ color: "#888", fontSize: "12px", padding: "2px" }}>没有可添加的主体（未提及的主体均已添加）</div>`
                 : html`
                     ${
-                      addedNames.map(n => {
+                      visibleAdded.map(n => {
                         const h = subjects.find(x => x.name === n);
                         return html`
                         <span
@@ -1830,14 +2036,10 @@ export function GlobalParamsPanel({ director }) {
                       value=${gp[def.name]}
                       onChange=${(e) => setGlobal(def.name, e.target.value)}
                     >${def.options.map(o => html`<option value=${o}>${o}</option>`)}</select>`
-                  : html`<input
-                      class="tr-gp-input"
-                      type="number"
-                      min=${def.min}
-                      max=${def.max}
-                      step=${def.step}
+                  : html`<${NumInput}
+                      def=${def}
                       value=${gp[def.name]}
-                      onInput=${(e) => setGlobal(def.name, parseFloat(e.target.value) || def.fallback)}
+                      onCommit=${setGlobal}
                     />`
               }
             </label>

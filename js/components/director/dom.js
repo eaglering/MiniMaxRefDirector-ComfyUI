@@ -715,7 +715,7 @@ export const dom = {
     this.strengthValue = document.createElement("input");
     this.strengthValue.type = "text";
     this.strengthValue.className = "mrd-pr-strength-input";
-    this.strengthValue.value = "1.00";
+    this.strengthValue.value = "16";
     this.strengthValue.disabled = true;
     this.strengthValue.style.cursor = "ew-resize";
 
@@ -728,7 +728,7 @@ export const dom = {
     this.strengthValue.addEventListener("mousedown", (e) => {
       if (this.strengthValue.disabled) return;
       startX = e.clientX;
-      startVal = parseFloat(this.strengthValue.value) || 1.0;
+      startVal = parseInt(this.strengthValue.value) || 16;
       hasMoved = false;
 
       const onMouseMove = (moveEvent) => {
@@ -740,20 +740,18 @@ export const dom = {
 
         if (isDragging) {
           moveEvent.preventDefault();
-          const sensitivity = 0.002;
+          const sensitivity = 0.2;
           let newVal = startVal + deltaX * sensitivity;
 
           if (newVal < 0) newVal = 0;
-          if (newVal > 1) newVal = 1;
+          if (newVal > 100) newVal = 100;
 
-          this.strengthValue.value = newVal.toFixed(2);
+          this.strengthValue.value = parseInt(newVal);
 
-          if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
+          if (this.timeline.segments[this.selectedIndex]) {
             const seg = this.timeline.segments[this.selectedIndex];
-            if (seg.type !== "text") {
-              seg.guideStrength = newVal;
+            seg.guideStrength = newVal;
               this.commitChanges();
-            }
           }
         }
       };
@@ -774,16 +772,14 @@ export const dom = {
     });
 
     this.strengthValue.addEventListener("change", (e) => {
-      let val = parseFloat(e.target.value);
-      if (isNaN(val)) val = 1;
-      val = Math.max(0, Math.min(1, val));
-      this.strengthValue.value = val.toFixed(2);
-      if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
+      let val = parseInt(e.target.value);
+      if (isNaN(val)) val = 16;
+      val = Math.max(0, Math.min(100, val));
+      this.strengthValue.value = val;
+      if (this.timeline.segments[this.selectedIndex]) {
         const seg = this.timeline.segments[this.selectedIndex];
-        if (seg.type !== "text") {
-          seg.guideStrength = val;
+        seg.guideStrength = val;
           this.commitChanges();
-        }
       }
     });
 

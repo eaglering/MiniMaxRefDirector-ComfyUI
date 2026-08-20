@@ -246,7 +246,7 @@ export const state = {
         Length: <span>${this.formatTime(seg.audioDurationFrames)}</span> Output Length: <span>${this.formatTime(seg.length)}</span><br>
         Trim-in: <span>${this.formatTime(Math.round(seg.trimStart))}</span> Trim-Out: <span>${this.formatTime(Math.round(seg.audioDurationFrames - (seg.trimStart + seg.length)))}</span>
       `;
-      this.strengthValue.value = "1.00";
+      this.strengthValue.value = "16";
       this.strengthValue.disabled = true;
     } else {
       if (this.segmentPromptLabel) {
@@ -268,11 +268,10 @@ export const state = {
         this.promptInput.style.opacity = "1.0";
         this._setTransferVisible(true);
 
-        const isImage = (this.selectionType === "image") && (seg.type === "image" || seg.type === "video");
-        const strength = isImage ? (seg.guideStrength ?? 1.0) : 1.0;
-        this.strengthValue.value = strength.toFixed(2);
-        this.strengthValue.disabled = !isImage;
-        this.strengthValue.style.opacity = isImage ? "1.0" : "0.35";
+        const strength = (seg.guideStrength ?? 16);
+        this.strengthValue.value = parseInt(strength);
+        this.strengthValue.disabled = false;
+        this.strengthValue.style.opacity = "1.0";
       } else {
         this.promptInput.value = "";
         if (this._transferSetLeft) this._transferSetLeft("");
@@ -280,7 +279,7 @@ export const state = {
         this.promptInput.disabled = true;
         this.promptInput.style.opacity = "0.4";
         this._setTransferVisible(false);
-        this.strengthValue.value = "1.00";
+        this.strengthValue.value = "16";
         this.strengthValue.disabled = true;
         this.strengthValue.style.opacity = "0.35";
       }

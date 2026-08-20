@@ -178,6 +178,49 @@ def merge_two_audio(audio1: dict | None, audio2: dict | None, merge_method: str 
 
     return {"waveform": waveform, "sample_rate": output_sample_rate}
 
+
+def fill_audio_gaps(audio_segments, range_start, range_end):
+    """把不连贯的音频片段补齐空白段，使其连贯覆盖 [range_start, range_end)。
+
+    音频段字段语义（与前端 timeline audioSegments 一致）：
+    - start            : 该段对应的视频起始帧（像素帧）
+    - length           : 该段覆盖的视频帧数
+    - trimStart        : 音频切割的起始位置（在音频文件内的帧位置）
+    - audioDurationFrames : 音频文件总帧数
+
+    输入段可能不连续（中间有空隙 / 首尾未对齐视频范围），这里按 start 升序
+    遍历，在空隙处插入标记 silence=True 的空白段，保证返回列表无缝覆盖
+    [range_start, range_end)。原段保留全部字段不动。
+    """
+    if not audio_segments:
+        return []
+    segs = sorted(
+        [s for s in audio_segments if isinstance(s, dict) and s.get("start") is not None],
+        key=lambda s: int(s.get("start", 0)),
+    )
+    result = []
+    cursor = int(range_start)
+    for s in segs:
+        start = int(s.get("start", 0))
+        length = int(s.get("length", 0))
+        if start > cursor:
+            result.append({
+                "type": "audio",
+                "start": cursor,
+                "length": start - cursor,
+                "silence": True,
+            })
+        result.append(s)
+        cursor = max(cursor, start + length)
+    if cursor < int(range_end):
+        result.append({
+            "type": "audio",
+            "start": cursor,
+            "length": int(range_end) - cursor,
+            "silence": True,
+        })
+    return result
+
 class RefSaveAudio(io.ComfyNode):
     """Save audio to the ComfyUI output directory."""
 

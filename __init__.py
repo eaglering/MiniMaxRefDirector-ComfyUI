@@ -3,6 +3,7 @@ from . import server  # registers /minimax_ref/api routes
 from .subject import MiniMaxRefSubject
 from .director import MiniMaxRefDirector
 from .guide import MiniMaxRefGuide
+from .combine import MiniMaxRefCombine
 from .lib.utils import RefJoinString
 from .lib.video import RefMergeVideosFromPaths
 from .lib.audio import RefSaveAudio
@@ -19,6 +20,7 @@ class PromptRelay(ComfyExtension):
         return [
             MiniMaxRefDirector,
             MiniMaxRefGuide,
+            MiniMaxRefCombine,
             MiniMaxRefSubject,
             RefJoinString,
             RefMergeVideosFromPaths,
@@ -34,6 +36,7 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxRefSubject": MiniMaxRefSubject,
     "MiniMaxRefDirector": MiniMaxRefDirector,
     "MiniMaxRefGuide": MiniMaxRefGuide,
+    "MiniMaxRefCombine": MiniMaxRefCombine,
     "MiniMaxRefMergeVideosFromPaths": RefMergeVideosFromPaths,
     "MiniMaxRefSaveImage": RefSaveImage,
     "MiniMaxRefSaveAudio": RefSaveAudio,
@@ -45,6 +48,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefSubject": "MiniMax Subject",
     "MiniMaxRefDirector": "MiniMax Super Director",
     "MiniMaxRefGuide": "MiniMax Ref Guide",
+    "MiniMaxRefCombine": "MiniMax Ref Combine",
     "MiniMaxRefMergeVideosFromPaths": "Merge Videos From Paths",
     "MiniMaxRefSaveImage": "Save Image",
     "MiniMaxRefSaveAudio": "Save Audio",
