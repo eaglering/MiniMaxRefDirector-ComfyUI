@@ -94,8 +94,6 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "million_pixels", default=0.6, min=0.1, max=4.0, step=0.1, optional=True,
                     tooltip="Million pixels target. 1.0 MP ≈ 1024×1024.",
                 ),
-                # --- 视频生成已迁移到 MiniMaxRefGuide 节点（Easy-Use forLoop 内按段调用） ---
-                # director 仅负责组装 guide_data；model/clip/video_vae/audio_vae 由外部自行接入采样链路。
             ],
             outputs=[
                 GuideData.Output(display_name="guide_data"),

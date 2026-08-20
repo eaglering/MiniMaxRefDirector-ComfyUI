@@ -472,22 +472,55 @@ const RESOLUTION_OPTIONS = ["1:1方形", "9:16竖屏", "16:9横屏", "3:2横屏"
 //   frames  -> start_frame/end_frame/duration_frames（Start(f)/End(f)/Duration(f)）
 const TIME_PARAM_DEFS = {
   seconds: [
-    { name: "start_second", label: "Start(s)", type: "number", fallback: 0, min: 0, max: 1000, step: 0.01 },
-    { name: "end_second", label: "End(s)", type: "number", fallback: 5, min: 0, max: 1000, step: 0.01 },
-    { name: "duration_seconds", label: "Duration(s)", type: "number", fallback: 5, min: 0.1, max: 1000, step: 0.01 },
+    { name: "start_second", label: "Start(s)", type: "number", fallback: 0, min: 0, max: 1000, step: 0.01, digits: 2 },
+    { name: "end_second", label: "End(s)", type: "number", fallback: 5, min: 0, max: 1000, step: 0.01, digits: 2 },
+    { name: "duration_seconds", label: "Duration(s)", type: "number", fallback: 5, min: 0.1, max: 1000, step: 0.01, digits: 2 },
   ],
   frames: [
-    { name: "start_frame", label: "Start(f)", type: "number", fallback: 0, min: 0, max: 100000, step: 1 },
-    { name: "end_frame", label: "End(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1 },
-    { name: "duration_frames", label: "Duration(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1 },
+    { name: "start_frame", label: "Start(f)", type: "number", fallback: 0, min: 0, max: 100000, step: 1, digits: 0 },
+    { name: "end_frame", label: "End(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1, digits: 0 },
+    { name: "duration_frames", label: "Duration(f)", type: "number", fallback: 120, min: 1, max: 100000, step: 1, digits: 0 },
   ],
 };
 
 const OTHER_GLOBAL_DEFS = [
-  { name: "frame_rate", label: "FPS", type: "number", fallback: 24, min: 1, max: 240, step: 1 },
+  { name: "frame_rate", label: "FPS", type: "number", fallback: 24, min: 1, max: 240, step: 1, digits: 0 },
   { name: "outpu_resolution", label: "Resolution", type: "select", fallback: "16:9横屏", options: RESOLUTION_OPTIONS },
-  { name: "million_pixels", label: "Million Pixels", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1 },
+  { name: "million_pixels", label: "Million Pixels", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1, digits: 1 },
 ];
+
+// ---------- 数字输入框（失焦/回车提交，允许输入中间态） ----------
+// 本地文本 state 保留用户正在输入的原始内容（如 "0."、"0.05"），只在
+// 失焦/回车时解析并提交：按 digits 四舍五入、clamp 到 [min,max]。
+// 避免受控组件在每次击键时强制重渲染，吞掉小数点 / 前导 0。
+function NumInput({ def, value, onCommit }) {
+  const [text, setText] = useState(() => String(value ?? def.fallback ?? ""));
+  // 外部值变化（FPS 联动、显示模式切换等）时同步显示
+  useEffect(() => {
+    setText(String(value ?? def.fallback ?? ""));
+  }, [value, def]);
+
+  const commit = () => {
+    let nv = parseFloat(text);
+    if (Number.isNaN(nv)) nv = def.fallback;
+    nv = Math.min(Math.max(nv, def.min), def.max);
+    const digits = def.digits ?? (def.step < 1 ? 2 : 0);
+    nv = digits > 0 ? Number(nv.toFixed(digits)) : Math.round(nv);
+    onCommit(def.name, nv);
+  };
+
+  return html`<input
+    class="tr-gp-input"
+    type="number"
+    min=${def.min}
+    max=${def.max}
+    step=${def.step}
+    value=${text}
+    onInput=${(e) => setText(e.target.value)}
+    onBlur=${commit}
+    onKeyDown=${(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+  />`;
+}
 
 // ---------- Preact 组件 ----------
 
@@ -1830,14 +1863,10 @@ export function GlobalParamsPanel({ director }) {
                       value=${gp[def.name]}
                       onChange=${(e) => setGlobal(def.name, e.target.value)}
                     >${def.options.map(o => html`<option value=${o}>${o}</option>`)}</select>`
-                  : html`<input
-                      class="tr-gp-input"
-                      type="number"
-                      min=${def.min}
-                      max=${def.max}
-                      step=${def.step}
+                  : html`<${NumInput}
+                      def=${def}
                       value=${gp[def.name]}
-                      onInput=${(e) => setGlobal(def.name, parseFloat(e.target.value) || def.fallback)}
+                      onCommit=${setGlobal}
                     />`
               }
             </label>
