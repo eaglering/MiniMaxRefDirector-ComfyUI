@@ -26,6 +26,66 @@ import { RefModal } from "./modal.js";
 
 const html = htm.bind(h);
 
+// mention 选择器样式：与 subject.js 的 @mention 弹层保持一致（幂等注入）
+if (!document.getElementById("ref-ms-mention-styles")) {
+  const st = document.createElement("style");
+  st.id = "ref-ms-mention-styles";
+  st.textContent = `
+.ref-ms-mention-popup {
+    position: fixed;
+    z-index: 100000;
+    min-width: 170px;
+    max-width: 280px;
+    max-height: 190px;
+    overflow-y: auto;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    padding: 4px;
+    box-sizing: border-box;
+}
+.ref-ms-mention-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ref-ms-mention-item:hover,
+.ref-ms-mention-item.active {
+    background: #333;
+}
+.ref-ms-mention-item img,
+.ref-ms-mention-item video {
+    display: block;
+}
+.ref-ms-mention-type {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex: 0 0 auto;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+.ref-ms-mention-empty {
+    font-size: 11px;
+    color: #777;
+    padding: 6px 8px;
+    white-space: nowrap;
+}
+`;
+  document.head.appendChild(st);
+}
+
 // ---------- 工具函数 ----------
 
 function getSubjectsFromGraph() {
@@ -132,33 +192,18 @@ function subjectMediaPreview(s) {
   return { kind: "none" };
 }
 
-// 下拉菜单里的媒体缩略图：图片/视频显示资源，音频用图标占位
+// 下拉菜单里的媒体缩略图：
+//   audio → 音频图标；video → 视频图标；image → 图片；无媒体 → "T"（文本主体）
 // size：缩略图边长（px），默认 22（mention 菜单）；弹窗"添加主体"列表放大一倍用 44
 function subjectMediaThumb(s, size = 22) {
   const p = subjectMediaPreview(s);
   const base = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", objectFit: "cover" };
+  const iconBase = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: Math.round(size * 0.5) + "px", fontStyle: "normal", lineHeight: 1, background: "#1e3a5f", color: "#38bdf8" };
   if (p.kind === "image") return html`<img src=${p.src} alt="" style=${base} />`;
-  if (p.kind === "video") return html`<video src=${p.src} muted preload="metadata" style=${Object.assign({}, base, { background: "#000" })} />`;
-  if (p.kind === "audio") return html`<span title="音频" style=${{ width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#1e3a5f", color: "#38bdf8", fontSize: Math.round(size * 0.5) + "px", fontStyle: "normal" }}>♪</span>`;
-  return null;
-}
-
-// 从 H3 prompt 文本提取 <@name> / <#name:dialogue> 提及
-function extractH3Mentions(text) {
-  const names = new Set();
-  const dialogues = new Set();
-  const nameRe = /<@([^>]+)>/g;
-  const diaRe = /<#([^>:]+):/g;
-  let m;
-  while ((m = nameRe.exec(text || ""))) {
-    const n = m[1].trim();
-    if (n) names.add(n);
-  }
-  while ((m = diaRe.exec(text || ""))) {
-    const n = m[1].trim();
-    if (n) dialogues.add(n);
-  }
-  return { names, dialogues };
+  if (p.kind === "video") return html`<span title="视频" style=${Object.assign({}, iconBase, { color: "#a5d6a7" })}>▶</span>`;
+  if (p.kind === "audio") return html`<span title="音频" style=${iconBase}>♪</span>`;
+  // 无媒体（纯文本主体）：T 徽标
+  return html`<span title="文本" style=${Object.assign({}, iconBase, { background: "#333", color: "#ccc", fontSize: Math.round(size * 0.5) + "px" })}>T</span>`;
 }
 
 // 主体定义 / retention_analysis / 媒体列表（images / audios / videos）
@@ -769,21 +814,22 @@ export function TransferPanel({ director }) {
   useEffect(() => {
     if (!menu) return;
     const onDown = (e) => {
-      if (e.target.closest && !e.target.closest(".tr-menu")) setMenu(null);
+      if (e.target.closest && !e.target.closest(".ref-ms-mention-popup")) setMenu(null);
     };
     window.addEventListener("mousedown", onDown, true);
     return () => window.removeEventListener("mousedown", onDown, true);
   }, [menu]);
 
-  // 右侧内容 debounce 解析资源引用
+  // 资源引用条：优先使用后端 /h3/build_subject_bindings 返回的 subjects
+  // （已包含 prompt 提及 + additionSubject 手动添加的主体，媒体字段权威），
+  // 不再本地正则解析 prompt；bindData 未就绪（未加载/请求失败）时 fallback 到 parseResources。
   useEffect(() => {
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      if (!aliveRef.current) return;
-      setResources(parseResources(rightText, subjects));
-    }, 500);
-    return () => clearTimeout(debounceRef.current);
-  }, [rightText, subjects, addVersion]);
+    if (bindData && Array.isArray(bindData.subjects)) {
+      setResources(resourcesFromBindings(bindData, curSeg));
+      return;
+    }
+    setResources(parseResources(rightText, subjects));
+  }, [bindData, rightText, subjects, addVersion, curSeg]);
 
   // 右侧 H3 JSON / 主体 / 当前选中段 / 时间轴变化时 debounce 请求后端
   // /h3/build_subject_bindings（替代前端 buildFirstFramePayload 的绑定组装）。
@@ -831,6 +877,14 @@ export function TransferPanel({ director }) {
     try {
       // timeline_segment：当前选中 segment（含 additionSubject，供后端追加绑定未提及的主体）
       const seg = curSeg;
+      // 过滤 prompt 中已提及（<@name> 会由 prompt 绑定，后端将其写入 mapping）的主体，避免重复追加。
+      // 注意：additionSubject 手动添加的主体不会被写入 mapping，必须保留发送，
+      // 否则"已绑定→从 additionSubject 移除→解除绑定→回到候选"循环。
+      const boundMentions = new Set();
+      for (const k of Object.keys(bindData?.mapping || {})) {
+        const mm = /^<@([^>]+)>$/.exec(k);
+        if (mm) boundMentions.add(mm[1]);
+      }
       const body = {
         subject_data: { subjects: subjects || [] },
         raw_prompt: rightText,
@@ -840,7 +894,7 @@ export function TransferPanel({ director }) {
               start: seg.start,
               videoFile: seg.videoFile || "",
               audioFile: seg.audioFile || "",
-              additionSubject: Array.isArray(seg.additionSubject) ? seg.additionSubject : [],
+              additionSubject: (Array.isArray(seg.additionSubject) ? seg.additionSubject : []).filter((n) => !boundMentions.has(n)),
             }
           : {},
       };
@@ -1006,11 +1060,15 @@ export function TransferPanel({ director }) {
     const charW = 7.5;
     // fixed 定位实际以最近 transform 祖先（图容器）为包含块解析，rect 是视口坐标，
     // 需减去包含块左上角，否则菜单整体偏移（可能移出可视区，表现为输入 @/# 无反应）。
+    // 注意与 modal.js 拖动定位一致：包含块在 ComfyUI 图容器（transform 平移/缩放）内时，
+    // getBoundingClientRect 是已含 scale 的视口坐标，写入 fixed 定位必须是布局值，
+    // 故差值必须除以缩放系数，否则画布缩放 ≠1 时菜单位置会被 scale 二次放大而偏离光标。
     const cb = getFixedCb(el);
     const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
-    const vw = cb ? cbRect.width : window.innerWidth;
-    const x = Math.max(4, Math.min(rect.left + col * charW - cbRect.left, vw - 200));
-    const y = rect.top + (line + 1) * lineHeight + 6 - cbRect.top;
+    const scale = cb && cb.offsetWidth > 0 && cbRect.width > 0 ? cbRect.width / cb.offsetWidth : 1;
+    const vw = cb ? cbRect.width / scale : window.innerWidth;
+    const x = Math.max(4, Math.min((rect.left - cbRect.left) / scale + col * charW, vw - 200));
+    const y = (rect.top - cbRect.top) / scale + (line + 1) * lineHeight + 6;
     // 打开菜单前刷新一次主体列表，确保新增的主体立即可选
     setSubjects(getSubjectsLatest());
     setMenu({ side, trigger: ch, caret, x, y });
@@ -1059,6 +1117,27 @@ export function TransferPanel({ director }) {
     setMenu(null);
   }
 
+  // 资源引用条数据：直接使用后端 /h3/build_subject_bindings 返回的 subjects
+  // （后端已按 prompt 提及 + additionSubject 手动添加过滤，媒体字段为权威来源）。
+  // kind 依据当前 segment 的 additionSubject 区分，用于展示"＋"与移除按钮。
+  function resourcesFromBindings(bindData, seg) {
+    const out = [];
+    const added = new Set(Array.isArray(seg?.additionSubject) ? seg.additionSubject : []);
+    for (const s of bindData.subjects || []) {
+      if (!s || !s.name) continue;
+      const kind = added.has(s.name) ? "addition" : "subject";
+      out.push({
+        key: (kind === "addition" ? "add-" : "subj-") + s.name,
+        label: s.name,
+        src: subjectImgSrc(s),
+        audio: s.audioFile,
+        kind,
+      });
+    }
+    return out;
+  }
+
+  // 本地兜底解析：bindData 未就绪（未加载/请求失败）时从 prompt 文本提取引用
   function parseResources(text, subjectsList) {
     const out = [];
     const re = /<(?:@|#)([^>:]+)(?::[^>]*)?>/g;
@@ -1083,13 +1162,13 @@ export function TransferPanel({ director }) {
   }
 
   // ---------- additionSubject 添加框 ----------
-  // 候选主体：未在右侧 prompt 中提及、且尚未添加的主体
-  const mentionNames = (() => {
-    const m = extractH3Mentions(rightText);
-    return new Set([...m.names, ...m.dialogues]);
-  })();
+  // 已绑定主体：后端 /h3/build_subject_bindings 返回的 subjects（= prompt 提及 + additionSubject 添加），
+  // 不再本地解析 prompt 文本
+  const boundNames = new Set((bindData?.subjects || []).map((s) => s?.name).filter(Boolean));
   const addedNames = Array.isArray(curSeg?.additionSubject) ? curSeg.additionSubject : [];
-  const addCandidates = subjects.filter((s) => !mentionNames.has(s.name) && !addedNames.includes(s.name));
+  // 已被绑定的主体不再作为 additionSubject 展示
+  const visibleAdded = addedNames.filter((n) => !boundNames.has(n));
+  const addCandidates = subjects.filter((s) => !boundNames.has(s.name) && !addedNames.includes(s.name));
   const addSubject = (name) => {
     if (!curSeg || !director) return;
     if (!Array.isArray(curSeg.additionSubject)) curSeg.additionSubject = [];
@@ -1098,15 +1177,41 @@ export function TransferPanel({ director }) {
     setAddVersion((v) => v + 1);
     director.commitChanges(true);
   };
-  // 信息图标 tooltip：fixed 定位避免被 .tr-resources 的 overflow 裁剪；按视口空间决定向上/向下弹出
+  // 信息图标 tooltip：fixed 定位避免被 .tr-resources 的 overflow 裁剪；跟随鼠标坐标移动，
+  // 带 6px 移动阈值（鼠标慢速移动/停顿时 tooltip 留在原地，方便移入内部滚动），按包含块空间决定向上/向下弹出
+  const defsTimer = useRef(null); // 延迟关闭定时器：鼠标从图标滑向 tooltip 的间隙不关闭
+  const defsLastXY = useRef(null); // 上次定位的鼠标坐标，用于移动阈值判断
   const openDefsTip = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const up = rect.top > window.innerHeight * 0.55;
-    const left = Math.max(4, Math.min(rect.left, window.innerWidth - 300));
-    const top = up ? rect.top - 6 : rect.bottom + 6;
+    if (e.target && e.target.closest && e.target.closest(".tr-defs-tip")) return; // 鼠标在 tooltip 上时停止跟随，允许滚动内容
+    const last = defsLastXY.current;
+    if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 6) return; // 移动不足阈值：tooltip 原地不动，鼠标可移入
+    defsLastXY.current = { x: e.clientX, y: e.clientY };
+    // fixed 定位实际以最近 transform 祖先（图容器，带平移/缩放）为包含块解析，clientX/Y 是视口坐标，
+    // 需减包含块左上角并除以缩放系数，否则画布缩放 ≠1 时 tooltip 偏离鼠标、根本点不到。
+    // 与 openMenu / modal.js 拖动定位同一套换算。
+    const cb = getFixedCb(e.currentTarget);
+    const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
+    const scale = cb && cb.offsetWidth > 0 && cbRect.width > 0 ? cbRect.width / cb.offsetWidth : 1;
+    const cx = (e.clientX - cbRect.left) / scale;
+    const cy = (e.clientY - cbRect.top) / scale;
+    const cw = cb ? cbRect.width / scale : window.innerWidth;
+    const ch = cb ? cbRect.height / scale : window.innerHeight;
+    const up = cy > ch * 0.55;
+    const left = Math.max(4, Math.min(cx, cw - 300));
+    const top = up ? cy - 6 : cy + 14;
     setDefsPos({ left: left + "px", top: top + "px", up });
     setDefsOpen(true);
   };
+  // 延迟关闭：鼠标从图标移向 tooltip（中间空隙）时不关闭；进入 tooltip 后由 keepDefsOpen 取消
+  const delayCloseDefs = () => {
+    clearTimeout(defsTimer.current);
+    defsTimer.current = setTimeout(() => setDefsOpen(false), 150);
+  };
+  const keepDefsOpen = () => {
+    clearTimeout(defsTimer.current);
+    setDefsOpen(true);
+  };
+  useEffect(() => () => clearTimeout(defsTimer.current), []);
   const removeAddedSubject = (name) => {
     if (!curSeg || !director) return;
     if (!Array.isArray(curSeg.additionSubject)) return;
@@ -1475,15 +1580,17 @@ export function TransferPanel({ director }) {
               class="tr-defs"
               style=${S.defsWrap}
               onMouseEnter=${openDefsTip}
-              onMouseLeave=${() => setDefsOpen(false)}
+              onMouseMove=${openDefsTip}
+              onMouseLeave=${delayCloseDefs}
             >
               <span style=${S.defsIcon}>ℹ</span>
               ${
                 defsOpen && defsPos
                   ? html`<div
+                      class="tr-defs-tip"
                       style=${Object.assign({}, S.defsTip, { left: defsPos.left, top: defsPos.top }, defsPos.up ? { transform: "translateY(-100%)" } : null)}
-                      onMouseEnter=${() => setDefsOpen(true)}
-                      onMouseLeave=${() => setDefsOpen(false)}
+                      onMouseEnter=${keepDefsOpen}
+                      onMouseLeave=${delayCloseDefs}
                     >
                       ${
                         bindingsText
@@ -1694,18 +1801,22 @@ export function TransferPanel({ director }) {
       ${
         menu
           ? html`
-            <div class="tr-menu" style=${Object.assign({}, S.menu, { left: menu.x + "px", top: menu.y + "px" })}>
+            <div class="ref-ms-mention-popup open" style=${{ left: menu.x + "px", top: menu.y + "px", zIndex: 100000 }}>
               ${
                 subjects.length === 0
-                  ? html`<div style=${{ padding: "6px 10px", color: "#888", fontSize: "12px" }}>没有可用主体（请先在主体节点中添加）</div>`
+                  ? html`<div class="ref-ms-mention-empty">暂无可用主体（请先在主体节点中添加）</div>`
                   : subjects.map(h => html`
-                      <button
-                        class="mrd-pr-btn"
-                        style=${Object.assign({}, S.trBtn, { display: "flex", alignItems: "center", gap: "6px", textAlign: "left", padding: "3px 6px" })}
+                      <div
+                        class="ref-ms-mention-item"
                         key=${h.name}
                         onMouseDown=${(e) => e.preventDefault()}
                         onClick=${() => pickSubject(h)}
-                      >${subjectMediaThumb(h)}<span>${h.name}</span></button>
+                        title="插入 ${menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:对话内容>`}"
+                      >
+                        ${subjectMediaThumb(h, 22)}
+                        <span class="ref-ms-mention-type">${h.type || "Subject"}</span>
+                        <span>${h.name}</span>
+                      </div>
                     `)
               }
             </div>
@@ -1719,6 +1830,7 @@ export function TransferPanel({ director }) {
         width="1500px"
         height="720px"
         onClose=${() => { setEditorOpen(false); setMenu(null); }}
+        help=${bindingsText || "暂无主体定义"}
       >
         <div style=${{ display: "flex", gap: "6px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
           <div class="mrd-pr-prompt-wrapper" style=${S.col}>
@@ -1767,11 +1879,11 @@ export function TransferPanel({ director }) {
           <div style=${{ fontSize: "10px", fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 2px 2px" }}>添加主体（additionSubject）</div>
           <div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
             ${
-              addedNames.length === 0 && addCandidates.length === 0
+              visibleAdded.length === 0 && addCandidates.length === 0
                 ? html`<div style=${{ color: "#888", fontSize: "12px", padding: "2px" }}>没有可添加的主体（未提及的主体均已添加）</div>`
                 : html`
                     ${
-                      addedNames.map(n => {
+                      visibleAdded.map(n => {
                         const h = subjects.find(x => x.name === n);
                         return html`
                         <span

@@ -159,7 +159,7 @@ const MSCSS = `
     font-family: inherit;
     outline: none;
     resize: vertical;
-    min-height: 60px;
+    min-height: 90px;
     box-sizing: border-box;
     transition: border-color 0.2s;
 }
@@ -423,6 +423,57 @@ const MSCSS = `
     text-align: center;
     padding: 4px 0;
 }
+.ref-ms-mention-popup {
+    position: fixed;
+    z-index: 9999;
+    min-width: 170px;
+    max-width: 280px;
+    max-height: 190px;
+    overflow-y: auto;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    padding: 4px;
+    display: none;
+    box-sizing: border-box;
+}
+.ref-ms-mention-popup.open {
+    display: block;
+}
+.ref-ms-mention-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ref-ms-mention-item:hover,
+.ref-ms-mention-item.active {
+    background: #333;
+}
+.ref-ms-mention-type {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex: 0 0 auto;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+.ref-ms-mention-empty {
+    font-size: 11px;
+    color: #777;
+    padding: 6px 8px;
+    white-space: nowrap;
+}
 `;
 
 let styleEl = document.getElementById("minimax-subject-styles");
@@ -432,6 +483,187 @@ if (!styleEl) {
     document.head.appendChild(styleEl);
 }
 styleEl.textContent = MSCSS;
+
+// --- @mention 主体选择器（描述输入框输入 @ 弹出，插入 <@name> 供 H3 绑定） ---
+let mentionPopup = null;
+let mentionCtx = null; // { ta, idx, start, query, items, active, save }
+
+document.addEventListener("mousedown", (e) => {
+    if (mentionPopup && !mentionPopup.contains(e.target)) closeMention();
+}, true);
+
+function closeMention() {
+    if (mentionPopup) {
+        mentionPopup.classList.remove("open");
+        mentionPopup.innerHTML = "";
+    }
+    mentionCtx = null;
+}
+
+function buildMentionPopup() {
+    if (!mentionPopup) {
+        mentionPopup = document.createElement("div");
+        mentionPopup.className = "ref-ms-mention-popup";
+        document.body.appendChild(mentionPopup);
+    }
+    return mentionPopup;
+}
+
+function positionMentionPopup(ta) {
+    const rect = ta.getBoundingClientRect();
+    const pop = buildMentionPopup();
+    pop.style.left = rect.left + "px";
+    pop.style.top = (rect.bottom + 4) + "px";
+    const popW = pop.offsetWidth || 200;
+    if (rect.left + popW > window.innerWidth - 8) {
+        pop.style.left = Math.max(8, window.innerWidth - popW - 8) + "px";
+    }
+}
+
+function mentionQuery(ta) {
+    const pos = ta.selectionStart;
+    if (pos !== ta.selectionEnd) return null;
+    const v = ta.value;
+    if (pos > 0 && v[pos - 1] === ">") return null; // 已闭合 <@name> 之后不触发
+    const m = v.slice(0, pos).match(/@([^@\s>]*)$/);
+    if (!m) return null;
+    return { start: m.index, query: m[1] };
+}
+
+function setMentionActive(i) {
+    if (!mentionCtx) return;
+    mentionCtx.active = i;
+    const pop = buildMentionPopup();
+    [...pop.children].forEach((el, j) => {
+        el.classList.toggle("active", j === i);
+    });
+}
+
+// 主体媒体展示：audio → 音频图标；video → 视频图标；image → 图片；无媒体 → "T"（文本主体）
+function mentionMedia(s, size) {
+    const t = s.type || "Subject";
+    const base = {
+        width: size + "px",
+        height: size + "px",
+        borderRadius: "3px",
+        flex: "0 0 auto",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: Math.round(size * 0.5) + "px",
+        fontStyle: "normal",
+        lineHeight: 1,
+        background: "#1e3a5f",
+        color: "#38bdf8",
+    };
+    if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile)) {
+        const el = document.createElement("span");
+        el.title = "音频";
+        el.textContent = "♪";
+        Object.assign(el.style, base);
+        return el;
+    }
+    if (t === "Video" || s.videoFile) {
+        const el = document.createElement("span");
+        el.title = "视频";
+        el.textContent = "▶";
+        Object.assign(el.style, base, { color: "#a5d6a7" });
+        return el;
+    }
+    if (t === "Picture" || s.imageFile || s.imageB64) {
+        const img = document.createElement("img");
+        img.alt = "";
+        img.src = s.imageB64 || (s.imageFile ? viewUrl(s.imageFile, "minimaxrefdirector") : "");
+        Object.assign(img.style, base, { objectFit: "cover" });
+        return img;
+    }
+    // 无媒体 → 文本主体 T 徽标
+    const el = document.createElement("span");
+    el.title = "文本";
+    el.textContent = "T";
+    Object.assign(el.style, base, { background: "#333", color: "#ccc" });
+    return el;
+}
+
+function acceptMention() {
+    const ctx = mentionCtx;
+    if (!ctx) return;
+    const item = ctx.items[ctx.active];
+    if (!item) return;
+    const insert = `<@${item.s.name.trim()}>`;
+    const end = ctx.start + 1 + ctx.query.length; // @ + query 的结束位置
+    const newVal = ctx.ta.value.slice(0, ctx.start) + insert + ctx.ta.value.slice(end);
+    ctx.ta.value = newVal;
+    const caret = ctx.start + insert.length;
+    ctx.ta.focus();
+    ctx.ta.setSelectionRange(caret, caret);
+    if (ctx.save) ctx.save(newVal);
+    closeMention();
+}
+
+function updateMention(ta, idx, subjects, save) {
+    const q = mentionQuery(ta);
+    if (!q) { closeMention(); return; }
+    const items = subjects
+        .map((s, i) => ({ s, i }))
+        .filter(({ s, i }) => i !== idx && (s.name || "").trim() && s.name.toLowerCase().includes(q.query.toLowerCase()));
+    const pop = buildMentionPopup();
+    pop.innerHTML = "";
+    mentionCtx = { ta, idx, start: q.start, query: q.query, items, active: 0, save };
+    if (items.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "ref-ms-mention-empty";
+        empty.textContent = "暂无其他主体可引用";
+        pop.appendChild(empty);
+        pop.classList.add("open");
+        positionMentionPopup(ta);
+        return;
+    }
+    items.forEach((it, i) => {
+        const item = document.createElement("div");
+        item.className = "ref-ms-mention-item" + (i === 0 ? " active" : "");
+        const type = document.createElement("span");
+        type.className = "ref-ms-mention-type";
+        type.textContent = it.s.type || "Subject";
+        const name = document.createElement("span");
+        name.textContent = it.s.name;
+        item.appendChild(mentionMedia(it.s, 22));
+        item.appendChild(name);
+        item.appendChild(type);
+        item.addEventListener("mousedown", (e) => {
+            e.preventDefault(); // 保持 textarea 焦点
+            mentionCtx.active = i;
+            acceptMention();
+        });
+        item.addEventListener("mouseenter", () => setMentionActive(i));
+        pop.appendChild(item);
+    });
+    pop.classList.add("open");
+    positionMentionPopup(ta);
+}
+
+function attachMention(ta, idx, subjects, save) {
+    ta.addEventListener("input", () => updateMention(ta, idx, subjects, save));
+    ta.addEventListener("keydown", (e) => {
+        if (!mentionCtx) return;
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setMentionActive(Math.min(mentionCtx.active + 1, mentionCtx.items.length - 1));
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setMentionActive(Math.max(mentionCtx.active - 1, 0));
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            acceptMention();
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            closeMention();
+        }
+    });
+    ta.addEventListener("blur", () => {
+        setTimeout(() => closeMention(), 120);
+    });
+}
 
 // 图像类主体（Subject / Picture / Video）的关系选项
 const REF_RELATIONSHIPS_PRESERVED = [
@@ -449,6 +681,15 @@ const REF_RELATIONSHIPS_COPY = [
     ["weak_reference", "weak reference"],
 ];
 
+// 音频参考类型（audio_rel 下拉，独立字段 audio_relationship）：
+// 与后端 lib/prompt.py _AUDIO_RELATION_TEXT 键保持一致
+const REF_RELATIONSHIPS_AUDIO = [
+    ["reference", "reference"],
+    ["fully_copy", "fully copy"],
+    ["partially_copy", "partially copy"],
+    ["weak_reference", "weak reference"],
+];
+
 // type → 关系选项组（联动）
 const REF_TYPE_RELATIONSHIPS = {
     Subject: REF_RELATIONSHIPS_PRESERVED,
@@ -460,6 +701,11 @@ const REF_TYPE_RELATIONSHIPS = {
 // type → relationship 默认值
 function refDefaultRelationship(type) {
     return (REF_TYPE_RELATIONSHIPS[type || "Subject"] || REF_RELATIONSHIPS_PRESERVED)[0][0];
+}
+
+// audio_rel 默认值（后端默认 "reference"）
+function refDefaultAudioRelationship() {
+    return REF_RELATIONSHIPS_AUDIO[0][0];
 }
 
 // type → 可上传的媒体类型（联动显示）
@@ -625,7 +871,7 @@ app.registerExtension({
 
                     if (subjects.length === 0) {
                         while (subjects.length < subjectCount) {
-                            subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", imageFile: "", audioFile: "", videoFile: "" });
+                            subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", audio_relationship: refDefaultAudioRelationship(), imageFile: "", audioFile: "", videoFile: "" });
                         }
                     } else {
                         subjectCount = subjects.length;
@@ -779,6 +1025,7 @@ app.registerExtension({
                 }
 
                 function renderSubjects() {
+                    closeMention();
                     subjectList.innerHTML = "";
                     // tab 高亮
                     TYPE_TABS.forEach(t => {
@@ -860,6 +1107,26 @@ app.registerExtension({
                         });
                         metaRow.appendChild(relLabel);
                         metaRow.appendChild(relSelect);
+                        // 音频参考类型（audio_rel）：与 Rel 同一行，独立字段 audio_relationship
+                        const audioRelLabel = document.createElement("span");
+                        audioRelLabel.className = "ref-ms-label-sm";
+                        audioRelLabel.textContent = "A-Rel";
+                        const audioRelSelect = document.createElement("select");
+                        audioRelSelect.className = "ref-ms-select";
+                        const audioRelDefault = refDefaultAudioRelationship();
+                        REF_RELATIONSHIPS_AUDIO.forEach(([val, label]) => {
+                            const opt = document.createElement("option");
+                            opt.value = val;
+                            opt.textContent = label;
+                            opt.selected = (subj.audio_relationship || audioRelDefault) === val;
+                            audioRelSelect.appendChild(opt);
+                        });
+                        audioRelSelect.addEventListener("change", () => {
+                            subjects[idx].audio_relationship = audioRelSelect.value;
+                            saveState();
+                        });
+                        metaRow.appendChild(audioRelLabel);
+                        metaRow.appendChild(audioRelSelect);
                         card.appendChild(metaRow);
 
                         // Description
@@ -870,11 +1137,15 @@ app.registerExtension({
                         descLabel.textContent = "Desc";
                         const descInput = document.createElement("textarea");
                         descInput.className = "ref-ms-textarea";
-                        descInput.placeholder = "Subject description...";
+                        descInput.placeholder = "Subject description... (type @ to mention another subject)";
                         descInput.value = subj.description || "";
                         descInput.rows = 1;
                         descInput.addEventListener("input", () => {
                             subjects[idx].description = descInput.value;
+                            saveState();
+                        });
+                        attachMention(descInput, idx, subjects, (v) => {
+                            subjects[idx].description = v;
                             saveState();
                         });
                         descRow.appendChild(descLabel);
@@ -1099,7 +1370,7 @@ app.registerExtension({
                 });
 
                 addBtn.addEventListener("click", () => {
-                    subjects.push({ name: "", description: "", type: activeTab, relationship: refDefaultRelationship(activeTab), imageFile: "", audioFile: "", videoFile: "" });
+                    subjects.push({ name: "", description: "", type: activeTab, relationship: refDefaultRelationship(activeTab), audio_relationship: refDefaultAudioRelationship(), imageFile: "", audioFile: "", videoFile: "" });
                     subjectCount = subjects.length;
                     renderSubjects();
                     saveState();
@@ -1136,7 +1407,7 @@ app.registerExtension({
                             // 按文件类型分发到最后一个空卡片，否则新建对应类型的卡片
                             const last = subjects[subjects.length - 1];
                             if (!last || last.name || last[field]) {
-                                subjects.push({ name: "", description: "", type, relationship: refDefaultRelationship(type), imageFile: "", imageB64: "", audioFile: "", videoFile: "", videoB64: "" });
+                                subjects.push({ name: "", description: "", type, relationship: refDefaultRelationship(type), audio_relationship: refDefaultAudioRelationship(), imageFile: "", imageB64: "", audioFile: "", videoFile: "", videoB64: "" });
                                 subjectCount = subjects.length;
                             }
                             const target = subjects[subjects.length - 1];
