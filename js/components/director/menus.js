@@ -375,7 +375,15 @@ export const menus = {
       items.push(this._menuDivider());
     }
 
-    // Group 7: Mark Selection + Delete
+    // Group 7: Latent Upscaler + Mark Selection + Delete
+    items.push(this._menuBtn("Latent Upscaler", {
+      onClick: () => {
+        seg.upscale = !seg.upscale;
+        this.commitChanges();
+        this.render();
+        this.dismissMenu();
+      }
+    }));
     items.push(this._menuBtn("Mark Selection", {
       onClick: () => {
         if (this.selectedSegmentIds && this.selectedSegmentIds.includes(seg.id)) this.markCurrentSelection();

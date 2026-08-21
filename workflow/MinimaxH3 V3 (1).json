@@ -1,0 +1,2638 @@
+{
+  "id": "9e7cf849-0a2e-4055-8b1d-4eb56f17280c",
+  "revision": 0,
+  "last_node_id": 188,
+  "last_link_id": 590,
+  "nodes": [
+    {
+      "id": 144,
+      "type": "MarkdownNote",
+      "pos": [
+        2704.2237544793797,
+        3395.7525491895467
+      ],
+      "size": [
+        247.82892464654594,
+        391.3113474614802
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "Note: Size Settings Reference",
+      "properties": {},
+      "widgets_values": [
+        "| megapixels | Aspect | Output (multiple=32) |\n|---|---|---|\n| 0.2 | 16:9 | 608 x 352 |\n| 0.3 | 16:9 | 736 x 416 |\n| 0.4 | 16:9 | 864 x 480 |\n| 0.5 | 16:9 | 960 x 544 |\n| 0.6 | 16:9 | 1056 x 608 |\n| 0.7 | 16:9 | 1152 x 640 |\n| 0.8 | 16:9 | 1216 x 672 |\n| 0.9 | 16:9 | 1280 x 736 |\n| 0.98 | 16:9 | 1344 x 768 |\n| 1.0 | 16:9 | 1376 x 768 |\n| 1.2 | 16:9 | 1504 x 832 |\n| 1.5 | 16:9 | 1664 x 928 |\n| 1.8 | 16:9 | 1824 x 1024 |\n| 2.0 | 16:9 | 1920 x 1088 |\n"
+      ],
+      "widgets_values_named": {
+        "text": "| megapixels | Aspect | Output (multiple=32) |\n|---|---|---|\n| 0.2 | 16:9 | 608 x 352 |\n| 0.3 | 16:9 | 736 x 416 |\n| 0.4 | 16:9 | 864 x 480 |\n| 0.5 | 16:9 | 960 x 544 |\n| 0.6 | 16:9 | 1056 x 608 |\n| 0.7 | 16:9 | 1152 x 640 |\n| 0.8 | 16:9 | 1216 x 672 |\n| 0.9 | 16:9 | 1280 x 736 |\n| 0.98 | 16:9 | 1344 x 768 |\n| 1.0 | 16:9 | 1376 x 768 |\n| 1.2 | 16:9 | 1504 x 832 |\n| 1.5 | 16:9 | 1664 x 928 |\n| 1.8 | 16:9 | 1824 x 1024 |\n| 2.0 | 16:9 | 1920 x 1088 |\n"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 145,
+      "type": "MarkdownNote",
+      "pos": [
+        2441.8189686774676,
+        3854.4273681269215
+      ],
+      "size": [
+        517.927579548314,
+        378.87032134392757
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "# MiniMaxRefDirector-ComfyUI 插件\n## 🔗 插件下载地址\n## **https://github.com/eaglering/MiniMaxRefDirector-ComfyUI**\n\n## 版本信息\n### v3.0.0\nMiniMax 导演台参考图生视频工作流。\n功能包含：\n- 可视化时间线编辑器\n- 多主体管理\n- 基于 VLM 的智能提示词增强\n- 尾帧自动转首帧参考（motion context + 提示词增强）\n- 片段重做\n\n## 作者\nTenz-8"
+      ],
+      "widgets_values_named": {
+        "text": "# MiniMaxRefDirector-ComfyUI 插件\n## 🔗 插件下载地址\n## **https://github.com/eaglering/MiniMaxRefDirector-ComfyUI**\n\n## 版本信息\n### v3.0.0\nMiniMax 导演台参考图生视频工作流。\n功能包含：\n- 可视化时间线编辑器\n- 多主体管理\n- 基于 VLM 的智能提示词增强\n- 尾帧自动转首帧参考（motion context + 提示词增强）\n- 片段重做\n\n## 作者\nTenz-8"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 149,
+      "type": "MiniMaxRefPureVRAM",
+      "pos": [
+        6600.542168187326,
+        3461.586947149221
+      ],
+      "size": [
+        210,
+        82
+      ],
+      "flags": {},
+      "order": 36,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "anything",
+          "type": "*",
+          "link": 569
+        }
+      ],
+      "outputs": [
+        {
+          "name": "anything",
+          "type": "*",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "6de72301b888466d35412db15ea346303dbe4df7",
+        "Node name for S&R": "MiniMaxRefPureVRAM"
+      },
+      "widgets_values": [
+        true,
+        true
+      ],
+      "widgets_values_named": {
+        "purge_vram": true,
+        "purge_models": true
+      }
+    },
+    {
+      "id": 113,
+      "type": "KSamplerSelect",
+      "pos": [
+        5304.918168814946,
+        3666.7687836457358
+      ],
+      "size": [
+        232.7071701988807,
+        58
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            377,
+            406
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "KSamplerSelect"
+      },
+      "widgets_values": [
+        "res_multistep"
+      ],
+      "widgets_values_named": {
+        "sampler_name": "res_multistep"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 143,
+      "type": "UNETLoader",
+      "pos": [
+        4587.544174222786,
+        3439.1067309588416
+      ],
+      "size": [
+        357.57855001797816,
+        82
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            571
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "UNETLoader"
+      },
+      "widgets_values": [
+        "minimax_h3_ref2va_pruned_hybrid_nvfp4_blackwell.safetensors",
+        "default"
+      ],
+      "widgets_values_named": {
+        "unet_name": "minimax_h3_ref2va_pruned_hybrid_nvfp4_blackwell.safetensors",
+        "weight_dtype": "default"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 123,
+      "type": "VAEDecode",
+      "pos": [
+        5826.706330636762,
+        3709.1524438044517
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 30,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 549
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 409
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            473
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "VAEDecode"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 124,
+      "type": "VAEDecodeAudio",
+      "pos": [
+        5828.376031925558,
+        3621.7448321617494
+      ],
+      "size": [
+        164.2388671875,
+        46
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 31,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 550
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 410
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            408
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "VAEDecodeAudio"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 112,
+      "type": "BasicGuider",
+      "pos": [
+        5307.5865849752845,
+        3583.2068803433594
+      ],
+      "size": [
+        228.7818407776772,
+        46
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 462
+        },
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 383
+        }
+      ],
+      "outputs": [
+        {
+          "name": "GUIDER",
+          "type": "GUIDER",
+          "links": [
+            376
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "BasicGuider"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 155,
+      "type": "BasicGuider",
+      "pos": [
+        5787.539365952842,
+        3993.1126377474243
+      ],
+      "size": [
+        228.7818407776772,
+        46
+      ],
+      "flags": {},
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 507
+        },
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 580
+        }
+      ],
+      "outputs": [
+        {
+          "name": "GUIDER",
+          "type": "GUIDER",
+          "links": [
+            492
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "BasicGuider"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 114,
+      "type": "RandomNoise",
+      "pos": [
+        5304.132619805033,
+        3770.6150602172033
+      ],
+      "size": [
+        238.45695019279356,
+        82
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "noise_seed",
+          "type": "INT",
+          "widget": {
+            "name": "noise_seed"
+          },
+          "link": 384
+        }
+      ],
+      "outputs": [
+        {
+          "name": "NOISE",
+          "type": "NOISE",
+          "links": [
+            375,
+            576
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "RandomNoise"
+      },
+      "widgets_values": [
+        157368968255098,
+        "randomize"
+      ],
+      "widgets_values_named": {
+        "noise_seed": 157368968255098,
+        "control_after_generate": "randomize"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 156,
+      "type": "DisableNoise",
+      "pos": [
+        5782.509288986289,
+        4103.1527267585825
+      ],
+      "size": [
+        230.38621529796546,
+        26
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "NOISE",
+          "type": "NOISE",
+          "links": [
+            510
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "DisableNoise"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 18,
+      "type": "CLIPLoader",
+      "pos": [
+        4583.927933145374,
+        3553.039666155037
+      ],
+      "size": [
+        361.7542647815783,
+        106
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            360
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "CLIPLoader",
+        "models": [
+          {
+            "name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "directory": "text_encoders"
+          }
+        ]
+      },
+      "widgets_values": [
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "minimax",
+        "default"
+      ],
+      "widgets_values_named": {
+        "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        "type": "minimax",
+        "device": "default"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 19,
+      "type": "VAELoader",
+      "pos": [
+        4583.611744809898,
+        3692.58993428643
+      ],
+      "size": [
+        360.015228936463,
+        58
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            361,
+            409,
+            417
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "VAELoader",
+        "models": [
+          {
+            "name": "minimax_h3_video_vae_fp16.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors",
+            "directory": "vae"
+          }
+        ]
+      },
+      "widgets_values": [
+        "minimax_h3_video_vae_fp16.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 20,
+      "type": "VAELoader",
+      "pos": [
+        4581.082238126093,
+        3786.0474393012696
+      ],
+      "size": [
+        359.5810138657723,
+        58
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            362,
+            410
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "VAELoader",
+        "models": [
+          {
+            "name": "minimax_h3_audio_vae_fp32.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors",
+            "directory": "vae"
+          }
+        ]
+      },
+      "widgets_values": [
+        "minimax_h3_audio_vae_fp32.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 160,
+      "type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+      "pos": [
+        4582.421224861476,
+        4502.583146608247
+      ],
+      "size": [
+        320.323828125,
+        26
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 19,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 496
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "1289b52fbb6d64a339a4047b9ea74cf7758ccf1e",
+        "Node name for S&R": "MiniMaxH3MemoryEfficientSageAttentionPatch"
+      }
+    },
+    {
+      "id": 159,
+      "type": "SolAttnPatch",
+      "pos": [
+        4663.949554620968,
+        4186.637429671203
+      ],
+      "size": [
+        270,
+        342
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 495
+        },
+        {
+          "name": "tau_profile",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            496
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "kijai/ComfyUI-SolAttn_triton",
+        "ver": "acfe1cfb4905ad8106f78d61a082f7c2fc58620e",
+        "Node name for S&R": "SolAttnPatch"
+      },
+      "widgets_values": [
+        1.2,
+        0.2,
+        0.9,
+        4096,
+        true,
+        "exact_kv",
+        false,
+        "3d",
+        false,
+        false,
+        false,
+        ""
+      ],
+      "widgets_values_named": {
+        "tau": 1.2,
+        "start_percent": 0.2,
+        "end_percent": 0.9,
+        "min_tokens": 4096,
+        "int8_qk": true,
+        "sink_conditioning": "exact_kv",
+        "morton": false,
+        "morton_curve": "3d",
+        "int8_pv": false,
+        "verbose": false,
+        "use_tma": false,
+        "dense_blocks": ""
+      }
+    },
+    {
+      "id": 158,
+      "type": "EasyCache",
+      "pos": [
+        4586.327629645765,
+        4007.9753745149255
+      ],
+      "size": [
+        341.6856190294211,
+        130
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 500
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            495
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "EasyCache"
+      },
+      "widgets_values": [
+        0.2,
+        0.15,
+        0.95,
+        false
+      ],
+      "widgets_values_named": {
+        "reuse_threshold": 0.2,
+        "start_percent": 0.15,
+        "end_percent": 0.95,
+        "verbose": false
+      }
+    },
+    {
+      "id": 127,
+      "type": "ModelPreviewOverrideKJ",
+      "pos": [
+        4959.514644455391,
+        3929.2081968220095
+      ],
+      "size": [
+        360,
+        480
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 573
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 417
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            460,
+            461,
+            462,
+            507,
+            508,
+            575
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "3f20054214fec9f9234fd3841ae6f1e4287948f6",
+        "Node name for S&R": "ModelPreviewOverrideKJ"
+      },
+      "widgets_values": [
+        1024,
+        80,
+        false,
+        12,
+        12,
+        "none",
+        ""
+      ],
+      "widgets_values_named": {
+        "max_resolution": 1024,
+        "jpeg_quality": 80,
+        "suppress_default_preview": false,
+        "preview_frames": 12,
+        "preview_fps": 12,
+        "tiny_vae": "none",
+        "preview": ""
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 104,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        6061.75319251102,
+        3443.071949981859
+      ],
+      "size": [
+        233.64117638013067,
+        465.8709938648997
+      ],
+      "flags": {},
+      "order": 33,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 474
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 408
+        },
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        },
+        {
+          "name": "frame_rate",
+          "type": "FLOAT",
+          "widget": {
+            "name": "frame_rate"
+          },
+          "link": 372
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": [
+            475
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "4ee72c065db22c9d96c2427954dc69e7b908444b",
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 8,
+        "loop_count": 0,
+        "filename_prefix": "Tenz",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "Tenz_00038-audio.mp4",
+            "subfolder": "",
+            "type": "output",
+            "format": "video/h264-mp4",
+            "frame_rate": 24,
+            "workflow": "Tenz_00038.png",
+            "fullpath": "D:\\workspace\\ComfyUI_windows_portable\\ComfyUI\\output\\Tenz_00038-audio.mp4"
+          }
+        }
+      },
+      "widgets_values_named": {
+        "frame_rate": 8,
+        "loop_count": 0,
+        "filename_prefix": "Tenz",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "Tenz_00038-audio.mp4",
+            "subfolder": "",
+            "type": "output",
+            "format": "video/h264-mp4",
+            "frame_rate": 24,
+            "workflow": "Tenz_00038.png",
+            "fullpath": "D:\\workspace\\ComfyUI_windows_portable\\ComfyUI\\output\\Tenz_00038-audio.mp4"
+          }
+        }
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 56,
+      "type": "MiniMaxRefSubject",
+      "pos": [
+        3029.5282238803748,
+        3392.9926532922377
+      ],
+      "size": [
+        488.96513672142646,
+        2028
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "config",
+          "type": "SUBJECT_CONFIG",
+          "links": [
+            81
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "873c6dc4d8af3c5bc71a41e521a00819db62a9a1",
+        "Node name for S&R": "MiniMaxRefSubject"
+      },
+      "widgets_values": [
+        "llama-cpp",
+        "Qwen3-VL-8B-Instruct-Q5_K_M.gguf",
+        "mmproj-BF16.gguf",
+        "{\"subjects\":[{\"name\":\"莱伦\",\"description\":\"黑发少年，身穿破旧灰色连帽斗篷，内着黑色紧身长裤，脚踩黑靴，手臂周围萦绕着紫色暗影魔力。\\n\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/莱伦.png\",\"audioFile\":\"minimaxrefdirector/ComfyUI_temp_gfxck_00001.flac\",\"videoFile\":\"\"},{\"name\":\"琼娜\",\"description\":\"拥有一头黑色长卷发，左侧佩戴带有红色圆形符文和金属尖角的发饰。她肤色白皙，眼瞳呈现鲜红色，神情冷艳。穿着一件带有暗色藤蔓图案的暗红色宽松长款外袍，内搭黑色抹胸和黑色多层长裙，腰间系有红黑相间的腰带和挂坠。脖子上戴着几何形状的项链，双手戴黑色半指手套，脚穿黑色短靴。\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/琼娜.png\",\"audioFile\":\"minimaxrefdirector/薇菈-配音.flac\",\"videoFile\":\"\"},{\"name\":\"怪兽\",\"description\":\"黑鳞恶魔躯体，犄角蝠翼，体表流淌紫色魔力纹路。\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/动画剧情概述.png\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"参考视频\",\"description\":\"这是描述\",\"type\":\"Video\",\"relationship\":\"weak_reference\",\"imageFile\":\"\",\"audioFile\":\"\",\"videoFile\":\"minimaxrefdirector/MiniMax_H3_00020_.mp4\"},{\"name\":\"参考音频\",\"description\":\"\",\"type\":\"Audio\",\"relationship\":\"reference\",\"imageFile\":\"\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"森林背景\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/地龙.png\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"张琪婆婆\",\"description\":\"老式盘发、灰色针织开杉、深色长裤、强势刻薄的站姿和指人\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/微信图片_20260820211944_55_49.jpg\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"张琪\",\"description\":\"棕色大波浪卷发、我米色蕾丝连衣裙、黑金链条包、精致但被压迫的神情;本片中她右手攥着收银小票,黑金链条包挂在手腕\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/微信图片_20260820211943_54_49.jpg\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"林晚\",\"description\":\"黑色中长发微卷、深棕色衬衫、卡其色半身裙、棕色手提包、温和但敏锐的气质;本片中她右手握棕色手提包,方手拎购物塑料袋\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/微信图片_20260820211942_53_49.jpg\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"女性\",\"description\":\"一位人类精灵女性\",\"type\":\"Subject\",\"relationship\":\"weak_reference\",\"imageFile\":\"minimaxrefdirector/krea2_identity_edit_00003_.png\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"ll\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/dd8268047ff017708650b1e986d7717f382084148.png\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"小红帽\",\"description\":\"\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/ComfyUI_00001_.png\",\"audioFile\":\"\",\"videoFile\":\"\"}]}",
+        12,
+        "本视频为影视级3d写实cg，采用ue5超写实渲染，电影级景深，柔和环境光，材质细节细腻\n\n\n\n\n\n\n\n\n",
+        ""
+      ],
+      "widgets_values_named": {
+        "vlm_mode": "llama-cpp",
+        "vlm_mode.gguf_name": "Qwen3-VL-8B-Instruct-Q5_K_M.gguf",
+        "vlm_mode.mmproj_path": "mmproj-BF16.gguf",
+        "subject_data": "{\"subjects\":[{\"name\":\"莱伦\",\"description\":\"黑发少年，身穿破旧灰色连帽斗篷，内着黑色紧身长裤，脚踩黑靴，手臂周围萦绕着紫色暗影魔力。\\n\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/莱伦.png\",\"audioFile\":\"minimaxrefdirector/ComfyUI_temp_gfxck_00001.flac\",\"videoFile\":\"\"},{\"name\":\"琼娜\",\"description\":\"拥有一头黑色长卷发，左侧佩戴带有红色圆形符文和金属尖角的发饰。她肤色白皙，眼瞳呈现鲜红色，神情冷艳。穿着一件带有暗色藤蔓图案的暗红色宽松长款外袍，内搭黑色抹胸和黑色多层长裙，腰间系有红黑相间的腰带和挂坠。脖子上戴着几何形状的项链，双手戴黑色半指手套，脚穿黑色短靴。\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/琼娜.png\",\"audioFile\":\"minimaxrefdirector/薇菈-配音.flac\",\"videoFile\":\"\"},{\"name\":\"怪兽\",\"description\":\"黑鳞恶魔躯体，犄角蝠翼，体表流淌紫色魔力纹路。\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/动画剧情概述.png\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"参考视频\",\"description\":\"这是描述\",\"type\":\"Video\",\"relationship\":\"weak_reference\",\"imageFile\":\"\",\"audioFile\":\"\",\"videoFile\":\"minimaxrefdirector/MiniMax_H3_00020_.mp4\"},{\"name\":\"参考音频\",\"description\":\"\",\"type\":\"Audio\",\"relationship\":\"reference\",\"imageFile\":\"\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"森林背景\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/地龙.png\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"张琪婆婆\",\"description\":\"老式盘发、灰色针织开杉、深色长裤、强势刻薄的站姿和指人\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/微信图片_20260820211944_55_49.jpg\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"张琪\",\"description\":\"棕色大波浪卷发、我米色蕾丝连衣裙、黑金链条包、精致但被压迫的神情;本片中她右手攥着收银小票,黑金链条包挂在手腕\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/微信图片_20260820211943_54_49.jpg\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"林晚\",\"description\":\"黑色中长发微卷、深棕色衬衫、卡其色半身裙、棕色手提包、温和但敏锐的气质;本片中她右手握棕色手提包,方手拎购物塑料袋\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/微信图片_20260820211942_53_49.jpg\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"女性\",\"description\":\"一位人类精灵女性\",\"type\":\"Subject\",\"relationship\":\"weak_reference\",\"imageFile\":\"minimaxrefdirector/krea2_identity_edit_00003_.png\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"ll\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/dd8268047ff017708650b1e986d7717f382084148.png\",\"audioFile\":\"\",\"videoFile\":\"\"},{\"name\":\"小红帽\",\"description\":\"\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/ComfyUI_00001_.png\",\"audioFile\":\"\",\"videoFile\":\"\"}]}",
+        "subject_count": 12,
+        "global_prompt": "本视频为影视级3d写实cg，采用ue5超写实渲染，电影级景深，柔和环境光，材质细节细腻\n\n\n\n\n\n\n\n\n",
+        "minimax_subject_ui": ""
+      }
+    },
+    {
+      "id": 122,
+      "type": "SamplerCustomAdvanced",
+      "pos": [
+        6066.286797275811,
+        4000.238948735166
+      ],
+      "size": [
+        229.24583932968426,
+        232.2242921951256
+      ],
+      "flags": {},
+      "order": 28,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "noise",
+          "type": "NOISE",
+          "link": 510
+        },
+        {
+          "name": "guider",
+          "type": "GUIDER",
+          "link": 492
+        },
+        {
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 406
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 505
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 579
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            551
+          ]
+        },
+        {
+          "name": "denoised_output",
+          "type": "LATENT",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "SamplerCustomAdvanced"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 115,
+      "type": "SamplerCustomAdvanced",
+      "pos": [
+        5561.425450541152,
+        3434.9116934816543
+      ],
+      "size": [
+        239.80183839973915,
+        396.42874007061346
+      ],
+      "flags": {},
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "noise",
+          "type": "NOISE",
+          "link": 375
+        },
+        {
+          "name": "guider",
+          "type": "GUIDER",
+          "link": 376
+        },
+        {
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 377
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 499
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 385
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            548
+          ]
+        },
+        {
+          "name": "denoised_output",
+          "type": "LATENT",
+          "links": [
+            574
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "SamplerCustomAdvanced"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 150,
+      "type": "MiniMaxRefPureVRAM",
+      "pos": [
+        6599.308906176578,
+        3604.4135782105386
+      ],
+      "size": [
+        210,
+        82
+      ],
+      "flags": {},
+      "order": 32,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "anything",
+          "type": "*",
+          "link": 473
+        }
+      ],
+      "outputs": [
+        {
+          "name": "anything",
+          "type": "*",
+          "links": [
+            474
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "6de72301b888466d35412db15ea346303dbe4df7",
+        "Node name for S&R": "MiniMaxRefPureVRAM"
+      },
+      "widgets_values": [
+        true,
+        true
+      ],
+      "widgets_values_named": {
+        "purge_vram": true,
+        "purge_models": true
+      }
+    },
+    {
+      "id": 44,
+      "type": "Seed (rgthree)",
+      "pos": [
+        5016.58140288472,
+        3726.227846384847
+      ],
+      "size": [
+        256.3651147154005,
+        130
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "dir": 4,
+          "name": "SEED",
+          "shape": 3,
+          "type": "INT",
+          "links": [
+            364,
+            384
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "rgthree-comfy",
+        "ver": "6b76ee6f2c5a007710b5a16f97c94330d6ecc871",
+        "randomMax": 1125899906842624,
+        "randomMin": 0
+      },
+      "widgets_values": [
+        -1,
+        "",
+        "",
+        "okay"
+      ],
+      "widgets_values_named": {
+        "seed": -1,
+        "🎲 Randomize Each Time": "",
+        "🎲 New Fixed Random": "",
+        "USE_LAST_SEED": "okay"
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 50,
+      "type": "PathchSageAttentionKJ",
+      "pos": [
+        4594.765744471681,
+        3880.7842242364372
+      ],
+      "size": [
+        351.03591716369374,
+        82
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            500
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "3f20054214fec9f9234fd3841ae6f1e4287948f6",
+        "Node name for S&R": "PathchSageAttentionKJ"
+      },
+      "widgets_values": [
+        "auto",
+        false
+      ],
+      "widgets_values_named": {
+        "sage_attention": "auto",
+        "allow_compile": false
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 183,
+      "type": "ModelAttentionBackend",
+      "pos": [
+        4628.649484848269,
+        4617.086992332191
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 571
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            572
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "ModelAttentionBackend"
+      },
+      "widgets_values": [
+        "comfy kitchen attention"
+      ],
+      "widgets_values_named": {
+        "attention": "comfy kitchen attention"
+      }
+    },
+    {
+      "id": 184,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        5006.010001837493,
+        4586.176915855258
+      ],
+      "size": [
+        270,
+        82
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 572
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            573
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        1
+      ],
+      "widgets_values_named": {
+        "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "strength_model": 1
+      }
+    },
+    {
+      "id": 111,
+      "type": "BasicScheduler",
+      "pos": [
+        5305.706718365368,
+        3434.374991996048
+      ],
+      "size": [
+        232.13318348328403,
+        106
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 461
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            499
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "BasicScheduler"
+      },
+      "widgets_values": [
+        "simple",
+        8,
+        1
+      ],
+      "widgets_values_named": {
+        "scheduler": "simple",
+        "steps": 8,
+        "denoise": 1
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 161,
+      "type": "BasicScheduler",
+      "pos": [
+        5780.655945208124,
+        4182.277398684859
+      ],
+      "size": [
+        232.13318348328403,
+        106
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 508
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            505,
+            577
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "BasicScheduler"
+      },
+      "widgets_values": [
+        "simple",
+        8,
+        0.45
+      ],
+      "widgets_values_named": {
+        "scheduler": "simple",
+        "steps": 8,
+        "denoise": 0.45
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 185,
+      "type": "MiniMaxH3LatentUpscaleCombined",
+      "pos": [
+        5366.695738012539,
+        3980.640884421107
+      ],
+      "size": [
+        373.6861328125,
+        298
+      ],
+      "flags": {},
+      "order": 26,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 574
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 575
+        },
+        {
+          "name": "noise",
+          "type": "NOISE",
+          "link": 576
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 577
+        },
+        {
+          "name": "learned_upscaler",
+          "shape": 7,
+          "type": "H3_LATENT_UPSCALER",
+          "link": null
+        },
+        {
+          "name": "positive",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 578
+        },
+        {
+          "name": "negative",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            579
+          ]
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            580
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "eaglering/ComfyUI-MiniMaxH3_LatentUpscaler",
+        "ver": "895e3c471164423f0ea0e8eaf45eb701efe641ae",
+        "Node name for S&R": "MiniMaxH3LatentUpscaleCombined"
+      },
+      "widgets_values": [
+        "learned model",
+        "h3_clean_latent_upscaler_film_epoch200.safetensors",
+        0,
+        "independent",
+        0
+      ],
+      "widgets_values_named": {
+        "method": "learned model",
+        "learned_model": "h3_clean_latent_upscaler_film_epoch200.safetensors",
+        "audio_denoise": 0,
+        "noise_resample": "independent",
+        "match_stats": 0
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 178,
+      "type": "ComfySwitchNode",
+      "pos": [
+        5824.029147754,
+        3495.650575130351
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 29,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "on_false",
+          "type": "LATENT",
+          "link": 548
+        },
+        {
+          "name": "on_true",
+          "type": "LATENT",
+          "link": 551
+        },
+        {
+          "name": "switch",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "switch"
+          },
+          "link": 547
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            549,
+            550
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "ComfySwitchNode"
+      },
+      "widgets_values": [
+        false
+      ],
+      "widgets_values_named": {
+        "switch": false
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 55,
+      "type": "MiniMaxRefDirector",
+      "pos": [
+        3545.3735678697894,
+        3389.5007318115645
+      ],
+      "size": [
+        987.5119348071112,
+        1107
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "config",
+          "shape": 7,
+          "type": "SUBJECT_CONFIG",
+          "link": 81
+        }
+      ],
+      "outputs": [
+        {
+          "name": "guide_data",
+          "type": "GUIDE_DATA",
+          "links": [
+            581
+          ]
+        },
+        {
+          "name": "segment_count",
+          "type": "INT",
+          "links": [
+            584
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "873c6dc4d8af3c5bc71a41e521a00819db62a9a1",
+        "Node name for S&R": "MiniMaxRefDirector",
+        "mainTrackEnabled": true,
+        "audioTrackEnabled": true,
+        "audioTrackWasEnabledBeforeOverride": false,
+        "inpaint_audio": false,
+        "override_audio": false,
+        "overrideAudio": false,
+        "showFilenames": true,
+        "use_custom_audio": false,
+        "frame_rate": 24,
+        "display_mode": "seconds",
+        "custom_width": 0,
+        "custom_height": 0,
+        "resize_method": "maintain aspect ratio",
+        "divisible_by": 32,
+        "img_compression": 18,
+        "guide_strength": "",
+        "local_prompts": "",
+        "segment_lengths": "120",
+        "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":552,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":936,\"normalDurationFrames\":120,\"segments\":[{\"id\":\"1786972292054m66hl\",\"start\":0,\"length\":120,\"prompt\":\"琼娜举起手机,转了一圈，开心地晃了晃说道：“宝子们，导演台3.0更新啦，快来围观！”\",\"type\":\"image\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@琼娜> 举起手机，身体微微侧转，手臂划出一个完整的圆周，随后开心地晃动手机。镜头保持中景，以平视角度捕捉她的动作和表情。她面带笑容，对着镜头说话。声音清晰，无其他背景音。 <#琼娜:宝子们，导演台3.0更新啦，快来围观！>\\n\\noverall_soundscape:\\n轻微的背景白噪音，无明显物理声源。\\n\\nnon_diegetic_music:\\nN/A\\n\",\"autoEndFrame\":true,\"additionSubject\":[],\"motionContext\":true,\"imageFile\":\"whatdreamscost/地龙.png\",\"imageB64\":\"/api/view?filename=%E5%9C%B0%E9%BE%99.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1787115347723heape\",\"start\":120,\"length\":120,\"prompt\":\"琼娜举着手机在莱伦面前炫耀。莱伦好奇地把头凑近手机屏幕，定睛一看，脸色骤变。@莱伦 慌忙说道：“不是啊，这个是我洗澡的照片，你怎么发网上了？！”\",\"type\":\"text\",\"motionContext\":true,\"autoEndFrame\":true,\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@琼娜>举着手机，将屏幕朝向<@莱伦>，脸上带着得意的神情。<@莱伦>好奇地把头凑近手机屏幕，目光聚焦在屏幕上，表情从好奇逐渐转为震惊，脸色骤变。<@莱伦>慌忙开口，声音急促：<#莱伦:不是啊，这个是我洗澡的照片，你怎么发网上了？！>\\n\\noverall_soundscape:\\n包括手机屏幕的轻微反光声和<@莱伦>急促的说话声。\\n\\nnon_diegetic_music:\\nN/A\\n\"},{\"id\":\"1787115672955r1ebs_v\",\"type\":\"video\",\"start\":240,\"length\":192,\"trimStart\":0,\"videoDurationFrames\":192,\"imageFile\":\"whatdreamscost/Tenz_00003-audio.mp4\",\"fileName\":\"Tenz_00003-audio.mp4\",\"prompt\":\"\",\"fileSize\":3720208,\"imageB64\":\"/api/view?filename=Tenz_00003-audio.mp4&type=input&subfolder=whatdreamscost\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@莱伦>扑过来想要抢夺<@琼娜>的手机。<@琼娜>侧身躲过，狡黠一笑，收回手机藏到身后。镜头跟随<@琼娜>的动作轻微晃动，保持中景构图。<#琼娜:谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！>\\n\\noverall_soundscape:\\n轻微回声和手机屏幕轻触声。\\n\\nnon_diegetic_music:\\nN/A\"},{\"id\":\"1787044709678tbhwo\",\"start\":432,\"length\":192,\"prompt\":\"莱伦扑过来想要抢夺琼娜的手机。琼娜侧身躲过，狡黠一笑，收回手机藏到身后：“谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！”\",\"type\":\"text\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@莱伦>扑过来想要抢夺<@琼娜>的手机。<@琼娜>侧身躲过，狡黠一笑，收回手机藏到身后。镜头跟随<@琼娜>的动作轻微晃动，保持中景构图。<#琼娜:谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！>\\n\\noverall_soundscape:\\n轻微回声和手机屏幕轻触声。\\n\\nnon_diegetic_music:\\nN/A\\n\",\"motionContext\":false,\"autoEndFrame\":true},{\"id\":\"1787094406242se2no\",\"start\":624,\"length\":144,\"prompt\":\"见到@琼娜 把手机藏到身后。@莱伦 焦急的挥了挥双手，求饶地说道：“别！别！别！我发，我现在就发！”\",\"type\":\"text\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] 镜头从<@琼娜>身上快速切换到<@莱伦>。<@莱伦> 焦急地挥了挥双手，求饶地说道：<#莱伦:别！别！别！我发，我现在就发！>。\\n\\noverall_soundscape:\\nN/A\\n\\nnon_diegetic_music:\\nN/A\\n\",\"motionContext\":true,\"autoEndFrame\":true},{\"id\":\"1787239080165tr3aq\",\"start\":768,\"length\":168,\"prompt\":\"Shot 1 (0-3秒)\\n想要:灯牌特写,快速推入。画面上方被\\\"邻户生活小区便利店\\\"发光灯牌占据,木质门头下方的玻璃门映出小区树影。店内货架和饮料陈列透过玻璃门发出暖光,门口纸箱货架和盆栽停在台阶两侧。黄昏环境光偏\\n冷,灯牌暖光忽然变得刺眼,像一句难听的话从门口冲出来。镜头从门头灯牌快速推入到玻璃门区域,轻微手持震动\\n台词:张琪婆婆(画外,中文,尖利强势,声音从便利店门口冲出):\\\"当初娶你张琪才花三万,你还真把自己当责人了?\\n音效:灯牌轻微电流声,便利店冷柜低频嗡鸣,争吵声突然突入,低频悬疑音乐从很低的位置进入。\\n不想要:不要字幕、水印、文字叠加、画面拼贴、九宫格边框、店名变形、灯牌错字、玻璃门融化、过度炫光\\nShot 2 (3-6秒)\\n想要:小区步道中景,侧跟急停。林晚从画面左侧沿弧形小区步道走向便利店门口,深棕色村杉和卡其色半身裙被傍晚光线压暗,右手握棕色手提包,左手拎购物塑料袋。花坛、路灯、住宅楼和园区树影在她身后延\\n伸。镜头从林晚侧后方跟拍,她听见\\\"三万\\\"后脚步突然停住,肩膀微僵,购物塑料袋在左手轻轻晃动,她下意识转头看向便利店门口\\n台词:林晚(画内,中文,压低声音,震惊克制):\\\"三万?\\n音效:购物袋窸窣,远处儿童脚步声和小区环境声被争吵声压低,低频悬疑音乐继续铺底\\n不想要:不要夸张表演、不要林晚突然换装、不要手提包消失、不要料袋变成其他物品、不要路人围观聚集。\\nShot 3 (6-10秒)\\n想要:婆媳双人中景,前景货架半遮挡,像林晚路过时无意看见。张琪和张琪婆婆站在便利店台阶下方争执,玻璃门里的货架灯光压在两人背后。张琪穿浅米色蕾连衣裙,右手攥着收银小票,黑金链条包挂在手\\n腕,她身体略往后缩但强忍情绪。张琪婆婆站在台阶边,灰色针织开衫袖口卷起右手食指指向张琪脸前,表情刻薄强势。纸箱货架在前景形成半遮挡,镜头从货架边缘轻微侧移,保持窥见感和压迫感。\\n台词:张琪婆婆(画内,中文,刻薄强势,语速偏快):\\\"房贷、车贷、生活费,你都该一起分担。别天天摆少奶奶架子。\\n音效:便利店门口争吵声清晰,纸箱货架被风轻碰的细小摩擦声,远处园区脚步与儿童声渐远,低频悬疑音乐压住结尾\\n不想要:不要肢体冲突升级、不要打人、不要围观群众抢戏、不要字幕、水印、文字叠加、角色脸部漂移、年龄漂移、服装漂移、包小票消失、镜头突然跳到室内。\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/微信图片_20260820211946_57_49.jpg\",\"imageB64\":\"/api/view?filename=%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260820211946_57_49.jpg&type=input&subfolder=whatdreamscost\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] At 00:00.000, 特写镜头快速推入，画面顶部被“邻户生活小区便利店”发光灯牌占据，木质门头下方的玻璃门映出小区树影。店内货架和饮料陈列透过玻璃门发出暖光，门口纸箱货架和盆栽停在台阶两侧。黄昏环境光偏冷，灯牌暖光忽然变得刺眼，像一句难听的话从门口冲出来。镜头从门头灯牌快速推入到玻璃门区域，轻微手持震动。<#张琪婆婆:当初娶你张琪才花三万,你还真把自己当责人了?> 音效：灯牌轻微电流声，便利店冷柜低频嗡鸣，争吵声突然突入，低频悬疑音乐从很低的位置进入。\\n\\n[Shot 2] At 00:03.000, 小区步道中景，侧跟急停。<@林晚>从画面左侧沿弧形小区步道走向便利店门口，深棕色村杉和卡其色半身裙被傍晚光线压暗，右手握棕色手提包，左手拎购物塑料袋。花坛、路灯、住宅楼和园区树影在她身后延伸。镜头从<@林晚>侧后方跟拍，她听见“三万”后脚步突然停住，肩膀微僵，购物塑料袋在左手轻轻晃动，她下意识转头看向便利店门口。<#林晚:三万?> 音效：购物袋窸窣，远处儿童脚步声和小区环境声被争吵声压低，低频悬疑音乐继续铺底。\\n\\n[Shot 3] At 00:06.000, 婆媳双人中景，前景货架半遮挡，<@林晚>路过时无意看见。<@张琪>和<@张琪婆婆>站在便利店台阶下方争执，玻璃门里的货架灯光压在两人背后。<@张琪>穿浅米色蕾连衣裙，右手攥着收银小票，黑金链条包挂在手腕，她身体略往后缩但强忍情绪。<@张琪婆婆>站在台阶边，灰色针织开衫袖口卷起右手食指指向<@张琪>脸前，表情刻薄强势。纸箱货架在前景形成半遮挡，镜头从货架边缘轻微侧移，保持窥见感和压迫感。<#张琪婆婆:房贷、车贷、生活费,你都该一起分担。别天天摆少奶奶架子。> 音效：便利店门口争吵声清晰，纸箱货架被风轻碰的细小摩擦声，远处园区脚步与儿童声渐远，低频悬疑音乐压住结尾。\\n\\noverall_soundscape:\\n黄昏小区环境音、购物袋窸窣声、儿童脚步声、便利店冷柜低频嗡鸣、争吵声持续压过环境音，低频悬疑音乐作为底噪贯穿始终。\\n\\nnon_diegetic_music:\\n低频悬疑音乐，持续铺底，音量稳定，无明显动态变化。\\n\",\"additionSubject\":[\"小红帽\",\"琼娜\",\"怪兽\",\"女性\",\"森林背景\",\"参考音频\",\"莱伦\"],\"upscale\":false},{\"id\":\"17872665512263zt6s\",\"start\":936,\"length\":120,\"prompt\":\"\",\"type\":\"image\",\"motionContext\":false,\"autoEndFrame\":true,\"h3PromptJson\":\"detailed_description:\\n[Shot 1] At 00:00.000, <@女性>位于画面中央，背景为纯黑色，周围有蝴蝶自然飞舞。镜头缓慢拉远，跟随<@女性>姿态变化，保持视觉连贯性。人物姿势从首帧至尾帧逐步变化，动作流畅无突兀转折。环境与灯光保持一致性，无对话或声音事件。\\n\\noverall_soundscape:\\n无对话或声音事件。\\nnon_diegetic_music:\\nN/A\",\"imageFile\":\"whatdreamscost/Krea2-20260820140734_00001_.png\",\"imageB64\":\"/api/view?filename=Krea2-20260820140734_00001_.png&type=input&subfolder=whatdreamscost\",\"additionSubject\":[\"ll\"],\"guideStrength\":1,\"upscale\":true}],\"audioSegments\":[{\"id\":\"1787115672955r1ebs_a\",\"type\":\"audio\",\"start\":240,\"length\":192,\"trimStart\":0,\"audioDurationFrames\":192,\"audioFile\":\"whatdreamscost/Tenz_00003-audio_extracted_audio.wav\",\"fileName\":\"Tenz_00003-audio.mp4\",\"waveformPeaks\":[0.10853387415409088,0.33204829692840576,0.20113004744052887,0.07627727836370468,0.03197271004319191,0.0038489261642098427,0.005984385032206774,0.0035553118214011192,0.0036125166807323694,0.0030500181019306183,0.004432670772075653,0.002512928331270814,0.002318388782441616,0.002184370532631874,0.0021916362456977367,0.0023529359605163336,0.002077421173453331,0.001931493286974728,0.002760800300166011,0.002020796062424779,0.0021017894614487886,0.002134207170456648,0.002052407246083021,0.0021378365345299244,0.002296299207955599,0.0019896947778761387,0.002159229712560773,0.0018188293324783444,0.003714652732014656,0.1103704571723938,0.19793693721294403,0.29314032196998596,0.2187873125076294,0.8385069966316223,0.7869704365730286,0.6992566585540771,0.8496028184890747,0.6525750160217285,0.3393780589103699,0.5675368905067444,0.5776897668838501,0.1044071689248085,0.09562001377344131,0.6273041367530823,0.8703845143318176,0.19267863035202026,0.6042564511299133,0.6356816291809082,0.6140881776809692,0.35531342029571533,0.4347592294216156,0.45531973242759705,0.44686126708984375,0.399962842464447,0.22528815269470215,0.17447839677333832,0.11925278604030609,0.14681778848171234,0.06142577901482582,0.04703495278954506,0.027656596153974533,0.018113669008016586,0.0031881718896329403,0.003810690715909004,0.0034938554745167494,0.0034967013634741306,0.004592235200107098,0.003306771395727992,0.002936628879979253,0.005388461984694004,0.01925995945930481,0.07388582080602646,0.8650609254837036,0.7553563117980957,0.4004400372505188,0.1264301836490631,0.20422983169555664,0.2646901309490204,0.8562769889831543,0.8196213245391846,0.14011156558990479,0.10739830136299133,0.21898889541625977,0.7675886154174805,0.7561736106872559,0.07850686460733414,0.42366477847099304,0.8749573230743408,0.8465182185173035,0.5576872825622559,0.5500738620758057,0.5185635089874268,0.5146589279174805,0.10000181198120117,0.01974497176706791,0.0027901523280888796,0.003097919514402747,0.0036201789043843746,0.003203549887984991,0.0030062987934798002,0.0029578572139143944,0.0027898915577679873,0.001979599241167307,0.0028543563093990088,0.0038318417500704527,0.0071015143766999245,0.011281575076282024,0.01437730435281992,0.016225343570113182,0.013750746846199036,0.01098894514143467,0.00953182764351368,0.0062636020593345165,0.006104394793510437,0.005999627057462931,0.005476274527609348,0.00605673948302865,0.3932773172855377,0.7063376307487488,0.8146989941596985,0.7352949976921082,0.4853912889957428,0.0954919382929802,0.866946280002594,0.7238782644271851,0.7059463262557983,0.1747351884841919,0.3503974974155426,0.06565038859844208,0.44278791546821594,0.6998980641365051,0.6956207156181335,0.1494757980108261,0.5263957977294922,0.5062792897224426,0.45570412278175354,0.24814070761203766,0.18071044981479645,0.17434221506118774,0.3915501534938812,0.4844478368759155,0.3690830171108246,0.056550804525613785,0.004906121175736189,0.0025125935208052397,0.0030634913127869368,0.0038478777278214693,0.006845998112112284,0.009027745574712753,0.006330482196062803,0.00585436075925827,0.006328207440674305,0.005346811376512051,0.6449949145317078,0.6433172225952148,0.2630670368671417,0.5061547756195068,0.6156134605407715,0.1790645867586136,0.3466140925884247,0.6988418698310852,0.26471179723739624,0.6578705310821533,0.8501262068748474,0.5104408264160156,0.9261988401412964,0.6778811812400818,0.4513755142688751,0.23429960012435913,0.40326014161109924,0.3652278482913971,0.8089595437049866,0.02903885208070278,0.8641405701637268,0.7745489478111267,0.7664962410926819,0.6460054516792297,0.8140968084335327,0.3906816244125366,0.19993500411510468,0.2552200257778168,0.33675307035446167,0.75434809923172,0.7384837865829468,0.4490432143211365,0.4380840063095093,0.4522234797477722,0.0875561535358429,0.01821477897465229,0.003068827325478196,0.00932601559907198,0.018948353826999664,0.021927397698163986,0.0075220572762191296,0.013629656285047531,0.006336509715765715,0.0052810776978731155,0.005547702312469482,0.00553483609110117,0.007362144533544779],\"fileSize\":3720208}]}",
+        "epsilon": 0.001,
+        "start_second": 39,
+        "end_second": 44,
+        "duration_seconds": 5,
+        "start_frame": 936,
+        "end_frame": 1056,
+        "duration_frames": 120,
+        "outpu_resolution": "16:9横屏",
+        "million_pixels": 0.5,
+        "timeline_ui": "",
+        "has_serialized_properties": true,
+        "propHeight": 552,
+        "isSnapping": false
+      },
+      "widgets_values": [
+        39,
+        44,
+        5,
+        936,
+        1056,
+        120,
+        "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":552,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":936,\"normalDurationFrames\":120,\"segments\":[{\"id\":\"1786972292054m66hl\",\"start\":0,\"length\":120,\"prompt\":\"琼娜举起手机,转了一圈，开心地晃了晃说道：“宝子们，导演台3.0更新啦，快来围观！”\",\"type\":\"image\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@琼娜> 举起手机，身体微微侧转，手臂划出一个完整的圆周，随后开心地晃动手机。镜头保持中景，以平视角度捕捉她的动作和表情。她面带笑容，对着镜头说话。声音清晰，无其他背景音。 <#琼娜:宝子们，导演台3.0更新啦，快来围观！>\\n\\noverall_soundscape:\\n轻微的背景白噪音，无明显物理声源。\\n\\nnon_diegetic_music:\\nN/A\\n\",\"autoEndFrame\":true,\"additionSubject\":[],\"motionContext\":true,\"imageFile\":\"whatdreamscost/地龙.png\",\"imageB64\":\"/api/view?filename=%E5%9C%B0%E9%BE%99.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1787115347723heape\",\"start\":120,\"length\":120,\"prompt\":\"琼娜举着手机在莱伦面前炫耀。莱伦好奇地把头凑近手机屏幕，定睛一看，脸色骤变。@莱伦 慌忙说道：“不是啊，这个是我洗澡的照片，你怎么发网上了？！”\",\"type\":\"text\",\"motionContext\":true,\"autoEndFrame\":true,\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@琼娜>举着手机，将屏幕朝向<@莱伦>，脸上带着得意的神情。<@莱伦>好奇地把头凑近手机屏幕，目光聚焦在屏幕上，表情从好奇逐渐转为震惊，脸色骤变。<@莱伦>慌忙开口，声音急促：<#莱伦:不是啊，这个是我洗澡的照片，你怎么发网上了？！>\\n\\noverall_soundscape:\\n包括手机屏幕的轻微反光声和<@莱伦>急促的说话声。\\n\\nnon_diegetic_music:\\nN/A\\n\"},{\"id\":\"1787115672955r1ebs_v\",\"type\":\"video\",\"start\":240,\"length\":192,\"trimStart\":0,\"videoDurationFrames\":192,\"imageFile\":\"whatdreamscost/Tenz_00003-audio.mp4\",\"fileName\":\"Tenz_00003-audio.mp4\",\"prompt\":\"\",\"fileSize\":3720208,\"imageB64\":\"/api/view?filename=Tenz_00003-audio.mp4&type=input&subfolder=whatdreamscost\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@莱伦>扑过来想要抢夺<@琼娜>的手机。<@琼娜>侧身躲过，狡黠一笑，收回手机藏到身后。镜头跟随<@琼娜>的动作轻微晃动，保持中景构图。<#琼娜:谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！>\\n\\noverall_soundscape:\\n轻微回声和手机屏幕轻触声。\\n\\nnon_diegetic_music:\\nN/A\"},{\"id\":\"1787044709678tbhwo\",\"start\":432,\"length\":192,\"prompt\":\"莱伦扑过来想要抢夺琼娜的手机。琼娜侧身躲过，狡黠一笑，收回手机藏到身后：“谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！”\",\"type\":\"text\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@莱伦>扑过来想要抢夺<@琼娜>的手机。<@琼娜>侧身躲过，狡黠一笑，收回手机藏到身后。镜头跟随<@琼娜>的动作轻微晃动，保持中景构图。<#琼娜:谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！>\\n\\noverall_soundscape:\\n轻微回声和手机屏幕轻触声。\\n\\nnon_diegetic_music:\\nN/A\\n\",\"motionContext\":false,\"autoEndFrame\":true},{\"id\":\"1787094406242se2no\",\"start\":624,\"length\":144,\"prompt\":\"见到@琼娜 把手机藏到身后。@莱伦 焦急的挥了挥双手，求饶地说道：“别！别！别！我发，我现在就发！”\",\"type\":\"text\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] 镜头从<@琼娜>身上快速切换到<@莱伦>。<@莱伦> 焦急地挥了挥双手，求饶地说道：<#莱伦:别！别！别！我发，我现在就发！>。\\n\\noverall_soundscape:\\nN/A\\n\\nnon_diegetic_music:\\nN/A\\n\",\"motionContext\":true,\"autoEndFrame\":true},{\"id\":\"1787239080165tr3aq\",\"start\":768,\"length\":168,\"prompt\":\"Shot 1 (0-3秒)\\n想要:灯牌特写,快速推入。画面上方被\\\"邻户生活小区便利店\\\"发光灯牌占据,木质门头下方的玻璃门映出小区树影。店内货架和饮料陈列透过玻璃门发出暖光,门口纸箱货架和盆栽停在台阶两侧。黄昏环境光偏\\n冷,灯牌暖光忽然变得刺眼,像一句难听的话从门口冲出来。镜头从门头灯牌快速推入到玻璃门区域,轻微手持震动\\n台词:张琪婆婆(画外,中文,尖利强势,声音从便利店门口冲出):\\\"当初娶你张琪才花三万,你还真把自己当责人了?\\n音效:灯牌轻微电流声,便利店冷柜低频嗡鸣,争吵声突然突入,低频悬疑音乐从很低的位置进入。\\n不想要:不要字幕、水印、文字叠加、画面拼贴、九宫格边框、店名变形、灯牌错字、玻璃门融化、过度炫光\\nShot 2 (3-6秒)\\n想要:小区步道中景,侧跟急停。林晚从画面左侧沿弧形小区步道走向便利店门口,深棕色村杉和卡其色半身裙被傍晚光线压暗,右手握棕色手提包,左手拎购物塑料袋。花坛、路灯、住宅楼和园区树影在她身后延\\n伸。镜头从林晚侧后方跟拍,她听见\\\"三万\\\"后脚步突然停住,肩膀微僵,购物塑料袋在左手轻轻晃动,她下意识转头看向便利店门口\\n台词:林晚(画内,中文,压低声音,震惊克制):\\\"三万?\\n音效:购物袋窸窣,远处儿童脚步声和小区环境声被争吵声压低,低频悬疑音乐继续铺底\\n不想要:不要夸张表演、不要林晚突然换装、不要手提包消失、不要料袋变成其他物品、不要路人围观聚集。\\nShot 3 (6-10秒)\\n想要:婆媳双人中景,前景货架半遮挡,像林晚路过时无意看见。张琪和张琪婆婆站在便利店台阶下方争执,玻璃门里的货架灯光压在两人背后。张琪穿浅米色蕾连衣裙,右手攥着收银小票,黑金链条包挂在手\\n腕,她身体略往后缩但强忍情绪。张琪婆婆站在台阶边,灰色针织开衫袖口卷起右手食指指向张琪脸前,表情刻薄强势。纸箱货架在前景形成半遮挡,镜头从货架边缘轻微侧移,保持窥见感和压迫感。\\n台词:张琪婆婆(画内,中文,刻薄强势,语速偏快):\\\"房贷、车贷、生活费,你都该一起分担。别天天摆少奶奶架子。\\n音效:便利店门口争吵声清晰,纸箱货架被风轻碰的细小摩擦声,远处园区脚步与儿童声渐远,低频悬疑音乐压住结尾\\n不想要:不要肢体冲突升级、不要打人、不要围观群众抢戏、不要字幕、水印、文字叠加、角色脸部漂移、年龄漂移、服装漂移、包小票消失、镜头突然跳到室内。\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/微信图片_20260820211946_57_49.jpg\",\"imageB64\":\"/api/view?filename=%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260820211946_57_49.jpg&type=input&subfolder=whatdreamscost\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] At 00:00.000, 特写镜头快速推入，画面顶部被“邻户生活小区便利店”发光灯牌占据，木质门头下方的玻璃门映出小区树影。店内货架和饮料陈列透过玻璃门发出暖光，门口纸箱货架和盆栽停在台阶两侧。黄昏环境光偏冷，灯牌暖光忽然变得刺眼，像一句难听的话从门口冲出来。镜头从门头灯牌快速推入到玻璃门区域，轻微手持震动。<#张琪婆婆:当初娶你张琪才花三万,你还真把自己当责人了?> 音效：灯牌轻微电流声，便利店冷柜低频嗡鸣，争吵声突然突入，低频悬疑音乐从很低的位置进入。\\n\\n[Shot 2] At 00:03.000, 小区步道中景，侧跟急停。<@林晚>从画面左侧沿弧形小区步道走向便利店门口，深棕色村杉和卡其色半身裙被傍晚光线压暗，右手握棕色手提包，左手拎购物塑料袋。花坛、路灯、住宅楼和园区树影在她身后延伸。镜头从<@林晚>侧后方跟拍，她听见“三万”后脚步突然停住，肩膀微僵，购物塑料袋在左手轻轻晃动，她下意识转头看向便利店门口。<#林晚:三万?> 音效：购物袋窸窣，远处儿童脚步声和小区环境声被争吵声压低，低频悬疑音乐继续铺底。\\n\\n[Shot 3] At 00:06.000, 婆媳双人中景，前景货架半遮挡，<@林晚>路过时无意看见。<@张琪>和<@张琪婆婆>站在便利店台阶下方争执，玻璃门里的货架灯光压在两人背后。<@张琪>穿浅米色蕾连衣裙，右手攥着收银小票，黑金链条包挂在手腕，她身体略往后缩但强忍情绪。<@张琪婆婆>站在台阶边，灰色针织开衫袖口卷起右手食指指向<@张琪>脸前，表情刻薄强势。纸箱货架在前景形成半遮挡，镜头从货架边缘轻微侧移，保持窥见感和压迫感。<#张琪婆婆:房贷、车贷、生活费,你都该一起分担。别天天摆少奶奶架子。> 音效：便利店门口争吵声清晰，纸箱货架被风轻碰的细小摩擦声，远处园区脚步与儿童声渐远，低频悬疑音乐压住结尾。\\n\\noverall_soundscape:\\n黄昏小区环境音、购物袋窸窣声、儿童脚步声、便利店冷柜低频嗡鸣、争吵声持续压过环境音，低频悬疑音乐作为底噪贯穿始终。\\n\\nnon_diegetic_music:\\n低频悬疑音乐，持续铺底，音量稳定，无明显动态变化。\\n\",\"additionSubject\":[\"小红帽\",\"琼娜\",\"怪兽\",\"女性\",\"森林背景\",\"参考音频\",\"莱伦\"],\"upscale\":false},{\"id\":\"17872665512263zt6s\",\"start\":936,\"length\":120,\"prompt\":\"\",\"type\":\"image\",\"motionContext\":false,\"autoEndFrame\":true,\"h3PromptJson\":\"detailed_description:\\n[Shot 1] At 00:00.000, <@女性>位于画面中央，背景为纯黑色，周围有蝴蝶自然飞舞。镜头缓慢拉远，跟随<@女性>姿态变化，保持视觉连贯性。人物姿势从首帧至尾帧逐步变化，动作流畅无突兀转折。环境与灯光保持一致性，无对话或声音事件。\\n\\noverall_soundscape:\\n无对话或声音事件。\\nnon_diegetic_music:\\nN/A\",\"imageFile\":\"whatdreamscost/Krea2-20260820140734_00001_.png\",\"imageB64\":\"/api/view?filename=Krea2-20260820140734_00001_.png&type=input&subfolder=whatdreamscost\",\"additionSubject\":[\"ll\"],\"guideStrength\":1,\"upscale\":true}],\"audioSegments\":[{\"id\":\"1787115672955r1ebs_a\",\"type\":\"audio\",\"start\":240,\"length\":192,\"trimStart\":0,\"audioDurationFrames\":192,\"audioFile\":\"whatdreamscost/Tenz_00003-audio_extracted_audio.wav\",\"fileName\":\"Tenz_00003-audio.mp4\",\"waveformPeaks\":[0.10853387415409088,0.33204829692840576,0.20113004744052887,0.07627727836370468,0.03197271004319191,0.0038489261642098427,0.005984385032206774,0.0035553118214011192,0.0036125166807323694,0.0030500181019306183,0.004432670772075653,0.002512928331270814,0.002318388782441616,0.002184370532631874,0.0021916362456977367,0.0023529359605163336,0.002077421173453331,0.001931493286974728,0.002760800300166011,0.002020796062424779,0.0021017894614487886,0.002134207170456648,0.002052407246083021,0.0021378365345299244,0.002296299207955599,0.0019896947778761387,0.002159229712560773,0.0018188293324783444,0.003714652732014656,0.1103704571723938,0.19793693721294403,0.29314032196998596,0.2187873125076294,0.8385069966316223,0.7869704365730286,0.6992566585540771,0.8496028184890747,0.6525750160217285,0.3393780589103699,0.5675368905067444,0.5776897668838501,0.1044071689248085,0.09562001377344131,0.6273041367530823,0.8703845143318176,0.19267863035202026,0.6042564511299133,0.6356816291809082,0.6140881776809692,0.35531342029571533,0.4347592294216156,0.45531973242759705,0.44686126708984375,0.399962842464447,0.22528815269470215,0.17447839677333832,0.11925278604030609,0.14681778848171234,0.06142577901482582,0.04703495278954506,0.027656596153974533,0.018113669008016586,0.0031881718896329403,0.003810690715909004,0.0034938554745167494,0.0034967013634741306,0.004592235200107098,0.003306771395727992,0.002936628879979253,0.005388461984694004,0.01925995945930481,0.07388582080602646,0.8650609254837036,0.7553563117980957,0.4004400372505188,0.1264301836490631,0.20422983169555664,0.2646901309490204,0.8562769889831543,0.8196213245391846,0.14011156558990479,0.10739830136299133,0.21898889541625977,0.7675886154174805,0.7561736106872559,0.07850686460733414,0.42366477847099304,0.8749573230743408,0.8465182185173035,0.5576872825622559,0.5500738620758057,0.5185635089874268,0.5146589279174805,0.10000181198120117,0.01974497176706791,0.0027901523280888796,0.003097919514402747,0.0036201789043843746,0.003203549887984991,0.0030062987934798002,0.0029578572139143944,0.0027898915577679873,0.001979599241167307,0.0028543563093990088,0.0038318417500704527,0.0071015143766999245,0.011281575076282024,0.01437730435281992,0.016225343570113182,0.013750746846199036,0.01098894514143467,0.00953182764351368,0.0062636020593345165,0.006104394793510437,0.005999627057462931,0.005476274527609348,0.00605673948302865,0.3932773172855377,0.7063376307487488,0.8146989941596985,0.7352949976921082,0.4853912889957428,0.0954919382929802,0.866946280002594,0.7238782644271851,0.7059463262557983,0.1747351884841919,0.3503974974155426,0.06565038859844208,0.44278791546821594,0.6998980641365051,0.6956207156181335,0.1494757980108261,0.5263957977294922,0.5062792897224426,0.45570412278175354,0.24814070761203766,0.18071044981479645,0.17434221506118774,0.3915501534938812,0.4844478368759155,0.3690830171108246,0.056550804525613785,0.004906121175736189,0.0025125935208052397,0.0030634913127869368,0.0038478777278214693,0.006845998112112284,0.009027745574712753,0.006330482196062803,0.00585436075925827,0.006328207440674305,0.005346811376512051,0.6449949145317078,0.6433172225952148,0.2630670368671417,0.5061547756195068,0.6156134605407715,0.1790645867586136,0.3466140925884247,0.6988418698310852,0.26471179723739624,0.6578705310821533,0.8501262068748474,0.5104408264160156,0.9261988401412964,0.6778811812400818,0.4513755142688751,0.23429960012435913,0.40326014161109924,0.3652278482913971,0.8089595437049866,0.02903885208070278,0.8641405701637268,0.7745489478111267,0.7664962410926819,0.6460054516792297,0.8140968084335327,0.3906816244125366,0.19993500411510468,0.2552200257778168,0.33675307035446167,0.75434809923172,0.7384837865829468,0.4490432143211365,0.4380840063095093,0.4522234797477722,0.0875561535358429,0.01821477897465229,0.003068827325478196,0.00932601559907198,0.018948353826999664,0.021927397698163986,0.0075220572762191296,0.013629656285047531,0.006336509715765715,0.0052810776978731155,0.005547702312469482,0.00553483609110117,0.007362144533544779],\"fileSize\":3720208}]}",
+        "",
+        "120",
+        24,
+        "seconds",
+        "16:9横屏",
+        0.5,
+        ""
+      ],
+      "widgets_values_named": {
+        "start_second": 39,
+        "end_second": 44,
+        "duration_seconds": 5,
+        "start_frame": 936,
+        "end_frame": 1056,
+        "duration_frames": 120,
+        "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":552,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":936,\"normalDurationFrames\":120,\"segments\":[{\"id\":\"1786972292054m66hl\",\"start\":0,\"length\":120,\"prompt\":\"琼娜举起手机,转了一圈，开心地晃了晃说道：“宝子们，导演台3.0更新啦，快来围观！”\",\"type\":\"image\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@琼娜> 举起手机，身体微微侧转，手臂划出一个完整的圆周，随后开心地晃动手机。镜头保持中景，以平视角度捕捉她的动作和表情。她面带笑容，对着镜头说话。声音清晰，无其他背景音。 <#琼娜:宝子们，导演台3.0更新啦，快来围观！>\\n\\noverall_soundscape:\\n轻微的背景白噪音，无明显物理声源。\\n\\nnon_diegetic_music:\\nN/A\\n\",\"autoEndFrame\":true,\"additionSubject\":[],\"motionContext\":true,\"imageFile\":\"whatdreamscost/地龙.png\",\"imageB64\":\"/api/view?filename=%E5%9C%B0%E9%BE%99.png&type=input&subfolder=whatdreamscost\"},{\"id\":\"1787115347723heape\",\"start\":120,\"length\":120,\"prompt\":\"琼娜举着手机在莱伦面前炫耀。莱伦好奇地把头凑近手机屏幕，定睛一看，脸色骤变。@莱伦 慌忙说道：“不是啊，这个是我洗澡的照片，你怎么发网上了？！”\",\"type\":\"text\",\"motionContext\":true,\"autoEndFrame\":true,\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@琼娜>举着手机，将屏幕朝向<@莱伦>，脸上带着得意的神情。<@莱伦>好奇地把头凑近手机屏幕，目光聚焦在屏幕上，表情从好奇逐渐转为震惊，脸色骤变。<@莱伦>慌忙开口，声音急促：<#莱伦:不是啊，这个是我洗澡的照片，你怎么发网上了？！>\\n\\noverall_soundscape:\\n包括手机屏幕的轻微反光声和<@莱伦>急促的说话声。\\n\\nnon_diegetic_music:\\nN/A\\n\"},{\"id\":\"1787115672955r1ebs_v\",\"type\":\"video\",\"start\":240,\"length\":192,\"trimStart\":0,\"videoDurationFrames\":192,\"imageFile\":\"whatdreamscost/Tenz_00003-audio.mp4\",\"fileName\":\"Tenz_00003-audio.mp4\",\"prompt\":\"\",\"fileSize\":3720208,\"imageB64\":\"/api/view?filename=Tenz_00003-audio.mp4&type=input&subfolder=whatdreamscost\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@莱伦>扑过来想要抢夺<@琼娜>的手机。<@琼娜>侧身躲过，狡黠一笑，收回手机藏到身后。镜头跟随<@琼娜>的动作轻微晃动，保持中景构图。<#琼娜:谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！>\\n\\noverall_soundscape:\\n轻微回声和手机屏幕轻触声。\\n\\nnon_diegetic_music:\\nN/A\"},{\"id\":\"1787044709678tbhwo\",\"start\":432,\"length\":192,\"prompt\":\"莱伦扑过来想要抢夺琼娜的手机。琼娜侧身躲过，狡黠一笑，收回手机藏到身后：“谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！”\",\"type\":\"text\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] <@莱伦>扑过来想要抢夺<@琼娜>的手机。<@琼娜>侧身躲过，狡黠一笑，收回手机藏到身后。镜头跟随<@琼娜>的动作轻微晃动，保持中景构图。<#琼娜:谁让你拖更这么久，粉丝都跑光了。你要再不发更新，我就只好把这个发网上了！>\\n\\noverall_soundscape:\\n轻微回声和手机屏幕轻触声。\\n\\nnon_diegetic_music:\\nN/A\\n\",\"motionContext\":false,\"autoEndFrame\":true},{\"id\":\"1787094406242se2no\",\"start\":624,\"length\":144,\"prompt\":\"见到@琼娜 把手机藏到身后。@莱伦 焦急的挥了挥双手，求饶地说道：“别！别！别！我发，我现在就发！”\",\"type\":\"text\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] 镜头从<@琼娜>身上快速切换到<@莱伦>。<@莱伦> 焦急地挥了挥双手，求饶地说道：<#莱伦:别！别！别！我发，我现在就发！>。\\n\\noverall_soundscape:\\nN/A\\n\\nnon_diegetic_music:\\nN/A\\n\",\"motionContext\":true,\"autoEndFrame\":true},{\"id\":\"1787239080165tr3aq\",\"start\":768,\"length\":168,\"prompt\":\"Shot 1 (0-3秒)\\n想要:灯牌特写,快速推入。画面上方被\\\"邻户生活小区便利店\\\"发光灯牌占据,木质门头下方的玻璃门映出小区树影。店内货架和饮料陈列透过玻璃门发出暖光,门口纸箱货架和盆栽停在台阶两侧。黄昏环境光偏\\n冷,灯牌暖光忽然变得刺眼,像一句难听的话从门口冲出来。镜头从门头灯牌快速推入到玻璃门区域,轻微手持震动\\n台词:张琪婆婆(画外,中文,尖利强势,声音从便利店门口冲出):\\\"当初娶你张琪才花三万,你还真把自己当责人了?\\n音效:灯牌轻微电流声,便利店冷柜低频嗡鸣,争吵声突然突入,低频悬疑音乐从很低的位置进入。\\n不想要:不要字幕、水印、文字叠加、画面拼贴、九宫格边框、店名变形、灯牌错字、玻璃门融化、过度炫光\\nShot 2 (3-6秒)\\n想要:小区步道中景,侧跟急停。林晚从画面左侧沿弧形小区步道走向便利店门口,深棕色村杉和卡其色半身裙被傍晚光线压暗,右手握棕色手提包,左手拎购物塑料袋。花坛、路灯、住宅楼和园区树影在她身后延\\n伸。镜头从林晚侧后方跟拍,她听见\\\"三万\\\"后脚步突然停住,肩膀微僵,购物塑料袋在左手轻轻晃动,她下意识转头看向便利店门口\\n台词:林晚(画内,中文,压低声音,震惊克制):\\\"三万?\\n音效:购物袋窸窣,远处儿童脚步声和小区环境声被争吵声压低,低频悬疑音乐继续铺底\\n不想要:不要夸张表演、不要林晚突然换装、不要手提包消失、不要料袋变成其他物品、不要路人围观聚集。\\nShot 3 (6-10秒)\\n想要:婆媳双人中景,前景货架半遮挡,像林晚路过时无意看见。张琪和张琪婆婆站在便利店台阶下方争执,玻璃门里的货架灯光压在两人背后。张琪穿浅米色蕾连衣裙,右手攥着收银小票,黑金链条包挂在手\\n腕,她身体略往后缩但强忍情绪。张琪婆婆站在台阶边,灰色针织开衫袖口卷起右手食指指向张琪脸前,表情刻薄强势。纸箱货架在前景形成半遮挡,镜头从货架边缘轻微侧移,保持窥见感和压迫感。\\n台词:张琪婆婆(画内,中文,刻薄强势,语速偏快):\\\"房贷、车贷、生活费,你都该一起分担。别天天摆少奶奶架子。\\n音效:便利店门口争吵声清晰,纸箱货架被风轻碰的细小摩擦声,远处园区脚步与儿童声渐远,低频悬疑音乐压住结尾\\n不想要:不要肢体冲突升级、不要打人、不要围观群众抢戏、不要字幕、水印、文字叠加、角色脸部漂移、年龄漂移、服装漂移、包小票消失、镜头突然跳到室内。\",\"type\":\"image\",\"imageFile\":\"whatdreamscost/微信图片_20260820211946_57_49.jpg\",\"imageB64\":\"/api/view?filename=%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260820211946_57_49.jpg&type=input&subfolder=whatdreamscost\",\"h3PromptJson\":\"detailed_description:\\n[Shot 1] At 00:00.000, 特写镜头快速推入，画面顶部被“邻户生活小区便利店”发光灯牌占据，木质门头下方的玻璃门映出小区树影。店内货架和饮料陈列透过玻璃门发出暖光，门口纸箱货架和盆栽停在台阶两侧。黄昏环境光偏冷，灯牌暖光忽然变得刺眼，像一句难听的话从门口冲出来。镜头从门头灯牌快速推入到玻璃门区域，轻微手持震动。<#张琪婆婆:当初娶你张琪才花三万,你还真把自己当责人了?> 音效：灯牌轻微电流声，便利店冷柜低频嗡鸣，争吵声突然突入，低频悬疑音乐从很低的位置进入。\\n\\n[Shot 2] At 00:03.000, 小区步道中景，侧跟急停。<@林晚>从画面左侧沿弧形小区步道走向便利店门口，深棕色村杉和卡其色半身裙被傍晚光线压暗，右手握棕色手提包，左手拎购物塑料袋。花坛、路灯、住宅楼和园区树影在她身后延伸。镜头从<@林晚>侧后方跟拍，她听见“三万”后脚步突然停住，肩膀微僵，购物塑料袋在左手轻轻晃动，她下意识转头看向便利店门口。<#林晚:三万?> 音效：购物袋窸窣，远处儿童脚步声和小区环境声被争吵声压低，低频悬疑音乐继续铺底。\\n\\n[Shot 3] At 00:06.000, 婆媳双人中景，前景货架半遮挡，<@林晚>路过时无意看见。<@张琪>和<@张琪婆婆>站在便利店台阶下方争执，玻璃门里的货架灯光压在两人背后。<@张琪>穿浅米色蕾连衣裙，右手攥着收银小票，黑金链条包挂在手腕，她身体略往后缩但强忍情绪。<@张琪婆婆>站在台阶边，灰色针织开衫袖口卷起右手食指指向<@张琪>脸前，表情刻薄强势。纸箱货架在前景形成半遮挡，镜头从货架边缘轻微侧移，保持窥见感和压迫感。<#张琪婆婆:房贷、车贷、生活费,你都该一起分担。别天天摆少奶奶架子。> 音效：便利店门口争吵声清晰，纸箱货架被风轻碰的细小摩擦声，远处园区脚步与儿童声渐远，低频悬疑音乐压住结尾。\\n\\noverall_soundscape:\\n黄昏小区环境音、购物袋窸窣声、儿童脚步声、便利店冷柜低频嗡鸣、争吵声持续压过环境音，低频悬疑音乐作为底噪贯穿始终。\\n\\nnon_diegetic_music:\\n低频悬疑音乐，持续铺底，音量稳定，无明显动态变化。\\n\",\"additionSubject\":[\"小红帽\",\"琼娜\",\"怪兽\",\"女性\",\"森林背景\",\"参考音频\",\"莱伦\"],\"upscale\":false},{\"id\":\"17872665512263zt6s\",\"start\":936,\"length\":120,\"prompt\":\"\",\"type\":\"image\",\"motionContext\":false,\"autoEndFrame\":true,\"h3PromptJson\":\"detailed_description:\\n[Shot 1] At 00:00.000, <@女性>位于画面中央，背景为纯黑色，周围有蝴蝶自然飞舞。镜头缓慢拉远，跟随<@女性>姿态变化，保持视觉连贯性。人物姿势从首帧至尾帧逐步变化，动作流畅无突兀转折。环境与灯光保持一致性，无对话或声音事件。\\n\\noverall_soundscape:\\n无对话或声音事件。\\nnon_diegetic_music:\\nN/A\",\"imageFile\":\"whatdreamscost/Krea2-20260820140734_00001_.png\",\"imageB64\":\"/api/view?filename=Krea2-20260820140734_00001_.png&type=input&subfolder=whatdreamscost\",\"additionSubject\":[\"ll\"],\"guideStrength\":1,\"upscale\":true}],\"audioSegments\":[{\"id\":\"1787115672955r1ebs_a\",\"type\":\"audio\",\"start\":240,\"length\":192,\"trimStart\":0,\"audioDurationFrames\":192,\"audioFile\":\"whatdreamscost/Tenz_00003-audio_extracted_audio.wav\",\"fileName\":\"Tenz_00003-audio.mp4\",\"waveformPeaks\":[0.10853387415409088,0.33204829692840576,0.20113004744052887,0.07627727836370468,0.03197271004319191,0.0038489261642098427,0.005984385032206774,0.0035553118214011192,0.0036125166807323694,0.0030500181019306183,0.004432670772075653,0.002512928331270814,0.002318388782441616,0.002184370532631874,0.0021916362456977367,0.0023529359605163336,0.002077421173453331,0.001931493286974728,0.002760800300166011,0.002020796062424779,0.0021017894614487886,0.002134207170456648,0.002052407246083021,0.0021378365345299244,0.002296299207955599,0.0019896947778761387,0.002159229712560773,0.0018188293324783444,0.003714652732014656,0.1103704571723938,0.19793693721294403,0.29314032196998596,0.2187873125076294,0.8385069966316223,0.7869704365730286,0.6992566585540771,0.8496028184890747,0.6525750160217285,0.3393780589103699,0.5675368905067444,0.5776897668838501,0.1044071689248085,0.09562001377344131,0.6273041367530823,0.8703845143318176,0.19267863035202026,0.6042564511299133,0.6356816291809082,0.6140881776809692,0.35531342029571533,0.4347592294216156,0.45531973242759705,0.44686126708984375,0.399962842464447,0.22528815269470215,0.17447839677333832,0.11925278604030609,0.14681778848171234,0.06142577901482582,0.04703495278954506,0.027656596153974533,0.018113669008016586,0.0031881718896329403,0.003810690715909004,0.0034938554745167494,0.0034967013634741306,0.004592235200107098,0.003306771395727992,0.002936628879979253,0.005388461984694004,0.01925995945930481,0.07388582080602646,0.8650609254837036,0.7553563117980957,0.4004400372505188,0.1264301836490631,0.20422983169555664,0.2646901309490204,0.8562769889831543,0.8196213245391846,0.14011156558990479,0.10739830136299133,0.21898889541625977,0.7675886154174805,0.7561736106872559,0.07850686460733414,0.42366477847099304,0.8749573230743408,0.8465182185173035,0.5576872825622559,0.5500738620758057,0.5185635089874268,0.5146589279174805,0.10000181198120117,0.01974497176706791,0.0027901523280888796,0.003097919514402747,0.0036201789043843746,0.003203549887984991,0.0030062987934798002,0.0029578572139143944,0.0027898915577679873,0.001979599241167307,0.0028543563093990088,0.0038318417500704527,0.0071015143766999245,0.011281575076282024,0.01437730435281992,0.016225343570113182,0.013750746846199036,0.01098894514143467,0.00953182764351368,0.0062636020593345165,0.006104394793510437,0.005999627057462931,0.005476274527609348,0.00605673948302865,0.3932773172855377,0.7063376307487488,0.8146989941596985,0.7352949976921082,0.4853912889957428,0.0954919382929802,0.866946280002594,0.7238782644271851,0.7059463262557983,0.1747351884841919,0.3503974974155426,0.06565038859844208,0.44278791546821594,0.6998980641365051,0.6956207156181335,0.1494757980108261,0.5263957977294922,0.5062792897224426,0.45570412278175354,0.24814070761203766,0.18071044981479645,0.17434221506118774,0.3915501534938812,0.4844478368759155,0.3690830171108246,0.056550804525613785,0.004906121175736189,0.0025125935208052397,0.0030634913127869368,0.0038478777278214693,0.006845998112112284,0.009027745574712753,0.006330482196062803,0.00585436075925827,0.006328207440674305,0.005346811376512051,0.6449949145317078,0.6433172225952148,0.2630670368671417,0.5061547756195068,0.6156134605407715,0.1790645867586136,0.3466140925884247,0.6988418698310852,0.26471179723739624,0.6578705310821533,0.8501262068748474,0.5104408264160156,0.9261988401412964,0.6778811812400818,0.4513755142688751,0.23429960012435913,0.40326014161109924,0.3652278482913971,0.8089595437049866,0.02903885208070278,0.8641405701637268,0.7745489478111267,0.7664962410926819,0.6460054516792297,0.8140968084335327,0.3906816244125366,0.19993500411510468,0.2552200257778168,0.33675307035446167,0.75434809923172,0.7384837865829468,0.4490432143211365,0.4380840063095093,0.4522234797477722,0.0875561535358429,0.01821477897465229,0.003068827325478196,0.00932601559907198,0.018948353826999664,0.021927397698163986,0.0075220572762191296,0.013629656285047531,0.006336509715765715,0.0052810776978731155,0.005547702312469482,0.00553483609110117,0.007362144533544779],\"fileSize\":3720208}]}",
+        "local_prompts": "",
+        "segment_lengths": "120",
+        "frame_rate": 24,
+        "display_mode": "seconds",
+        "outpu_resolution": "16:9横屏",
+        "million_pixels": 0.5,
+        "timeline_ui": ""
+      }
+    },
+    {
+      "id": 62,
+      "type": "VHS_SelectFilename",
+      "pos": [
+        5821.801587342458,
+        3799.2659636158714
+      ],
+      "size": [
+        230.1396484375,
+        58
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 34,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "filenames",
+          "type": "VHS_FILENAMES",
+          "link": 475
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filename",
+          "type": "STRING",
+          "links": [
+            586
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "4ee72c065db22c9d96c2427954dc69e7b908444b",
+        "Node name for S&R": "VHS_SelectFilename"
+      },
+      "widgets_values": {
+        "index": -1
+      },
+      "widgets_values_named": {
+        "index": -1
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 187,
+      "type": "MiniMaxRefPureVRAM",
+      "pos": [
+        6594.582187316109,
+        3743.6560234752974
+      ],
+      "size": [
+        211.71647496303558,
+        82
+      ],
+      "flags": {},
+      "order": 37,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "anything",
+          "type": "*",
+          "link": 587
+        }
+      ],
+      "outputs": [
+        {
+          "name": "anything",
+          "type": "*",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "089e25d2bcc7fd659052eb522966a86dd8dfb478",
+        "Node name for S&R": "MiniMaxRefPureVRAM"
+      },
+      "widgets_values": [
+        true,
+        true
+      ],
+      "widgets_values_named": {
+        "purge_vram": true,
+        "purge_models": true
+      }
+    },
+    {
+      "id": 181,
+      "type": "easy forLoopEnd",
+      "pos": [
+        6361.826683754177,
+        3661.7215603807103
+      ],
+      "size": [
+        164.203125,
+        86
+      ],
+      "flags": {},
+      "order": 35,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "flow",
+          "shape": 5,
+          "type": "FLOW_CONTROL",
+          "link": 582
+        },
+        {
+          "name": "initial_value1",
+          "shape": 7,
+          "type": "*",
+          "link": 585
+        },
+        {
+          "name": "initial_value2",
+          "type": "*",
+          "link": 586
+        },
+        {
+          "name": "initial_value3",
+          "type": "*",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "value1",
+          "type": "*",
+          "links": [
+            569
+          ]
+        },
+        {
+          "name": "value2",
+          "type": "*",
+          "links": [
+            587
+          ]
+        },
+        {
+          "name": "value3",
+          "type": "*",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "4de1ab3b66e48da916b6f263bacd001df53a2720",
+        "Node name for S&R": "easy forLoopEnd"
+      },
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 110,
+      "type": "MiniMaxRefGuide",
+      "pos": [
+        5011.19933496924,
+        3440.7235308530776
+      ],
+      "size": [
+        270,
+        234
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "guide_data",
+          "type": "GUIDE_DATA",
+          "link": 588
+        },
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 460
+        },
+        {
+          "name": "clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 360
+        },
+        {
+          "name": "video_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 361
+        },
+        {
+          "name": "audio_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 362
+        },
+        {
+          "name": "prev_tail",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "prev_tail"
+          },
+          "link": 589
+        },
+        {
+          "name": "seed",
+          "shape": 7,
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": 364
+        },
+        {
+          "name": "guide_index",
+          "shape": 7,
+          "type": "INT",
+          "widget": {
+            "name": "guide_index"
+          },
+          "link": 583
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            383,
+            578
+          ]
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            385
+          ]
+        },
+        {
+          "name": "trim_frames",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "frame_rate",
+          "type": "FLOAT",
+          "links": [
+            372
+          ]
+        },
+        {
+          "name": "upscale",
+          "type": "BOOLEAN",
+          "links": [
+            547,
+            590
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "64adc2079e24e25faa0138496b5584c88fc963f1",
+        "Node name for S&R": "MiniMaxRefGuide"
+      },
+      "widgets_values": [
+        "",
+        16,
+        0,
+        "randomize",
+        0
+      ],
+      "widgets_values_named": {
+        "prev_tail": "",
+        "context_length": 16,
+        "seed": 0,
+        "control_after_generate": "randomize",
+        "guide_index": 0
+      },
+      "color": "#222",
+      "bgcolor": "#000"
+    },
+    {
+      "id": 188,
+      "type": "PreviewAny",
+      "pos": [
+        5602.906277844626,
+        4384.774798881899
+      ],
+      "size": [
+        210,
+        122
+      ],
+      "flags": {},
+      "order": 24,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 590
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [],
+      "widgets_values_named": {}
+    },
+    {
+      "id": 186,
+      "type": "easy forLoopStart",
+      "pos": [
+        6354.805266224895,
+        3459.337284946013
+      ],
+      "size": [
+        210,
+        138
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "initial_value1",
+          "shape": 7,
+          "type": "*",
+          "link": 581
+        },
+        {
+          "name": "total",
+          "type": "INT",
+          "widget": {
+            "name": "total"
+          },
+          "link": 584
+        },
+        {
+          "name": "initial_value2",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "initial_value3",
+          "type": "*",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "flow",
+          "shape": 5,
+          "type": "FLOW_CONTROL",
+          "links": [
+            582
+          ]
+        },
+        {
+          "name": "index",
+          "type": "INT",
+          "links": [
+            583
+          ]
+        },
+        {
+          "name": "value1",
+          "type": "*",
+          "links": [
+            585,
+            588
+          ]
+        },
+        {
+          "name": "value2",
+          "type": "*",
+          "links": [
+            589
+          ]
+        },
+        {
+          "name": "value3",
+          "type": "*",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "4de1ab3b66e48da916b6f263bacd001df53a2720",
+        "Node name for S&R": "easy forLoopStart"
+      },
+      "widgets_values": [
+        1
+      ],
+      "widgets_values_named": {
+        "total": 1
+      },
+      "color": "#223",
+      "bgcolor": "#335"
+    }
+  ],
+  "links": [
+    [
+      81,
+      56,
+      0,
+      55,
+      0,
+      "SUBJECT_CONFIG"
+    ],
+    [
+      180,
+      73,
+      3,
+      63,
+      0,
+      "*"
+    ],
+    [
+      355,
+      79,
+      4,
+      105,
+      0,
+      "*"
+    ],
+    [
+      360,
+      18,
+      0,
+      110,
+      2,
+      "CLIP"
+    ],
+    [
+      361,
+      19,
+      0,
+      110,
+      3,
+      "VAE"
+    ],
+    [
+      362,
+      20,
+      0,
+      110,
+      4,
+      "VAE"
+    ],
+    [
+      364,
+      44,
+      0,
+      110,
+      6,
+      "INT"
+    ],
+    [
+      372,
+      110,
+      3,
+      104,
+      4,
+      "FLOAT"
+    ],
+    [
+      375,
+      114,
+      0,
+      115,
+      0,
+      "NOISE"
+    ],
+    [
+      376,
+      112,
+      0,
+      115,
+      1,
+      "GUIDER"
+    ],
+    [
+      377,
+      113,
+      0,
+      115,
+      2,
+      "SAMPLER"
+    ],
+    [
+      383,
+      110,
+      0,
+      112,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      384,
+      44,
+      0,
+      114,
+      0,
+      "INT"
+    ],
+    [
+      385,
+      110,
+      1,
+      115,
+      4,
+      "LATENT"
+    ],
+    [
+      406,
+      113,
+      0,
+      122,
+      2,
+      "SAMPLER"
+    ],
+    [
+      408,
+      124,
+      0,
+      104,
+      1,
+      "AUDIO"
+    ],
+    [
+      409,
+      19,
+      0,
+      123,
+      1,
+      "VAE"
+    ],
+    [
+      410,
+      20,
+      0,
+      124,
+      1,
+      "VAE"
+    ],
+    [
+      417,
+      19,
+      0,
+      127,
+      1,
+      "VAE"
+    ],
+    [
+      460,
+      127,
+      0,
+      110,
+      1,
+      "MODEL"
+    ],
+    [
+      461,
+      127,
+      0,
+      111,
+      0,
+      "MODEL"
+    ],
+    [
+      462,
+      127,
+      0,
+      112,
+      0,
+      "MODEL"
+    ],
+    [
+      473,
+      123,
+      0,
+      150,
+      0,
+      "IMAGE"
+    ],
+    [
+      474,
+      150,
+      0,
+      104,
+      0,
+      "IMAGE"
+    ],
+    [
+      475,
+      104,
+      0,
+      62,
+      0,
+      "VHS_FILENAMES"
+    ],
+    [
+      492,
+      155,
+      0,
+      122,
+      1,
+      "GUIDER"
+    ],
+    [
+      495,
+      158,
+      0,
+      159,
+      0,
+      "MODEL"
+    ],
+    [
+      496,
+      159,
+      0,
+      160,
+      0,
+      "MODEL"
+    ],
+    [
+      499,
+      111,
+      0,
+      115,
+      3,
+      "SIGMAS"
+    ],
+    [
+      500,
+      50,
+      0,
+      158,
+      0,
+      "MODEL"
+    ],
+    [
+      505,
+      161,
+      0,
+      122,
+      3,
+      "SIGMAS"
+    ],
+    [
+      507,
+      127,
+      0,
+      155,
+      0,
+      "MODEL"
+    ],
+    [
+      508,
+      127,
+      0,
+      161,
+      0,
+      "MODEL"
+    ],
+    [
+      510,
+      156,
+      0,
+      122,
+      0,
+      "NOISE"
+    ],
+    [
+      547,
+      110,
+      4,
+      178,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      548,
+      115,
+      0,
+      178,
+      0,
+      "LATENT"
+    ],
+    [
+      549,
+      178,
+      0,
+      123,
+      0,
+      "LATENT"
+    ],
+    [
+      550,
+      178,
+      0,
+      124,
+      0,
+      "LATENT"
+    ],
+    [
+      551,
+      122,
+      0,
+      178,
+      1,
+      "LATENT"
+    ],
+    [
+      569,
+      181,
+      0,
+      149,
+      0,
+      "*"
+    ],
+    [
+      571,
+      143,
+      0,
+      183,
+      0,
+      "MODEL"
+    ],
+    [
+      572,
+      183,
+      0,
+      184,
+      0,
+      "MODEL"
+    ],
+    [
+      573,
+      184,
+      0,
+      127,
+      0,
+      "MODEL"
+    ],
+    [
+      574,
+      115,
+      1,
+      185,
+      0,
+      "LATENT"
+    ],
+    [
+      575,
+      127,
+      0,
+      185,
+      1,
+      "MODEL"
+    ],
+    [
+      576,
+      114,
+      0,
+      185,
+      2,
+      "NOISE"
+    ],
+    [
+      577,
+      161,
+      0,
+      185,
+      3,
+      "SIGMAS"
+    ],
+    [
+      578,
+      110,
+      0,
+      185,
+      5,
+      "CONDITIONING"
+    ],
+    [
+      579,
+      185,
+      0,
+      122,
+      4,
+      "LATENT"
+    ],
+    [
+      580,
+      185,
+      1,
+      155,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      581,
+      55,
+      0,
+      186,
+      0,
+      "GUIDE_DATA"
+    ],
+    [
+      582,
+      186,
+      0,
+      181,
+      0,
+      "FLOW_CONTROL"
+    ],
+    [
+      583,
+      186,
+      1,
+      110,
+      7,
+      "INT"
+    ],
+    [
+      584,
+      55,
+      1,
+      186,
+      1,
+      "INT"
+    ],
+    [
+      585,
+      186,
+      2,
+      181,
+      1,
+      "*"
+    ],
+    [
+      586,
+      62,
+      0,
+      181,
+      2,
+      "STRING"
+    ],
+    [
+      587,
+      181,
+      1,
+      187,
+      0,
+      "*"
+    ],
+    [
+      588,
+      186,
+      2,
+      110,
+      0,
+      "GUIDE_DATA"
+    ],
+    [
+      589,
+      186,
+      3,
+      110,
+      5,
+      "STRING"
+    ],
+    [
+      590,
+      110,
+      4,
+      188,
+      0,
+      "BOOLEAN"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "#1 Sample",
+      "bounding": [
+        4991.566692864055,
+        3360.6177390423295,
+        1329.2808807393649,
+        514.0131499321692
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "model clip vae lora",
+      "bounding": [
+        4559.577696488099,
+        3362.8541838804217,
+        392.54589399386714,
+        1179.7689677079393
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 5,
+      "title": "# Upscale",
+      "bounding": [
+        5331.255006573938,
+        3898.0951611453474,
+        987.7067738854803,
+        407.78511225500097
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 6,
+      "title": "Loop",
+      "bounding": [
+        6342.409905949346,
+        3367.873367261268,
+        488.31548778758224,
+        484.96715326979665
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.5833552445298567,
+      "offset": [
+        -4235.39015999899,
+        -3221.1038474149395
+      ]
+    },
+    "frontendVersion": "1.49.6",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

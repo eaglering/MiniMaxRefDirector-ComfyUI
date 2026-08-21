@@ -211,7 +211,9 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "durationFrames": dur,
                 "type": seg.get("type", "text"),
                 "imageFile": seg.get("imageFile", ""),
-                "motionContext": seg.get("motionContext", False)
+                "motionContext": seg.get("motionContext", False),
+                "upscale": seg.get("upscale", False),
+                "guideStrength": seg.get("guideStrength", 16),
             }
             guide_timeline.append(entry)
             segment_count += 1

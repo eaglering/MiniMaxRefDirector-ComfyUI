@@ -329,9 +329,9 @@ const S = {
   },
   res: {
     flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
-    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "64px",
+    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "120px",
   },
-  img: { width: "48px", height: "48px", objectFit: "cover", borderRadius: "4px", background: "#111" },
+  img: { width: "100%", height: "auto", objectFit: "cover", borderRadius: "4px", background: "#111" },
   label: {
     fontSize: "10px", color: "#aaa", maxWidth: "64px", overflow: "hidden",
     textOverflow: "ellipsis", whiteSpace: "nowrap",

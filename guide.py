@@ -274,9 +274,6 @@ class MiniMaxRefGuide(io.ComfyNode):
                     optional=True,
                     tooltip="上一段生成完成的视频路径；文本段开启 motionContext 时作为 motion context 实现跨段衔接；收到时通知前端该段完成。",
                 ),
-                io.Int.Input("context_length", optional=True, default=22, min=0, step=1,
-                    tooltip="尾帧参考帧数。"
-                ),
                 io.Int.Input("seed", optional=True, default=0, min=0, step=1,
                     tooltip="随机种子，透传给外部 KSampler 以复现每段生成；"
                     "本节点仅记录并在日志中展示。"),
@@ -290,12 +287,13 @@ class MiniMaxRefGuide(io.ComfyNode):
                 io.Latent.Output(display_name="latent"),
                 io.Int.Output(display_name="trim_frames"),
                 io.Float.Output(display_name="frame_rate"),
+                io.Boolean.Output(display_name="upscale"),
             ],
         )
 
     @classmethod
     def execute(cls, guide_data=None, model=None, clip=None, video_vae=None, 
-                audio_vae=None, prev_tail=None, context_length=22, seed=None, 
+                audio_vae=None, prev_tail=None, seed=None, 
                 guide_index=None) -> io.NodeOutput:
         """按 guide_index 取段 → 条件编码 → 输出 positive/latent；并按 prev_tail/越界发送通知。
 
@@ -329,9 +327,12 @@ class MiniMaxRefGuide(io.ComfyNode):
                 f"final notify-only iteration, blocking outputs to end the loop."
             )
             return io.NodeOutput(ExecutionBlocker(None), ExecutionBlocker(None),
-                                 ExecutionBlocker(None), ExecutionBlocker(None))
+                                 ExecutionBlocker(None), ExecutionBlocker(None),
+                                 ExecutionBlocker(None))
         
         entry = timeline[idx]
+        upscale = entry.get("upscale", False)
+        guide_strength = entry.get("guideStrength", 16)
         prompt = entry.get("prompt", "")
         width = int(guide_data.get("width", 1024))
         height = int(guide_data.get("height", 576))
@@ -351,7 +352,11 @@ class MiniMaxRefGuide(io.ComfyNode):
         log.info(f"[MiniMaxRefGuide] guide_index={idx} prompt={prompt} "
                  f"images={images} videos={videos} audios={audios} seed={seed}")
 
-        unload_llama_models()
+        try:
+            unload_llama_models()
+        except Exception as e:
+            log.warning(f"[MiniMaxRefGuide] Failed to unload Llama models: {e}")
+
         # 基础条件：普通 refs（图片/视频/音频）Reference-to-video 编码
         cond, _neg_cond, latent, _frame_count = h3lib.build_segment_conditioning(
             clip, video_vae, audio_vae, prompt, width, height, length,
@@ -376,10 +381,10 @@ class MiniMaxRefGuide(io.ComfyNode):
                 img_src = _vhs_tuple_path(img_src)
             img_frames = load_image_tensor(img_src)
             if img_frames is not None and img_frames.shape[0] >= 1:
-                img_frames = img_frames.repeat(context_length, 1, 1, 1)  # [8, H, W, C]
+                img_frames = img_frames.repeat(guide_strength, 1, 1, 1)  # [8, H, W, C]
                 cond, trim_frames = _apply_motion_context(
                     cond, latent, video_vae, img_frames,
-                    context_length=context_length, audio_vae=audio_vae,
+                    context_length=guide_strength, audio_vae=audio_vae,
                 )
                 log.info(f"[MiniMaxRefGuide] guide_index={idx} image motion context "
                          f"({img_frames.shape[0]} frames from {img_src})")
@@ -394,7 +399,7 @@ class MiniMaxRefGuide(io.ComfyNode):
             if frames is not None and frames.shape[0] >= 1:
                 cond, trim_frames = _apply_motion_context(
                     cond, latent, video_vae, frames,
-                    context_length=context_length, audio_vae=audio_vae,
+                    context_length=guide_strength, audio_vae=audio_vae,
                 )
                 log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
                          f"({frames.shape[0]} frames)")
@@ -404,4 +409,4 @@ class MiniMaxRefGuide(io.ComfyNode):
                     f"skipped: {prev_tail} could not be decoded")
 
         # 3) 其他段：不处理 prev_tail，直接输出普通条件
-        return io.NodeOutput(cond, latent, trim_frames, frame_rate)
+        return io.NodeOutput(cond, latent, trim_frames, frame_rate, upscale)
