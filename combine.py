@@ -89,10 +89,22 @@ class MiniMaxRefCombine(io.ComfyNode):
                 io.Int.Input(
                     "context_frames",
                     default=39,
-                    min=5,
+                    min=0,
                     step=17,
                     tooltip="该段的 context 引导帧数（H3 run 网格 5/22/39/56/...；"
-                            "AV 对齐建议 39/90/141）。写入 meta 供无损合并使用。",
+                            "AV 对齐建议 39/90/141）。接 MiniMax Ref Guide 的 "
+                            "context_frames 输出时自动取该段实际值；0 表示无 context。"
+                            "写入 meta 供无损合并使用。",
+                ),
+                io.Int.Input(
+                    "trim_frames",
+                    default=0,
+                    min=0,
+                    step=1,
+                    tooltip="像素路径下从解码帧头部裁掉的 motion context 引导帧数"
+                            "（接 MiniMax Ref Guide 的 trim_frames 输出），并按帧率"
+                            "同步裁掉音频头部保持 A/V 对齐。latent 路径不裁（保留完整"
+                            "帧供无损合并衔接），仅在 meta 中记录。",
                 ),
                 io.Float.Input(
                     "frame_rate",
@@ -151,7 +163,7 @@ class MiniMaxRefCombine(io.ComfyNode):
     @classmethod
     def execute(cls, images=None, audio=None, latent=None, video_vae=None,
                 audio_vae=None, save_latent=True, context_frames=39,
-                frame_rate=24.0, loop_count=0,
+                trim_frames=0, frame_rate=24.0, loop_count=0,
                 filename_prefix="MiniMaxRef/combine", format="video/h264-mp4",
                 pingpong=False, save_output=True, prompt=None, extra_pnginfo=None):
         if latent is not None:
@@ -162,6 +174,7 @@ class MiniMaxRefCombine(io.ComfyNode):
                 audio_vae=audio_vae,
                 save_latent=save_latent,
                 context_frames=context_frames,
+                trim_frames=trim_frames,
                 frame_rate=frame_rate,
                 loop_count=loop_count,
                 filename_prefix=filename_prefix,
@@ -175,6 +188,29 @@ class MiniMaxRefCombine(io.ComfyNode):
         # ── 像素路径（原行为） ──────────────────────────────────────────
         if not save_output:
             return io.NodeOutput((False, "", "", ""), ui={"gifs": []})
+
+        # motion context 引导帧：解码帧头部 trim_frames 帧为 pinned context
+        # 延续，单段输出时裁掉；按帧率同步裁掉音频头部，保持 A/V 对齐。
+        if trim_frames > 0:
+            if images is not None and int(images.shape[0]) > trim_frames:
+                images = images[trim_frames:]
+                if audio is not None:
+                    wave = audio["waveform"]
+                    sr = int(audio["sample_rate"])
+                    n = int(round(trim_frames / float(frame_rate) * sr))
+                    if wave.shape[-1] > n:
+                        audio = {"waveform": wave[..., n:], "sample_rate": sr}
+                    else:
+                        log.warning(
+                            "trim_frames=%d: audio shorter than trim window "
+                            "(%d samples); skip audio trim", trim_frames, int(wave.shape[-1]),
+                        )
+            else:
+                have = 0 if images is None else int(images.shape[0])
+                log.warning(
+                    "trim_frames=%d >= available frames %d; skip frame trim",
+                    trim_frames, have,
+                )
 
         meta = encode_frames_with_vhs(
             images=images,
@@ -195,13 +231,15 @@ class MiniMaxRefCombine(io.ComfyNode):
 
     @classmethod
     def _execute_latent(cls, latent, audio, video_vae, audio_vae, save_latent,
-                        context_frames, frame_rate, loop_count, filename_prefix,
-                        format, pingpong, save_output, prompt, extra_pnginfo):
+                        context_frames, trim_frames, frame_rate, loop_count,
+                        filename_prefix, format, pingpong, save_output,
+                        prompt, extra_pnginfo):
         video, audio_lat = latent_lib.split_joint_latent(latent)
 
         meta_data = {
             "frame_count": int(video.shape[2]),
             "context_frames": int(context_frames),
+            "trim_frames": int(trim_frames),
             "fps": float(frame_rate),
             "width": int(video.shape[4]),
             "height": int(video.shape[3]),

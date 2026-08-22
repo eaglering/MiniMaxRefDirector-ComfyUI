@@ -133,6 +133,12 @@ class MiniMaxRefGuide(io.ComfyNode):
                     display_name="clip_audio",
                     tooltip="H3 Song Masked Audio Context 从合成 master_audio 中按本段起始位置精确切出的音频片段（AUDIO）；无音频段时输出静音。",
                 ),
+                io.Int.Output(
+                    display_name="context_frames",
+                    tooltip="该段 H3 context 引导帧数（guideStrength 吸附到合法 H3 run 0/5/22/39/56...，"
+                            "与 SongMaskedAVContext 的 context_length 一致）。接 MiniMax Ref Combine "
+                            "的 context_frames 输入，供无损合并 meta 使用。",
+                ),
             ],
         )
 
@@ -173,11 +179,15 @@ class MiniMaxRefGuide(io.ComfyNode):
             )
             return io.NodeOutput(ExecutionBlocker(None), ExecutionBlocker(None),
                                  ExecutionBlocker(None), ExecutionBlocker(None),
-                                 ExecutionBlocker(None), ExecutionBlocker(None))
+                                 ExecutionBlocker(None), ExecutionBlocker(None),
+                                 ExecutionBlocker(None))
         
         entry = timeline[idx]
         upscale = entry.get("upscale", False)
         guide_strength = entry.get("guideStrength", 16)
+        # 该段 H3 context 引导帧数（guideStrength 吸附到合法 H3 run 0/5/22/39/56...），
+        # 同时作为 SongMaskedAVContext 的 context_length 与输出 context_frames 的值
+        ctx_len = _snap_h3_run(guide_strength)
         prompt = entry.get("prompt", "")
         width = int(guide_data.get("width", 1024))
         height = int(guide_data.get("height", 576))
@@ -223,7 +233,6 @@ class MiniMaxRefGuide(io.ComfyNode):
                     seg_start_frames = int(entry.get("startFrames", 0))
                     clip_start_seconds = max(0.0,
                                              (seg_start_frames - range_start) / frame_rate)
-                    ctx_len = _snap_h3_run(guide_strength)
                     latent, _song_trim, clip_audio = song_node().prepare(
                         latent, audio_vae, master_audio,
                         clip_start_seconds=clip_start_seconds,
@@ -290,4 +299,5 @@ class MiniMaxRefGuide(io.ComfyNode):
             # 无音频段 / 合成失败：输出静音 AUDIO，保持类型与下游连线兼容
             clip_audio = {"waveform": torch.zeros(1, 2, 1, dtype=torch.float32),
                           "sample_rate": 32000}
-        return io.NodeOutput(cond, latent, trim_frames, frame_rate, upscale, clip_audio)
+        return io.NodeOutput(cond, latent, trim_frames, frame_rate, upscale, clip_audio,
+                             ctx_len)

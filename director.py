@@ -98,6 +98,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             outputs=[
                 GuideData.Output(display_name="guide_data"),
                 io.Int.Output(display_name="segment_count"),
+                io.Float.Output(display_name="frame_rate"),
             ],
         )
 
@@ -254,7 +255,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
         )
 
-        result = io.NodeOutput(guide_data, segment_count + 1)
+        result = io.NodeOutput(guide_data, segment_count + 1, frame_rate)
         _director_cache[cache_key] = result
         return result
 
