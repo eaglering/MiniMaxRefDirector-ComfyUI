@@ -710,7 +710,34 @@ export const dom = {
 
     this.strengthLabel = document.createElement("span");
     this.strengthLabel.className = "mrd-pr-strength-label";
+    this.strengthLabel.style.marginLeft = "0px";
     this.strengthLabel.textContent = "Guide Strength:";
+
+    // --- Segment Duration Input（Guide Strength 左侧；秒，两位小数） ---
+    this.durationLabel = document.createElement("span");
+    this.durationLabel.className = "mrd-pr-strength-label";
+    this.durationLabel.textContent = "Duration:";
+
+    this.durationValue = document.createElement("input");
+    this.durationValue.type = "text";
+    this.durationValue.className = "mrd-pr-strength-input";
+    this.durationValue.value = "";
+    this.durationValue.disabled = true;
+    this.durationValue.style.cursor = "text";
+    this.durationValue.style.width = "58px";
+    this.durationValue.title = "段时长。单位跟随 display_mode：帧模式为整数帧，秒模式为两位小数秒。切换焦点（blur/change）应用到当前段；段时长变化时此处同步。";
+
+    // 切换焦点时应用 duration 到当前 seg；阻止全局快捷键（如 Delete）在输入框内生效
+    this.durationValue.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") this.durationValue.blur();
+    });
+    this.durationValue.addEventListener("change", () => {
+      this._applyDurationInput();
+    });
+    this.durationValue.addEventListener("blur", () => {
+      this._applyDurationInput();
+    });
 
     this.strengthValue = document.createElement("input");
     this.strengthValue.type = "text";
@@ -785,6 +812,8 @@ export const dom = {
 
     this.strengthRow.appendChild(this.timeCodeDisplay);
     this.strengthRow.appendChild(this.segmentBoundsDisplay);
+    this.strengthRow.appendChild(this.durationLabel);
+    this.strengthRow.appendChild(this.durationValue);
     this.strengthRow.appendChild(this.strengthLabel);
     this.strengthRow.appendChild(this.strengthValue);
 
