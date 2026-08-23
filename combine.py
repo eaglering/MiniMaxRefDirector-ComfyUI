@@ -5,7 +5,7 @@
 - latent 路径：把 joint H3 latent（视频+音频 NestedTensor）保存为
   image_latent / audio_latent 两个 safetensors + sidecar meta（无损合并素材）；
   接入 video_vae / audio_vae 时解码帧并编码视频；audio（clip_audio）优先作为
-  音轨，否则用 audio_vae 解码的音频。
+  音轨，否则用 audio_vae 解码的音频流兜底。
 
 两条路径均输出 VHS_FILENAMES 4 元组 (filename, subfolder, type, full_path)，
 与 guide.py ``_vhs_tuple_path`` 的解析约定一致，可直连 Guide 的 prev_tail。
@@ -50,7 +50,7 @@ class MiniMaxRefCombine(io.ComfyNode):
                 "· latent 路径：joint H3 latent（视频+音频）→ 保存 image_latent / "
                 "audio_latent safetensors + meta（供「无损合并」使用）；接入 video_vae "
                 "时解码帧并编码视频；audio（clip_audio）优先作为音轨，否则用 audio_vae "
-                "解码音频。\n"
+                "解码的音频流兜底。\n"
                 "输出 VHS_FILENAMES 供 MiniMaxRefGuide 的 prev_tail 输入使用。"
             ),
             inputs=[
@@ -62,8 +62,9 @@ class MiniMaxRefCombine(io.ComfyNode):
                 io.Audio.Input(
                     "audio",
                     optional=True,
-                    tooltip="可选音频轨（clip_audio）：latent 路径下优先作为音轨，"
-                            "通常来自 MiniMaxH3SongMaskedAVContext 的 clip_audio 输出。",
+                    tooltip="可选音频轨（clip_audio）：优先作为音轨（master_audio 经 "
+                            "MiniMaxH3SongMaskedAVContext 处理后的本段分割音频，保真）；"
+                            "无 audio 时用 audio_vae 解码 latent 音频流兜底。",
                 ),
                 io.Latent.Input(
                     "latent",
@@ -257,11 +258,35 @@ class MiniMaxRefCombine(io.ComfyNode):
         if save_latent:
             saved = latent_lib.save_joint_latent_files(latent, meta_data, filename_prefix)
 
-        # 音轨：clip_audio（audio 输入）优先，否则 audio_vae 解码音频流
+        # 音轨：clip_audio（audio 输入）优先——它是 master_audio 经 Song Masked
+        # Audio Context 处理后的本段分割音频（原始素材切片，保真无损）；
+        # audio_vae 解码 latent 音频流仅作兜底（VAE 重建有损，仅当 clip_audio 缺失时）。
         out_audio = audio
         if out_audio is None and audio_vae is not None:
-            wave, sr = latent_lib.decode_audio_latent(audio_vae, audio_lat)
-            out_audio = {"waveform": wave, "sample_rate": sr}
+            try:
+                wave, sr = latent_lib.decode_audio_latent(audio_vae, audio_lat)
+                # 解码结果过短（<0.5s）说明 latent 音频流为空/无效：视为无音轨，
+                # 不输出假静音（让 VHS 不 mux 音频轨）。
+                if wave is not None and wave.shape[-1] >= max(1, int(sr) // 2):
+                    out_audio = {"waveform": wave, "sample_rate": sr}
+                else:
+                    log.info(
+                        "[MiniMaxRefCombine] audio latent decode produced too-short "
+                        "waveform (%s), treating as no audio track",
+                        tuple(wave.shape) if wave is not None else None)
+            except Exception:
+                log.warning(
+                    "[MiniMaxRefCombine] failed to decode audio latent, "
+                    "skipping audio track", exc_info=True)
+        if out_audio is not None:
+            w = out_audio.get("waveform")
+            try:
+                rms = float(w.float().pow(2).mean().sqrt()) if w is not None else 0.0
+            except Exception:
+                rms = -1.0
+            log.info("[MiniMaxRefCombine] audio track: waveform=%s sample_rate=%s rms=%.4f",
+                     tuple(w.shape) if w is not None else None,
+                     out_audio.get("sample_rate"), rms)
 
         clip_audio_path = None
         if out_audio is not None:

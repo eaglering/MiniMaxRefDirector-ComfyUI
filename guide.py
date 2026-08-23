@@ -131,7 +131,7 @@ class MiniMaxRefGuide(io.ComfyNode):
                 io.Boolean.Output(display_name="upscale"),
                 io.Audio.Output(
                     display_name="clip_audio",
-                    tooltip="H3 Song Masked Audio Context 从合成 master_audio 中按本段起始位置精确切出的音频片段（AUDIO）；无音频段时输出静音。",
+                    tooltip="H3 Song Masked Audio Context 从合成 master_audio 中按本段起始位置精确切出的音频片段（AUDIO）；无音频段时输出 None。",
                 ),
                 io.Int.Output(
                     display_name="context_frames",
@@ -294,10 +294,5 @@ class MiniMaxRefGuide(io.ComfyNode):
                     f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
                     f"skipped: {prev_tail} could not be decoded")
 
-        # 3) 其他段：不处理 prev_tail，直接输出普通条件
-        if clip_audio is None:
-            # 无音频段 / 合成失败：输出静音 AUDIO，保持类型与下游连线兼容
-            clip_audio = {"waveform": torch.zeros(1, 2, 1, dtype=torch.float32),
-                          "sample_rate": 32000}
         return io.NodeOutput(cond, latent, trim_frames, frame_rate, upscale, clip_audio,
                              ctx_len)
