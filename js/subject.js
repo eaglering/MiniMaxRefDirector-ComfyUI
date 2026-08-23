@@ -755,7 +755,7 @@ const REF_MENTION_TYPES = {
     Subject: ["Picture", "Video"],
     Picture: ["Picture"],
     Video: ["Picture", "Video"],
-    Audio: ["Audio"],
+    Audio: ["Audio", "Subject"],
 };
 
 app.registerExtension({
@@ -1383,12 +1383,17 @@ app.registerExtension({
                         retentionLabel.className = "ref-ms-label";
                         retentionLabel.textContent = "Retention";
                         retentionRow.appendChild(retentionLabel);
-                        retentionRow.appendChild(buildRetentionInput());
+                        const retentionInput = buildRetentionInput();
+                        retentionRow.appendChild(retentionInput);
                         // relationship 为空（引用）时隐藏 Retention 输入
                         const syncRetentionVisibility = () => {
                             retentionRow.style.display = relSelect.value === "" ? "none" : "";
                         };
                         syncRetentionVisibility();
+                        attachMention(retentionInput, idx, subjects, (v) => {
+                            subjects[idx].retention = v;
+                            saveState();
+                        });
                         // 媒体行挂载在 retention 之前（始终可见，不随 desc/retention 显隐）
                         card.appendChild(mediaRow);
                         card.appendChild(retentionRow);

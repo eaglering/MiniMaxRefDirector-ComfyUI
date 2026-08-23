@@ -290,6 +290,11 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
                 subject_data = {}
         if not isinstance(subject_data, dict):
             return web.json_response({"success": False, "error": "subject_data must be an object"}, status=400)
+        if isinstance(prompt_json, str):
+            try:
+                prompt_json = json.loads(prompt_json)
+            except (json.JSONDecodeError, TypeError):
+                prompt_json = {}
         if not isinstance(prompt_json, dict):
             return web.json_response({"success": False, "error": "prompt_json must be an object"}, status=400)
         timeline_segment = data.get("timeline_segment", None)

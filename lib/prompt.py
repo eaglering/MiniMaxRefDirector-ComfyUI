@@ -78,10 +78,10 @@ _H3_SKILLS_TEMPLATE_PATH = os.path.join(
 )
 # 音频关系 -> retention_analysis 文案模板（{n} 为 Audio 编号）
 _AUDIO_RELATION_TEXT = {
-    "fully_copy": "<Audio {n}> is reused 1:1 as the target video's complete final audio track.",
-    "partially_copy": "Only part of the timeline or selected audio layers of <Audio {n}> are copied.",
-    "reference": "the target speaker follows <Audio {n}>'s voice timbre and measured delivery without copying the original signal.",
-    "weak_reference": "Only broad similarity in category or atmosphere from <Audio {n}> is retained.",
+    "fully_copy": "{n} is reused 1:1 as the target video's complete final audio track.",
+    "partially_copy": "Only part of the timeline or selected audio layers of {n} are copied.",
+    "reference": "the target speaker follows {n}'s voice timbre and measured delivery without copying the original signal.",
+    "weak_reference": "Only broad similarity in category or atmosphere from {n} is retained.",
 }
 
 def _load_h3_skills_template() -> str:
@@ -325,8 +325,8 @@ def build_h3_subject_bindings(
     speaker_ids = _assign_speaker_ids(detailed_desc)
     subject_definitions = []
     retention_analysis = []
-    subject_definitions_raw = []
-    retention_analysis_raw = []
+    subject_definitions_text = []
+    retention_analysis_text = []
     images: list[str] = []
     audios: list[str] = []
     videos: list[str] = []
@@ -399,15 +399,16 @@ def build_h3_subject_bindings(
             # 是否写入 definitions / retention 取决于被引用主体的 relationship 是否有值
             if _relationship:
                 subject_definitions.append(f"{_label} {_description}")
-                subject_definitions_raw.append(f"{_pattern} {_description}")
+                subject_definitions_text.append(f"{_pattern} {_description}")
                 retention_analysis.append(
                     _retention_line(_label, _relationship, _retention, shot_mentions.get(_name, []))
                 )
-                retention_analysis_raw.append(
+                retention_analysis_text.append(
                     _retention_line(_pattern, _relationship, _retention, shot_mentions.get(_name, []))
                 )
             seen.add(_name)
-            subjects_out.append(_subj)
+            if _dType != "Subject":
+                subjects_out.append(_subj)
             mapping[_pattern] = _label
             # 递归处理描述中的提及
             if _description:
@@ -428,16 +429,15 @@ def build_h3_subject_bindings(
         # 对话说话者一定是主体（Subject）：抽象对象，无媒体资源可绑定，直接编号
         label = _next_label("Subject")
         subject_definitions.append(f"{label} {description}")
-        subject_definitions_raw.append(f"<@{name}> {description}")
+        subject_definitions_text.append(f"<@{name}> {description}")
         retention_analysis.append(
             _retention_line(label, relationship, retention, shot_mentions.get(name, []))
         )
-        retention_analysis_raw.append(
+        retention_analysis_text.append(
             _retention_line(f"<@{name}>", relationship, retention, shot_mentions.get(name, []))
         )
         seen.add(name)
         mapping[f"<@{name}>"] = label
-        subjects_out.append(subj)
         # 递归处理描述中的 <@提及>（在 seen 之后调用，防止 <@自身> 自引用无限递归）
         if description:
             _extract_h3_subject_mentions(description)
@@ -464,7 +464,6 @@ def build_h3_subject_bindings(
             audio_relationship = (audio_subj.get("relationship", "") or "").strip()
             audio_description = audio_subj.get("description", "")
             audios.append(audio_file)
-            audio_no = len(audios)  # 编号 = 资源在 audios 中的位置
             audio_label = _next_label("Audio")
             seen.add(audio_ref)
             mapping[f"<@{audio_ref}>"] = audio_label
@@ -472,26 +471,30 @@ def build_h3_subject_bindings(
             # 递归处理 Audio 描述中的 <@提及>（在 seen 之后调用，防止自引用无限递归）
             if audio_description:
                 _extract_h3_subject_mentions(audio_description)
+            # 引用模式：voice-timbre reference，绑定目标说话者 (Sx)
+            speaker = speaker_ids.get(name, "")
+            speaker_suffix = f" ({speaker})" if speaker else ""
+
             if not audio_relationship:
-                # 引用模式：voice-timbre reference，绑定目标说话者 (Sx)
-                speaker = speaker_ids.get(name, "")
-                speaker_suffix = f" ({speaker})" if speaker else ""
                 subject_definitions.append(
                     f"{audio_label} is the voice-timbre reference for {label}{speaker_suffix}."
                 )
-                subject_definitions_raw.append(
+                subject_definitions_text.append(
                     f"<@{audio_ref}> is the voice-timbre reference for <@{name}>{speaker_suffix}."
                 )
                 text = _AUDIO_RELATION_TEXT["reference"]
-                retention_analysis.append(f"{audio_label}: reference - {text.format(n=audio_no)}")
-                retention_analysis_raw.append(f"<@{audio_ref}>: reference - {text.format(n=audio_no)}")
+                retention_analysis.append(f"{audio_label}: reference - {text.format(n=audio_label)}")
+                retention_analysis_text.append(f"<@{audio_ref}>: reference - {text.format(n=f"<@{audio_ref}>")}")
             else:
                 # 定义模式：用 Audio 主体 description 独立定义
-                subject_definitions.append(f"{audio_label} {audio_description}")
-                subject_definitions_raw.append(f"<@{audio_ref}> {audio_description}")
+                audio_description_text = audio_description.replace(f"<@{name}>", f"<@{name}>{speaker_suffix}")
+                subject_definitions.append(f"{audio_label} {audio_description_text}")
+                subject_definitions_text.append(f"<@{audio_ref}> {audio_description_text}")
                 text = _AUDIO_RELATION_TEXT.get(audio_relationship, _AUDIO_RELATION_TEXT["reference"])
-                retention_analysis.append(f"{audio_label}: {audio_relationship} - {text.format(n=audio_no)}")
-                retention_analysis_raw.append(f"<@{audio_ref}>: {audio_relationship} - {text.format(n=audio_no)}")
+                retention_descritpion = audio_subj.get("retention", "").strip()
+                retention_descritpion_text = f" - {retention_descritpion}" if retention_descritpion else f" - {text.format(n=audio_label)}"
+                retention_analysis.append(f"{audio_label}: {audio_relationship}{retention_descritpion_text}")
+                retention_analysis_text.append(f"<@{audio_ref}>: {audio_relationship}{retention_descritpion_text}")
 
     for name, pattern in names.items():
         if name in seen or name in unmatched:
@@ -503,21 +506,23 @@ def build_h3_subject_bindings(
         subj = subjects_in[idx]
         description = subj.get("description", "")
         relationship = subj.get("relationship", "")
-        retention = (subj.get("retention", "") or "").strip()
         d_type = subj.get("type", "") or "Subject"
         if _bind_media(subj, d_type, name) is None:
             continue
         label = _next_label(d_type)
-        subject_definitions.append(f"{label} {description}")
-        subject_definitions_raw.append(f"<@{name}> {description}")
-        retention_analysis.append(
-            _retention_line(label, relationship, retention, shot_mentions.get(name, []))
-        )
-        retention_analysis_raw.append(
-            _retention_line(f"<@{name}>", relationship, retention, shot_mentions.get(name, []))
-        )
+        if relationship:
+            subject_definitions.append(f"{label} {description}")
+            subject_definitions_text.append(f"<@{name}> {description}")
+            retention = (subj.get("retention", "") or "").strip()
+            retention_analysis.append(
+                _retention_line(label, relationship, retention, shot_mentions.get(name, []))
+            )
+            retention_analysis_text.append(
+                _retention_line(f"<@{name}>", relationship, retention, shot_mentions.get(name, []))
+            )
         seen.add(name)
-        subjects_out.append(subj)
+        if d_type != "Subject":
+            subjects_out.append(subj)
         mapping[pattern] = label
         # 递归处理描述中的 <@提及>（在 seen 之后调用，防止自引用无限递归）
         if description:
@@ -533,32 +538,34 @@ def build_h3_subject_bindings(
         subj = subjects_in[idx]
         description = subj.get("description", "")
         relationship = subj.get("relationship", "")
-        retention = (subj.get("retention", "") or "").strip()
         d_type = subj.get("type", "") or "Subject"
         if _bind_media(subj, d_type, name) is None:
             continue
         label = _next_label(d_type)
-        subject_definitions.append(f"{label} {description}")
-        subject_definitions_raw.append(f"<@{name}> {description}")
-        # additionSubject 未在 prompt 中提及，shot_mentions 为空 → (appears in []): reference
-        retention_analysis.append(
-            _retention_line(label, relationship, retention, shot_mentions.get(name, []))
-        )
-        retention_analysis_raw.append(
-            _retention_line(f"<@{name}>", relationship, retention, shot_mentions.get(name, []))
-        )
+        if relationship:
+            subject_definitions.append(f"{label} {description}")
+            subject_definitions_text.append(f"<@{name}> {description}")
+            # additionSubject 未在 prompt 中提及，shot_mentions 为空 → (appears in []): reference
+            retention = (subj.get("retention", "") or "").strip()
+            retention_analysis.append(
+                _retention_line(label, relationship, retention, shot_mentions.get(name, []))
+            )
+            retention_analysis_text.append(
+                _retention_line(f"<@{name}>", relationship, retention, shot_mentions.get(name, []))
+            )
         seen.add(name)
-        subjects_out.append(subj)
+        if d_type != "Subject":
+            subjects_out.append(subj)
         # 递归处理描述中的 <@提及>（在 seen 之后调用，防止自引用无限递归）
         if description:
             _extract_h3_subject_mentions(description)
 
     data = {
         "subjects": subjects_out,
-        "subject_definitions": "\n".join(subject_definitions),
-        "subject_definitions_raw": "\n".join(subject_definitions_raw),
-        "retention_analysis": "\n".join(retention_analysis),
-        "retention_analysis_raw": "\n".join(retention_analysis_raw),
+        "subject_definitions": "\n".join(subject_definitions_text),
+        "subject_definitions_final": "\n".join(subject_definitions),
+        "retention_analysis": "\n".join(retention_analysis_text),
+        "retention_analysis_final": "\n".join(retention_analysis),
         "summary": prompt_json.get("summary", ""),
         "detailed_description": prompt_json.get("detailed_description", ""), 
         "overall_soundscape": prompt_json.get("overall_soundscape", ""),
@@ -583,6 +590,7 @@ def build_h3_prompt(
 ) -> dict:
     prompt_res = build_h3_subject_bindings(subject_data=subject_data, prompt_json=prompt_json, timeline_segment=timeline_segment)
 
+    summary = prompt_res.get("summary", "")
     subject_definitions = prompt_res.get("subject_definitions", "")
     retention_analysis = prompt_res.get("retention_analysis", "")
     detailed_description = prompt_res.get("detailed_description", "")
@@ -674,6 +682,7 @@ def build_h3_prompt(
 
     mapping = prompt_res.get("mapping", {})
     subject_definitions = _replace_mapping(subject_definitions, mapping)
+    summary = _replace_mapping(summary, mapping)
     retention_analysis = _replace_mapping(retention_analysis, mapping)
     detailed_description = _replace_mapping(detailed_description, mapping)
 
@@ -711,8 +720,9 @@ def build_h3_prompt(
     summary = prompt_res.get("summary", "") or "N/A"
     summary = _replace_mapping(summary, mapping)
 
-    prompt = "summary:\n" + summary + "\n"
-    prompt += "subject_definitions:\n" + subject_definitions + "\n"
+
+    prompt = "subject_definitions:\n" + subject_definitions + "\n"
+    prompt += "summary:\n" + summary + "\n"
     prompt += "retention_analysis:\n" + retention_analysis + "\n"
     prompt += "detailed_description:\n" + global_prompt + "\n" + detailed_description + "\n"
     prompt += "overall_soundscape:\n" + overall_soundscape + "\n"
@@ -730,54 +740,3 @@ def _replace_mapping(input: str, mapping: dict) -> str:
         for k, v in mapping.items():
             input = input.replace(k, v)
         return input
-
-def _build_prompt_json(raw_prompt) -> dict:
-    # prompt_json：直接接收 JSON 对象（前端已按 JSON 格式发送）
-    if isinstance(raw_prompt, dict):
-        return {
-            "summary": str(raw_prompt.get("summary", "") or ""),
-            "detailed_description": str(raw_prompt.get("detailed_description", "") or ""),
-            "overall_soundscape": str(raw_prompt.get("overall_soundscape", "") or "") or "N/A",
-            "non_diegetic_music": str(raw_prompt.get("non_diegetic_music", "") or "") or "N/A",
-        }
-    lines = raw_prompt.split("\n")
-    prompt_json = {
-        "summary": "",
-        "detailed_description": "",
-        "overall_soundscape": "",
-        "non_diegetic_music": ""
-    }
-    section = "summary"
-    summary_lines = []
-    detail_lines = []
-    overall_lines = []
-    non_lines = []
-    for line in lines:
-        if line.startswith("summary:"):
-            section = "summary"
-            continue
-        if line.startswith("detailed_description:"):
-            section = "detail"
-            continue
-        if line.startswith("overall_soundscape:"):
-            section = "overall"
-            continue
-        if line.startswith("non_diegetic_music:"):
-            section = "music"
-            continue
-        if section == "summary":
-            summary_lines.append(line.strip())
-        elif section == "detail":
-            detail_lines.append(line.strip())
-        elif section == "overall":
-            if line.strip() != "" and line.strip() != "N/A":
-                overall_lines.append(line)
-        elif section == "music":
-            if line.strip() != "" and line.strip() != "N/A":
-                non_lines.append(line)
-
-    prompt_json["summary"] = "\n".join(summary_lines)
-    prompt_json["detailed_description"] = "\n".join(detail_lines)
-    prompt_json["overall_soundscape"] = "\n".join(overall_lines) if len(overall_lines) > 0 else "N/A"
-    prompt_json["non_diegetic_music"] = "\n".join(non_lines) if len(non_lines) > 0 else "N/A"
-    return prompt_json

@@ -389,8 +389,13 @@ const S = {
     display: "flex", flexWrap: "wrap", gap: "8px"
   },
   res: {
-    flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
+    position: "relative", flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
     background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "120px", height: "120px",
+  },
+  resType: {
+    position: "absolute", top: "2px", left: "2px", zIndex: 2, fontSize: "9px", lineHeight: 1.4,
+    background: "rgba(0,0,0,0.55)", color: "#ffd54f", borderRadius: "3px", padding: "1px 4px",
+    maxWidth: "calc(100% - 8px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
   img: { width: "100%", height: "calc(100% - 14px)", objectFit: "contain", borderRadius: "4px", background: "#111" },
   label: {
@@ -1175,6 +1180,7 @@ export function TransferPanel({ director }) {
         src: subjectImgSrc(s),
         audio: s.audioFile,
         kind,
+        type: s.type,
       });
     }
     return out;
@@ -1190,7 +1196,7 @@ export function TransferPanel({ director }) {
     for (const name of used) {
       const s = subjectsList.find(x => x.name === name);
       if (s) {
-        out.push({ key: "subj-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "subject" });
+        out.push({ key: "subj-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "subject", type: s.type });
       }
     }
     // additionSubject：用户在主体添加框手动加入、但未在 prompt 中提及的主体
@@ -1198,7 +1204,7 @@ export function TransferPanel({ director }) {
       if (used.has(name)) continue;
       const s = subjectsList.find(x => x.name === name);
       if (s) {
-        out.push({ key: "add-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "addition" });
+        out.push({ key: "add-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "addition", type: s.type });
       }
     }
     return out;
@@ -1645,6 +1651,11 @@ export function TransferPanel({ director }) {
                   return html`
                   <div style=${S.res} key=${r.key}>
                     ${
+                      r.type
+                        ? html`<span style=${S.resType} title="主体类型">${r.type}</span>`
+                        : ""
+                    }
+                    ${
                       hasImg
                         ? html`<img style=${S.img} src=${r.src} alt=${r.label} />`
                         : html`<span style=${S.resAudio} title="音频主体">♪</span>`
@@ -2018,7 +2029,7 @@ export function TransferPanel({ director }) {
                       class="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
                       value=${pObj.non_diegetic_music === "N/A" ? "" : pObj.non_diegetic_music}
-                      placeholder=${"describes background music that the characters cannot hear and that is audible only to the audience. When music is present, state its instrumentation, tempo, and dynamic development:\n\nA restrained solo-piano score at a slow tempo, with sustained low cello underneath and no swell.\n\nor\n\n<@Anni voice> is directly reused as the complete audience-only score."}
+                      placeholder=${"describes background music that the characters cannot hear and that is audible only to the audience. When music is present, state its instrumentation, tempo, and dynamic development:\n\nA restrained solo-piano score at a slow tempo, with sustained low cello underneath and no swell.\nor\n<@Anni voice> is directly reused as the complete audience-only score."}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "non_diegetic_music", e.target.value)); handleInput(e, "right", "music"); }}
                     ></textarea>
