@@ -85,7 +85,7 @@ _AUDIO_RELATION_TEXT = {
 }
 
 def _load_h3_skills_template() -> str:
-    """Load the custom H3 skills template (three-field output only)."""
+    """Load the custom H3 skills template (four-field output)."""
     with open(_H3_SKILLS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
         return f.read()
 
@@ -94,8 +94,8 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool) -> str:
     """Build the full prompt sent to the local GGUF VLM.
 
     Includes the custom skills guide, the required JSON output format
-    (detailed_description / overall_soundscape / non_diegetic_music) and the
-    <@角色名称> / <#角色名称:对话内容> placeholder rules. When a reference
+    (summary / detailed_description / overall_soundscape / non_diegetic_music)
+    and the <@角色名称> / <#角色名称:对话内容> placeholder rules. When a reference
     image is provided it is NOT treated as a first frame; instead its contents
     are merged into "detailed_description" together with the user's input.
     """
@@ -121,14 +121,19 @@ Write every field in the same language as the user's input (Chinese input -> Chi
 
 ## Output Format
 Output ONLY a JSON object with exactly these keys:
+  - "summary": string
   - "detailed_description": string
   - "overall_soundscape": string
   - "non_diegetic_music": string
 ## Placeholder Rules
+In "summary": wrap every character name as <@角色名称>, e.g. <@Zhang San>. The summary is a plain summary and does not contain dialogue.
 In "detailed_description", "overall_soundscape" and "non_diegetic_music":
 1. Wrap every character name as <@角色名称>, e.g. <@Zhang San>. This applies even if the user wrote the name as a bare word (e.g. "小李做了什么" must become "<@小李>做了什么").
 2. Wrap every dialogue as <#角色名称:对话内容>, e.g. <#Zhang San:Hello!> or <#李四:你好！>.
 3. Keep character names and dialogue in their original language, never translate them.
+
+## "summary" Format
+Write one short paragraph summarizing the target video and its reference relationships. It begins with a square-bracketed task-type prefix, e.g. "[reference generation]" or "[video editing + reference generation + audio reuse]". Choose task types according to the actual role each reference asset plays in the target video: keyframe completion (an image is a concrete frame anchor), reference generation (an asset provides generation guidance), video editing (a source video is directly modified), video continuation (new content continues from a source video), audio reuse (the same audio signal is reused in full or in part), audio reference (only the audio's characteristics are referenced). When multiple relationships hold, combine task types with " + " and do not repeat a type. The summary describes the main subjects and shot flow using <@角色名称> placeholders, e.g. <@Zhang San>, without introducing content beyond the user's input and without quoting any dialogue.
 
 ## Strictness
 - "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".
@@ -161,11 +166,11 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
       - api_key: vlm_mode="api" 时的 key 覆盖（可留空，回落配置/环境变量）
       - clip_type: CLIP 模型类型（"minimax" / "qwen3vl" / "gemma"）
 
-    The output JSON includes detailed_description / overall_soundscape /
-    non_diegetic_music (a provided reference image is merged into
-    detailed_description, not treated as a first frame). Character names are
-    wrapped as <@名字> and dialogue as <#名字:[Language]对话> directly by the
-    model, with a language tag such as [Chinese] or [English] before the
+    The output JSON includes summary / detailed_description /
+    overall_soundscape / non_diegetic_music (a provided reference image is
+    merged into detailed_description, not treated as a first frame). Character
+    names are wrapped as <@名字> and dialogue as <#名字:[Language]对话> directly
+    by the model, with a language tag such as [Chinese] or [English] before the
     dialogue text. No mapping is returned.
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
