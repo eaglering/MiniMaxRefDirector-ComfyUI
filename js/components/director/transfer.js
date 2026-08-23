@@ -390,9 +390,9 @@ const S = {
   },
   res: {
     flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
-    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "120px",
+    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "120px", height: "120px",
   },
-  img: { width: "100%", height: "auto", objectFit: "cover", borderRadius: "4px", background: "#111" },
+  img: { width: "100%", height: "calc(100% - 14px)", objectFit: "contain", borderRadius: "4px", background: "#111" },
   label: {
     fontSize: "10px", color: "#aaa", maxWidth: "64px", overflow: "hidden",
     textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -407,7 +407,7 @@ const S = {
   },
   audioIcon: { fontSize: "10px", color: "#ffb74d" },
   resAudio: {
-    width: "48px", height: "48px", borderRadius: "4px", background: "#1e3a5f",
+    width: "100%", height: "96px", borderRadius: "4px", background: "#1e3a5f",
     color: "#38bdf8", display: "inline-flex", alignItems: "center", justifyContent: "center",
     fontSize: "16px", flex: "0 0 auto",
   },
@@ -1586,6 +1586,22 @@ export function TransferPanel({ director }) {
   if (bindings.retention_analysis) bindParts.push("retention_analysis:\n" + bindings.retention_analysis);
   const bindingsText = bindParts.join("\n\n");
 
+  // 完整 H3 prompt 预览文本：主体定义 / 留存分析来自 bindData，其余来自 rightText（实时编辑）
+  const h3PreviewSections = [
+    ["subject_definitions", bindings.subject_definitions],
+    ["summary", rightText.summary],
+    ["retention_analysis", bindings.retention_analysis],
+    ["detailed_description", rightText.detailed_description],
+    ["overall_soundscape", rightText.overall_soundscape],
+    ["non_diegetic_music", rightText.non_diegetic_music],
+  ];
+  const h3PreviewText = h3PreviewSections
+    .map(([key, val]) => {
+      const text = val == null ? "" : String(val);
+      return `${key}:\n${text.trim() ? text : "N/A"}`;
+    })
+    .join("\n\n");
+
   return html`
     <div class="tr-panel" style=${S.panel}>
       <div style=${S.buttons}>
@@ -1686,7 +1702,7 @@ export function TransferPanel({ director }) {
           <textarea
             class="mrd-h3-preview-area"
             style=${S.h3PreviewArea}
-            value=${JSON.stringify(rightText, null, 2)}
+            value=${h3PreviewText}
             readOnly
             spellcheck=${false}
           ></textarea>
@@ -1990,7 +2006,7 @@ export function TransferPanel({ director }) {
                       class="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
                       value=${pObj.overall_soundscape === "N/A" ? "" : pObj.overall_soundscape}
-                      placeholder=${"summarizes ambience and physical sounds across the full video. Dialogue, singing, and sound events synchronized to a particular shot remain in detailed_description:\n\nQuiet indoor room tone and a low ventilation hum continue throughout the video.\n\nor\n\nThe copied ambience layer from <@Anni voice> continues throughout the target video."}
+                      placeholder=${"summarizes ambience and physical sounds across the full video. Dialogue, singing, and sound events synchronized to a particular shot remain in detailed_description:\n\nQuiet indoor room tone and a low ventilation hum continue throughout the video.\nor\nThe copied ambience layer from <@Anni voice> continues throughout the target video."}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "overall_soundscape", e.target.value)); handleInput(e, "right", "overall"); }}
                     ></textarea>

@@ -96,6 +96,13 @@ const MSCSS = `
     display: flex;
     gap: 6px;
     align-items: center;
+    justify-content: flex-end;
+}
+.ref-ms-row-group {
+    display: flex;
+    flex: 1;
+    gap: 4px;
+    align-items: center;
 }
 .ref-ms-label,.ref-ms-label-sm {
     font-size: 10px;
@@ -186,7 +193,7 @@ const MSCSS = `
     font-family: inherit;
     outline: none;
     resize: none;
-    min-height: 30px;
+    min-height: 60px;
     line-height: 1.35;
     box-sizing: border-box;
     transition: border-color 0.2s;
@@ -236,7 +243,6 @@ const MSCSS = `
     padding: 6px 8px;
     box-sizing: border-box;
     flex-shrink: 0;
-    flex: 1;
 }
 .ref-ms-global-prompt-label {
     font-size: 10px;
@@ -255,6 +261,7 @@ const MSCSS = `
     box-sizing: border-box;
     outline: none;
     height: 100%;
+    min-height: 90px;
 }
 .ref-ms-global-prompt-input:focus {
     border-color: #888;
@@ -706,7 +713,7 @@ const REF_RELATIONSHIPS_SUBJECT = [
 ];
 
 const REF_RELATIONSHIPS_PV = [
-    ["none", "none", "For subject reference only"],
+    ["", "none", "For subject reference only"],
     ["fully_preserved", "fully preserved", "The defined role of the referenced content is fully preserved"],
     ["partially_preserved", "partially preserved", "The referenced content is still used, but some defined characteristics are changed or only partially retained"],
     ["attribute_transfer", "attribute transfer", "Referenced characteristics are transferred to a different identifiable target subject"],
@@ -715,7 +722,7 @@ const REF_RELATIONSHIPS_PV = [
 
 // Audio 的关系选项
 const REF_RELATIONSHIPS_AUDIO = [
-    ["none", "none", "For sound‑effect or subject reference only"],
+    ["", "none", "For sound‑effect or subject reference only"],
     ["fully_copy", "fully copy", "The complete source audio serves as the target video's complete final audio track"],
     ["partially_copy", "partially copy", "Only part of the timeline or selected audio layers are copied, or other sounds are added, removed, or replaced after copying"],
     ["reference", "reference", "The signal is not copied directly; only timbre, rhythm, music style, dialogue content, or sound texture is referenced"],
@@ -831,6 +838,11 @@ app.registerExtension({
                 domWidget.computeSize = function (width) {
                     const nodeWidth = node.size?.[0] || 475;
                     const innerWidth = Math.max(10, nodeWidth - 30); // DOM widget 内容宽（与 .ref-ms-wrapper 一致）
+                    // 优先实测内容高度：卡片已渲染时 scrollHeight 即真实高度，
+                    // 自动跟随内容变化（媒体行/视频行/Description 显隐/textarea 拉伸/多列网格）。
+                    const measured = wrapper.scrollHeight || 0;
+                    if (measured > 0) return [innerWidth, measured];
+                    // 兜底估算（DOM 尚未就绪的首帧）
                     const listWidth = Math.max(1, innerWidth - 12); // 列表可用宽（wrapper padding 6px ×2）
                     const estCardHeight = 235; // per subject card (image/audio boxes + retention + video row)
                     const extras = 206; // global prompt area + tabs + add button + footer + gaps
@@ -1135,7 +1147,7 @@ app.registerExtension({
                         relCell.className = "ref-ms-cell";
                         const relLabel = document.createElement("span");
                         relLabel.className = "ref-ms-label-sm";
-                        relLabel.textContent = "Rel *";
+                        relLabel.textContent = "Relation *";
                         relLabel.title = "Required";
                         const relSelect = document.createElement("select");
                         relSelect.className = "ref-ms-select";
@@ -1153,6 +1165,9 @@ app.registerExtension({
                             subjects[idx].relationship = relSelect.value;
                             saveState();
                             syncRetentionVisibility();
+                            syncDescriptionVisibility();
+                            // Description/Retention 行显隐切换影响卡片高度
+                            updateNodeSize();
                         });
                         relCell.appendChild(relLabel);
                         relCell.appendChild(relSelect);
@@ -1161,9 +1176,12 @@ app.registerExtension({
                         topRow.appendChild(relCell);
                         card.appendChild(topRow);
 
-                        // Description
                         const descRow = document.createElement("div");
                         descRow.className = "ref-ms-row";
+
+                        // Description
+                        const descRowGroup = document.createElement("div");
+                        descRowGroup.className = "ref-ms-row-group";
                         const descLabel = document.createElement("span");
                         descLabel.className = "ref-ms-label";
                         descLabel.textContent = "Definition";
@@ -1176,15 +1194,23 @@ app.registerExtension({
                             subjects[idx].description = descInput.value;
                             saveState();
                         });
+                        // textarea 手动拉伸（resize: vertical）后重算节点高度
+                        descInput.addEventListener("resize", updateNodeSize);
                         attachMention(descInput, idx, subjects, (v) => {
                             subjects[idx].description = v;
                             saveState();
                         });
-                        descRow.appendChild(descLabel);
-                        descRow.appendChild(descInput);
+                        // relationship 为空（引用）时隐藏 Description 输入
+                        const syncDescriptionVisibility = () => {
+                            descRowGroup.style.display = relSelect.value === "" ? "none" : "";
+                        };
+                        syncDescriptionVisibility();
+                        descRowGroup.appendChild(descLabel);
+                        descRowGroup.appendChild(descInput);
+                        descRow.appendChild(descRowGroup);
                         card.appendChild(descRow);
 
-                        // --- Media boxes (attached to the desc row for a compact layout) ---
+                        // --- Media boxes（独立行，始终可见，不随 Description 的显隐联动）---
                         // 可上传的媒体随 type 联动（REF_TYPE_MEDIA）
                         const typeMedia = REF_TYPE_MEDIA[subj.type || "Subject"] || REF_TYPE_MEDIA.Subject;
                         const mediaRow = descRow;
@@ -1218,6 +1244,7 @@ app.registerExtension({
                                 subjects[idx].imageB64 = imgUrl;
                                 saveState();
                                 renderSubjects();
+                                updateNodeSize();
                             });
                         });
                         imgOverlay.appendChild(imgAddBtn);
@@ -1232,6 +1259,7 @@ app.registerExtension({
                                 subjects[idx].imageB64 = null;
                                 saveState();
                                 renderSubjects();
+                                updateNodeSize();
                             });
                             imgOverlay.appendChild(imgDelBtn);
                         }
@@ -1269,6 +1297,7 @@ app.registerExtension({
                                     subjects[idx].audioFile = filename;
                                     saveState();
                                     renderSubjects();
+                                    updateNodeSize();
                                 });
                             });
                             audioOverlay.appendChild(audAddBtn);
@@ -1291,6 +1320,7 @@ app.registerExtension({
                                     subjects[idx].audioFile = null;
                                     saveState();
                                     renderSubjects();
+                                    updateNodeSize();
                                 });
                                 audioOverlay.appendChild(audDelBtn);
                             }
@@ -1354,11 +1384,13 @@ app.registerExtension({
                         retentionLabel.textContent = "Retention";
                         retentionRow.appendChild(retentionLabel);
                         retentionRow.appendChild(buildRetentionInput());
-                        // relationship 为 none 时隐藏 Retention 输入
+                        // relationship 为空（引用）时隐藏 Retention 输入
                         const syncRetentionVisibility = () => {
-                            retentionRow.style.display = relSelect.value === "none" ? "none" : "";
+                            retentionRow.style.display = relSelect.value === "" ? "none" : "";
                         };
                         syncRetentionVisibility();
+                        // 媒体行挂载在 retention 之前（始终可见，不随 desc/retention 显隐）
+                        card.appendChild(mediaRow);
                         card.appendChild(retentionRow);
 
                         // ----- Video row (type=Video, 单独一行大图预览/替换/删除) -----
@@ -1395,6 +1427,7 @@ app.registerExtension({
                                 subjects[idx].videoB64 = videoUrl;
                                 saveState();
                                 renderSubjects();
+                                updateNodeSize();
                             });
                         });
                         videoActions.appendChild(vidAddBtn);
@@ -1410,12 +1443,12 @@ app.registerExtension({
                                 subjects[idx].videoB64 = null;
                                 saveState();
                                 renderSubjects();
+                                updateNodeSize();
                             });
                             videoActions.appendChild(vidDelBtn);
                         }
                         videoRow.appendChild(videoActions);
                         if (!typeMedia.video) videoRow.style.display = "none";
-                        card.appendChild(mediaRow);
                         card.appendChild(videoRow);
 
                         subjectList.appendChild(card);
@@ -1527,6 +1560,7 @@ app.registerExtension({
                 setTimeout(() => {
                     renderSubjects();
                     node.syncLayoutToNode();
+                    updateNodeSize();
                 }, 10);
 
                 // Override onResize for layout sync
