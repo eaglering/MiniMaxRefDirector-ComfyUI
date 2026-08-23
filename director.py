@@ -19,7 +19,11 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 # director 是纯函数（同一组输入必得同一输出）。
 # 缓存兜底：Easy-Use forLoop 展开时，director 输出可能被 compare 的 link 引用而重复调度执行。
 # 同一次 prompt 内同一输入直接返回缓存，避免 build_h3_prompt / LLM 生成被重复计算。
+# 缓存键含 prompt_id，跨 prompt（即使输入相同）不命中，保证修改 subject.py / prompt.py
+# 后无需重启 Python 即可生效。
 _director_cache: dict[str, io.NodeOutput] = {}
+# 最近一次执行的 prompt_id：跨 prompt 时整体清空旧缓存（旧条目不会再被命中，避免无界增长）
+_last_prompt_id: object = None
 
 
 class MiniMaxRefDirector(io.ComfyNode):
@@ -118,6 +122,23 @@ class MiniMaxRefDirector(io.ComfyNode):
             "frame_rate": frame_rate, "display_mode": display_mode,
             "outpu_resolution": outpu_resolution, "million_pixels": million_pixels,
         }
+        # 附加当前 prompt_id：跨 prompt（即使输入相同）不命中旧缓存，
+        # 保证修改 subject.py / prompt.py 后无需重启 Python 即可生效。
+        global _last_prompt_id
+        _current_prompt_id = None
+        try:
+            from comfy_execution.utils import get_executing_context
+            _ctx = get_executing_context()
+            _current_prompt_id = getattr(_ctx, "prompt_id", None)
+            key_data["_prompt_id"] = _current_prompt_id
+        except Exception:
+            pass
+        # 跨 prompt 清理：prompt_id 变化时旧缓存整体失效，避免无界增长
+        if _current_prompt_id is not None and _current_prompt_id != _last_prompt_id:
+            _last_prompt_id = _current_prompt_id
+            if _director_cache:
+                log.info("[MiniMaxRefDirector] prompt changed -> clear stale cache")
+                _director_cache.clear()
         cache_key = hashlib.md5(
             json.dumps(key_data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
         ).hexdigest()

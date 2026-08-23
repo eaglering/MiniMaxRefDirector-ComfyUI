@@ -354,20 +354,21 @@ export const state = {
 
     // 解析当前选中段（与 updateUIFromSelection 相同逻辑，含 preview/ghostTrack 场景）
     let seg = null;
+    let trackArr = null;
     if (this.selectedIndex >= 0) {
       if (this.selectionType === "audio") {
         const origSeg = this.timeline.audioSegments[this.selectedIndex];
         if (origSeg) {
           const previewIsAudio = this._ghostTrack === 'audio' || (this._previewSegments && this._ghostTrack === null && this.selectionType === 'audio');
-          const arr = (this._previewSegments && previewIsAudio) ? this._previewSegments : this.timeline.audioSegments;
-          seg = arr.find(s => s.id === origSeg.id) || origSeg;
+          trackArr = (this._previewSegments && previewIsAudio) ? this._previewSegments : this.timeline.audioSegments;
+          seg = trackArr.find(s => s.id === origSeg.id) || origSeg;
         }
       } else {
         const origSeg = this.timeline.segments[this.selectedIndex];
         if (origSeg) {
           const previewIsImage = this._ghostTrack === 'image' || (this._previewSegments && this._ghostTrack === null && this.selectionType === 'image');
-          const arr = (this._previewSegments && previewIsImage) ? this._previewSegments : this.timeline.segments;
-          seg = arr.find(s => s.id === origSeg.id) || origSeg;
+          trackArr = (this._previewSegments && previewIsImage) ? this._previewSegments : this.timeline.segments;
+          seg = trackArr.find(s => s.id === origSeg.id) || origSeg;
         }
       }
     }
@@ -389,6 +390,36 @@ export const state = {
       const origDur = seg.audioDurationFrames || seg.videoDurationFrames || seg.length;
       frames = Math.min(frames, Math.max(MIN_SEGMENT_LENGTH, origDur - (seg.trimStart || 0)));
     }
+
+    const oldLen = seg.length;
+    let delta = frames - oldLen;
+
+    // 长度变化后顺移后续段的起始位置，避免变长时覆盖下一个 segment。
+    // 顺移不能把后续段挤出总时长：后端会把超出范围段 clamp 成 0 帧直接跳过
+    // （director.py dur<=0 continue），即下一段 duration_frames 变成 0，不允许。
+    // 因此变长时按“每段至少保留 MIN_SEGMENT_LENGTH 帧”约束截断顺移量，
+    // 空间不足则当前段按最大可顺移量应用（与拖拽右边框 clamp 语义一致）。
+    const idx = trackArr.findIndex((s) => s.id === seg.id);
+    if (idx >= 0) {
+      if (delta > 0) {
+        const totalDur = this.getDurationFrames() || 0;
+        if (totalDur > 0) {
+          let maxDelta = delta;
+          for (let j = idx + 1; j < trackArr.length; j++) {
+            const s = trackArr[j];
+            // 顺移后该段 start 最多到 totalDur - MIN_SEGMENT_LENGTH（保留最小帧）
+            const room = totalDur - MIN_SEGMENT_LENGTH - s.start;
+            if (room < maxDelta) maxDelta = Math.max(0, room);
+          }
+          delta = Math.min(delta, maxDelta);
+        }
+      }
+      for (let j = idx + 1; j < trackArr.length; j++) {
+        trackArr[j].start += delta;
+      }
+      frames = oldLen + delta;
+    }
+
     seg.length = frames;
     input.value = this._formatDurationValue(frames);
 

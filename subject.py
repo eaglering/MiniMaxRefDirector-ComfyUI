@@ -153,13 +153,15 @@ class MiniMaxRefSubject(io.ComfyNode):
 
         for subj in subjects:
             entry = {
-                "name": str(subj.get("name", ""))[:128],
-                "description": str(subj.get("description", ""))[:1024],
+                "name": str(subj.get("name", "")),
+                "audioRef": str(subj.get("audioRef", "")),
+                "description": str(subj.get("description", "")),
                 "imageFile": str(subj.get("imageFile", "")),
                 "audioFile": str(subj.get("audioFile", "")),
-                "type": str(subj.get("type", "") or "Subject")[:32],
-                "relationship": str(subj.get("relationship", "") or "fully_preserved")[:64],
-                "audio_relationship": str(subj.get("audio_relationship", "") or "reference")[:64],
+                "videoFile": str(subj.get("videoFile", "")),
+                "type": str(subj.get("type", "")),
+                "relationship": str(subj.get("relationship", "")),
+                "retention": str(subj.get("retention", "")),
             }
             output["subjects"].append(entry)
 
@@ -187,6 +189,7 @@ class MiniMaxRefSubject(io.ComfyNode):
         for s in output["subjects"]:
             s["imageFile"] = _resolve_file(s["imageFile"])
             s["audioFile"] = _resolve_file(s["audioFile"])
+            s["videoFile"] = _resolve_file(s["videoFile"])
 
         # Unified config: VLM opts (consumed by the H3 prompt generator) + subject data.
         opts = {
@@ -205,6 +208,7 @@ class MiniMaxRefSubject(io.ComfyNode):
             "subject_count": subject_count,
         }
 
+        log.info(f"[MiniMaxRefSubject] config: {json.dumps(config, indent=2)}")
         return io.NodeOutput(
             config,
         )

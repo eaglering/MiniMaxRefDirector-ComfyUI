@@ -495,7 +495,9 @@ def build_h3_subject_bindings(
             speaker = speaker_ids.get(name, "")
             speaker_suffix = f" ({speaker})" if speaker else ""
 
-            if not audio_relationship:
+            if not audio_relationship or not audio_description.strip():
+                # 引用模式：voice-timbre reference，绑定目标说话者 (Sx)。
+                # 定义模式缺少 description 时也回退到引用模式，避免输出只有标签的残缺行（如 "<Audio 1> "）。
                 subject_definitions.append(
                     f"{audio_label} is the voice-timbre reference for {label}{speaker_suffix}."
                 )
