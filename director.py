@@ -200,7 +200,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
             next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
             prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
-                                         raw_prompt=h3_prompt_json, previous_timeline_segment=prev_seg,
+                                         prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
                                          timeline_segment=seg, next_timeline_segment=next_seg)
             entry = {
                 "prompt": prompt_res["prompt"],

@@ -107,7 +107,7 @@ const MSCSS = `
     line-height: 1.5;
     text-align: left;
     user-select: none;
-    min-width: 40px;
+    min-width: 60px;
 }
 .ref-ms-input {
     flex: 1;
@@ -165,6 +165,37 @@ const MSCSS = `
 }
 .ref-ms-textarea:focus {
     border-color: #888;
+}
+.ref-ms-cell {
+    flex: 1 1 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+}
+.ref-ms-retention {
+    flex: 1;
+    min-width: 0;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+    resize: none;
+    min-height: 30px;
+    line-height: 1.35;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+.ref-ms-retention:focus {
+    border-color: #888;
+}
+.ref-ms-input.required-missing {
+    border-color: #e0533d;
 }
 /* --- Type tabs --- */
 .ref-ms-tabs {
@@ -230,8 +261,8 @@ const MSCSS = `
 }
 /* --- Media box styles (attached to desc row, right-aligned image & audio) --- */
 .ref-ms-media-box {
-    width: 56px;
-    height: 56px;
+    width: 90px;
+    height: 90px;
     border: 1px dashed #444;
     border-radius: 6px;
     display: flex;
@@ -556,7 +587,7 @@ function mentionMedia(s, size) {
         background: "#1e3a5f",
         color: "#38bdf8",
     };
-    if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile)) {
+    if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile) || (s.audioRef && t === "Subject")) {
         const el = document.createElement("span");
         el.title = "音频";
         el.textContent = "♪";
@@ -604,9 +635,10 @@ function acceptMention() {
 function updateMention(ta, idx, subjects, save) {
     const q = mentionQuery(ta);
     if (!q) { closeMention(); return; }
+    const allowed = REF_MENTION_TYPES[subjects[idx].type] || [];
     const items = subjects
         .map((s, i) => ({ s, i }))
-        .filter(({ s, i }) => i !== idx && (s.name || "").trim() && s.name.toLowerCase().includes(q.query.toLowerCase()));
+        .filter(({ s, i }) => i !== idx && allowed.includes(s.type) && (s.name || "").trim() && s.name.toLowerCase().includes(q.query.toLowerCase()));
     const pop = buildMentionPopup();
     pop.innerHTML = "";
     mentionCtx = { ta, idx, start: q.start, query: q.query, items, active: 0, save };
@@ -666,54 +698,57 @@ function attachMention(ta, idx, subjects, save) {
 }
 
 // 图像类主体（Subject / Picture / Video）的关系选项
-const REF_RELATIONSHIPS_PRESERVED = [
-    ["fully_preserved", "fully preserved"],
-    ["partially_preserved", "partially preserved"],
-    ["attribute_transfer", "attribute transfer"],
-    ["weak_reference", "weak reference"],
+const REF_RELATIONSHIPS_SUBJECT = [
+    ["fully_preserved", "fully preserved", "The defined role of the referenced content is fully preserved"],
+    ["partially_preserved", "partially preserved", "The referenced content is still used, but some defined characteristics are changed or only partially retained"],
+    ["attribute_transfer", "attribute transfer", "Referenced characteristics are transferred to a different identifiable target subject"],
+    ["weak_reference", "weak reference", "Only broad similarity in style, category, composition, or atmosphere is retained"],
+];
+
+const REF_RELATIONSHIPS_PV = [
+    ["none", "none", "For subject reference only"],
+    ["fully_preserved", "fully preserved", "The defined role of the referenced content is fully preserved"],
+    ["partially_preserved", "partially preserved", "The referenced content is still used, but some defined characteristics are changed or only partially retained"],
+    ["attribute_transfer", "attribute transfer", "Referenced characteristics are transferred to a different identifiable target subject"],
+    ["weak_reference", "weak reference", "Only broad similarity in style, category, composition, or atmosphere is retained"],
 ];
 
 // Audio 的关系选项
-const REF_RELATIONSHIPS_COPY = [
-    ["fully_copy", "fully copy"],
-    ["partially_copy", "partially copy"],
-    ["reference", "reference"],
-    ["weak_reference", "weak reference"],
-];
-
-// 音频参考类型（audio_rel 下拉，独立字段 audio_relationship）：
-// 与后端 lib/prompt.py _AUDIO_RELATION_TEXT 键保持一致
 const REF_RELATIONSHIPS_AUDIO = [
-    ["reference", "reference"],
-    ["fully_copy", "fully copy"],
-    ["partially_copy", "partially copy"],
-    ["weak_reference", "weak reference"],
+    ["none", "none", "For sound‑effect or subject reference only"],
+    ["fully_copy", "fully copy", "The complete source audio serves as the target video's complete final audio track"],
+    ["partially_copy", "partially copy", "Only part of the timeline or selected audio layers are copied, or other sounds are added, removed, or replaced after copying"],
+    ["reference", "reference", "The signal is not copied directly; only timbre, rhythm, music style, dialogue content, or sound texture is referenced"],
+    ["weak_reference", "weak reference", "Only broad similarity in category or atmosphere is retained"],
 ];
 
 // type → 关系选项组（联动）
 const REF_TYPE_RELATIONSHIPS = {
-    Subject: REF_RELATIONSHIPS_PRESERVED,
-    Picture: REF_RELATIONSHIPS_PRESERVED,
-    Video: REF_RELATIONSHIPS_PRESERVED,
-    Audio: REF_RELATIONSHIPS_COPY,
+    Subject: REF_RELATIONSHIPS_SUBJECT,
+    Picture: REF_RELATIONSHIPS_PV,
+    Video: REF_RELATIONSHIPS_PV,
+    Audio: REF_RELATIONSHIPS_AUDIO,
 };
 
 // type → relationship 默认值
 function refDefaultRelationship(type) {
-    return (REF_TYPE_RELATIONSHIPS[type || "Subject"] || REF_RELATIONSHIPS_PRESERVED)[0][0];
-}
-
-// audio_rel 默认值（后端默认 "reference"）
-function refDefaultAudioRelationship() {
-    return REF_RELATIONSHIPS_AUDIO[0][0];
+    return (REF_TYPE_RELATIONSHIPS[type || "Subject"])[0][0];
 }
 
 // type → 可上传的媒体类型（联动显示）
 const REF_TYPE_MEDIA = {
-    Subject: { image: true, audio: true, video: false },
+    Subject: { image: false, audio: false, video: false },
     Picture: { image: true, audio: false, video: false },
     Audio: { image: false, audio: true, video: false },
     Video: { image: false, audio: false, video: true },
+};
+
+// type → 可 @ 引用的主体类型（mention 过滤）
+const REF_MENTION_TYPES = {
+    Subject: ["Picture", "Video"],
+    Picture: ["Picture"],
+    Video: ["Picture", "Video"],
+    Audio: ["Audio"],
 };
 
 app.registerExtension({
@@ -797,7 +832,7 @@ app.registerExtension({
                     const nodeWidth = node.size?.[0] || 475;
                     const innerWidth = Math.max(10, nodeWidth - 30); // DOM widget 内容宽（与 .ref-ms-wrapper 一致）
                     const listWidth = Math.max(1, innerWidth - 12); // 列表可用宽（wrapper padding 6px ×2）
-                    const estCardHeight = 215; // per subject card (image/audio boxes + video row)
+                    const estCardHeight = 235; // per subject card (image/audio boxes + retention + video row)
                     const extras = 206; // global prompt area + tabs + add button + footer + gaps
                     const visibleCount = subjects.filter(s => (s.type || "Subject") === activeTab).length;
                     if (visibleCount === 0) return [innerWidth, extras];
@@ -831,6 +866,8 @@ app.registerExtension({
                             relationship: s.relationship || refDefaultRelationship(s.type),
                             imageFile: s.imageFile || "",
                             audioFile: s.audioFile || "",
+                            audioRef: s.audioRef || "",
+                            retention: s.retention || "",
                             videoFile: s.videoFile || "",
                         }));
                         window.dispatchEvent(new CustomEvent("ref:subjects-changed"));
@@ -853,6 +890,8 @@ app.registerExtension({
                                         imageFile: s.imageFile || "",
                                         imageB64: s.imageB64 || viewUrl(s.imageFile, "minimaxrefdirector"),
                                         audioFile: s.audioFile || "",
+                                        audioRef: s.audioRef || "",
+                                        retention: s.retention || "",
                                         videoFile: s.videoFile || "",
                                         videoB64: s.videoB64 || viewUrl(s.videoFile, "minimaxrefdirector"),
                                     });
@@ -871,7 +910,7 @@ app.registerExtension({
 
                     if (subjects.length === 0) {
                         while (subjects.length < subjectCount) {
-                            subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", audio_relationship: refDefaultAudioRelationship(), imageFile: "", audioFile: "", videoFile: "" });
+                            subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", audioRef: "", retention: "", imageFile: "", audioFile: "", videoFile: "" });
                         }
                     } else {
                         subjectCount = subjects.length;
@@ -1002,6 +1041,8 @@ app.registerExtension({
                             relationship: s.relationship || refDefaultRelationship(s.type),
                             imageFile: s.imageFile,
                             audioFile: s.audioFile,
+                            audioRef: s.audioRef,
+                            retention: s.retention,
                             videoFile: s.videoFile,
                         }))
                     };
@@ -1064,80 +1105,71 @@ app.registerExtension({
                         header.appendChild(removeBtn);
                         card.appendChild(header);
 
-                        // Name
-                        const nameRow = document.createElement("div");
-                        nameRow.className = "ref-ms-row";
+                        // Name + Rel（并排各 50%，均必填）
+                        const topRow = document.createElement("div");
+                        topRow.className = "ref-ms-row";
+
+                        const nameCell = document.createElement("div");
+                        nameCell.className = "ref-ms-cell";
                         const nameLabel = document.createElement("span");
-                        nameLabel.className = "ref-ms-label";
-                        nameLabel.textContent = "Name";
+                        nameLabel.className = "ref-ms-label-sm";
+                        nameLabel.textContent = "Name *";
+                        nameLabel.title = "Required";
                         const nameInput = document.createElement("input");
                         nameInput.className = "ref-ms-input";
                         nameInput.type = "text";
                         nameInput.placeholder = "Subject name...";
                         nameInput.value = subj.name || "";
                         nameInput.maxLength = 128;
+                        nameInput.title = "Required";
+                        if (!(subj.name || "").trim()) nameInput.classList.add("required-missing");
                         nameInput.addEventListener("input", () => {
                             subjects[idx].name = nameInput.value;
+                            nameInput.classList.toggle("required-missing", !nameInput.value.trim());
                             saveState();
                         });
-                        nameRow.appendChild(nameLabel);
-                        nameRow.appendChild(nameInput);
-                        card.appendChild(nameRow);
+                        nameCell.appendChild(nameLabel);
+                        nameCell.appendChild(nameInput);
 
-                        // Relationship（选项组随当前 tab 类型固定：Subject/Picture/Video 用 preserved 系，Audio 用 copy 系）
-                        const metaRow = document.createElement("div");
-                        metaRow.className = "ref-ms-row";
+                        const relCell = document.createElement("div");
+                        relCell.className = "ref-ms-cell";
                         const relLabel = document.createElement("span");
                         relLabel.className = "ref-ms-label-sm";
-                        relLabel.textContent = "Rel";
+                        relLabel.textContent = "Rel *";
+                        relLabel.title = "Required";
                         const relSelect = document.createElement("select");
                         relSelect.className = "ref-ms-select";
-                        const relOptions = REF_TYPE_RELATIONSHIPS[activeTab] || REF_RELATIONSHIPS_PRESERVED;
+                        const relOptions = REF_TYPE_RELATIONSHIPS[activeTab] || REF_RELATIONSHIPS_SUBJECT;
                         const relDefault = relOptions[0][0];
-                        relOptions.forEach(([val, label]) => {
+                        relOptions.forEach(([val, label, description]) => {
                             const opt = document.createElement("option");
                             opt.value = val;
                             opt.textContent = label;
+                            opt.title = description || "";
                             opt.selected = (subj.relationship || relDefault) === val;
                             relSelect.appendChild(opt);
                         });
                         relSelect.addEventListener("change", () => {
                             subjects[idx].relationship = relSelect.value;
                             saveState();
+                            syncRetentionVisibility();
                         });
-                        metaRow.appendChild(relLabel);
-                        metaRow.appendChild(relSelect);
-                        // 音频参考类型（audio_rel）：与 Rel 同一行，独立字段 audio_relationship
-                        const audioRelLabel = document.createElement("span");
-                        audioRelLabel.className = "ref-ms-label-sm";
-                        audioRelLabel.textContent = "A-Rel";
-                        const audioRelSelect = document.createElement("select");
-                        audioRelSelect.className = "ref-ms-select";
-                        const audioRelDefault = refDefaultAudioRelationship();
-                        REF_RELATIONSHIPS_AUDIO.forEach(([val, label]) => {
-                            const opt = document.createElement("option");
-                            opt.value = val;
-                            opt.textContent = label;
-                            opt.selected = (subj.audio_relationship || audioRelDefault) === val;
-                            audioRelSelect.appendChild(opt);
-                        });
-                        audioRelSelect.addEventListener("change", () => {
-                            subjects[idx].audio_relationship = audioRelSelect.value;
-                            saveState();
-                        });
-                        metaRow.appendChild(audioRelLabel);
-                        metaRow.appendChild(audioRelSelect);
-                        card.appendChild(metaRow);
+                        relCell.appendChild(relLabel);
+                        relCell.appendChild(relSelect);
+
+                        topRow.appendChild(nameCell);
+                        topRow.appendChild(relCell);
+                        card.appendChild(topRow);
 
                         // Description
                         const descRow = document.createElement("div");
                         descRow.className = "ref-ms-row";
                         const descLabel = document.createElement("span");
                         descLabel.className = "ref-ms-label";
-                        descLabel.textContent = "Desc";
+                        descLabel.textContent = "Definition";
                         const descInput = document.createElement("textarea");
                         descInput.className = "ref-ms-textarea";
-                        descInput.placeholder = "Subject description... (type @ to mention another subject)";
+                        descInput.placeholder = "Subject definition... (type @ to mention another subject)";
                         descInput.value = subj.description || "";
                         descInput.rows = 1;
                         descInput.addEventListener("input", () => {
@@ -1207,63 +1239,127 @@ app.registerExtension({
                         if (!typeMedia.image) imgBox.style.display = "none";
                         mediaRow.appendChild(imgBox);
 
-                        // ----- Audio box -----
-                        const audioBox = document.createElement("div");
-                        audioBox.className = "ref-ms-media-box";
-                        if (subj.audioFile) {
-                            audioBox.classList.add("has-file");
-                            const aIcon = document.createElement("div");
-                            aIcon.className = "ref-ms-media-icon";
-                            aIcon.style.cssText = "color:#38bdf8;";
-                            aIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg><span style="font-size:8px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${basename(subj.audioFile)}</span>`;
-                            audioBox.appendChild(aIcon);
-                        } else {
-                            const icon = document.createElement("div");
-                            icon.className = "ref-ms-media-icon";
-                            icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg><span>Audio</span>`;
-                            audioBox.appendChild(icon);
+                        // ----- Audio box（Audio 类型保留上传；Subject 类型改为下方的 Audio Ref 选择器）-----
+                        if (subj.type !== "Subject") {
+                            const audioBox = document.createElement("div");
+                            audioBox.className = "ref-ms-media-box";
+                            if (subj.audioFile) {
+                                audioBox.classList.add("has-file");
+                                const aIcon = document.createElement("div");
+                                aIcon.className = "ref-ms-media-icon";
+                                aIcon.style.cssText = "color:#38bdf8;";
+                                aIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg><span style="font-size:8px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${basename(subj.audioFile)}</span>`;
+                                audioBox.appendChild(aIcon);
+                            } else {
+                                const icon = document.createElement("div");
+                                icon.className = "ref-ms-media-icon";
+                                icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg><span>Audio</span>`;
+                                audioBox.appendChild(icon);
+                            }
+
+                            const audioOverlay = document.createElement("div");
+                            audioOverlay.className = "ref-ms-media-overlay";
+
+                            const audAddBtn = document.createElement("button");
+                            audAddBtn.className = "ref-ms-media-action";
+                            audAddBtn.textContent = subj.audioFile ? "Change" : "Add";
+                            audAddBtn.addEventListener("click", (e) => {
+                                e.stopPropagation();
+                                createFileInput("audio/*", (filename) => {
+                                    subjects[idx].audioFile = filename;
+                                    saveState();
+                                    renderSubjects();
+                                });
+                            });
+                            audioOverlay.appendChild(audAddBtn);
+
+                            if (subj.audioFile) {
+                                const playBtn = document.createElement("button");
+                                playBtn.className = "ref-ms-media-action play-btn";
+                                playBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
+                                playBtn.addEventListener("click", (e) => {
+                                    e.stopPropagation();
+                                    playAudio(subj.audioFile, playBtn);
+                                });
+                                audioOverlay.appendChild(playBtn);
+
+                                const audDelBtn = document.createElement("button");
+                                audDelBtn.className = "ref-ms-media-action del";
+                                audDelBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+                                audDelBtn.addEventListener("click", (e) => {
+                                    e.stopPropagation();
+                                    subjects[idx].audioFile = null;
+                                    saveState();
+                                    renderSubjects();
+                                });
+                                audioOverlay.appendChild(audDelBtn);
+                            }
+                            audioBox.appendChild(audioOverlay);
+                            if (!typeMedia.audio) audioBox.style.display = "none";
+                            mediaRow.appendChild(audioBox);
                         }
 
-                        const audioOverlay = document.createElement("div");
-                        audioOverlay.className = "ref-ms-media-overlay";
-
-                        const audAddBtn = document.createElement("button");
-                        audAddBtn.className = "ref-ms-media-action";
-                        audAddBtn.textContent = subj.audioFile ? "Change" : "Add";
-                        audAddBtn.addEventListener("click", (e) => {
-                            e.stopPropagation();
-                            createFileInput("audio/*", (filename) => {
-                                subjects[idx].audioFile = filename;
+                        // ----- Retention textarea（Rel 下，各类型均有）-----
+                        const buildRetentionInput = () => {
+                            const ta = document.createElement("textarea");
+                            ta.className = "ref-ms-retention";
+                            ta.placeholder = "the young man's short wavy brown hair and dark-grey hoodie are retained.";
+                            ta.value = subj.retention || "";
+                            ta.rows = 1;
+                            ta.spellcheck = false;
+                            ta.addEventListener("input", () => {
+                                subjects[idx].retention = ta.value;
                                 saveState();
-                                renderSubjects();
                             });
-                        });
-                        audioOverlay.appendChild(audAddBtn);
+                            return ta;
+                        };
 
-                        if (subj.audioFile) {
-                            const playBtn = document.createElement("button");
-                            playBtn.className = "ref-ms-media-action play-btn";
-                            playBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
-                            playBtn.addEventListener("click", (e) => {
-                                e.stopPropagation();
-                                playAudio(subj.audioFile, playBtn);
+                        // ----- Subject：Audio Ref 选择器（50% 宽，label inline）-----
+                        if (subj.type === "Subject") {
+                            const audioRefRow = document.createElement("div");
+                            audioRefRow.className = "ref-ms-row";
+                            audioRefRow.style.width = "50%";
+                            const audioRefLabel = document.createElement("span");
+                            audioRefLabel.className = "ref-ms-label-sm";
+                            audioRefLabel.textContent = "Audio";
+                            const audioRefSelect = document.createElement("select");
+                            audioRefSelect.className = "ref-ms-select";
+                            const noneOpt = document.createElement("option");
+                            noneOpt.value = "";
+                            noneOpt.textContent = "None";
+                            audioRefSelect.appendChild(noneOpt);
+                            subjects.forEach((a) => {
+                                if (a.type === "Audio" && a.name.trim()) {
+                                    const opt = document.createElement("option");
+                                    opt.value = a.name;
+                                    opt.textContent = a.name;
+                                    opt.selected = (subj.audioRef || "") === a.name;
+                                    audioRefSelect.appendChild(opt);
+                                }
                             });
-                            audioOverlay.appendChild(playBtn);
-
-                            const audDelBtn = document.createElement("button");
-                            audDelBtn.className = "ref-ms-media-action del";
-                            audDelBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
-                            audDelBtn.addEventListener("click", (e) => {
-                                e.stopPropagation();
-                                subjects[idx].audioFile = null;
+                            audioRefSelect.addEventListener("change", () => {
+                                subjects[idx].audioRef = audioRefSelect.value;
                                 saveState();
-                                renderSubjects();
                             });
-                            audioOverlay.appendChild(audDelBtn);
+                            audioRefRow.appendChild(audioRefLabel);
+                            audioRefRow.appendChild(audioRefSelect);
+                            card.appendChild(audioRefRow);
                         }
-                        audioBox.appendChild(audioOverlay);
-                        if (!typeMedia.audio) audioBox.style.display = "none";
-                        mediaRow.appendChild(audioBox);
+
+                        // ----- Retention（100% 宽度全行，label inline）-----
+                        const retentionRow = document.createElement("div");
+                        retentionRow.className = "ref-ms-row";
+                        const retentionLabel = document.createElement("span");
+                        retentionLabel.className = "ref-ms-label";
+                        retentionLabel.textContent = "Retention";
+                        retentionRow.appendChild(retentionLabel);
+                        retentionRow.appendChild(buildRetentionInput());
+                        // relationship 为 none 时隐藏 Retention 输入
+                        const syncRetentionVisibility = () => {
+                            retentionRow.style.display = relSelect.value === "none" ? "none" : "";
+                        };
+                        syncRetentionVisibility();
+                        card.appendChild(retentionRow);
 
                         // ----- Video row (type=Video, 单独一行大图预览/替换/删除) -----
                         const videoRow = document.createElement("div");
@@ -1370,7 +1466,7 @@ app.registerExtension({
                 });
 
                 addBtn.addEventListener("click", () => {
-                    subjects.push({ name: "", description: "", type: activeTab, relationship: refDefaultRelationship(activeTab), audio_relationship: refDefaultAudioRelationship(), imageFile: "", audioFile: "", videoFile: "" });
+                    subjects.push({ name: "", description: "", type: activeTab, relationship: refDefaultRelationship(activeTab), audioRef: "", retention: "", imageFile: "", audioFile: "", videoFile: "" });
                     subjectCount = subjects.length;
                     renderSubjects();
                     saveState();
@@ -1407,7 +1503,7 @@ app.registerExtension({
                             // 按文件类型分发到最后一个空卡片，否则新建对应类型的卡片
                             const last = subjects[subjects.length - 1];
                             if (!last || last.name || last[field]) {
-                                subjects.push({ name: "", description: "", type, relationship: refDefaultRelationship(type), audio_relationship: refDefaultAudioRelationship(), imageFile: "", imageB64: "", audioFile: "", videoFile: "", videoB64: "" });
+                                subjects.push({ name: "", description: "", type, relationship: refDefaultRelationship(type), audioRef: "", retention: "", imageFile: "", imageB64: "", audioFile: "", videoFile: "", videoB64: "" });
                                 subjectCount = subjects.length;
                             }
                             const target = subjects[subjects.length - 1];

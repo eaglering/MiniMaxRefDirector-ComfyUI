@@ -212,69 +212,85 @@ function subjectMediaThumb(s, size = 22) {
 
 // 右侧 textarea 默认 JSON 数据结构（→ 生成结果会替代它）
 const DEFAULT_PROMPT_JSON = {
+  summary: "",
   detailed_description: "",
   overall_soundscape: "",
   non_diegetic_music: "",
 };
 
-// 将 prompt JSON 按展示规则格式化为 textarea 文本
-// 规则：
-//   detailed_description:
-//   [Shot 2]{shot2_description}（如果存在）
-//   ...
-//   {detailed_description}
-//   overall_soundscape:
-//   {overall_soundscape}或者N/A
-//   non_diegetic_music:
-//   {non_diegetic_music}N/A
-function formatPromptJson(data) {
-  const d = data && typeof data === "object" ? data : {};
-  const val = (v) => (v != null && String(v).trim() !== "" ? String(v) : "N/A");
-  const plain = (v) => (v != null ? String(v) : "");
-  const lines = ["detailed_description:"];
-  lines.push(plain(d.detailed_description) + "\n");
-  lines.push("overall_soundscape:");
-  lines.push(val(d.overall_soundscape) + "\n");
-  lines.push("non_diegetic_music:");
-  lines.push(val(d.non_diegetic_music) + "\n");
-  return lines.join("\n");
+// H3 summary 任务类型标签（点击填入 summary 输入框光标处，title 提示 When to use it）
+const TASK_TYPES = [
+  { label: "keyframe completion", title: "When to use it: An image serves as the target video's first frame, keyframe, last frame, edited keyframe, or another concrete frame anchor" },
+  { label: "reference generation", title: "When to use it: An image, video, or audio asset provides generation guidance for a character, scene, style, action, camera movement, storyboard, and so on, without serving as a concrete frame or as the source video being edited or continued" },
+  { label: "video editing", title: "When to use it: An existing source video is directly modified; editing an image or generating between still keyframes does not belong to this type" },
+  { label: "video continuation", title: "When to use it: New content continues, extends, resumes, or transitions from an existing source video" },
+  { label: "audio reuse", title: "When to use it: The same audio signal is reused in full or in part" },
+  { label: "audio reference", title: "When to use it: The audio signal is not copied directly; only its music style, timbre, dialogue or lyric content, sound-effect texture, beat, or continuity is referenced" },
+];
+
+// 将 h3PromptJson / rightText 统一规范化为 JSON 对象（兼容旧 string 数据）。
+// 旧数据为纯文本展示格式（summary: / detailed_description: ...），
+// 现统一存储/编辑为 JSON 对象 { summary, detailed_description, overall_soundscape, non_diegetic_music }。
+function normalizePromptJson(v) {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return Object.assign({}, DEFAULT_PROMPT_JSON, v);
+  }
+  if (typeof v === "string" && v.trim()) {
+    return Object.assign({}, DEFAULT_PROMPT_JSON, parsePromptText(v));
+  }
+  return Object.assign({}, DEFAULT_PROMPT_JSON);
 }
 
-// 将右侧 textarea 的展示文本反向解析回 JSON 对象
-// （与 formatPromptJson 的规则对称，便于按钮增删 shotX_description）
+// 将旧的纯文本展示格式（summary: / detailed_description: ...）反向解析回 JSON 对象，
+// 仅用于兼容历史 string 数据（normalizePromptJson 内部调用）。
 function parsePromptText(text) {
-  const obj = { detailed_description: "", overall_soundscape: "", non_diegetic_music: "" };
+  const obj = { summary: "", detailed_description: "", overall_soundscape: "", non_diegetic_music: "" };
   const lines = (text || "").split("\n");
-  let section = "detail"; // detail | overall | music
+  let section = "summary"; // summary | detail | overall | music
+  const summaryLines = [];
   const detailLines = [];
+  const overallLines = [];
+  const musicLines = [];
   for (const line of lines) {
+    if (line.startsWith("summary:")) { section = "summary"; continue; }
     if (line.startsWith("detailed_description:")) { section = "detail"; continue; }
     if (line.startsWith("overall_soundscape:")) { section = "overall"; continue; }
     if (line.startsWith("non_diegetic_music:")) { section = "music"; continue; }
-    if (section === "detail") {
+    if (section === "summary") {
+      if (line.trim() !== "" && line.trim() !== "N/A") summaryLines.push(line);
+    } else if (section === "detail") {
       detailLines.push(line);
     } else if (section === "overall") {
-      if (line.trim() !== "" && line.trim() !== "N/A") obj.overall_soundscape = line;
+      if (line.trim() !== "" && line.trim() !== "N/A") overallLines.push(line);
     } else if (section === "music") {
-      if (line.trim() !== "" && line.trim() !== "N/A") obj.non_diegetic_music = line;
+      if (line.trim() !== "" && line.trim() !== "N/A") musicLines.push(line);
     }
   }
+  obj.summary = summaryLines.join("\n");
   obj.detailed_description = detailLines.join("\n");
+  obj.overall_soundscape = overallLines.join("\n");
+  obj.non_diegetic_music = musicLines.join("\n");
   return obj;
 }
 
-// 更新右侧文本中某个字段
-function updateShotField(text, key, value) {
-  const obj = parsePromptText(text);
-  obj[key] = value;
-  return formatPromptJson(obj);
+// 将 JSON 对象各字段拼接为纯文本（供 parseResources 正则提取 <@name> / <#name:...> 引用）
+function promptJsonText(obj) {
+  const d = obj && typeof obj === "object" ? obj : {};
+  return [d.summary, d.detailed_description, d.overall_soundscape, d.non_diegetic_music]
+    .filter((v) => typeof v === "string")
+    .join("\n");
 }
 
-// 从右侧文本中删除某个字段
-function removeShotField(text, key) {
-  const obj = parsePromptText(text);
-  delete obj[key];
-  return formatPromptJson(obj);
+// 更新右侧 JSON 中某个字段（返回新对象触发 setState）
+function updateShotField(obj, key, value) {
+  return Object.assign({}, obj, { [key]: value });
+}
+
+// 从右侧 JSON 中删除某个字段
+function removeShotField(obj, key) {
+  const next = Object.assign({}, obj);
+  delete next[key];
+  return next;
 }
 
 // 素材追加计数器：每次 add_material 通知都会追加素材（不去重），
@@ -578,7 +594,7 @@ function NumInput({ def, value, onCommit }) {
 
 export function TransferPanel({ director }) {
   const [leftText, setLeftText] = useState(() => director?.promptInput?.value || "");
-  const [rightText, setRightText] = useState(() => formatPromptJson(DEFAULT_PROMPT_JSON));
+  const [rightText, setRightText] = useState(() => ({ ...DEFAULT_PROMPT_JSON }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [subjects, setSubjects] = useState([]);
@@ -647,7 +663,11 @@ export function TransferPanel({ director }) {
 
   const leftRef = useRef(null);
   const stripRef = useRef(null); // 素材条横向滚动容器
-  const rightRef = useRef(null);
+  // 右侧 H3 Prompt 四分区输入框 ref（summary / detailed_description / overall_soundscape / non_diegetic_music）
+  const rightSummaryRef = useRef(null);
+  const rightDetailRef = useRef(null);
+  const rightOverallRef = useRef(null);
+  const rightMusicRef = useRef(null);
   const debounceRef = useRef(null);
   const bindDebounceRef = useRef(null); // 主体绑定接口请求防抖
   const bindSeqRef = useRef(0); // 绑定请求序号：只应用最新一次请求的返回，防并发乱序覆盖
@@ -676,11 +696,7 @@ export function TransferPanel({ director }) {
         if (segId && segId !== lastSegIdRef.current) {
           lastSegIdRef.current = segId;
           // 无 segment JSON 时回退默认模板，避免残留上一个 segment 的内容
-          setRightText(
-            seg && typeof seg.h3PromptJson === "string"
-              ? seg.h3PromptJson
-              : formatPromptJson(DEFAULT_PROMPT_JSON)
-          );
+          setRightText(normalizePromptJson(seg?.h3PromptJson));
         } else if (!segId) {
           lastSegIdRef.current = null;
         }
@@ -696,15 +712,15 @@ export function TransferPanel({ director }) {
         ? (initSeg.prompt || "")
         : (director.promptInput?.value || "");
       setLeftText(initPrompt);
-      // 优先从当前 segment 的 h3PromptJson 恢复右侧内容；
+      // 优先从当前 segment 的 h3PromptJson 恢复右侧内容（string 或 JSON 对象均兼容）；
       // 无 segment JSON 时兜底从节点 properties 恢复旧版 __rightPromptText（兼容旧 workflow）
-      const segJson = initSeg && typeof initSeg.h3PromptJson === "string" ? initSeg.h3PromptJson : "";
+      const segJson = initSeg && initSeg.h3PromptJson;
       if (segJson) {
         lastSegIdRef.current = initSeg.id;
-        setRightText(segJson);
+        setRightText(normalizePromptJson(segJson));
       } else {
         const savedRight = director.node?.properties?.__rightPromptText;
-        if (typeof savedRight === "string" && savedRight) setRightText(savedRight);
+        if (typeof savedRight === "string" && savedRight) setRightText(normalizePromptJson(savedRight));
       }
     }
     return () => {
@@ -822,7 +838,7 @@ export function TransferPanel({ director }) {
     if (!aliveRef.current || !director?.node) return;
     const seg = curSeg;
     if (!seg || typeof seg.id === "undefined") return;
-    if (seg.h3PromptJson !== rightText) {
+    if (JSON.stringify(seg.h3PromptJson || {}) !== JSON.stringify(rightText)) {
       seg.h3PromptJson = rightText;
       // 经外壳 commitChanges 序列化（...rest 保留 h3PromptJson 自定义字段）
       director.commitChanges(true);
@@ -849,7 +865,7 @@ export function TransferPanel({ director }) {
       setResources(resourcesFromBindings(bindData, curSeg));
       return;
     }
-    setResources(parseResources(rightText, subjects));
+    setResources(parseResources(promptJsonText(rightText), subjects));
   }, [bindData, rightText, subjects, addVersion, curSeg]);
 
   // 右侧 H3 JSON / 主体 / 当前选中段 / 时间轴变化时 debounce 请求后端
@@ -908,7 +924,9 @@ export function TransferPanel({ director }) {
       }
       const body = {
         subject_data: { subjects: subjects || [] },
-        raw_prompt: rightText,
+        // prompt_json：JSON 格式（rightText 即 JSON 对象，直接发送，
+        // 后端 build_h3_subject_bindings 按 JSON 解析并返回对应绑定值替代）
+        prompt_json: rightText,
         timeline_segment: seg
           ? {
               type: seg.type,
@@ -969,7 +987,7 @@ export function TransferPanel({ director }) {
           ? (pd.detailed_description || JSON.stringify(pd))
           : String(pd || "");
         // 追加而非覆盖，避免丢失已有 detailed_description
-        const cur = parsePromptText(rightText).detailed_description || "";
+        const cur = (rightText && rightText.detailed_description) || "";
         const merged = cur.trim() ? cur.trim() + "\n" + desc : desc;
         setRightText(updateShotField(rightText, "detailed_description", merged));
       } else {
@@ -1015,16 +1033,8 @@ export function TransferPanel({ director }) {
       const data = await res.json();
       console.log("[Transfer] generate_prompt_json ->", data);
       if (data.success) {
-        let obj = data.json_data;
-        if (typeof obj === "string") {
-          try { obj = JSON.parse(obj); } catch { /* 保留原始字符串 */ }
-        }
-        const text =
-          obj && typeof obj === "object"
-            ? formatPromptJson(obj)
-            : typeof data.json_data === "string"
-              ? data.json_data
-              : JSON.stringify(data.json_data, null, 2);
+        // 生成结果统一规范化为 JSON 对象（兼容后端返回 string / 对象）
+        const text = normalizePromptJson(data.json_data);
         // 生成结果写回发起请求时的 segment 的 H3 prompt JSON（随 timeline_data 持久化）
         if (targetSeg && typeof targetSeg.id !== "undefined") {
           targetSeg.h3PromptJson = text;
@@ -1055,7 +1065,11 @@ export function TransferPanel({ director }) {
     return null;
   }
 
-  function openMenu(e, side) {
+  // 右侧四分区 field → prompt 字段 key / ref（左侧为 "left"）
+  const RIGHT_FIELD_KEYS = { summary: "summary", detail: "detailed_description", overall: "overall_soundscape", music: "non_diegetic_music" };
+  const RIGHT_FIELD_REFS = { summary: rightSummaryRef, detail: rightDetailRef, overall: rightOverallRef, music: rightMusicRef };
+
+  function openMenu(e, side, field) {
     const el = e.target;
     const caret = el.selectionStart;
     const before = el.value.slice(0, caret);
@@ -1081,17 +1095,17 @@ export function TransferPanel({ director }) {
     const y = (rect.top - cbRect.top) / scale + (line + 1) * lineHeight + 6;
     // 打开菜单前刷新一次主体列表，确保新增的主体立即可选
     setSubjects(getSubjectsLatest());
-    setMenu({ side, trigger: ch, caret, x, y });
+    setMenu({ side, trigger: ch, caret, x, y, field });
   }
 
-  function handleInput(e, side) {
+  function handleInput(e, side, field) {
     const el = e.target;
     const caret = el.selectionStart;
     const before = el.value.slice(0, caret);
     const ch = before.slice(-1) || "";
     const allowed = side === "left" ? "@" : "@#";
     if (ch && allowed.includes(ch)) {
-      openMenu(e, side);
+      openMenu(e, side, field);
     } else if (menu && menu.side === side) {
       setMenu(null);
     }
@@ -1104,7 +1118,7 @@ export function TransferPanel({ director }) {
 
   function pickSubject(s) {
     if (!menu) return;
-    const el = menu.side === "left" ? leftRef.current : rightRef.current;
+    const el = menu.side === "left" ? leftRef.current : (RIGHT_FIELD_REFS[menu.field] || {}).current;
     if (!el) return;
     const token = menu.trigger === "@" ? `<@${s.name}>` : `<#${s.name}:对话内容>`;
     const text = el.value;
@@ -1116,7 +1130,8 @@ export function TransferPanel({ director }) {
         director.promptInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
     } else {
-      setRightText(newText);
+      // 右侧：只更新触发 mention 的那个分区字段
+      setRightText(updateShotField(rightText, RIGHT_FIELD_KEYS[menu.field] || "detailed_description", newText));
     }
     const pos = menu.caret - 1 + token.length;
     requestAnimationFrame(() => {
@@ -1125,6 +1140,24 @@ export function TransferPanel({ director }) {
       el.setSelectionRange(pos, pos);
     });
     setMenu(null);
+  }
+
+  // summary 任务类型标签点击：在光标处填入 [tag]；若光标位于未闭合的方括号内则追加 " + tag"
+  function insertTaskTag(tag) {
+    const el = rightSummaryRef.current;
+    if (!el) return;
+    const caret = el.selectionStart ?? el.value.length;
+    const before = el.value.slice(0, caret);
+    const lastOpen = before.lastIndexOf("[");
+    const insideOpenBracket = lastOpen >= 0 && !before.slice(lastOpen).includes("]");
+    const token = insideOpenBracket ? ` + ${tag}` : `[${tag}]`;
+    const newText = el.value.slice(0, caret) + token + el.value.slice(caret);
+    setRightText(updateShotField(rightText, "summary", newText));
+    requestAnimationFrame(() => {
+      if (!aliveRef.current) return;
+      el.focus();
+      el.setSelectionRange(caret + token.length, caret + token.length);
+    });
   }
 
   // 资源引用条数据：直接使用后端 /h3/build_subject_bindings 返回的 subjects
@@ -1653,7 +1686,7 @@ export function TransferPanel({ director }) {
           <textarea
             class="mrd-h3-preview-area"
             style=${S.h3PreviewArea}
-            value=${rightText}
+            value=${JSON.stringify(rightText, null, 2)}
             readOnly
             spellcheck=${false}
           ></textarea>
@@ -1914,19 +1947,69 @@ export function TransferPanel({ director }) {
               onClick=${() => runGenerate(leftText)}
             >→</button>
           </div>
-          <div class="mrd-pr-prompt-wrapper" style=${S.col}>
+          <div class="mrd-pr-prompt-wrapper" style=${{ ...S.col, gap: "8px" }}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>
               Minimax H3 Prompt
             </div>
-            <textarea
-              ref=${rightRef}
-              class="mrd-pr-prompt-area"
-              style=${S.refTextarea}
-              value=${rightText}
-              placeholder="生成结果（输入 @ 或 # 引用主体）"
-              spellcheck=${false}
-              onInput=${(e) => { setRightText(e.target.value); handleInput(e, "right"); }}
-            ></textarea>
+            <div style=${{ display: "flex", flexDirection: "column", gap: "8px", flex: "1 1 0", minHeight: "0" }}>
+              ${(() => {
+                const pObj = rightText;
+                const fieldStyle = (label) => ({ display: "flex", flexDirection: "column", minHeight: "0", ...label });
+                return html`
+                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>summary</div>
+                    <textarea
+                      ref=${rightSummaryRef}
+                      class="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "0 0 96px", height: "96px" }}
+                      value=${pObj.summary}
+                      placeholder=${"This section uses one short paragraph to summarize the target video and its reference relationships. It begins with a square-bracketed task-type prefix:\n\n[video editing + reference generation + audio reuse] The target video shows <@Anni> eating a cookie in <@Caff>. <@Tony> enters with <@May>, which lunges toward the cookie. The three-shot exchange uses <@Anni voice> as the voice-timbre reference for <@Anni> and ends with a canned audience laugh."}
+                      spellcheck=${false}
+                      onInput=${(e) => { setRightText(updateShotField(rightText, "summary", e.target.value)); handleInput(e, "right", "summary"); }}
+                    ></textarea>
+                    <div class="mrd-pr-tags" style=${{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "4px 8px 0" }}>
+                      ${TASK_TYPES.map((t) => html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#2a2a2a", border: "1px solid #444", borderRadius: "3px", color: "#9bb9ff", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t.title} onClick=${() => insertTaskTag(t.label)}>${t.label}</span>`)}
+                    </div>
+                  </div>
+                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "1 1 0" })}>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>detailed_description</div>
+                    <textarea
+                      ref=${rightDetailRef}
+                      class="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "1 1 0" }}
+                      value=${pObj.detailed_description}
+                      placeholder=${"[Shot 1] The scene opens in a crowded urban street...\n[Shot 2] At 00:09.000, the shot cuts to an extreme close-up..."}
+                      spellcheck=${false}
+                      onInput=${(e) => { setRightText(updateShotField(rightText, "detailed_description", e.target.value)); handleInput(e, "right", "detail"); }}
+                    ></textarea>
+                  </div>
+                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>overall_soundscape</div>
+                    <textarea
+                      ref=${rightOverallRef}
+                      class="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
+                      value=${pObj.overall_soundscape === "N/A" ? "" : pObj.overall_soundscape}
+                      placeholder=${"summarizes ambience and physical sounds across the full video. Dialogue, singing, and sound events synchronized to a particular shot remain in detailed_description:\n\nQuiet indoor room tone and a low ventilation hum continue throughout the video.\n\nor\n\nThe copied ambience layer from <@Anni voice> continues throughout the target video."}
+                      spellcheck=${false}
+                      onInput=${(e) => { setRightText(updateShotField(rightText, "overall_soundscape", e.target.value)); handleInput(e, "right", "overall"); }}
+                    ></textarea>
+                  </div>
+                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>non_diegetic_music</div>
+                    <textarea
+                      ref=${rightMusicRef}
+                      class="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
+                      value=${pObj.non_diegetic_music === "N/A" ? "" : pObj.non_diegetic_music}
+                      placeholder=${"describes background music that the characters cannot hear and that is audible only to the audience. When music is present, state its instrumentation, tempo, and dynamic development:\n\nA restrained solo-piano score at a slow tempo, with sustained low cello underneath and no swell.\n\nor\n\n<@Anni voice> is directly reused as the complete audience-only score."}
+                      spellcheck=${false}
+                      onInput=${(e) => { setRightText(updateShotField(rightText, "non_diegetic_music", e.target.value)); handleInput(e, "right", "music"); }}
+                    ></textarea>
+                  </div>
+                `;
+              })()}
+            </div>
           </div>
         </div>
         ${
