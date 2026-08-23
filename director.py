@@ -157,7 +157,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             log.warning("[MiniMaxRefDirector] Failed to parse timeline_data.")
 
         timeline_segments = tdata.get("segments", [])
-        audio_segments = tdata.get("audioSegments", [])
+        audio_segments = tdata.get("audioSegments", None) if tdata.get("audioTrackEnabled", False) else None
         
         # --- Determine effective frame range based on display_mode ---
         if display_mode == "seconds":
@@ -176,12 +176,7 @@ class MiniMaxRefDirector(io.ComfyNode):
         last_frame_path = ""
 
         if timeline_data_len == 0:
-            timeline_segments = [{
-                "length": duration_frames,
-                "start": 0,
-                "prompt": "",
-                "imageFile": "",
-            }]
+            raise ValueError("[MiniMaxRefDirector] timeline_segments is required and must not be empty.")
         
         for i, seg in enumerate(timeline_segments):
             dur = int(seg.get("length", 1))

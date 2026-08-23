@@ -940,7 +940,7 @@ export const dom = {
       this.commitChanges(true);
       this.render();
     });
-
+    this.mainTrackLabel._eyeBtn.style.display = "none";
     this.audioTrackLabel = createTrackLabel("AUDIO", "#1e1e1e", "audio", this.audioTrackEnabled, () => {
       this.audioTrackEnabled = !this.audioTrackEnabled;
       updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", this.audioTrackEnabled);

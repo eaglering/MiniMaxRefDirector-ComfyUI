@@ -184,9 +184,11 @@ function subjectImgSrc(s) {
 }
 
 // 主体媒体类型判断：优先按 type，其次按已有文件字段推断（兼容旧数据无 videoFile/type）
+// 返回 { kind: "audio"|"video"|"image"|"none", src }，kind 决定 .tr-resources 的渲染形态，
+// src 为可直接用于 <audio>/<video>/<img> 播放/显示的 URL（audio/video 分支包含 b64 与 viewUrl 兜底）。
 function subjectMediaPreview(s) {
   const t = s.type || "Subject";
-  if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile)) return { kind: "audio" };
+  if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile)) return { kind: "audio", src: s.audioB64 || (s.audioFile ? viewUrl(s.audioFile, "minimaxrefdirector") : "") };
   if (t === "Video" || s.videoFile) return { kind: "video", src: s.videoB64 || (s.videoFile ? viewUrl(s.videoFile, "minimaxrefdirector") : "") };
   if (t === "Picture" || s.imageFile) return { kind: "image", src: subjectImgSrc(s) };
   return { kind: "none" };
@@ -228,49 +230,23 @@ const TASK_TYPES = [
   { label: "audio reference", title: "When to use it: The audio signal is not copied directly; only its music style, timbre, dialogue or lyric content, sound-effect texture, beat, or continuity is referenced" },
 ];
 
-// 将 h3PromptJson / rightText 统一规范化为 JSON 对象（兼容旧 string 数据）。
-// 旧数据为纯文本展示格式（summary: / detailed_description: ...），
-// 现统一存储/编辑为 JSON 对象 { summary, detailed_description, overall_soundscape, non_diegetic_music }。
+// 将 h3PromptJson / rightText 统一规范化为 JSON 对象。
+// 统一存储/编辑为 JSON 对象 { summary, detailed_description, overall_soundscape, non_diegetic_music }。
 function normalizePromptJson(v) {
   if (v && typeof v === "object" && !Array.isArray(v)) {
     return Object.assign({}, DEFAULT_PROMPT_JSON, v);
   }
   if (typeof v === "string" && v.trim()) {
-    return Object.assign({}, DEFAULT_PROMPT_JSON, parsePromptText(v));
-  }
-  return Object.assign({}, DEFAULT_PROMPT_JSON);
-}
-
-// 将旧的纯文本展示格式（summary: / detailed_description: ...）反向解析回 JSON 对象，
-// 仅用于兼容历史 string 数据（normalizePromptJson 内部调用）。
-function parsePromptText(text) {
-  const obj = { summary: "", detailed_description: "", overall_soundscape: "", non_diegetic_music: "" };
-  const lines = (text || "").split("\n");
-  let section = "summary"; // summary | detail | overall | music
-  const summaryLines = [];
-  const detailLines = [];
-  const overallLines = [];
-  const musicLines = [];
-  for (const line of lines) {
-    if (line.startsWith("summary:")) { section = "summary"; continue; }
-    if (line.startsWith("detailed_description:")) { section = "detail"; continue; }
-    if (line.startsWith("overall_soundscape:")) { section = "overall"; continue; }
-    if (line.startsWith("non_diegetic_music:")) { section = "music"; continue; }
-    if (section === "summary") {
-      if (line.trim() !== "" && line.trim() !== "N/A") summaryLines.push(line);
-    } else if (section === "detail") {
-      detailLines.push(line);
-    } else if (section === "overall") {
-      if (line.trim() !== "" && line.trim() !== "N/A") overallLines.push(line);
-    } else if (section === "music") {
-      if (line.trim() !== "" && line.trim() !== "N/A") musicLines.push(line);
+    try {
+      const parsed = JSON.parse(v);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return Object.assign({}, DEFAULT_PROMPT_JSON, parsed);
+      }
+    } catch (e) {
+      // 非 JSON 字符串（旧纯文本展示格式）不再解析，回退默认模板
     }
   }
-  obj.summary = summaryLines.join("\n");
-  obj.detailed_description = detailLines.join("\n");
-  obj.overall_soundscape = overallLines.join("\n");
-  obj.non_diegetic_music = musicLines.join("\n");
-  return obj;
+  return Object.assign({}, DEFAULT_PROMPT_JSON);
 }
 
 // 将 JSON 对象各字段拼接为纯文本（供 parseResources 正则提取 <@name> / <#name:...> 引用）
@@ -381,16 +357,17 @@ const S = {
   col: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
   buttons: { display: "flex", gap: "6px", padding: "4px 0", flex: "0 0 auto" },
   resources: {
-    display: "flex", flexDirection: "row", flexWrap: "nowrap", overflow: "auto",
+    display: "flex", flexDirection: "row", flexWrap: "nowrap", overflow: "hidden",
     gap: "8px", padding: "4px 0", flex: "1 1 0", minHeight: "0",
-    alignItems: "flex-start", borderTop: "1px solid #333", scrollbarWidth: "thin",
+    alignItems: "flex-start", borderTop: "1px solid #333",
   },
   resourcesList: {
-    display: "flex", flexWrap: "wrap", gap: "8px"
+    display: "flex", flexWrap: "wrap", gap: "8px",
+    alignSelf: "stretch", minHeight: "0", overflowY: "auto", scrollbarWidth: "thin",
   },
   res: {
     position: "relative", flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
-    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "120px", height: "120px",
+    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "140px", height: "120px",
   },
   resType: {
     position: "absolute", top: "2px", left: "2px", zIndex: 2, fontSize: "9px", lineHeight: 1.4,
@@ -416,6 +393,31 @@ const S = {
     color: "#38bdf8", display: "inline-flex", alignItems: "center", justifyContent: "center",
     fontSize: "16px", flex: "0 0 auto",
   },
+  // .tr-resources 内 Video / Audio 主体播放器：带浏览器原生 controls，可直接播放
+  video: {
+    width: "100%", height: "calc(100% - 18px)", objectFit: "contain",
+    borderRadius: "4px", background: "#111", cursor: "pointer",
+  },
+  // 音频卡片：上方大 ♪ 封面（点击播放/暂停）+ 底部原生播放条
+  audioCard: {
+    position: "relative", width: "100%", height: "calc(100% - 18px)",
+    display: "flex", flexDirection: "column", alignItems: "center",
+    justifyContent: "flex-start", gap: "2px",
+  },
+  audioIconBig: {
+    width: "100%", height: "calc(100% - 30px)", borderRadius: "4px", background: "#1e3a5f",
+    color: "#38bdf8", display: "inline-flex", alignItems: "center", justifyContent: "center",
+    fontSize: "22px", cursor: "pointer", userSelect: "none", flex: "0 0 auto",
+  },
+  audio: {
+    width: "100%", height: "28px", flex: "0 0 auto", display: "block",
+  },
+  // 视频类型但无文件时的图标兜底（原样恢复 ♪ 系列风格）
+  resVideo: {
+    width: "100%", height: "96px", borderRadius: "4px", background: "#143a2e",
+    color: "#4ade80", display: "inline-flex", alignItems: "center", justifyContent: "center",
+    fontSize: "18px", flex: "0 0 auto",
+  },
   defsWrap: {
     position: "relative", flex: "0 0 auto", display: "flex", alignItems: "center",
     alignSelf: "flex-start", padding: "0 4px", cursor: "help",
@@ -435,7 +437,7 @@ const S = {
   h3PreviewWrap: {
     flex: "0 0 50%", width: "50%", display: "flex", flexDirection: "column",
     alignSelf: "stretch", marginLeft: "auto", borderLeft: "1px solid #333",
-    paddingLeft: "8px", minHeight: "0", cursor: "pointer",
+    paddingLeft: "8px", minHeight: "0", cursor: "pointer", overflow: "hidden",
   },
   h3PreviewLabel: {
     fontSize: "10px", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px",
@@ -446,7 +448,7 @@ const S = {
     background: "rgba(30,30,30,.55)", color: "#fff", border: "1px dashed #444",
     borderRadius: "4px", padding: "4px 6px", fontFamily: "monospace", fontSize: "10px",
     lineHeight: "1.4", resize: "none", outline: "none", cursor: "pointer",
-    overflowY: "auto", scrollbarWidth: "thin", whiteSpace: "pre-wrap",
+    overflowY: "auto", scrollbarWidth: "thin", whiteSpace: "pre-wrap", overflowWrap: "break-word",
   },
   refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" },
   refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
@@ -717,7 +719,7 @@ export function TransferPanel({ director }) {
         ? (initSeg.prompt || "")
         : (director.promptInput?.value || "");
       setLeftText(initPrompt);
-      // 优先从当前 segment 的 h3PromptJson 恢复右侧内容（string 或 JSON 对象均兼容）；
+      // 优先从当前 segment 的 h3PromptJson 恢复右侧内容（JSON 对象或 JSON 字符串）；
       // 无 segment JSON 时兜底从节点 properties 恢复旧版 __rightPromptText（兼容旧 workflow）
       const segJson = initSeg && initSeg.h3PromptJson;
       if (segJson) {
@@ -1038,7 +1040,7 @@ export function TransferPanel({ director }) {
       const data = await res.json();
       console.log("[Transfer] generate_prompt_json ->", data);
       if (data.success) {
-        // 生成结果统一规范化为 JSON 对象（兼容后端返回 string / 对象）
+        // 生成结果统一规范化为 JSON 对象
         const text = normalizePromptJson(data.json_data);
         // 生成结果写回发起请求时的 segment 的 H3 prompt JSON（随 timeline_data 持久化）
         if (targetSeg && typeof targetSeg.id !== "undefined") {
@@ -1181,6 +1183,7 @@ export function TransferPanel({ director }) {
         audio: s.audioFile,
         kind,
         type: s.type,
+        media: subjectMediaPreview(s),
       });
     }
     return out;
@@ -1196,7 +1199,7 @@ export function TransferPanel({ director }) {
     for (const name of used) {
       const s = subjectsList.find(x => x.name === name);
       if (s) {
-        out.push({ key: "subj-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "subject", type: s.type });
+        out.push({ key: "subj-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "subject", type: s.type, media: subjectMediaPreview(s) });
       }
     }
     // additionSubject：用户在主体添加框手动加入、但未在 prompt 中提及的主体
@@ -1204,16 +1207,21 @@ export function TransferPanel({ director }) {
       if (used.has(name)) continue;
       const s = subjectsList.find(x => x.name === name);
       if (s) {
-        out.push({ key: "add-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "addition", type: s.type });
+        out.push({ key: "add-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "addition", type: s.type, media: subjectMediaPreview(s) });
       }
     }
     return out;
   }
 
   // ---------- additionSubject 添加框 ----------
-  // 已绑定主体：后端 /h3/build_subject_bindings 返回的 subjects（= prompt 提及 + additionSubject 添加），
-  // 不再本地解析 prompt 文本
-  const boundNames = new Set((bindData?.subjects || []).map((s) => s?.name).filter(Boolean));
+  // 已绑定主体：后端 /h3/build_subject_bindings 返回的 subjects（仅非 Subject 资源主体）
+  // + mapping 中的 <@name> 提及（Subject 抽象主体绑定后只进 mapping，不进 subjects）。
+  const boundNames = new Set([
+    ...(bindData?.subjects || []).map((s) => s?.name).filter(Boolean),
+    ...Object.keys(bindData?.mapping || {})
+      .map((k) => { const m = /^<@([^>]+)>$/.exec(k); return m ? m[1] : null; })
+      .filter(Boolean),
+  ]);
   const addedNames = Array.isArray(curSeg?.additionSubject) ? curSeg.additionSubject : [];
   // 已被绑定的主体不再作为 additionSubject 展示
   const visibleAdded = addedNames.filter((n) => !boundNames.has(n));
@@ -1588,8 +1596,8 @@ export function TransferPanel({ director }) {
   // 主体定义 / retention_analysis（来自后端 /h3/build_subject_bindings 的 debounce 结果）
   const bindings = bindData || {};
   const bindParts = [];
-  if (bindings.subject_definitions) bindParts.push("subject_definitions:\n" + bindings.subject_definitions);
-  if (bindings.retention_analysis) bindParts.push("retention_analysis:\n" + bindings.retention_analysis);
+  if (bindings.subject_definitions) bindParts.push("subject_definitions:\n" + bindings.subject_definitions_final);
+  if (bindings.retention_analysis) bindParts.push("retention_analysis:\n" + bindings.retention_analysis_final);
   const bindingsText = bindParts.join("\n\n");
 
   // 完整 H3 prompt 预览文本：主体定义 / 留存分析来自 bindData，其余来自 rightText（实时编辑）
@@ -1646,8 +1654,8 @@ export function TransferPanel({ director }) {
             resources.length === 0
               ? html`<div style=${S.hint}>资源引用（主体 / 手动添加主体）会显示在这里</div>`
               : resources.map(r => {
-                  const hasImg = !!r.src;
-                  const isAudio = !hasImg || !!r.audio;
+                  const media = r.media && r.media.kind ? r.media : subjectMediaPreview(r);
+                  const isAudio = media.kind === "audio";
                   return html`
                   <div style=${S.res} key=${r.key}>
                     ${
@@ -1656,9 +1664,20 @@ export function TransferPanel({ director }) {
                         : ""
                     }
                     ${
-                      hasImg
-                        ? html`<img style=${S.img} src=${r.src} alt=${r.label} />`
-                        : html`<span style=${S.resAudio} title="音频主体">♪</span>`
+                      media.kind === "video" && media.src
+                        ? html`<video style=${S.video} src=${media.src} controls preload="metadata" title="视频主体（点击画面播放/暂停）"
+                            onClick=${(e) => { if (e.target === e.currentTarget) { const v = e.currentTarget; v.paused ? v.play() : v.pause(); } }}></video>`
+                        : media.kind === "image" && media.src
+                          ? html`<img style=${S.img} src=${media.src} alt=${r.label} />`
+                          : media.kind === "audio" && media.src
+                            ? html`<div style=${S.audioCard}>
+                                <span style=${S.audioIconBig} title="音频主体（点击播放/暂停）"
+                                  onClick=${(e) => { const a = e.currentTarget.parentElement.querySelector("audio"); if (a) { a.paused ? a.play() : a.pause(); } }}>♪</span>
+                                <audio style=${S.audio} src=${media.src} controls preload="metadata" onClick=${(e) => e.stopPropagation()}></audio>
+                              </div>`
+                            : media.kind === "video"
+                              ? html`<span style=${S.resVideo} title="视频主体（无文件）">▶</span>`
+                              : html`<span style=${S.resAudio} title="音频/无媒体主体">♪</span>`
                     }
                     ${
                       r.kind === "addition"

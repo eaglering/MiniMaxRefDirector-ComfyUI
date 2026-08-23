@@ -279,6 +279,23 @@ def _retention_line(label: str, relationship: str, retention: str, shots: list[i
     return f"{label} {_fmt_appears_in(shots)}: {marker}{suffix}"
 
 
+def _normalize_h3_prompt_json(v) -> dict:
+    """将 H3 prompt JSON 统一规范化为 dict。
+
+    h3PromptJson 统一为 JSON 对象（dict 或 JSON 字符串）；空串 /
+    解析失败 / 非 dict 按空 dict 兜底。旧纯文本展示格式不再解析。
+    """
+    if isinstance(v, dict):
+        return v
+    if isinstance(v, str) and v.strip():
+        try:
+            parsed = json.loads(v)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
+
+
 def build_h3_subject_bindings(
     subject_data: dict,
     prompt_json: dict,
@@ -293,7 +310,7 @@ def build_h3_subject_bindings(
             relationship: visual marker, one of fully_preserved (default) /
                 partially_preserved / attribute_transfer / weak_reference.
             retention: retention description.
-        prompt_json: H3 output JSON (dict 或文本) with summary /
+        prompt_json: H3 output JSON (dict 或 JSON 字符串) with summary /
             detailed_description / overall_soundscape / non_diegetic_music.
         timeline_segment: current timeline segment dict; its "additionSubject"
             list (subject names added in the editor but not mentioned in the
@@ -310,6 +327,9 @@ def build_h3_subject_bindings(
             "videos": [...],               # 视频文件路径列表
         }
     """
+    # 统一 h3PromptJson 为 dict：director.py 直接传 timeline 段的原始值
+    # （工作流反序列化后为 dict，或 JSON 字符串），解析失败按空 dict 兜底。
+    prompt_json = _normalize_h3_prompt_json(prompt_json)
     subjects_in = (subject_data or {}).get("subjects", []) or []
     names = _extract_h3_name_mentions([
         prompt_json.get("summary", ""),
@@ -717,12 +737,10 @@ def build_h3_prompt(
     non_diegetic_music = prompt_res.get("non_diegetic_music", "") or "N/A"
     non_diegetic_music = _replace_mapping(non_diegetic_music, mapping)
 
-    summary = prompt_res.get("summary", "") or "N/A"
-    summary = _replace_mapping(summary, mapping)
-
 
     prompt = "subject_definitions:\n" + subject_definitions + "\n"
-    prompt += "summary:\n" + summary + "\n"
+    if summary:
+        prompt += "summary:\n" + summary + "\n"
     prompt += "retention_analysis:\n" + retention_analysis + "\n"
     prompt += "detailed_description:\n" + global_prompt + "\n" + detailed_description + "\n"
     prompt += "overall_soundscape:\n" + overall_soundscape + "\n"
