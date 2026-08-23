@@ -529,7 +529,17 @@ def _load_wav_audio(path: str) -> dict:
             waveform, sample_rate = torchaudio.load(path)
             return {"waveform": waveform.unsqueeze(0), "sample_rate": int(sample_rate)}
         except Exception as exc:
-            raise RuntimeError("Failed to load extracted audio with soundfile or torchaudio.") from exc
+            # 最后回退：av (PyAV) 解码任意容器（mp3/m4a/ogg...）。
+            # soundfile 的 Windows libsndfile 常不支持 mp3，
+            # 新版 torchaudio 又依赖 torchcodec，故用项目已依赖的 av 兜底。
+            from .audio import load_audio_tensor
+
+            try:
+                return load_audio_tensor(path)
+            except Exception as av_exc:
+                raise RuntimeError(
+                    "Failed to load audio with soundfile, torchaudio or av: %r" % (path,)
+                ) from av_exc
 
 
 def ffmpeg_extract_audio(video_path: str) -> dict | None:

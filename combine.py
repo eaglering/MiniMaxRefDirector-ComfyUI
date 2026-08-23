@@ -24,6 +24,7 @@ import logging
 from comfy_api.latest import io
 
 from .lib import latent as latent_lib
+from .lib.path import to_single_filename
 from .lib.video_combine import (
     VIDEO_FORMATS,
     build_vhs_filenames,
@@ -143,10 +144,10 @@ class MiniMaxRefCombine(io.ComfyNode):
                 ),
             ],
             outputs=[
-                io.Custom("VHS_FILENAMES").Output(
-                    "filenames",
+                io.String.Output(
+                    "Filename",
                     tooltip=(
-                        "VHS_FILENAMES 4 元组 (filename, subfolder, type, full_path)，"
+                        "单个 Filename（形如 subfolder/filename，subfolder 为空时仅文件名），"
                         "直连 MiniMaxRefGuide 的 prev_tail。"
                     ),
                 ),
@@ -187,7 +188,7 @@ class MiniMaxRefCombine(io.ComfyNode):
 
         # ── 像素路径（原行为） ──────────────────────────────────────────
         if not save_output:
-            return io.NodeOutput((False, "", "", ""), ui={"gifs": []})
+            return io.NodeOutput("", ui={"gifs": []})
 
         # motion context 引导帧：解码帧头部 trim_frames 帧为 pinned context
         # 延续，单段输出时裁掉；按帧率同步裁掉音频头部，保持 A/V 对齐。
@@ -224,7 +225,7 @@ class MiniMaxRefCombine(io.ComfyNode):
             prompt=prompt,
             extra_pnginfo=extra_pnginfo,
         )
-        value = build_vhs_filenames(meta)
+        value = to_single_filename(build_vhs_filenames(meta))
         return io.NodeOutput(value, ui=meta["ui"])
 
     # ── latent 路径 ──────────────────────────────────────────────────────
@@ -291,7 +292,7 @@ class MiniMaxRefCombine(io.ComfyNode):
         # 通知前端：携带视频 + latent 文件路径（供素材条「无损合并」）
         payload = {"status": "add_material", "type": "video"}
         if filenames is not None:
-            payload["imageFile"] = filenames
+            payload["imageFile"] = to_single_filename(filenames)
         if saved is not None:
             payload["image_latent"] = saved["image_path"]
             payload["audio_latent"] = saved["audio_path"]
@@ -301,7 +302,7 @@ class MiniMaxRefCombine(io.ComfyNode):
             payload["clip_audio"] = clip_audio_path
         _send_progress(payload)
 
-        return io.NodeOutput(filenames or (False, "", "", ""), ui=ui)
+        return io.NodeOutput(to_single_filename(filenames), ui=ui)
 
 
 NODE_CLASS_MAPPINGS = {

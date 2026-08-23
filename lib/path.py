@@ -53,6 +53,23 @@ def resolve_input_path(filename: str) -> str:
     return ""
 
 
+def to_single_filename(item):
+    """把 VHS_FILENAMES 元组 / 路径字符串 / 对象归一化为单个 filename 字符串。
+
+    返回形如 "subfolder/filename"（subfolder 为空时仅 filename）的相对路径，
+    前端 /view 端点可直接解析；空输入返回 ""（与 VHS 空 4 元组语义一致）。
+    """
+    if isinstance(item, (tuple, list)):
+        if len(item) >= 1 and item[0]:
+            filename = str(item[0])
+            subfolder = str(item[1]) if len(item) > 1 and item[1] else ""
+            return f"{subfolder}/{filename}" if subfolder else filename
+        return ""
+    if item is None:
+        return ""
+    return str(item)
+
+
 def vhs_tuple_path(item):
     """VHS_FILENAMES 元组 (filename, subfolder, type[, path]) → 本地绝对路径。
 

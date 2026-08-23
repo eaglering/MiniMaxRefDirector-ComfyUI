@@ -211,6 +211,9 @@ def build_segment_conditioning(
             "latent_t": z.shape[2],
             "latent_h": ch // VAE_SPATIAL_RATIO,
             "latent_w": cw // VAE_SPATIAL_RATIO,
+            # 官方 ref block 结构要求带 ref_audio_t（PackedLayout 对 video 也访问该键）；
+            # 本节点参考视频不配对音频，置 0 即可，kind 保持 "video"。
+            "ref_audio_t": 0,
             "latent": z,
         })
 

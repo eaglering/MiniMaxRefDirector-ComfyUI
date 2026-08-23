@@ -281,7 +281,9 @@ def encode_frames_with_vhs(
                 prompt=prompt,
                 extra_pnginfo=extra_pnginfo,
             )
-            preview = out["ui"]["gifs"][0]
+            # ui["gifs"] 数组可能包含多个条目（如中间产物 + 最终文件），
+            # 最后一个才是最终保存的文件（VHS 的 preview["fullpath"] 同样取 output_files[-1]）。
+            preview = out["ui"]["gifs"][-1]
             filename = preview["filename"]
             subfolder = preview.get("subfolder", "")
             ftype = preview.get("type", "output")
@@ -297,7 +299,11 @@ def encode_frames_with_vhs(
                         "falling back to ffmpeg: %s", exc)
 
     if audio is not None:
-        log.warning("[video_combine] ffmpeg fallback 忽略 AUDIO 输入。")
+        log.warning(
+            "[video_combine] VideoCombine 失败回退到本地 ffmpeg：ffmpeg 回退不含音轨。"
+            "此处音频来自 audio_vae 解码的 latent（audio 输入为空时的自动行为），"
+            "需要修复上方的 VideoCombine encode failed 才能合入音轨。"
+        )
 
     meta = encode_video_frames(images, float(frame_rate), filename_prefix, format)
     filename = meta["filename"]

@@ -269,8 +269,8 @@ function removeShotField(obj, key) {
   return next;
 }
 
-// 素材追加计数器：每次 add_material 通知都会追加素材（不去重），
-// id 需唯一（同时用作 React key 与多选集合依据），故在 URL 后附加自增序号。
+// 素材自增序号：仅新素材（URL 在素材条中不存在）追加时递增；
+// 同 URL 重复通知（Combine 保存后 + Guide 收到 prev_tail）会更新已有条目而非新增。
 let materialSeq = 0;
 
 // 素材持久化 key：按 Director 节点 id 隔离（单 tab / 多 tab 均适用）。
@@ -312,7 +312,8 @@ const CLICK_MOVE_TOLERANCE = 6; // 卡片 click 位移容忍：按下/松开位�
 
 // 将后端 send_sync("minimax_ref_video_progress", ...) 通知里的 imageFile
 // （VHS_FILENAMES：字符串 / 单对象 / 对象数组）解析为视频素材项 { id, label, src }。
-// 基础 id 取文件 URL；实际 id 在追加时附加自增序号保证唯一（不做 URL/文件名去重）。
+// 基础 id 取文件 URL；新素材追加时附加自增序号保证唯一，
+// 同 URL 重复通知在 setMaterials 里按 src 去重（更新而非新增）。
 // 取文件名（兼容 Windows 反斜杠与 POSIX 斜杠）：
 // VHS/输出目录返回的可能是绝对路径 D:\...\xx.mp4，若只用 "/" 分割，
 // 整个绝对路径会变成 label 并被当作文件名上传到服务器。
@@ -783,8 +784,28 @@ export function TransferPanel({ director }) {
       setMaterials((prev) => {
         const next = prev.slice();
         for (const it of items) {
-          // 不去重：后端每次 add_material 通知都追加（guide 正常轮与越界轮会各发一次同 URL）。
-          // id 附加自增序号保证唯一，避免 React key / 多选集合冲突。
+          // 同 URL 去重：同一段视频会被通知两次——Combine 节点保存后发一次，
+          // Guide 下一轮收到 prev_tail 又发一次（正常轮 + 越界轮）。命中已有条目
+          // 时更新而非新增，保证「一段视频在素材条只显示一条」。
+          // src 为空（纯 latent 素材）不参与匹配，始终新增。
+          const existIdx = it.src ? next.findIndex((m) => m.src && m.src === it.src) : -1;
+          if (existIdx >= 0) {
+            const old = next[existIdx];
+            next[existIdx] = {
+              ...it,
+              id: old.id,
+              vw: it.vw ?? old.vw,
+              vh: it.vh ?? old.vh,
+              // 无损合并字段以“已存在值优先”，避免后到的轻量通知（Guide 不带 latent）
+              // 把 Combine 通知写入的 latent / clip_audio / meta 字段清空。
+              imageLatent: old.imageLatent ?? d.image_latent,
+              audioLatent: old.audioLatent ?? d.audio_latent,
+              clipAudio: old.clipAudio ?? d.clip_audio,
+              meta: old.meta ?? d.meta,
+            };
+            continue;
+          }
+          // 新素材：id 附加自增序号保证唯一（React key / 多选集合依据）
           materialSeq += 1;
           next.push({
             ...it,
