@@ -35,6 +35,36 @@ from .guide import _send_progress
 log = logging.getLogger(__name__)
 
 
+def _trim_images_and_audio(images, audio, trim_frames, frame_rate):
+    """帧头裁剪 + 按帧率同步裁音频头 + 音频过短跳过警告（像素路径原逻辑）。
+
+    trim_frames 从解码帧头部裁掉 motion context 引导帧，并按帧率同步裁掉
+    音频头部，保持 A/V 对齐。音频比裁剪窗口还短时跳过音频裁剪（避免负长度），
+    帧数不足时跳过帧裁剪并告警。返回 (images, audio)。
+    """
+    if trim_frames > 0:
+        if images is not None and int(images.shape[0]) > trim_frames:
+            images = images[trim_frames:]
+            if audio is not None:
+                wave = audio["waveform"]
+                sr = int(audio["sample_rate"])
+                n = int(round(trim_frames / float(frame_rate) * sr))
+                if wave.shape[-1] > n:
+                    audio = {"waveform": wave[..., n:], "sample_rate": sr}
+                else:
+                    log.warning(
+                        "trim_frames=%d: audio shorter than trim window "
+                        "(%d samples); skip audio trim", trim_frames, int(wave.shape[-1]),
+                    )
+        else:
+            have = 0 if images is None else int(images.shape[0])
+            log.warning(
+                "trim_frames=%d >= available frames %d; skip frame trim",
+                trim_frames, have,
+            )
+    return images, audio
+
+
 class MiniMaxRefCombine(io.ComfyNode):
     """合并解码后的 IMAGE 帧或 joint H3 latent 并保存，输出 VHS_FILENAMES。"""
 
@@ -81,12 +111,6 @@ class MiniMaxRefCombine(io.ComfyNode):
                     "audio_vae",
                     optional=True,
                     tooltip="音频 VAE：latent 路径下无 audio 输入时，把音频流解码为音轨。",
-                ),
-                io.Boolean.Input(
-                    "save_latent",
-                    default=True,
-                    tooltip="latent 路径下保存 image_latent / audio_latent safetensors + meta，"
-                            "供素材条「无损合并」使用。",
                 ),
                 io.Int.Input(
                     "context_frames",
@@ -164,7 +188,7 @@ class MiniMaxRefCombine(io.ComfyNode):
 
     @classmethod
     def execute(cls, images=None, audio=None, latent=None, video_vae=None,
-                audio_vae=None, save_latent=True, context_frames=39,
+                audio_vae=None, context_frames=39,
                 trim_frames=0, frame_rate=24.0, loop_count=0,
                 filename_prefix="MiniMaxRef/combine", format="video/h264-mp4",
                 pingpong=False, save_output=True, prompt=None, extra_pnginfo=None):
@@ -174,7 +198,6 @@ class MiniMaxRefCombine(io.ComfyNode):
                 audio=audio,
                 video_vae=video_vae,
                 audio_vae=audio_vae,
-                save_latent=save_latent,
                 context_frames=context_frames,
                 trim_frames=trim_frames,
                 frame_rate=frame_rate,
@@ -193,26 +216,9 @@ class MiniMaxRefCombine(io.ComfyNode):
 
         # motion context 引导帧：解码帧头部 trim_frames 帧为 pinned context
         # 延续，单段输出时裁掉；按帧率同步裁掉音频头部，保持 A/V 对齐。
-        if trim_frames > 0:
-            if images is not None and int(images.shape[0]) > trim_frames:
-                images = images[trim_frames:]
-                if audio is not None:
-                    wave = audio["waveform"]
-                    sr = int(audio["sample_rate"])
-                    n = int(round(trim_frames / float(frame_rate) * sr))
-                    if wave.shape[-1] > n:
-                        audio = {"waveform": wave[..., n:], "sample_rate": sr}
-                    else:
-                        log.warning(
-                            "trim_frames=%d: audio shorter than trim window "
-                            "(%d samples); skip audio trim", trim_frames, int(wave.shape[-1]),
-                        )
-            else:
-                have = 0 if images is None else int(images.shape[0])
-                log.warning(
-                    "trim_frames=%d >= available frames %d; skip frame trim",
-                    trim_frames, have,
-                )
+        images, audio = _trim_images_and_audio(
+            images, audio, int(trim_frames), float(frame_rate)
+        )
 
         meta = encode_frames_with_vhs(
             images=images,
@@ -232,7 +238,7 @@ class MiniMaxRefCombine(io.ComfyNode):
     # ── latent 路径 ──────────────────────────────────────────────────────
 
     @classmethod
-    def _execute_latent(cls, latent, audio, video_vae, audio_vae, save_latent,
+    def _execute_latent(cls, latent, audio, video_vae, audio_vae,
                         context_frames, trim_frames, frame_rate, loop_count,
                         filename_prefix, format, pingpong, save_output,
                         prompt, extra_pnginfo):
@@ -254,17 +260,27 @@ class MiniMaxRefCombine(io.ComfyNode):
             ),
         }
 
+        # 分支 A：有 clip_audio（audio 输入）→ 保存 latent 素材 + clip_audio，音轨直接
+        # 用 clip_audio（master_audio 经 Song Masked Audio Context 处理后的本段分割音频，
+        # 原始素材切片，保真无损）；trim_frames 已在 meta_data 记录，不实际裁剪。
+        # 分支 B：无 clip_audio → 不保存素材；audio_vae 解码 latent 音频流仅作兜底
+        # （VAE 重建有损），编码前实际裁剪引导帧并同步裁音轨头。
+        has_clip_audio = audio is not None
         saved = None
-        if save_latent:
+        clip_audio_path = None
+        out_audio = None
+        if has_clip_audio:
             saved = latent_lib.save_joint_latent_files(latent, meta_data, filename_prefix)
-        # 同段素材的 latent / clip_audio 共享同一递增编号，防止不同段互相覆盖
-        save_id = saved.get("save_id") if saved else None
-
-        # 音轨：clip_audio（audio 输入）优先——它是 master_audio 经 Song Masked
-        # Audio Context 处理后的本段分割音频（原始素材切片，保真无损）；
-        # audio_vae 解码 latent 音频流仅作兜底（VAE 重建有损，仅当 clip_audio 缺失时）。
-        out_audio = audio
-        if out_audio is None and audio_vae is not None:
+            # 同段素材的 latent / clip_audio 共享同一递增编号，防止不同段互相覆盖
+            save_id = saved.get("save_id")
+            out_audio = audio
+            try:
+                clip_audio_path = latent_lib.save_audio_clip(
+                    out_audio, filename_prefix, save_id=save_id
+                )["path"]
+            except Exception:
+                log.warning("failed to save clip_audio wav", exc_info=True)
+        elif audio_vae is not None:
             try:
                 wave, sr = latent_lib.decode_audio_latent(audio_vae, audio_lat)
                 # 解码结果过短（<0.5s）说明 latent 音频流为空/无效：视为无音轨，
@@ -290,19 +306,16 @@ class MiniMaxRefCombine(io.ComfyNode):
                      tuple(w.shape) if w is not None else None,
                      out_audio.get("sample_rate"), rms)
 
-        clip_audio_path = None
-        if out_audio is not None:
-            try:
-                clip_audio_path = latent_lib.save_audio_clip(
-                    out_audio, filename_prefix, save_id=save_id
-                )["path"]
-            except Exception:
-                log.warning("failed to save clip_audio wav", exc_info=True)
-
         filenames = None
         ui = {"gifs": []}
         if video_vae is not None and save_output:
             frames = latent_lib.decode_video_latent(video_vae, video)
+            if not has_clip_audio:
+                # 分支 B 无 clip_audio：实际裁剪引导帧并同步裁音轨头（保持 A/V 对齐）；
+                # 分支 A 有 clip_audio：保留完整帧供无损合并衔接（trim 仅记录在 meta）。
+                frames, out_audio = _trim_images_and_audio(
+                    frames, out_audio, int(trim_frames), float(frame_rate)
+                )
             meta = encode_frames_with_vhs(
                 images=frames,
                 audio=out_audio,
@@ -318,8 +331,9 @@ class MiniMaxRefCombine(io.ComfyNode):
             filenames = build_vhs_filenames(meta)
             ui = meta["ui"]
 
-        # 通知前端：携带视频 + latent 文件路径（供素材条「无损合并」）
-        payload = {"status": "add_material", "type": "video"}
+        # 通知前端：分支 A 携带视频 + latent 文件路径 + clip_audio（供素材条「无损合并」）；
+        # 分支 B（无 clip_audio）仅视频路径。
+        payload: dict = {"status": "add_material", "type": "video"}
         if filenames is not None:
             payload["imageFile"] = to_single_filename(filenames)
         if saved is not None:

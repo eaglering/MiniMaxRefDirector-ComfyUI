@@ -842,14 +842,15 @@ async def merge_latents_api(request: web.Request) -> web.Response:
     {
       "materials": [
         {"src": viewUrl, "imageLatent": path, "audioLatent": path,
-         "clipAudio": path | null, "meta": {...} | null}
+         "clipAudio": path, "meta": {...} | null}
       ],
       "node_id": str | null,        # Director 节点 id（通知定向）
       "context_frames": int         # 兜底 context 帧数（素材 meta 优先），默认 39
     }
 
-    音频策略（用户确认）：每段 clip_audio 优先，否则 audio_latent + audio_vae
-    解码；各段按绝对帧边界拼接为 master_audio 随视频一起编码。
+    音频策略（用户确认）：每段必须有 clip_audio（Combine 节点在提供音频段时才
+    保存 latent 素材并输出 clip_audio）；各段按绝对帧边界拼接为 master_audio
+    随视频一起编码。
     产物复制到 input/whatdreamscost/merge_latent_{ts}.mp4 并 send_sync 通知。
     """
     try:
@@ -877,9 +878,12 @@ async def merge_latents_api(request: web.Request) -> web.Response:
                     {"success": False, "error": f"素材 {i + 1} 缺少 image_latent / audio_latent 文件"},
                     status=400,
                 )
-            clip_audio = None
-            if mat.get("clipAudio"):
-                clip_audio = _material_src_to_local_path(str(mat["clipAudio"]))
+            clip_audio = _material_src_to_local_path(str(mat.get("clipAudio") or ""))
+            if clip_audio is None:
+                return web.json_response(
+                    {"success": False, "error": f"素材 {i + 1} 缺少 clip_audio 音频文件"},
+                    status=400,
+                )
             entries.append({
                 "image_latent": image_latent,
                 "audio_latent": audio_latent,

@@ -323,6 +323,7 @@ def build_h3_subject_bindings(
     subject_data: dict,
     prompt_json: dict,
     timeline_segment: dict|None = None,
+    seg_audio: list[dict] = [],
 ) -> dict:
     """Match <@name> / <#name:dialogue> placeholders against subject data and build H3 bindings.
 
@@ -354,6 +355,10 @@ def build_h3_subject_bindings(
     # （工作流反序列化后为 dict，或 JSON 字符串），解析失败按空 dict 兜底。
     prompt_json = _normalize_h3_prompt_json(prompt_json)
     subjects_in = (subject_data or {}).get("subjects", []) or []
+    # 用户提交了有效 audiosegment（type=Audio 且 audioFile 非空）时，音频素材仅作
+    # 参考绑定（mapping）供前端使用：不写入 subject_definitions / retention_analysis，
+    # 也不放入 audios 资源数组（音频由 Combine 节点 clip_audio 通道直接传递）。
+    suppress_audio = True if len(seg_audio) > 0 else False
     names = _extract_h3_name_mentions([
         prompt_json.get("summary", ""),
         prompt_json.get("detailed_description", ""),
@@ -392,6 +397,8 @@ def build_h3_subject_bindings(
                 return None
             images.append(f)
         elif d_type == "Audio":
+            if suppress_audio:
+                return None
             f = subj.get("audioFile", "")
             if not f:
                 unmatched.setdefault(name, []).append(f"{name} has no audioFile")
@@ -492,7 +499,7 @@ def build_h3_subject_bindings(
         # 音频关联（仅 Subject 支持）：引用 / 定义双模式。
         # 判断依据为 audioRef 指向的 Audio 主体 relationship：空 → 引用（voice-timbre 模板）；
         # 非空 → 定义（用 Audio 主体 description 独立定义）。
-        if audio_ref:
+        if audio_ref and not suppress_audio:
             if audio_ref in seen or audio_ref in unmatched.keys():
                 continue
             a_idx = find_index(subjects_in, func=lambda x, y=audio_ref: x.get("name") == y)
@@ -631,10 +638,12 @@ def build_h3_prompt(
     subject_data: dict,
     prompt_json: dict,
     previous_timeline_segment: dict|None = None,
-    timeline_segment: dict|None = None,
-    next_timeline_segment: dict|None = None
+    timeline_segment: dict = {},
+    next_timeline_segment: dict|None = None,
+    seg_audio: list[dict] = [],
 ) -> dict:
-    prompt_res = build_h3_subject_bindings(subject_data=subject_data, prompt_json=prompt_json, timeline_segment=timeline_segment)
+    prompt_res = build_h3_subject_bindings(subject_data=subject_data, prompt_json=prompt_json, 
+                                           timeline_segment=timeline_segment, seg_audio=seg_audio)
 
     summary = prompt_res.get("summary", "")
     subject_definitions = prompt_res.get("subject_definitions", "")

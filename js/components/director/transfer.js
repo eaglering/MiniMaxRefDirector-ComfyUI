@@ -1453,10 +1453,11 @@ export function TransferPanel({ director }) {
     for (const m of materials) {
       if (selIds.has(m.id) && !sel.some((s) => s.id === m.id)) sel.push(m);
     }
-    // 无损合并要求每段都有 image_latent / audio_latent（Combine 节点保存的 latent）
-    sel = sel.filter((m) => m.imageLatent && m.audioLatent);
+    // 无损合并要求每段同时含 image_latent / audio_latent / clip_audio
+    //（Combine 节点在提供 clip_audio 时才保存 latent 素材并输出音频切片）
+    sel = sel.filter((m) => m.imageLatent && m.audioLatent && m.clipAudio);
     if (sel.length < 2) {
-      showDragHint("无损合并需要至少 2 段含 latent 的素材（请用 Combine 节点保存 latent）");
+      showDragHint("无损合并需要至少 2 段含 latent 与音频的素材（Guide 需输出 clip_audio）");
       return;
     }
     setLosslessMergeBusy(true);

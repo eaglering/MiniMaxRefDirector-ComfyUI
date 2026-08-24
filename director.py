@@ -177,9 +177,6 @@ class MiniMaxRefDirector(io.ComfyNode):
         except (json.JSONDecodeError, TypeError):
             log.warning("[MiniMaxRefDirector] Failed to parse timeline_data.")
 
-        timeline_segments = tdata.get("segments", [])
-        audio_segments = tdata.get("audioSegments", None) if tdata.get("audioTrackEnabled", False) else None
-        
         # --- Determine effective frame range based on display_mode ---
         if display_mode == "seconds":
             range_start = int(start_second * frame_rate)
@@ -190,9 +187,13 @@ class MiniMaxRefDirector(io.ComfyNode):
         range_end = max(range_end, range_start + 1)
         duration_frames = int(range_end - range_start)
 
+        audio_segments = tdata.get("audioSegments", None) if tdata.get("audioTrackEnabled", False) else None
+        audio_segments = fill_audio_gaps(audio_segments, range_start, range_end)
+
         # --- Build timeline_data array for guide_data ---
         guide_timeline = []
         segment_count = 0
+        timeline_segments = tdata.get("segments", [])
         timeline_data_len = len(timeline_segments)
         last_frame_path = ""
 
@@ -212,12 +213,13 @@ class MiniMaxRefDirector(io.ComfyNode):
             dur = seg_end_frames - seg_start_frames
             if dur <= 0:
                 continue
+            seg_audio = fill_audio_gaps(audio_segments, seg_start_frames, seg_end_frames)
             h3_prompt_json = seg.get("h3PromptJson", "")
             prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
             next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
             prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
                                          prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
-                                         timeline_segment=seg, next_timeline_segment=next_seg)
+                                         timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio)
             entry = {
                 "prompt": prompt_res["prompt"],
                 "subjects": prompt_res["subjects"],
@@ -235,6 +237,9 @@ class MiniMaxRefDirector(io.ComfyNode):
             }
             guide_timeline.append(entry)
             segment_count += 1
+
+        if segment_count == 0:
+            raise ValueError("[MiniMaxRefDirector] No valid segments found in timeline_data.")
 
         # --- Resolve output resolution ---
         out_w, out_h = calc_resolution(outpu_resolution, million_pixels)
@@ -259,7 +264,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             "global_prompt": global_prompt,
             "subject_data": subject,
             "timeline_data": guide_timeline,
-            "audio_segments": fill_audio_gaps(audio_segments, range_start, range_end),
+            "audio_segments": audio_segments,
             "_director_node_id": director_node_id,
         }
 

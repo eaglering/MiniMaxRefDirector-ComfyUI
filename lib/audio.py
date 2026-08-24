@@ -179,7 +179,7 @@ def merge_two_audio(audio1: dict | None, audio2: dict | None, merge_method: str 
     return {"waveform": waveform, "sample_rate": output_sample_rate}
 
 
-def fill_audio_gaps(audio_segments, range_start, range_end):
+def fill_audio_gaps(audio_segments, range_start, range_end) -> list[dict]:
     """把不连贯的音频片段补齐空白段，使其连贯覆盖 [range_start, range_end)。
 
     音频段字段语义（与前端 timeline audioSegments 一致）：
@@ -188,21 +188,43 @@ def fill_audio_gaps(audio_segments, range_start, range_end):
     - trimStart        : 音频切割的起始位置（在音频文件内的帧位置）
     - audioDurationFrames : 音频文件总帧数
 
-    输入段可能不连续（中间有空隙 / 首尾未对齐视频范围），这里按 start 升序
-    遍历，在空隙处插入标记 silence=True 的空白段，保证返回列表无缝覆盖
-    [range_start, range_end)。原段保留全部字段不动。
+    只严格保留落在 [range_start, range_end) 内的部分：
+    - 完全在范围之外（start >= range_end 或 start+length <= range_start）的段直接丢弃；
+    - 与范围部分重叠的段按范围裁剪：start/length 取交集，trimStart 同步右移
+      (clip_start - start) 帧，保证源文件切片对齐不变；
+    - 裁剪后的段按 start 升序排列，段之间的空隙用 silence=True 的空白段填充，
+      保证返回列表无缝覆盖 [range_start, range_end)。
+    返回的是新的 dict（浅拷贝），不会修改调用方持有的原段对象。
     """
-    if not audio_segments:
+    range_start = int(range_start)
+    range_end = int(range_end)
+    if not audio_segments or range_end <= range_start:
         return []
     segs = sorted(
         [s for s in audio_segments if isinstance(s, dict) and s.get("start") is not None],
         key=lambda s: int(s.get("start", 0)),
     )
-    result = []
-    cursor = int(range_start)
+    clipped = []
     for s in segs:
         start = int(s.get("start", 0))
         length = int(s.get("length", 0))
+        seg_end = start + length
+        clip_start = max(start, range_start)
+        clip_end = min(seg_end, range_end)
+        if clip_end <= clip_start:
+            continue  # 完全在范围之外，丢弃
+        new_seg = dict(s)
+        new_seg["start"] = clip_start
+        new_seg["length"] = clip_end - clip_start
+        if "trimStart" in s:
+            # 左边缘裁剪了多少帧，源文件内切割起点就相应右移多少帧
+            new_seg["trimStart"] = int(s.get("trimStart", 0)) + (clip_start - start)
+        clipped.append(new_seg)
+    result = []
+    cursor = range_start
+    for s in clipped:
+        start = int(s["start"])
+        length = int(s["length"])
         if start > cursor:
             result.append({
                 "type": "audio",
@@ -212,11 +234,11 @@ def fill_audio_gaps(audio_segments, range_start, range_end):
             })
         result.append(s)
         cursor = max(cursor, start + length)
-    if cursor < int(range_end):
+    if cursor < range_end:
         result.append({
             "type": "audio",
             "start": cursor,
-            "length": int(range_end) - cursor,
+            "length": range_end - cursor,
             "silence": True,
         })
     return result

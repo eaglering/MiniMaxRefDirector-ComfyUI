@@ -14,7 +14,7 @@ context 帧数 c_n（引导帧数），逐段计算：
 effective_seconds 的累计。
 
 同时提供 MultiRef h3_timing 同款工具（largest_h3_video_run /
-is_exact_av_boundary / sample_boundary_from_frames / crossfade_plan 等），
+is_exact_av_boundary / sample_boundary_from_frames / snap_av_context_length / crossfade_plan 等），
 供节点元数据、无损合并 API 与 latent 音频落位复用。
 """
 

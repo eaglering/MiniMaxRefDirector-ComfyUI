@@ -436,6 +436,33 @@ def _next_video_filename(folder: str, prefix: str, ext: str) -> str:
         n += 1
 
 
+def _iter_video_frames(frames):
+    """统一产出单帧（[1,H,W,C]），兼容 tensor 与一次性帧流。
+
+    tensor 输入按 index 取帧；可迭代帧流（如 VHS 的 _OneShotFrameSequence）
+    直接迭代。ffmpeg 回退路径全程流式，不物化全部帧。
+    """
+    if hasattr(frames, "shape"):
+        for i in range(int(frames.shape[0])):
+            yield frames[i]
+    else:
+        yield from frames
+
+
+def _replay_frame_input(frames):
+    """若帧输入是一次性帧流（VHS 失败后可能已被消费），重置为可重放。
+
+    tensor / numpy 没有 reset，直接跳过；帧流 reset 后重新流式解码，
+    保证 ffmpeg 回退拿得到完整帧数据且不累积显存。
+    """
+    reset = getattr(frames, "reset", None)
+    if callable(reset):
+        try:
+            reset()
+        except Exception:  # noqa: BLE001 - 尽力而为
+            pass
+
+
 def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
     """Local fallback: encode a [B,H,W,C] float frame batch to a video file with ffmpeg."""
     import folder_paths
@@ -463,8 +490,7 @@ def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format
     full_out = os.path.join(full_out_dir, filename)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        for i in range(frames.shape[0]):
-            frame = frames[i]
+        for i, frame in enumerate(_iter_video_frames(frames)):
             if frame.ndim == 4:  # [1,H,W,C] -> [H,W,C]
                 frame = frame[0]
             img = Image.fromarray((frame.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy()))
@@ -481,8 +507,8 @@ def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format
     return {"filename": filename, "subfolder": subfolder, "type": "output"}
 
 
-def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
-    """Encode a [B,H,W,C] float frame batch into a video file.
+def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4", try_vhs: bool = True) -> dict:
+    """Encode a [B,H,W,C] float frame batch (or a lazy frame stream) into a video file.
 
     Returns {"filename", "subfolder", "type"} suitable for send_sync / /view.
     Uses VideoHelperSuite when installed (soft dependency), otherwise falls back
@@ -493,7 +519,7 @@ def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = 
     except ImportError:
         VideoCombine = None
 
-    if VideoCombine is not None:
+    if VideoCombine is not None and try_vhs:
         try:
             vc = VideoCombine()
             out = vc.combine_video(
@@ -512,6 +538,8 @@ def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = 
         except Exception as exc:  # noqa: BLE001
             logger.warning("VideoCombine encode failed, falling back to local ffmpeg: %s", exc)
 
+    # ffmpeg 回退：一次性帧流可能已被 VHS 消费，重放后再流式逐帧编码。
+    _replay_frame_input(frames)
     return _encode_video_frames_ffmpeg(frames, fps, filename_prefix, format)
 
 

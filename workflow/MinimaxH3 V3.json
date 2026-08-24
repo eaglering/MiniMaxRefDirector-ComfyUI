@@ -1337,7 +1337,6 @@
         "Node name for S&R": "MiniMaxRefCombine"
       },
       "widgets_values": [
-        true,
         39,
         24,
         24,
@@ -1348,7 +1347,6 @@
         true
       ],
       "widgets_values_named": {
-        "save_latent": true,
         "context_frames": 39,
         "trim_frames": 24,
         "frame_rate": 24,
