@@ -90,7 +90,7 @@ def _load_h3_skills_template() -> str:
         return f.read()
 
 
-def _build_h3_prompt(skills: str, prompt: str, has_image: bool) -> str:
+def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0) -> str:
     """Build the full prompt sent to the local GGUF VLM.
 
     Includes the custom skills guide, the required JSON output format
@@ -107,6 +107,12 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool) -> str:
             "user's input into \"detailed_description\". The image is not a "
             "first frame and must not be output as its own field.\n"
         )
+
+    duration_note = ""
+    if duration_seconds and duration_seconds > 0:
+        duration_note = (
+            "The target video's total duration is %.2f seconds. "
+        ) % (float(duration_seconds))
 
     return f"""You are an expert video prompt writer. Follow the skills guide below.
 
@@ -139,7 +145,7 @@ Write one short paragraph summarizing the target video and its reference relatio
 - "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".
 - Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
 {image_note}## User Input Prompt
-{prompt}
+{duration_note}{prompt}
 
 Output ONLY the JSON object. Do not add any text before or after it."""
 
@@ -153,7 +159,7 @@ _H3_DEFAULT_OPTIONS: dict = {
 }
 
 
-def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None) -> dict:
+def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0) -> dict:
     """Generate an H3 full-reference prompt JSON.
 
     options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
@@ -177,18 +183,20 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
     image = load_image_tensor(image_path) if image_path else None
     skills = _load_h3_skills_template()
-    full_prompt = _build_h3_prompt(skills, prompt, image is not None)
+    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
-        image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
-        api_key=opts.get("api_key", ""), seed=seed,
-    )
-    elif vlm_mode == "llama-cpp":
+            image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
+            api_key=opts.get("api_key", ""), seed=seed,
+        )
+        return parse_generated_json(generate_text)
+    if vlm_mode == "llama-cpp":
         generate_text = generate_prompt_with_llama(
-            image=image,prompt=full_prompt, gguf_path=opts["gguf_path"], 
+            image=image, prompt=full_prompt, gguf_path=opts["gguf_path"],
             mmproj_path=opts["mmproj_path"], seed=seed,
-    )
-    return parse_generated_json(generate_text)
+        )
+        return parse_generated_json(generate_text)
+    raise ValueError(f"Unsupported vlm_mode: {vlm_mode}")
 
 
 # ── H3 主体绑定 ──────────────────────────────────────────────────

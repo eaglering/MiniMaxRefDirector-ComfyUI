@@ -227,7 +227,7 @@ def generate_prompt_with_llama(
     gguf_path: str = "",
     mmproj_path: str = "",
     seed: int = 42,
-) -> dict:
+) -> str:
     """Generate the placeholder-tagged prompt JSON with a local GGUF VLM via llama-cpp-python.
 
     Args:
@@ -238,7 +238,7 @@ def generate_prompt_with_llama(
         seed: sampling seed for llama.cpp
 
     Returns:
-        dict: same shape as generate_prompt_with_clip
+        str: the raw generated text (parsing is left to the caller)
     """
     has_multi_model = has_image(image) and bool(mmproj_path)
     if has_image(image) and not mmproj_path:

@@ -257,6 +257,8 @@ class MiniMaxRefCombine(io.ComfyNode):
         saved = None
         if save_latent:
             saved = latent_lib.save_joint_latent_files(latent, meta_data, filename_prefix)
+        # 同段素材的 latent / clip_audio 共享同一递增编号，防止不同段互相覆盖
+        save_id = saved.get("save_id") if saved else None
 
         # 音轨：clip_audio（audio 输入）优先——它是 master_audio 经 Song Masked
         # Audio Context 处理后的本段分割音频（原始素材切片，保真无损）；
@@ -291,7 +293,9 @@ class MiniMaxRefCombine(io.ComfyNode):
         clip_audio_path = None
         if out_audio is not None:
             try:
-                clip_audio_path = latent_lib.save_audio_clip(out_audio, filename_prefix)["path"]
+                clip_audio_path = latent_lib.save_audio_clip(
+                    out_audio, filename_prefix, save_id=save_id
+                )["path"]
             except Exception:
                 log.warning("failed to save clip_audio wav", exc_info=True)
 
@@ -325,6 +329,18 @@ class MiniMaxRefCombine(io.ComfyNode):
             payload["meta"] = meta_data
         if clip_audio_path:
             payload["clip_audio"] = clip_audio_path
+        # 诊断：记录发送的 payload 与执行上下文 node_id（排查第二条素材缺 latent）
+        try:
+            from comfy_execution.utils import get_executing_context
+            _notify_ctx_node = getattr(get_executing_context(), "node_id", None)
+        except Exception:
+            _notify_ctx_node = None
+        log.info(
+            "[MiniMaxRefCombine] add_material send: imageFile=%s image_latent=%s "
+            "audio_latent=%s clip_audio=%s ctx_node_id=%s",
+            payload.get("imageFile"), payload.get("image_latent"),
+            payload.get("audio_latent"), payload.get("clip_audio"), _notify_ctx_node,
+        )
         _send_progress(payload)
 
         return io.NodeOutput(to_single_filename(filenames), ui=ui)

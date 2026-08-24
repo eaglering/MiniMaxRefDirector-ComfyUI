@@ -755,11 +755,18 @@ export function TransferPanel({ director }) {
       if (!aliveRef.current) return;
       const d = e && e.detail ? e.detail : {};
       if (d.status !== "add_material" || d.type !== "video") return;
+      // ── 诊断：打印每条通知的字段与过滤决策（排查第二条素材缺 latent）──
+      try {
+        console.log("[Transfer] add_material recv:", JSON.stringify(d));
+      } catch (_e) { /* ignore */ }
       const myNodeId = director?.node?.id;
       const hasMine = myNodeId !== undefined && myNodeId !== null;
       if (d.director_node_id !== undefined && d.director_node_id !== null) {
         // 新后端：精确匹配 Director 节点 id
-        if (!hasMine || String(d.director_node_id) !== String(myNodeId)) return;
+        if (!hasMine || String(d.director_node_id) !== String(myNodeId)) {
+          console.log("[Transfer] add_material REJECT (director_node_id mismatch):", d.director_node_id, "vs mine", myNodeId);
+          return;
+        }
       } else if (d.node_id !== undefined && d.node_id !== null && hasMine) {
         // 旧版后端兜底：node_id 是 Guide 节点 id，无法直接比对，
         // 仅当当前 graph 中存在该节点时接收（来源属于本工作流）
@@ -767,10 +774,19 @@ export function TransferPanel({ director }) {
         try {
           const g = (typeof window !== "undefined" && window.app) ? window.app.graph : null;
           if (g && Array.isArray(g._nodes)) {
-            found = g._nodes.some((n) => String(n.id) === String(d.node_id));
+            found = g._nodes.some((n) => {
+              const id = String(n.id);
+              const raw = String(d.node_id);
+              // 精确匹配；forLoop 子图内后端可能发送虚拟路径（如
+              // "192.0.0.3.0.0.207"），支持 ".207" 后缀兜底匹配真实节点
+              return id === raw || raw.endsWith("." + id);
+            });
           }
         } catch (_e) { /* ignore */ }
-        if (!found) return;
+        if (!found) {
+          console.log("[Transfer] add_material REJECT (node_id not in graph):", d.node_id);
+          return;
+        }
       }
       // 无任何来源标识的极旧版本通知：直接接收（单 tab 正常行为）
       let items = toVideoItems(d.imageFile);
@@ -1048,10 +1064,15 @@ export function TransferPanel({ director }) {
     setBusy(true);
     setError("");
     const targetSeg = curSeg; // 记录发起请求时的 segment，返回结果写回该 segment
+    // 把目标 segment 的总时长（秒）传给后端，供提示词模板约束 [Shot N] 的时间戳分布
+    const durSecs = targetSeg && director
+      ? parseFloat(((Number(targetSeg.length) || 0) / Math.max(1, director.getFrameRate())).toFixed(2))
+      : 0;
     try {
       const body = vlmBody({
         prompt: source,
         image_path: firstFramePath(),
+        duration_seconds: durSecs > 0 ? durSecs : 0,
       });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",

@@ -76,7 +76,11 @@ def _send_progress(payload, director_node_id=None):
                 from comfy_execution.utils import get_executing_context
                 ctx = get_executing_context()
                 if ctx is not None and getattr(ctx, "node_id", None) is not None:
-                    payload["node_id"] = ctx.node_id
+                    # forLoop 子图内执行时 node_id 是虚拟节点路径
+                    # （如 "192.0.0.3.0.0.207"），归一为最后一段真实节点 id（"207"），
+                    # 保证前端能按 graph 节点 id 匹配（否则子图内通知会被过滤丢弃）
+                    raw_id = str(ctx.node_id)
+                    payload["node_id"] = raw_id.rsplit(".", 1)[-1]
             except Exception:
                 pass
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)

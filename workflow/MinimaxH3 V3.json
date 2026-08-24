@@ -1342,7 +1342,7 @@
         24,
         24,
         0,
-        "video/h264-mp4",
+        "MiniMaxRef/combine",
         "video/h264-mp4",
         true,
         true
@@ -1353,7 +1353,7 @@
         "trim_frames": 24,
         "frame_rate": 24,
         "loop_count": 0,
-        "filename_prefix": "video/h264-mp4",
+        "filename_prefix": "MiniMaxRef/combine",
         "format": "video/h264-mp4",
         "pingpong": true,
         "save_output": true

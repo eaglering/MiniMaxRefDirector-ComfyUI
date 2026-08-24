@@ -243,6 +243,10 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         image_path = data.get("image_path", "")
         vlm_mode = data.get("vlm_mode", "llama-cpp")
         seed = data.get("seed", 42)
+        try:
+            duration_seconds = float(data.get("duration_seconds") or 0)
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
         options = {
             "gguf_path": data.get("gguf_path", ""),
             "mmproj_path": data.get("mmproj_path", ""),
@@ -261,7 +265,8 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
                 return web.json_response({"success": False, "error": "provider is required"}, status=400)
             # api_key 允许为空：generate_prompt_with_api 会回落 API 管理器配置 / 环境变量
         json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed, 
-                                       vlm_mode=vlm_mode, options=options)
+                                       vlm_mode=vlm_mode, options=options,
+                                       duration_seconds=duration_seconds)
         return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()

@@ -141,6 +141,41 @@ def _split_prefix(filename_prefix: str) -> tuple[str, str]:
     return "", norm or "latent"
 
 
+def _next_joint_save_id(target_dir: str, base: str) -> int:
+    """Comfy 风格递增编号：扫描目录中同批已有文件，返回最大编号 + 1。
+
+    同一次保存的 image_latent / audio_latent / clip_audio / meta 共享同一编号
+    （形如 image_latent_{base}_{n:05d}.safetensors），避免不同段/不同运行
+    互相覆盖。编号规则参考 ComfyUI get_save_image_path：从已有文件名中
+    解析前缀后的连续数字，取最大值 + 1。
+    """
+    prefixes = (
+        "image_latent_%s_" % base,
+        "audio_latent_%s_" % base,
+        "audio_%s_" % base,
+        "%s_" % base,
+    )
+    n = 0
+    try:
+        entries = os.listdir(target_dir)
+    except OSError:
+        return 1
+    for fn in entries:
+        for prefix in prefixes:
+            if not fn.startswith(prefix):
+                continue
+            digits = ""
+            for ch in fn[len(prefix):]:
+                if ch.isdigit():
+                    digits += ch
+                else:
+                    break
+            if digits:
+                n = max(n, int(digits))
+            break
+    return n + 1
+
+
 def save_joint_latent_files(
     latent: dict,
     meta: dict | None,
@@ -158,9 +193,11 @@ def save_joint_latent_files(
     target_dir = os.path.join(output_dir, subfolder) if subfolder else output_dir
     os.makedirs(target_dir, exist_ok=True)
 
-    image_name = "image_latent_%s.safetensors" % base
-    audio_name = "audio_latent_%s.safetensors" % base
-    meta_name = "%s.meta.json" % base
+    # Comfy 风格递增编号：image/audio/meta 共享同批编号，防止不同段互相覆盖
+    save_id = _next_joint_save_id(target_dir, base)
+    image_name = "image_latent_%s_%05d.safetensors" % (base, save_id)
+    audio_name = "audio_latent_%s_%05d.safetensors" % (base, save_id)
+    meta_name = "%s_%05d.meta.json" % (base, save_id)
     image_path = os.path.join(target_dir, image_name)
     audio_path = os.path.join(target_dir, audio_name)
     meta_path = os.path.join(target_dir, meta_name)
@@ -189,6 +226,7 @@ def save_joint_latent_files(
         "audio_filename": audio_name,
         "meta_filename": meta_name,
         "prefix": filename_prefix,
+        "save_id": save_id,
     }
 
 
@@ -255,10 +293,12 @@ def decode_audio_latent(audio_vae, audio_latent: torch.Tensor) -> tuple[torch.Te
 
 # ── 音频文件工具（clip_audio 透传）───────────────────────────────────────
 
-def save_audio_clip(audio: dict, filename_prefix: str) -> dict:
+def save_audio_clip(audio: dict, filename_prefix: str, save_id: int | None = None) -> dict:
     """把 clip_audio（AUDIO dict）保存为 wav 到 output 目录。
 
     返回 {path, subfolder, filename}。
+    save_id 传入时与 latent 文件共享同一递增编号（同段素材的一组文件），
+    未传入时独立按目录已有文件递增，避免不同段互相覆盖。
     """
     waveform = audio.get("waveform")
     sample_rate = int(audio.get("sample_rate") or 0)
@@ -273,7 +313,9 @@ def save_audio_clip(audio: dict, filename_prefix: str) -> dict:
     output_dir = folder_paths.get_output_directory()
     target_dir = os.path.join(output_dir, subfolder) if subfolder else output_dir
     os.makedirs(target_dir, exist_ok=True)
-    name = "audio_%s.wav" % base
+    if save_id is None:
+        save_id = _next_joint_save_id(target_dir, base)
+    name = "audio_%s_%05d.wav" % (base, save_id)
     path = os.path.join(target_dir, name)
 
     wave_np = waveform.detach().to("cpu", dtype=torch.float32).numpy()
