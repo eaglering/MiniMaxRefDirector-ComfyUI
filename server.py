@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import traceback
 
@@ -279,9 +280,10 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         elif vlm_mode == "ollama":
             # model / base_url 允许为空：generate_prompt_with_ollama 会回落
             # API 管理器 ollama 服务配置 / 内置默认值（http://localhost:11434）
-            json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed, 
-                                           vlm_mode=vlm_mode, options=options,
-                                           duration_seconds=duration_seconds)
+            pass
+        json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed,
+                                       vlm_mode=vlm_mode, options=options,
+                                       duration_seconds=duration_seconds)
         return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()
@@ -934,7 +936,25 @@ async def merge_latents_api(request: web.Request) -> web.Response:
                 if i == 0:
                     contexts.append(min(requested, frames))
                 else:
-                    contexts.append(timing_lib.snap_av_context_length(requested, available, frames))
+                    try:
+                        contexts.append(
+                            timing_lib.snap_av_context_length(requested, available, frames)
+                        )
+                    except ValueError:
+                        # 短素材段无法构成精确 AV 接缝（需 ≥39 可用帧）：
+                        # 降级为最大 H3 video run（音频由 _conform_waveform_length
+                        # 按绝对帧边界做亚样本时间对正），过短则 context=0 硬切。
+                        cap = min(int(requested), int(available), int(frames) - 1)
+                        run = timing_lib.largest_h3_video_run(cap)
+                        logging.getLogger(__name__).warning(
+                            "[MiniMaxRefCombine] merge_latents: segment %d cannot form an "
+                            "exact AV context boundary (usable source frames=%d); "
+                            "fallback context=%d%s",
+                            i + 1, cap, run,
+                            " (hard cut, no crossfade)" if run == 0
+                            else " (H3 video run, audio time-conformed)",
+                        )
+                        contexts.append(run)
                 available = frames
 
             overlap = contexts[0] if contexts else default_context
