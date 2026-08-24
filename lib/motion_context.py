@@ -151,9 +151,14 @@ def _apply_motion_context(cond, latent, video_vae, context_frames,
     m = _get_motion_context_module()
     node = getattr(m, "MiniMaxH3MotionContext")
     n = _safe_mc_frames(latent, context_length, context_frames.shape[0])
+    # 适配 ComfyUI-H3-Motion-Context-MultiRef 签名：
+    # apply(conditioning, vae, latent, context_frames, context_length,
+    #       encode_mode, anchor_mode, crop, ...)
     cond, trim = node().apply(
-        cond, video_vae, latent, str(n),
-        context_frames=context_frames,
+        cond, video_vae, latent, context_frames, int(n),
+        encode_mode="video",
+        anchor_mode="head",
+        crop="disabled",
         audio_vae=audio_vae,
     )
     return cond, trim

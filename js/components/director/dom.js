@@ -742,7 +742,7 @@ export const dom = {
     this.strengthValue = document.createElement("input");
     this.strengthValue.type = "text";
     this.strengthValue.className = "mrd-pr-strength-input";
-    this.strengthValue.value = "16";
+    this.strengthValue.value = "39";
     this.strengthValue.disabled = true;
     this.strengthValue.style.cursor = "ew-resize";
 
@@ -755,7 +755,7 @@ export const dom = {
     this.strengthValue.addEventListener("mousedown", (e) => {
       if (this.strengthValue.disabled) return;
       startX = e.clientX;
-      startVal = parseInt(this.strengthValue.value) || 16;
+      startVal = parseInt(this.strengthValue.value) || 39;
       hasMoved = false;
 
       const onMouseMove = (moveEvent) => {
@@ -771,7 +771,7 @@ export const dom = {
           let newVal = startVal + deltaX * sensitivity;
 
           if (newVal < 0) newVal = 0;
-          if (newVal > 100) newVal = 100;
+          if (newVal > 9999) newVal = 9999;
 
           this.strengthValue.value = parseInt(newVal);
 
@@ -800,8 +800,8 @@ export const dom = {
 
     this.strengthValue.addEventListener("change", (e) => {
       let val = parseInt(e.target.value);
-      if (isNaN(val)) val = 16;
-      val = Math.max(0, Math.min(100, val));
+      if (isNaN(val)) val = 39;
+      val = Math.max(0, Math.min(9999, val));
       this.strengthValue.value = val;
       if (this.timeline.segments[this.selectedIndex]) {
         const seg = this.timeline.segments[this.selectedIndex];

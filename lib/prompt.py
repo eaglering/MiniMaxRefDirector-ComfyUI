@@ -597,6 +597,7 @@ def build_h3_subject_bindings(
         "audios": audios,
         "videos": videos,
         "mapping": mapping,
+        "speaker_ids": speaker_ids,
     }
 
     return data
@@ -617,6 +618,7 @@ def build_h3_prompt(
     retention_analysis = prompt_res.get("retention_analysis", "")
     detailed_description = prompt_res.get("detailed_description", "")
     images = prompt_res.get("images", [])
+    speaker_ids = prompt_res.get("speaker_ids", {})
     # Picture 编号 = 图片在 images 列表中的位置（<Picture N> 对应 images[N-1]）
     index = len(images) + 1
     # 首帧图片对应的 <Picture N> 标签（视频段首帧 / 图片段图），供 detailed_description reference 分镜使用
@@ -706,7 +708,7 @@ def build_h3_prompt(
     subject_definitions = _replace_mapping(subject_definitions, mapping)
     summary = _replace_mapping(summary, mapping)
     retention_analysis = _replace_mapping(retention_analysis, mapping)
-    detailed_description = _replace_mapping(detailed_description, mapping)
+    detailed_description = _replace_mapping(detailed_description, mapping, speaker_ids=speaker_ids)
 
     # 首帧图作为 reference 分镜：detailed_description 已含 [Shot N] 时全部 +1，
     # 且原 [Shot 1] 移位为 [Shot 2] 后附上动画起点时间戳 At 00:00.330；
@@ -756,7 +758,13 @@ def build_h3_prompt(
         "prevImageFile": prev_image_file,
         "prevType": prev_type
     }
-def _replace_mapping(input: str, mapping: dict) -> str:
+def _replace_mapping(input: str, mapping: dict, speaker_ids: dict = None) -> str:
         for k, v in mapping.items():
-            input = input.replace(k, v)
+            label = v
+            if speaker_ids and k.startswith("<@") and k.endswith(">"):
+                name = k[2:-1]
+                speaker_id = speaker_ids.get(name, "")
+                if speaker_id:
+                    label = f"{v} ({speaker_id})"
+            input = input.replace(k, label)
         return input
