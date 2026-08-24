@@ -364,7 +364,7 @@ const S = {
   },
   resourcesList: {
     display: "flex", flexWrap: "wrap", gap: "8px",
-    alignSelf: "stretch", minHeight: "0", overflowY: "auto", scrollbarWidth: "thin",
+    alignSelf: "stretch", minHeight: "0", overflowY: "auto", scrollbarWidth: "thin", alignContent: "flex-start",
   },
   res: {
     position: "relative", flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",

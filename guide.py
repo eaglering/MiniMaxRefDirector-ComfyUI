@@ -157,7 +157,7 @@ class MiniMaxRefGuide(io.ComfyNode):
 
         timeline = guide_data.get("timeline_data", [])
         frame_rate = float(guide_data.get("frame_rate", 24))
-        idx = int(guide_index)
+        idx = int(guide_index) if guide_index is not None else 0
         total = len(timeline)
 
         # 资源更新通知：把生成/合并的视频追加到对应 Director 前端素材条
