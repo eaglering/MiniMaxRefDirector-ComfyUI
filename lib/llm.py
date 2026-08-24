@@ -383,3 +383,93 @@ def generate_prompt_with_api(
     log.info("[llm] %s API generated (first 200 chars): %s",
              service_name, str(generated_text)[:200])
     return generated_text
+
+
+def generate_prompt_with_ollama(
+    image=None,
+    prompt: str = "",
+    model: str = "",
+    base_url: str = "",
+    api_key: str = "ollama",
+    seed: int = 42,
+) -> str:
+    """Generate text with a local Ollama server (native /api/chat or OpenAI-compatible endpoint).
+
+    Args:
+        image: ComfyUI image tensor [B, H, W, C], optional (None = text-only mode)
+        prompt: full user prompt (with the H3 skills template baked in)
+        model: Ollama model tag (e.g. "llava", "qwen2.5vl:7b"). Falls back to the
+            API 管理器 ollama service model, then to "llava".
+        base_url: Ollama endpoint. Defaults to "http://localhost:11434/api/chat".
+            Point it at an OpenAI-compatible "…/v1/chat/completions" URL to use
+            that API instead (both response formats are accepted).
+        api_key: Ollama does not require a real key; any non-empty placeholder
+            is fine (default "ollama").
+        seed: sampling seed, clamped into the signed 32-bit int range
+            (passed through Ollama options.seed).
+
+    Returns:
+        str: the raw generated text (parsing is left to the caller)
+    """
+    resolved_url = (base_url or "").strip() or "http://localhost:11434/api/chat"
+    resolved_model = (model or "").strip()
+    if not resolved_model:
+        cfg = api_config_manager.get_config_for("vlm", service_id="ollama") or {}
+        resolved_model = (cfg.get("model") or "").strip() or "llava"
+
+    is_openai_compat = resolved_url.rstrip("/").endswith("/v1/chat/completions")
+    messages: list[dict] = [{"role": "user", "content": prompt}]
+    if has_image(image):
+        b64 = tensor_to_base64(image)
+        if is_openai_compat:
+            messages[0]["content"] = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": b64}},
+            ]
+        else:
+            messages[0]["images"] = [b64]
+
+    payload: dict = {
+        "model": resolved_model,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": 0.1, "num_predict": 4096},
+    }
+    if seed is not None:
+        payload["options"]["seed"] = _clamp_seed_32(seed)
+
+    log.info("[llm] Calling Ollama (%s) at %s ...", resolved_model, resolved_url)
+    req = urllib.request.Request(
+        resolved_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer %s" % ((api_key or "").strip() or "ollama"),
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"[llm] Ollama HTTP {e.code}: {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"[llm] Ollama request failed: {e.reason}. "
+            "Is the Ollama server running (default http://localhost:11434)?"
+        ) from e
+
+    data = json.loads(body)
+    generated_text = ""
+    try:
+        # OpenAI 兼容格式：{"choices": [{"message": {"content": ...}}]}
+        generated_text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        # Ollama 原生格式：{"message": {"content": ...}}
+        try:
+            generated_text = data["message"]["content"]
+        except (KeyError, TypeError) as e:
+            raise RuntimeError(f"[llm] Unexpected Ollama response: {body[:500]}") from e
+    log.info("[llm] Ollama generated (first 200 chars): %s", str(generated_text)[:200])
+    return generated_text

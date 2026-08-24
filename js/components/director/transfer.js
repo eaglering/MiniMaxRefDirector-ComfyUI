@@ -142,19 +142,23 @@ function getSubjectVlmSettings() {
       };
       const clean = (s) => (s === "None" ? "" : s || "");
       const v = findW("vlm_mode")?.value;
-      const out = { vlm_mode: "api", gguf_name: "", mmproj_path: "", provider: "GLM", api_key: "" };
+      const out = { vlm_mode: "api", gguf_name: "", mmproj_path: "", provider: "GLM", api_key: "", ollama_model: "", ollama_base_url: "" };
       if (v && typeof v === "object" && !Array.isArray(v)) {
         out.vlm_mode = v.vlm_mode || out.vlm_mode;
         out.gguf_name = clean(v.gguf_name);
         out.mmproj_path = clean(v.mmproj_path);
         out.provider = v.provider || out.provider;
         out.api_key = clean(v.api_key);
+        out.ollama_model = clean(v.ollama_model);
+        out.ollama_base_url = clean(v.ollama_base_url);
       } else {
         out.vlm_mode = v || out.vlm_mode;
         out.gguf_name = clean(findAny("vlm_mode.gguf_name", "gguf_name"));
         out.mmproj_path = clean(findAny("vlm_mode.mmproj_path", "mmproj_path"));
         out.provider = findAny("vlm_mode.provider", "provider") || out.provider;
         out.api_key = clean(findAny("vlm_mode.api_key", "api_key"));
+        out.ollama_model = clean(findAny("vlm_mode.ollama_model", "ollama_model"));
+        out.ollama_base_url = clean(findAny("vlm_mode.ollama_base_url", "ollama_base_url"));
       }
       // 主 widget 缺失或为空时，从子 widget 推断模式
       if (out.vlm_mode === "api") {
@@ -163,7 +167,7 @@ function getSubjectVlmSettings() {
           findW("vlm_mode.mmproj_path") || findW("mmproj_path");
         if (hasGguf) out.vlm_mode = "llama-cpp";
       }
-      if (!findW("vlm_mode") && !findW("vlm_mode.gguf_name") && !findW("vlm_mode.provider") && !findW("gguf_name") && !findW("provider")) {
+      if (!findW("vlm_mode") && !findW("vlm_mode.gguf_name") && !findW("vlm_mode.provider") && !findW("vlm_mode.ollama_model") && !findW("gguf_name") && !findW("provider") && !findW("ollama_model")) {
         console.warn("[Transfer] getSubjectVlmSettings: 未找到 vlm 相关 widget，当前 widget 列表:",
           widgets.map((w) => `${w.name}(${w.type})`).join(", "));
       }
@@ -943,6 +947,8 @@ export function TransferPanel({ director }) {
       mmproj_path: v.mmproj_path || "",
       provider: v.provider || "GLM",
       api_key: v.api_key || "",
+      ollama_model: v.ollama_model || "",
+      ollama_base_url: v.ollama_base_url || "",
       ...extra,
     };
   };

@@ -9,7 +9,7 @@ import torch
 from PIL import Image
 
 from .image import load_image_tensor
-from .llm import generate_prompt_with_api, generate_prompt_with_llama
+from .llm import generate_prompt_with_api, generate_prompt_with_llama, generate_prompt_with_ollama
 from .path import resolve_input_path
 from .utils import find_index, parse_generated_json
 
@@ -156,6 +156,8 @@ _H3_DEFAULT_OPTIONS: dict = {
     "mmproj_path": "",
     "provider": "GLM",        # vlm_mode="api" 时的服务商
     "api_key": "",            # vlm_mode="api" 时的 key 覆盖
+    "ollama_model": "",       # vlm_mode="ollama" 时的模型名（空则回落 API 管理器 / "llava"）
+    "ollama_base_url": "",    # vlm_mode="ollama" 时的端点（空则默认 http://localhost:11434/api/chat）
 }
 
 
@@ -167,9 +169,13 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
       - gguf_path / mmproj_path: llama-cpp 本地 GGUF 模型文件
       - image_path: 参考图路径（提供时与用户输入合并进 detailed_description）
       - seed: 采样种子
-      - vlm_mode: "llama-cpp"（默认，本地 GGUF）/ "api"（云端 OpenAI 兼容接口）
+      - vlm_mode: "llama-cpp"（默认，本地 GGUF）/ "api"（云端 OpenAI 兼容接口）/
+        "ollama"（本地 Ollama 服务）
       - provider: vlm_mode="api" 时的服务商（走 API 管理器配置）
-      - api_key: vlm_mode="api" 时的 key 覆盖（可留空，回落配置/环境变量）
+      - api_key: vlm_mode="api"/"ollama" 时的 key 覆盖（可留空，回落配置/环境变量；
+        Ollama 无需真实 key，任意非空占位符即可）
+      - ollama_model: vlm_mode="ollama" 时的模型名（空则回落 API 管理器 ollama 服务 / "llava"）
+      - ollama_base_url: vlm_mode="ollama" 时的端点（空则默认 http://localhost:11434/api/chat）
       - clip_type: CLIP 模型类型（"minimax" / "qwen3vl" / "gemma"）
 
     The output JSON includes summary / detailed_description /
@@ -194,6 +200,15 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
         generate_text = generate_prompt_with_llama(
             image=image, prompt=full_prompt, gguf_path=opts["gguf_path"],
             mmproj_path=opts["mmproj_path"], seed=seed,
+        )
+        return parse_generated_json(generate_text)
+    if vlm_mode == "ollama":
+        generate_text = generate_prompt_with_ollama(
+            image=image, prompt=full_prompt,
+            model=opts.get("ollama_model", ""),
+            base_url=opts.get("ollama_base_url", ""),
+            api_key=opts.get("api_key", "ollama"),
+            seed=seed,
         )
         return parse_generated_json(generate_text)
     raise ValueError(f"Unsupported vlm_mode: {vlm_mode}")

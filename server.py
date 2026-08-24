@@ -11,7 +11,7 @@ import folder_paths
 from aiohttp import web
 
 from .lib.image import load_image_tensor
-from .lib.llm import generate_prompt_with_api
+from .lib.llm import generate_prompt_with_api, generate_prompt_with_ollama
 from .lib.prompt import generate_h3_prompt, image_analysis
 from server import PromptServer
 
@@ -216,6 +216,16 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
                 return web.json_response({"success": False, "error": "gguf_path is required (no GGUF found under models/llm)"}, status=400)
             mmproj_path = _resolve_llm_file(mmproj_path)
             prompt_data = image_analysis(gguf_path, mmproj_path, prompt, image_path, seed)
+        elif vlm_mode == "ollama":
+            image = load_image_tensor(image_path) if image_path else None
+            text = generate_prompt_with_ollama(
+                image=image, prompt=prompt,
+                model=data.get("ollama_model", ""),
+                base_url=data.get("ollama_base_url", ""),
+                api_key=data.get("api_key", ""),
+                seed=seed,
+            )
+            prompt_data = {"detailed_description": text}
         else:
             provider = data.get("provider", "GLM")
             api_key = data.get("api_key", "")
@@ -252,6 +262,8 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             "mmproj_path": data.get("mmproj_path", ""),
             "provider": data.get("provider", "GLM"),
             "api_key": data.get("api_key", ""),
+            "ollama_model": data.get("ollama_model", ""),
+            "ollama_base_url": data.get("ollama_base_url", ""),
         }
         if not prompt:
             return web.json_response({"success": False, "error": "prompt is required"}, status=400)
@@ -264,9 +276,12 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             if not options["provider"]:
                 return web.json_response({"success": False, "error": "provider is required"}, status=400)
             # api_key 允许为空：generate_prompt_with_api 会回落 API 管理器配置 / 环境变量
-        json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed, 
-                                       vlm_mode=vlm_mode, options=options,
-                                       duration_seconds=duration_seconds)
+        elif vlm_mode == "ollama":
+            # model / base_url 允许为空：generate_prompt_with_ollama 会回落
+            # API 管理器 ollama 服务配置 / 内置默认值（http://localhost:11434）
+            json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed, 
+                                           vlm_mode=vlm_mode, options=options,
+                                           duration_seconds=duration_seconds)
         return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()
