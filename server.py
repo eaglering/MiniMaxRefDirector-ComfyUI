@@ -320,10 +320,12 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
         if not isinstance(prompt_json, dict):
             return web.json_response({"success": False, "error": "prompt_json must be an object"}, status=400)
         timeline_segment = data.get("timeline_segment", None)
+        seg_audio = data.get("seg_audio", []) or []
         result = build_h3_subject_bindings(
             subject_data=subject_data,
             prompt_json=prompt_json,
             timeline_segment=timeline_segment,
+            seg_audio=seg_audio,
         )
         return web.json_response({"success": True, "data": result})
     except Exception as e:

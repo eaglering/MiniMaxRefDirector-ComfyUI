@@ -358,7 +358,7 @@ def build_h3_subject_bindings(
     # 用户提交了有效 audiosegment（type=Audio 且 audioFile 非空）时，音频素材仅作
     # 参考绑定（mapping）供前端使用：不写入 subject_definitions / retention_analysis，
     # 也不放入 audios 资源数组（音频由 Combine 节点 clip_audio 通道直接传递）。
-    suppress_audio = True if len(seg_audio) > 0 else False
+    suppress_audio = len(seg_audio) > 0
     names = _extract_h3_name_mentions([
         prompt_json.get("summary", ""),
         prompt_json.get("detailed_description", ""),
@@ -397,8 +397,6 @@ def build_h3_subject_bindings(
                 return None
             images.append(f)
         elif d_type == "Audio":
-            if suppress_audio:
-                return None
             f = subj.get("audioFile", "")
             if not f:
                 unmatched.setdefault(name, []).append(f"{name} has no audioFile")
@@ -457,8 +455,7 @@ def build_h3_subject_bindings(
                     _retention_line(_pattern, _relationship, _retention, shot_mentions.get(_name, []))
                 )
             seen.add(_name)
-            if _dType != "Subject":
-                subjects_out.append(_subj)
+            subjects_out.append(_subj)
             mapping[_pattern] = _label
             # 递归处理描述中的提及
             if _description:
@@ -573,8 +570,7 @@ def build_h3_subject_bindings(
                 _retention_line(f"<@{name}>", relationship, retention, shot_mentions.get(name, []))
             )
         seen.add(name)
-        if d_type != "Subject":
-            subjects_out.append(subj)
+        subjects_out.append(subj)
         mapping[pattern] = label
         # 递归处理描述中的 <@提及>（在 seen 之后调用，防止自引用无限递归）
         if description:
@@ -606,8 +602,7 @@ def build_h3_subject_bindings(
                 _retention_line(f"<@{name}>", relationship, retention, shot_mentions.get(name, []))
             )
         seen.add(name)
-        if d_type != "Subject":
-            subjects_out.append(subj)
+        subjects_out.append(subj)
         # 递归处理描述中的 <@提及>（在 seen 之后调用，防止自引用无限递归）
         if description:
             _extract_h3_subject_mentions(description)

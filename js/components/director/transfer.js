@@ -965,12 +965,33 @@ export function TransferPanel({ director }) {
       // timeline_segment：当前选中 segment（含 additionSubject，供后端追加绑定未提及的主体）
       const seg = curSeg;
       // 过滤 prompt 中已提及（<@name> 会由 prompt 绑定，后端将其写入 mapping）的主体，避免重复追加。
-      // 注意：additionSubject 手动添加的主体不会被写入 mapping，必须保留发送，
       // 否则"已绑定→从 additionSubject 移除→解除绑定→回到候选"循环。
       const boundMentions = new Set();
       for (const k of Object.keys(bindData?.mapping || {})) {
         const mm = /^<@([^>]+)>$/.exec(k);
         if (mm) boundMentions.add(mm[1]);
+      }
+      // seg_audio：当前 segment 范围内的音频段（不是全局 timeline.audioSegments）。
+      // 供后端 build_h3_subject_bindings 判断该段是否有音频：该段有音频（非空）时
+      // suppress_audio=True（音频素材仅作参考绑定）；无音频（空数组）时正常绑定音频素材。
+      // 与后端 director.py 的 fill_audio_gaps 段筛选语义一致：裁剪到段范围、trimStart 同步右移。
+      const segAudio = [];
+      const tl = director?.timeline;
+      if (tl?.audioTrackEnabled !== false && Array.isArray(tl?.audioSegments)) {
+        const segStart = seg ? (Number(seg.start) || 0) : 0;
+        const segEnd = segStart + (seg ? (Number(seg.length) || 0) : 0);
+        for (const as of tl.audioSegments) {
+          const aStart = Number(as?.start) || 0;
+          const aEnd = aStart + (Number(as?.length) || 0);
+          const clipStart = Math.max(aStart, segStart);
+          const clipEnd = Math.min(aEnd, segEnd);
+          if (clipEnd <= clipStart) continue; // 不与该段重叠，跳过
+          const clipped = { start: clipStart, length: clipEnd - clipStart };
+          if (as?.trimStart !== undefined) {
+            clipped.trimStart = (Number(as.trimStart) || 0) + (clipStart - aStart);
+          }
+          segAudio.push(clipped);
+        }
       }
       const body = {
         subject_data: { subjects: subjects || [] },
@@ -986,6 +1007,7 @@ export function TransferPanel({ director }) {
               additionSubject: (Array.isArray(seg.additionSubject) ? seg.additionSubject : []).filter((n) => !boundMentions.has(n)),
             }
           : {},
+        seg_audio: segAudio,
       };
       const res = await api.fetchApi("/minimax_ref/api/h3/build_subject_bindings", {
         method: "POST",
