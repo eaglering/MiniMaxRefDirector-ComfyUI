@@ -96,6 +96,13 @@ const MSCSS = `
     display: flex;
     gap: 6px;
     align-items: center;
+    justify-content: flex-end;
+}
+.ref-ms-row-group {
+    display: flex;
+    flex: 1;
+    gap: 4px;
+    align-items: center;
 }
 .ref-ms-label,.ref-ms-label-sm {
     font-size: 10px;
@@ -107,7 +114,7 @@ const MSCSS = `
     line-height: 1.5;
     text-align: left;
     user-select: none;
-    min-width: 40px;
+    min-width: 60px;
 }
 .ref-ms-input {
     flex: 1;
@@ -159,12 +166,43 @@ const MSCSS = `
     font-family: inherit;
     outline: none;
     resize: vertical;
-    min-height: 60px;
+    min-height: 90px;
     box-sizing: border-box;
     transition: border-color 0.2s;
 }
 .ref-ms-textarea:focus {
     border-color: #888;
+}
+.ref-ms-cell {
+    flex: 1 1 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+}
+.ref-ms-retention {
+    flex: 1;
+    min-width: 0;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+    resize: none;
+    min-height: 60px;
+    line-height: 1.35;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+.ref-ms-retention:focus {
+    border-color: #888;
+}
+.ref-ms-input.required-missing {
+    border-color: #e0533d;
 }
 /* --- Type tabs --- */
 .ref-ms-tabs {
@@ -205,7 +243,6 @@ const MSCSS = `
     padding: 6px 8px;
     box-sizing: border-box;
     flex-shrink: 0;
-    flex: 1;
 }
 .ref-ms-global-prompt-label {
     font-size: 10px;
@@ -224,14 +261,15 @@ const MSCSS = `
     box-sizing: border-box;
     outline: none;
     height: 100%;
+    min-height: 90px;
 }
 .ref-ms-global-prompt-input:focus {
     border-color: #888;
 }
 /* --- Media box styles (attached to desc row, right-aligned image & audio) --- */
 .ref-ms-media-box {
-    width: 56px;
-    height: 56px;
+    width: 90px;
+    height: 90px;
     border: 1px dashed #444;
     border-radius: 6px;
     display: flex;
@@ -423,6 +461,100 @@ const MSCSS = `
     text-align: center;
     padding: 4px 0;
 }
+.ref-ms-mention-popup {
+    position: fixed;
+    z-index: 9999;
+    min-width: 170px;
+    max-width: 280px;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    padding: 4px;
+    display: none;
+    box-sizing: border-box;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ref-ms-mention-popup.open {
+    display: flex;
+}
+/* 顶部主体类型 tab 条：固定不随列表滚动，选中态亮蓝强调 */
+.ref-ms-mention-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 0 4px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #333;
+    flex: 0 0 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.ref-ms-mention-tabs::-webkit-scrollbar {
+    display: none;
+}
+.ref-ms-mention-tab {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    background: transparent;
+    padding: 1px 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    line-height: 1.4;
+}
+.ref-ms-mention-tab:hover {
+    color: #aaa;
+    border-color: #555;
+}
+.ref-ms-mention-tab.active {
+    color: #4fc3f7;
+    background: rgba(79, 195, 247, 0.18);
+    border-color: rgba(79, 195, 247, 0.5);
+}
+/* 主体列表容器：纵向滚动，max-height 由 popup 顶部 tab 条让位 */
+.ref-ms-mention-list {
+    overflow-y: auto;
+    max-height: 176px;
+}
+.ref-ms-mention-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ref-ms-mention-item:hover,
+.ref-ms-mention-item.active {
+    background: #333;
+}
+.ref-ms-mention-type {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex: 0 0 auto;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+.ref-ms-mention-empty {
+    font-size: 11px;
+    color: #777;
+    padding: 6px 8px;
+    white-space: nowrap;
+}
 `;
 
 let styleEl = document.getElementById("minimax-subject-styles");
@@ -433,41 +565,278 @@ if (!styleEl) {
 }
 styleEl.textContent = MSCSS;
 
+// --- @mention 主体选择器（描述输入框输入 @ 弹出，插入 <@name> 供 H3 绑定） ---
+let mentionPopup = null;
+let mentionCtx = null; // { ta, idx, start, query, items, active, save, allSubjects }
+
+document.addEventListener("mousedown", (e) => {
+    if (mentionPopup && !mentionPopup.contains(e.target)) closeMention();
+}, true);
+
+function closeMention() {
+    if (mentionPopup) {
+        mentionPopup.classList.remove("open");
+        mentionPopup.innerHTML = "";
+        delete mentionPopup.dataset.tab; // 重置 tab 选中，下次打开回到「全部」
+    }
+    mentionCtx = null;
+}
+
+function buildMentionPopup() {
+    if (!mentionPopup) {
+        mentionPopup = document.createElement("div");
+        mentionPopup.className = "ref-ms-mention-popup";
+        document.body.appendChild(mentionPopup);
+    }
+    return mentionPopup;
+}
+
+function positionMentionPopup(ta) {
+    const rect = ta.getBoundingClientRect();
+    const pop = buildMentionPopup();
+    pop.style.left = rect.left + "px";
+    pop.style.top = (rect.bottom + 4) + "px";
+    const popW = pop.offsetWidth || 200;
+    if (rect.left + popW > window.innerWidth - 8) {
+        pop.style.left = Math.max(8, window.innerWidth - popW - 8) + "px";
+    }
+}
+
+function mentionQuery(ta) {
+    const pos = ta.selectionStart;
+    if (pos !== ta.selectionEnd) return null;
+    const v = ta.value;
+    if (pos > 0 && v[pos - 1] === ">") return null; // 已闭合 <@name> 之后不触发
+    const m = v.slice(0, pos).match(/@([^@\s>]*)$/);
+    if (!m) return null;
+    return { start: m.index, query: m[1] };
+}
+
+function setMentionActive(i) {
+    if (!mentionCtx) return;
+    mentionCtx.active = i;
+    const pop = buildMentionPopup();
+    const list = pop.querySelector(".ref-ms-mention-list");
+    if (!list) return;
+    [...list.children].forEach((el, j) => {
+        el.classList.toggle("active", j === i);
+    });
+}
+
+// 主体媒体展示：audio → 音频图标；video → 视频图标；image → 图片；无媒体 → "T"（文本主体）
+function mentionMedia(s, size) {
+    const t = s.type || "Subject";
+    const base = {
+        width: size + "px",
+        height: size + "px",
+        borderRadius: "3px",
+        flex: "0 0 auto",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: Math.round(size * 0.5) + "px",
+        fontStyle: "normal",
+        lineHeight: 1,
+        background: "#1e3a5f",
+        color: "#38bdf8",
+    };
+    if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile) || (s.audioRef && t === "Subject")) {
+        const el = document.createElement("span");
+        el.title = "音频";
+        el.textContent = "♪";
+        Object.assign(el.style, base);
+        return el;
+    }
+    if (t === "Video" || s.videoFile) {
+        const el = document.createElement("span");
+        el.title = "视频";
+        el.textContent = "▶";
+        Object.assign(el.style, base, { color: "#a5d6a7" });
+        return el;
+    }
+    if (t === "Picture" || s.imageFile || s.imageB64) {
+        const img = document.createElement("img");
+        img.alt = "";
+        img.src = s.imageB64 || (s.imageFile ? viewUrl(s.imageFile, "minimaxrefdirector") : "");
+        Object.assign(img.style, base, { objectFit: "cover" });
+        return img;
+    }
+    // 无媒体 → 文本主体 T 徽标
+    const el = document.createElement("span");
+    el.title = "文本";
+    el.textContent = "T";
+    Object.assign(el.style, base, { background: "#333", color: "#ccc" });
+    return el;
+}
+
+function acceptMention() {
+    const ctx = mentionCtx;
+    if (!ctx) return;
+    const item = ctx.items[ctx.active];
+    if (!item) return;
+    const insert = `<@${item.s.name.trim()}>`;
+    const end = ctx.start + 1 + ctx.query.length; // @ + query 的结束位置
+    const newVal = ctx.ta.value.slice(0, ctx.start) + insert + ctx.ta.value.slice(end);
+    ctx.ta.value = newVal;
+    const caret = ctx.start + insert.length;
+    ctx.ta.focus();
+    ctx.ta.setSelectionRange(caret, caret);
+    if (ctx.save) ctx.save(newVal);
+    closeMention();
+}
+
+// 渲染弹窗内容：顶部主体类型 tab 条（全部 / 可引用类型）+ 列表容器。
+// 当前 tab 存 pop.dataset.tab（popup 为缓存单例：input 重建时保持选中态，
+// closeMention 时重置回到「全部」）。tab 点击仅重渲染列表，不重建 mentionCtx
+// （保留 caret / query，键盘导航与 active 索引随之更新）。
+function renderMentionList(pop, allowed) {
+    const ctx = mentionCtx;
+    if (!ctx) return;
+    const tab = pop.dataset.tab || "";
+    pop.innerHTML = "";
+    // 顶部 tab 条："" 表示「全部」，其余为当前主体可引用的类型
+    const tabTypes = [""].concat(allowed || []);
+    const tabs = document.createElement("div");
+    tabs.className = "ref-ms-mention-tabs";
+    tabTypes.forEach((t) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ref-ms-mention-tab" + (t === tab ? " active" : "");
+        b.textContent = t || "全部";
+        b.addEventListener("mousedown", (e) => {
+            e.preventDefault(); // 保持 textarea 焦点
+            if (pop.dataset.tab === t) return;
+            pop.dataset.tab = t;
+            renderMentionList(pop, allowed);
+        });
+        tabs.appendChild(b);
+    });
+    pop.appendChild(tabs);
+    // 列表容器（滚动区域）
+    const list = document.createElement("div");
+    list.className = "ref-ms-mention-list";
+    // 过滤链：排除自身 + allowed 类型 + 名称非空 + 关键词匹配 + 当前 tab 类型
+    ctx.items = ctx.allSubjects
+        .map((s, i) => ({ s, i }))
+        .filter(({ s, i }) => i !== ctx.idx && allowed.includes(s.type) && (s.name || "").trim()
+            && s.name.toLowerCase().includes(ctx.query.toLowerCase())
+            && (tab === "" || s.type === tab));
+    ctx.active = 0;
+    if (ctx.items.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "ref-ms-mention-empty";
+        empty.textContent = "暂无可用主体";
+        list.appendChild(empty);
+    } else {
+        ctx.items.forEach((it, i) => {
+            const item = document.createElement("div");
+            item.className = "ref-ms-mention-item" + (i === 0 ? " active" : "");
+            const type = document.createElement("span");
+            type.className = "ref-ms-mention-type";
+            type.textContent = it.s.type || "Subject";
+            const name = document.createElement("span");
+            name.textContent = it.s.name;
+            item.appendChild(mentionMedia(it.s, 22));
+            item.appendChild(name);
+            item.appendChild(type);
+            item.addEventListener("mousedown", (e) => {
+                e.preventDefault(); // 保持 textarea 焦点
+                mentionCtx.active = i;
+                acceptMention();
+            });
+            item.addEventListener("mouseenter", () => setMentionActive(i));
+            list.appendChild(item);
+        });
+    }
+    pop.appendChild(list);
+}
+
+function updateMention(ta, idx, subjects, save) {
+    const q = mentionQuery(ta);
+    if (!q) { closeMention(); return; }
+    const allowed = REF_MENTION_TYPES[subjects[idx].type] || [];
+    const pop = buildMentionPopup();
+    mentionCtx = { ta, idx, start: q.start, query: q.query, items: [], active: 0, save, allSubjects: subjects };
+    renderMentionList(pop, allowed);
+    pop.classList.add("open");
+    positionMentionPopup(ta);
+}
+
+function attachMention(ta, idx, subjects, save) {
+    ta.addEventListener("input", () => updateMention(ta, idx, subjects, save));
+    ta.addEventListener("keydown", (e) => {
+        if (!mentionCtx) return;
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setMentionActive(Math.min(mentionCtx.active + 1, mentionCtx.items.length - 1));
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setMentionActive(Math.max(mentionCtx.active - 1, 0));
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            acceptMention();
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            closeMention();
+        }
+    });
+    ta.addEventListener("blur", () => {
+        setTimeout(() => closeMention(), 120);
+    });
+}
+
 // 图像类主体（Subject / Picture / Video）的关系选项
-const REF_RELATIONSHIPS_PRESERVED = [
-    ["fully_preserved", "fully preserved"],
-    ["partially_preserved", "partially preserved"],
-    ["attribute_transfer", "attribute transfer"],
-    ["weak_reference", "weak reference"],
+const REF_RELATIONSHIPS_SUBJECT = [
+    ["fully_preserved", "fully preserved", "The defined role of the referenced content is fully preserved"],
+    ["partially_preserved", "partially preserved", "The referenced content is still used, but some defined characteristics are changed or only partially retained"],
+    ["attribute_transfer", "attribute transfer", "Referenced characteristics are transferred to a different identifiable target subject"],
+    ["weak_reference", "weak reference", "Only broad similarity in style, category, composition, or atmosphere is retained"],
+];
+
+const REF_RELATIONSHIPS_PV = [
+    ["", "none", "For subject reference only"],
+    ["fully_preserved", "fully preserved", "The defined role of the referenced content is fully preserved"],
+    ["partially_preserved", "partially preserved", "The referenced content is still used, but some defined characteristics are changed or only partially retained"],
+    ["attribute_transfer", "attribute transfer", "Referenced characteristics are transferred to a different identifiable target subject"],
+    ["weak_reference", "weak reference", "Only broad similarity in style, category, composition, or atmosphere is retained"],
 ];
 
 // Audio 的关系选项
-const REF_RELATIONSHIPS_COPY = [
-    ["fully_copy", "fully copy"],
-    ["partially_copy", "partially copy"],
-    ["reference", "reference"],
-    ["weak_reference", "weak reference"],
+const REF_RELATIONSHIPS_AUDIO = [
+    ["", "none", "For sound‑effect or subject reference only"],
+    ["fully_copy", "fully copy", "The complete source audio serves as the target video's complete final audio track"],
+    ["partially_copy", "partially copy", "Only part of the timeline or selected audio layers are copied, or other sounds are added, removed, or replaced after copying"],
+    ["reference", "reference", "The signal is not copied directly; only timbre, rhythm, music style, dialogue content, or sound texture is referenced"],
+    ["weak_reference", "weak reference", "Only broad similarity in category or atmosphere is retained"],
 ];
 
 // type → 关系选项组（联动）
 const REF_TYPE_RELATIONSHIPS = {
-    Subject: REF_RELATIONSHIPS_PRESERVED,
-    Picture: REF_RELATIONSHIPS_PRESERVED,
-    Video: REF_RELATIONSHIPS_PRESERVED,
-    Audio: REF_RELATIONSHIPS_COPY,
+    Subject: REF_RELATIONSHIPS_SUBJECT,
+    Picture: REF_RELATIONSHIPS_PV,
+    Video: REF_RELATIONSHIPS_PV,
+    Audio: REF_RELATIONSHIPS_AUDIO,
 };
 
 // type → relationship 默认值
 function refDefaultRelationship(type) {
-    return (REF_TYPE_RELATIONSHIPS[type || "Subject"] || REF_RELATIONSHIPS_PRESERVED)[0][0];
+    return (REF_TYPE_RELATIONSHIPS[type || "Subject"])[0][0];
 }
 
 // type → 可上传的媒体类型（联动显示）
 const REF_TYPE_MEDIA = {
-    Subject: { image: true, audio: true, video: false },
+    Subject: { image: false, audio: false, video: false },
     Picture: { image: true, audio: false, video: false },
     Audio: { image: false, audio: true, video: false },
     Video: { image: false, audio: false, video: true },
+};
+
+// type → 可 @ 引用的主体类型（mention 过滤）
+const REF_MENTION_TYPES = {
+    Subject: ["Picture", "Video"],
+    Picture: ["Picture"],
+    Video: ["Picture", "Video"],
+    Audio: ["Audio", "Subject"],
 };
 
 app.registerExtension({
@@ -550,8 +919,13 @@ app.registerExtension({
                 domWidget.computeSize = function (width) {
                     const nodeWidth = node.size?.[0] || 475;
                     const innerWidth = Math.max(10, nodeWidth - 30); // DOM widget 内容宽（与 .ref-ms-wrapper 一致）
+                    // 优先实测内容高度：卡片已渲染时 scrollHeight 即真实高度，
+                    // 自动跟随内容变化（媒体行/视频行/Description 显隐/textarea 拉伸/多列网格）。
+                    const measured = wrapper.scrollHeight || 0;
+                    if (measured > 0) return [innerWidth, measured];
+                    // 兜底估算（DOM 尚未就绪的首帧）
                     const listWidth = Math.max(1, innerWidth - 12); // 列表可用宽（wrapper padding 6px ×2）
-                    const estCardHeight = 215; // per subject card (image/audio boxes + video row)
+                    const estCardHeight = 235; // per subject card (image/audio boxes + retention + video row)
                     const extras = 206; // global prompt area + tabs + add button + footer + gaps
                     const visibleCount = subjects.filter(s => (s.type || "Subject") === activeTab).length;
                     if (visibleCount === 0) return [innerWidth, extras];
@@ -585,6 +959,8 @@ app.registerExtension({
                             relationship: s.relationship || refDefaultRelationship(s.type),
                             imageFile: s.imageFile || "",
                             audioFile: s.audioFile || "",
+                            audioRef: s.audioRef || "",
+                            retention: s.retention || "",
                             videoFile: s.videoFile || "",
                         }));
                         window.dispatchEvent(new CustomEvent("ref:subjects-changed"));
@@ -607,6 +983,8 @@ app.registerExtension({
                                         imageFile: s.imageFile || "",
                                         imageB64: s.imageB64 || viewUrl(s.imageFile, "minimaxrefdirector"),
                                         audioFile: s.audioFile || "",
+                                        audioRef: s.audioRef || "",
+                                        retention: s.retention || "",
                                         videoFile: s.videoFile || "",
                                         videoB64: s.videoB64 || viewUrl(s.videoFile, "minimaxrefdirector"),
                                     });
@@ -625,7 +1003,7 @@ app.registerExtension({
 
                     if (subjects.length === 0) {
                         while (subjects.length < subjectCount) {
-                            subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", imageFile: "", audioFile: "", videoFile: "" });
+                            subjects.push({ name: "", description: "", type: "Subject", relationship: "fully_preserved", audioRef: "", retention: "", imageFile: "", audioFile: "", videoFile: "" });
                         }
                     } else {
                         subjectCount = subjects.length;
@@ -756,6 +1134,8 @@ app.registerExtension({
                             relationship: s.relationship || refDefaultRelationship(s.type),
                             imageFile: s.imageFile,
                             audioFile: s.audioFile,
+                            audioRef: s.audioRef,
+                            retention: s.retention,
                             videoFile: s.videoFile,
                         }))
                     };
@@ -779,6 +1159,7 @@ app.registerExtension({
                 }
 
                 function renderSubjects() {
+                    closeMention();
                     subjectList.innerHTML = "";
                     // tab 高亮
                     TYPE_TABS.forEach(t => {
@@ -817,71 +1198,100 @@ app.registerExtension({
                         header.appendChild(removeBtn);
                         card.appendChild(header);
 
-                        // Name
-                        const nameRow = document.createElement("div");
-                        nameRow.className = "ref-ms-row";
+                        // Name + Rel（并排各 50%，均必填）
+                        const topRow = document.createElement("div");
+                        topRow.className = "ref-ms-row";
+
+                        const nameCell = document.createElement("div");
+                        nameCell.className = "ref-ms-cell";
                         const nameLabel = document.createElement("span");
-                        nameLabel.className = "ref-ms-label";
-                        nameLabel.textContent = "Name";
+                        nameLabel.className = "ref-ms-label-sm";
+                        nameLabel.textContent = "Name *";
+                        nameLabel.title = "Required";
                         const nameInput = document.createElement("input");
                         nameInput.className = "ref-ms-input";
                         nameInput.type = "text";
                         nameInput.placeholder = "Subject name...";
                         nameInput.value = subj.name || "";
                         nameInput.maxLength = 128;
+                        nameInput.title = "Required";
+                        if (!(subj.name || "").trim()) nameInput.classList.add("required-missing");
                         nameInput.addEventListener("input", () => {
                             subjects[idx].name = nameInput.value;
+                            nameInput.classList.toggle("required-missing", !nameInput.value.trim());
                             saveState();
                         });
-                        nameRow.appendChild(nameLabel);
-                        nameRow.appendChild(nameInput);
-                        card.appendChild(nameRow);
+                        nameCell.appendChild(nameLabel);
+                        nameCell.appendChild(nameInput);
 
-                        // Relationship（选项组随当前 tab 类型固定：Subject/Picture/Video 用 preserved 系，Audio 用 copy 系）
-                        const metaRow = document.createElement("div");
-                        metaRow.className = "ref-ms-row";
+                        const relCell = document.createElement("div");
+                        relCell.className = "ref-ms-cell";
                         const relLabel = document.createElement("span");
                         relLabel.className = "ref-ms-label-sm";
-                        relLabel.textContent = "Rel";
+                        relLabel.textContent = "Relation *";
+                        relLabel.title = "Required";
                         const relSelect = document.createElement("select");
                         relSelect.className = "ref-ms-select";
-                        const relOptions = REF_TYPE_RELATIONSHIPS[activeTab] || REF_RELATIONSHIPS_PRESERVED;
+                        const relOptions = REF_TYPE_RELATIONSHIPS[activeTab] || REF_RELATIONSHIPS_SUBJECT;
                         const relDefault = relOptions[0][0];
-                        relOptions.forEach(([val, label]) => {
+                        relOptions.forEach(([val, label, description]) => {
                             const opt = document.createElement("option");
                             opt.value = val;
                             opt.textContent = label;
+                            opt.title = description || "";
                             opt.selected = (subj.relationship || relDefault) === val;
                             relSelect.appendChild(opt);
                         });
                         relSelect.addEventListener("change", () => {
                             subjects[idx].relationship = relSelect.value;
                             saveState();
+                            syncRetentionVisibility();
+                            syncDescriptionVisibility();
+                            // Description/Retention 行显隐切换影响卡片高度
+                            updateNodeSize();
                         });
-                        metaRow.appendChild(relLabel);
-                        metaRow.appendChild(relSelect);
-                        card.appendChild(metaRow);
+                        relCell.appendChild(relLabel);
+                        relCell.appendChild(relSelect);
 
-                        // Description
+                        topRow.appendChild(nameCell);
+                        topRow.appendChild(relCell);
+                        card.appendChild(topRow);
+
                         const descRow = document.createElement("div");
                         descRow.className = "ref-ms-row";
+
+                        // Description
+                        const descRowGroup = document.createElement("div");
+                        descRowGroup.className = "ref-ms-row-group";
                         const descLabel = document.createElement("span");
                         descLabel.className = "ref-ms-label";
-                        descLabel.textContent = "Desc";
+                        descLabel.textContent = "Definition";
                         const descInput = document.createElement("textarea");
                         descInput.className = "ref-ms-textarea";
-                        descInput.placeholder = "Subject description...";
+                        descInput.placeholder = "Subject definition... (type @ to mention another subject)";
                         descInput.value = subj.description || "";
                         descInput.rows = 1;
                         descInput.addEventListener("input", () => {
                             subjects[idx].description = descInput.value;
                             saveState();
                         });
-                        descRow.appendChild(descLabel);
-                        descRow.appendChild(descInput);
+                        // textarea 手动拉伸（resize: vertical）后重算节点高度
+                        descInput.addEventListener("resize", updateNodeSize);
+                        attachMention(descInput, idx, subjects, (v) => {
+                            subjects[idx].description = v;
+                            saveState();
+                        });
+                        // relationship 为空（引用）时隐藏 Description 输入
+                        const syncDescriptionVisibility = () => {
+                            descRowGroup.style.display = relSelect.value === "" ? "none" : "";
+                        };
+                        syncDescriptionVisibility();
+                        descRowGroup.appendChild(descLabel);
+                        descRowGroup.appendChild(descInput);
+                        descRow.appendChild(descRowGroup);
                         card.appendChild(descRow);
 
-                        // --- Media boxes (attached to the desc row for a compact layout) ---
+                        // --- Media boxes（独立行，始终可见，不随 Description 的显隐联动）---
                         // 可上传的媒体随 type 联动（REF_TYPE_MEDIA）
                         const typeMedia = REF_TYPE_MEDIA[subj.type || "Subject"] || REF_TYPE_MEDIA.Subject;
                         const mediaRow = descRow;
@@ -915,6 +1325,7 @@ app.registerExtension({
                                 subjects[idx].imageB64 = imgUrl;
                                 saveState();
                                 renderSubjects();
+                                updateNodeSize();
                             });
                         });
                         imgOverlay.appendChild(imgAddBtn);
@@ -929,6 +1340,7 @@ app.registerExtension({
                                 subjects[idx].imageB64 = null;
                                 saveState();
                                 renderSubjects();
+                                updateNodeSize();
                             });
                             imgOverlay.appendChild(imgDelBtn);
                         }
@@ -936,63 +1348,136 @@ app.registerExtension({
                         if (!typeMedia.image) imgBox.style.display = "none";
                         mediaRow.appendChild(imgBox);
 
-                        // ----- Audio box -----
-                        const audioBox = document.createElement("div");
-                        audioBox.className = "ref-ms-media-box";
-                        if (subj.audioFile) {
-                            audioBox.classList.add("has-file");
-                            const aIcon = document.createElement("div");
-                            aIcon.className = "ref-ms-media-icon";
-                            aIcon.style.cssText = "color:#38bdf8;";
-                            aIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg><span style="font-size:8px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${basename(subj.audioFile)}</span>`;
-                            audioBox.appendChild(aIcon);
-                        } else {
-                            const icon = document.createElement("div");
-                            icon.className = "ref-ms-media-icon";
-                            icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg><span>Audio</span>`;
-                            audioBox.appendChild(icon);
+                        // ----- Audio box（Audio 类型保留上传；Subject 类型改为下方的 Audio Ref 选择器）-----
+                        if (subj.type !== "Subject") {
+                            const audioBox = document.createElement("div");
+                            audioBox.className = "ref-ms-media-box";
+                            if (subj.audioFile) {
+                                audioBox.classList.add("has-file");
+                                const aIcon = document.createElement("div");
+                                aIcon.className = "ref-ms-media-icon";
+                                aIcon.style.cssText = "color:#38bdf8;";
+                                aIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg><span style="font-size:8px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${basename(subj.audioFile)}</span>`;
+                                audioBox.appendChild(aIcon);
+                            } else {
+                                const icon = document.createElement("div");
+                                icon.className = "ref-ms-media-icon";
+                                icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg><span>Audio</span>`;
+                                audioBox.appendChild(icon);
+                            }
+
+                            const audioOverlay = document.createElement("div");
+                            audioOverlay.className = "ref-ms-media-overlay";
+
+                            const audAddBtn = document.createElement("button");
+                            audAddBtn.className = "ref-ms-media-action";
+                            audAddBtn.textContent = subj.audioFile ? "Change" : "Add";
+                            audAddBtn.addEventListener("click", (e) => {
+                                e.stopPropagation();
+                                createFileInput("audio/*", (filename) => {
+                                    subjects[idx].audioFile = filename;
+                                    saveState();
+                                    renderSubjects();
+                                    updateNodeSize();
+                                });
+                            });
+                            audioOverlay.appendChild(audAddBtn);
+
+                            if (subj.audioFile) {
+                                const playBtn = document.createElement("button");
+                                playBtn.className = "ref-ms-media-action play-btn";
+                                playBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
+                                playBtn.addEventListener("click", (e) => {
+                                    e.stopPropagation();
+                                    playAudio(subj.audioFile, playBtn);
+                                });
+                                audioOverlay.appendChild(playBtn);
+
+                                const audDelBtn = document.createElement("button");
+                                audDelBtn.className = "ref-ms-media-action del";
+                                audDelBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+                                audDelBtn.addEventListener("click", (e) => {
+                                    e.stopPropagation();
+                                    subjects[idx].audioFile = null;
+                                    saveState();
+                                    renderSubjects();
+                                    updateNodeSize();
+                                });
+                                audioOverlay.appendChild(audDelBtn);
+                            }
+                            audioBox.appendChild(audioOverlay);
+                            if (!typeMedia.audio) audioBox.style.display = "none";
+                            mediaRow.appendChild(audioBox);
                         }
 
-                        const audioOverlay = document.createElement("div");
-                        audioOverlay.className = "ref-ms-media-overlay";
-
-                        const audAddBtn = document.createElement("button");
-                        audAddBtn.className = "ref-ms-media-action";
-                        audAddBtn.textContent = subj.audioFile ? "Change" : "Add";
-                        audAddBtn.addEventListener("click", (e) => {
-                            e.stopPropagation();
-                            createFileInput("audio/*", (filename) => {
-                                subjects[idx].audioFile = filename;
+                        // ----- Retention textarea（Rel 下，各类型均有）-----
+                        const buildRetentionInput = () => {
+                            const ta = document.createElement("textarea");
+                            ta.className = "ref-ms-retention";
+                            ta.placeholder = "the young man's short wavy brown hair and dark-grey hoodie are retained.";
+                            ta.value = subj.retention || "";
+                            ta.rows = 1;
+                            ta.spellcheck = false;
+                            ta.addEventListener("input", () => {
+                                subjects[idx].retention = ta.value;
                                 saveState();
-                                renderSubjects();
                             });
+                            return ta;
+                        };
+
+                        // ----- Subject：Audio Ref 选择器（50% 宽，label inline）-----
+                        if (subj.type === "Subject") {
+                            const audioRefRow = document.createElement("div");
+                            audioRefRow.className = "ref-ms-row";
+                            audioRefRow.style.width = "50%";
+                            const audioRefLabel = document.createElement("span");
+                            audioRefLabel.className = "ref-ms-label-sm";
+                            audioRefLabel.textContent = "Audio";
+                            const audioRefSelect = document.createElement("select");
+                            audioRefSelect.className = "ref-ms-select";
+                            const noneOpt = document.createElement("option");
+                            noneOpt.value = "";
+                            noneOpt.textContent = "None";
+                            audioRefSelect.appendChild(noneOpt);
+                            subjects.forEach((a) => {
+                                if (a.type === "Audio" && a.name.trim()) {
+                                    const opt = document.createElement("option");
+                                    opt.value = a.name;
+                                    opt.textContent = a.name;
+                                    opt.selected = (subj.audioRef || "") === a.name;
+                                    audioRefSelect.appendChild(opt);
+                                }
+                            });
+                            audioRefSelect.addEventListener("change", () => {
+                                subjects[idx].audioRef = audioRefSelect.value;
+                                saveState();
+                            });
+                            audioRefRow.appendChild(audioRefLabel);
+                            audioRefRow.appendChild(audioRefSelect);
+                            card.appendChild(audioRefRow);
+                        }
+
+                        // ----- Retention（100% 宽度全行，label inline）-----
+                        const retentionRow = document.createElement("div");
+                        retentionRow.className = "ref-ms-row";
+                        const retentionLabel = document.createElement("span");
+                        retentionLabel.className = "ref-ms-label";
+                        retentionLabel.textContent = "Retention";
+                        retentionRow.appendChild(retentionLabel);
+                        const retentionInput = buildRetentionInput();
+                        retentionRow.appendChild(retentionInput);
+                        // relationship 为空（引用）时隐藏 Retention 输入
+                        const syncRetentionVisibility = () => {
+                            retentionRow.style.display = relSelect.value === "" ? "none" : "";
+                        };
+                        syncRetentionVisibility();
+                        attachMention(retentionInput, idx, subjects, (v) => {
+                            subjects[idx].retention = v;
+                            saveState();
                         });
-                        audioOverlay.appendChild(audAddBtn);
-
-                        if (subj.audioFile) {
-                            const playBtn = document.createElement("button");
-                            playBtn.className = "ref-ms-media-action play-btn";
-                            playBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
-                            playBtn.addEventListener("click", (e) => {
-                                e.stopPropagation();
-                                playAudio(subj.audioFile, playBtn);
-                            });
-                            audioOverlay.appendChild(playBtn);
-
-                            const audDelBtn = document.createElement("button");
-                            audDelBtn.className = "ref-ms-media-action del";
-                            audDelBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
-                            audDelBtn.addEventListener("click", (e) => {
-                                e.stopPropagation();
-                                subjects[idx].audioFile = null;
-                                saveState();
-                                renderSubjects();
-                            });
-                            audioOverlay.appendChild(audDelBtn);
-                        }
-                        audioBox.appendChild(audioOverlay);
-                        if (!typeMedia.audio) audioBox.style.display = "none";
-                        mediaRow.appendChild(audioBox);
+                        // 媒体行挂载在 retention 之前（始终可见，不随 desc/retention 显隐）
+                        card.appendChild(mediaRow);
+                        card.appendChild(retentionRow);
 
                         // ----- Video row (type=Video, 单独一行大图预览/替换/删除) -----
                         const videoRow = document.createElement("div");
@@ -1028,6 +1513,7 @@ app.registerExtension({
                                 subjects[idx].videoB64 = videoUrl;
                                 saveState();
                                 renderSubjects();
+                                updateNodeSize();
                             });
                         });
                         videoActions.appendChild(vidAddBtn);
@@ -1043,12 +1529,12 @@ app.registerExtension({
                                 subjects[idx].videoB64 = null;
                                 saveState();
                                 renderSubjects();
+                                updateNodeSize();
                             });
                             videoActions.appendChild(vidDelBtn);
                         }
                         videoRow.appendChild(videoActions);
                         if (!typeMedia.video) videoRow.style.display = "none";
-                        card.appendChild(mediaRow);
                         card.appendChild(videoRow);
 
                         subjectList.appendChild(card);
@@ -1099,7 +1585,7 @@ app.registerExtension({
                 });
 
                 addBtn.addEventListener("click", () => {
-                    subjects.push({ name: "", description: "", type: activeTab, relationship: refDefaultRelationship(activeTab), imageFile: "", audioFile: "", videoFile: "" });
+                    subjects.push({ name: "", description: "", type: activeTab, relationship: refDefaultRelationship(activeTab), audioRef: "", retention: "", imageFile: "", audioFile: "", videoFile: "" });
                     subjectCount = subjects.length;
                     renderSubjects();
                     saveState();
@@ -1136,7 +1622,7 @@ app.registerExtension({
                             // 按文件类型分发到最后一个空卡片，否则新建对应类型的卡片
                             const last = subjects[subjects.length - 1];
                             if (!last || last.name || last[field]) {
-                                subjects.push({ name: "", description: "", type, relationship: refDefaultRelationship(type), imageFile: "", imageB64: "", audioFile: "", videoFile: "", videoB64: "" });
+                                subjects.push({ name: "", description: "", type, relationship: refDefaultRelationship(type), audioRef: "", retention: "", imageFile: "", imageB64: "", audioFile: "", videoFile: "", videoB64: "" });
                                 subjectCount = subjects.length;
                             }
                             const target = subjects[subjects.length - 1];
@@ -1160,6 +1646,7 @@ app.registerExtension({
                 setTimeout(() => {
                     renderSubjects();
                     node.syncLayoutToNode();
+                    updateNodeSize();
                 }, 10);
 
                 // Override onResize for layout sync

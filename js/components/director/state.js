@@ -1,6 +1,6 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: updateSelectionFromBox, syncSelectionTypeAndIndex, growTimelineIfNeeded, getMaxZoom, getVisualDurationFrames, updateZoomSliderMax, updateUIFromSelection, updateSidebarHeights
-import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, RULER_HEIGHT, app } from "./shared.js";
+import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, RULER_HEIGHT, MIN_SEGMENT_LENGTH, app } from "./shared.js";
 
 // transfer 面板（.mrd-pr-transfer-mount）显示时保证的最小 prop 区高度：
 // buttons 行 + status + resources 预览条（含 H3 prompt 预览，min 450px）+ 间距
@@ -194,6 +194,14 @@ export const state = {
         this.strengthValue.style.opacity = "0.35";
       }
 
+      if (this.durationValue) {
+        this.durationValue.style.display = "inline-block";
+        this.durationValue.value = "";
+        this.durationValue.placeholder = "(Multiple)";
+        this.durationValue.disabled = true;
+        this.durationValue.style.opacity = "0.35";
+      }
+
       if (this.audioInfoArea) this.audioInfoArea.style.display = "none";
 
       if (this.segmentBoundsDisplay) {
@@ -228,6 +236,10 @@ export const state = {
       this.strengthValue.style.opacity = "";
       this.strengthValue.placeholder = "";
     }
+    if (this.durationValue) {
+      this.durationValue.style.opacity = "";
+      this.durationValue.placeholder = "";
+    }
     if (this.promptInput) {
       this.promptInput.placeholder = "";
       this.promptInput.style.opacity = "";
@@ -246,8 +258,14 @@ export const state = {
         Length: <span>${this.formatTime(seg.audioDurationFrames)}</span> Output Length: <span>${this.formatTime(seg.length)}</span><br>
         Trim-in: <span>${this.formatTime(Math.round(seg.trimStart))}</span> Trim-Out: <span>${this.formatTime(Math.round(seg.audioDurationFrames - (seg.trimStart + seg.length)))}</span>
       `;
-      this.strengthValue.value = "1.00";
+      this.strengthValue.value = "39";
       this.strengthValue.disabled = true;
+      if (this.durationValue) {
+        this.durationValue.style.display = "inline-block";
+        this.durationValue.value = this._formatDurationValue(seg.length);
+        this.durationValue.disabled = true;
+        this.durationValue.style.opacity = "0.35";
+      }
     } else {
       if (this.segmentPromptLabel) {
         this.segmentPromptLabel.style.display = "block";
@@ -268,11 +286,16 @@ export const state = {
         this.promptInput.style.opacity = "1.0";
         this._setTransferVisible(true);
 
-        const isImage = (this.selectionType === "image") && (seg.type === "image" || seg.type === "video");
-        const strength = isImage ? (seg.guideStrength ?? 1.0) : 1.0;
-        this.strengthValue.value = strength.toFixed(2);
-        this.strengthValue.disabled = !isImage;
-        this.strengthValue.style.opacity = isImage ? "1.0" : "0.35";
+        const strength = (seg.guideStrength ?? 39);
+        this.strengthValue.value = parseInt(strength);
+        this.strengthValue.disabled = false;
+        this.strengthValue.style.opacity = "1.0";
+        if (this.durationValue) {
+          this.durationValue.style.display = "inline-block";
+          this.durationValue.value = this._formatDurationValue(seg.length);
+          this.durationValue.disabled = false;
+          this.durationValue.style.opacity = "1.0";
+        }
       } else {
         this.promptInput.value = "";
         if (this._transferSetLeft) this._transferSetLeft("");
@@ -280,9 +303,15 @@ export const state = {
         this.promptInput.disabled = true;
         this.promptInput.style.opacity = "0.4";
         this._setTransferVisible(false);
-        this.strengthValue.value = "1.00";
+        this.strengthValue.value = "39";
         this.strengthValue.disabled = true;
         this.strengthValue.style.opacity = "0.35";
+        if (this.durationValue) {
+          this.durationValue.style.display = "inline-block";
+          this.durationValue.value = "";
+          this.durationValue.disabled = true;
+          this.durationValue.style.opacity = "0.35";
+        }
       }
     }
 
@@ -306,5 +335,101 @@ export const state = {
       this.mainTrackLabel.style.height = `${this.blockHeight}px`;
       this.audioTrackLabel.style.height = `${this.audioTrackHeight}px`;
     }
+  },
+
+  // display_mode 决定 duration 输入/显示单位："frames" 帧（整数）| 其他为 "seconds" 秒（两位小数）
+  _durationDisplayMode() {
+    return this.displayModeWidget && this.displayModeWidget.value === "frames" ? "frames" : "seconds";
+  },
+
+  _formatDurationValue(frames) {
+    if (this._durationDisplayMode() === "frames") return String(Math.round(frames));
+    return (frames / this.getFrameRate()).toFixed(2);
+  },
+
+  // Duration 输入应用：解析输入（帧或秒）→ 帧，钳制到 [MIN_SEGMENT_LENGTH, 源可用帧]，失焦/回车/change 时调用
+  _applyDurationInput() {
+    const input = this.durationValue;
+    if (!input || input.disabled) return;
+
+    // 解析当前选中段（与 updateUIFromSelection 相同逻辑，含 preview/ghostTrack 场景）
+    let seg = null;
+    let trackArr = null;
+    if (this.selectedIndex >= 0) {
+      if (this.selectionType === "audio") {
+        const origSeg = this.timeline.audioSegments[this.selectedIndex];
+        if (origSeg) {
+          const previewIsAudio = this._ghostTrack === 'audio' || (this._previewSegments && this._ghostTrack === null && this.selectionType === 'audio');
+          trackArr = (this._previewSegments && previewIsAudio) ? this._previewSegments : this.timeline.audioSegments;
+          seg = trackArr.find(s => s.id === origSeg.id) || origSeg;
+        }
+      } else {
+        const origSeg = this.timeline.segments[this.selectedIndex];
+        if (origSeg) {
+          const previewIsImage = this._ghostTrack === 'image' || (this._previewSegments && this._ghostTrack === null && this.selectionType === 'image');
+          trackArr = (this._previewSegments && previewIsImage) ? this._previewSegments : this.timeline.segments;
+          seg = trackArr.find(s => s.id === origSeg.id) || origSeg;
+        }
+      }
+    }
+    if (!seg) return;
+
+    const fps = this.getFrameRate();
+    const mode = this._durationDisplayMode();
+    const raw = mode === "frames" ? parseInt(input.value, 10) : parseFloat(input.value);
+    if (!isFinite(raw) || raw <= 0) {
+      // 非法输入：回显当前实际时长
+      input.value = this._formatDurationValue(seg.length);
+      return;
+    }
+
+    let frames = mode === "frames" ? raw : Math.round(raw * fps);
+    frames = Math.max(MIN_SEGMENT_LENGTH, frames);
+    // 非静态图段：钳制到源素材可用帧（与拖拽右边框逻辑一致）
+    if (this.selectionType === "audio" || seg.type === "video") {
+      const origDur = seg.audioDurationFrames || seg.videoDurationFrames || seg.length;
+      frames = Math.min(frames, Math.max(MIN_SEGMENT_LENGTH, origDur - (seg.trimStart || 0)));
+    }
+
+    const oldLen = seg.length;
+    let delta = frames - oldLen;
+
+    // 长度变化后顺移后续段的起始位置，避免变长时覆盖下一个 segment。
+    // 顺移不能把后续段挤出总时长：后端会把超出范围段 clamp 成 0 帧直接跳过
+    // （director.py dur<=0 continue），即下一段 duration_frames 变成 0，不允许。
+    // 因此变长时按“每段至少保留 MIN_SEGMENT_LENGTH 帧”约束截断顺移量，
+    // 空间不足则当前段按最大可顺移量应用（与拖拽右边框 clamp 语义一致）。
+    const idx = trackArr.findIndex((s) => s.id === seg.id);
+    if (idx >= 0) {
+      if (delta > 0) {
+        const totalDur = this.getDurationFrames() || 0;
+        if (totalDur > 0) {
+          let maxDelta = delta;
+          for (let j = idx + 1; j < trackArr.length; j++) {
+            const s = trackArr[j];
+            // 顺移后该段 start 最多到 totalDur - MIN_SEGMENT_LENGTH（保留最小帧）
+            const room = totalDur - MIN_SEGMENT_LENGTH - s.start;
+            if (room < maxDelta) maxDelta = Math.max(0, room);
+          }
+          delta = Math.min(delta, maxDelta);
+        }
+      }
+      for (let j = idx + 1; j < trackArr.length; j++) {
+        trackArr[j].start += delta;
+      }
+      frames = oldLen + delta;
+    }
+
+    seg.length = frames;
+    input.value = this._formatDurationValue(frames);
+
+    if (this.segmentBoundsDisplay) {
+      const startStr = this.formatTime(seg.start, true);
+      const endStr = this.formatTime(seg.start + seg.length, true);
+      const lengthStr = this.formatTime(seg.length, true);
+      this.segmentBoundsDisplay.textContent = `Start: ${startStr} | End: ${endStr} | Length: ${lengthStr}`;
+    }
+    this.commitChanges(true);
+    this.render();
   }
 };

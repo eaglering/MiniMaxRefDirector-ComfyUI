@@ -4,6 +4,7 @@ import os
 import logging
 from comfy_api.latest import io
 
+from .lib.audio import fill_audio_gaps
 from .lib.image import calc_resolution
 from .lib.prompt import build_h3_prompt
 
@@ -14,12 +15,15 @@ SubjectConfig = io.Custom("SUBJECT_CONFIG")
 log = logging.getLogger(__name__)
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-_DEFAULT_TEMPLATE = os.path.join(_PROJECT_ROOT, "prompt", "minimax_ref2v_template.txt")
 
 # director 是纯函数（同一组输入必得同一输出）。
 # 缓存兜底：Easy-Use forLoop 展开时，director 输出可能被 compare 的 link 引用而重复调度执行。
 # 同一次 prompt 内同一输入直接返回缓存，避免 build_h3_prompt / LLM 生成被重复计算。
+# 缓存键含 prompt_id，跨 prompt（即使输入相同）不命中，保证修改 subject.py / prompt.py
+# 后无需重启 Python 即可生效。
 _director_cache: dict[str, io.NodeOutput] = {}
+# 最近一次执行的 prompt_id：跨 prompt 时整体清空旧缓存（旧条目不会再被命中，避免无界增长）
+_last_prompt_id: object = None
 
 
 class MiniMaxRefDirector(io.ComfyNode):
@@ -98,6 +102,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             outputs=[
                 GuideData.Output(display_name="guide_data"),
                 io.Int.Output(display_name="segment_count"),
+                io.Float.Output(display_name="frame_rate"),
             ],
         )
 
@@ -117,6 +122,23 @@ class MiniMaxRefDirector(io.ComfyNode):
             "frame_rate": frame_rate, "display_mode": display_mode,
             "outpu_resolution": outpu_resolution, "million_pixels": million_pixels,
         }
+        # 附加当前 prompt_id：跨 prompt（即使输入相同）不命中旧缓存，
+        # 保证修改 subject.py / prompt.py 后无需重启 Python 即可生效。
+        global _last_prompt_id
+        _current_prompt_id = None
+        try:
+            from comfy_execution.utils import get_executing_context
+            _ctx = get_executing_context()
+            _current_prompt_id = getattr(_ctx, "prompt_id", None)
+            key_data["_prompt_id"] = _current_prompt_id
+        except Exception:
+            pass
+        # 跨 prompt 清理：prompt_id 变化时旧缓存整体失效，避免无界增长
+        if _current_prompt_id is not None and _current_prompt_id != _last_prompt_id:
+            _last_prompt_id = _current_prompt_id
+            if _director_cache:
+                log.info("[MiniMaxRefDirector] prompt changed -> clear stale cache")
+                _director_cache.clear()
         cache_key = hashlib.md5(
             json.dumps(key_data, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
         ).hexdigest()
@@ -155,8 +177,6 @@ class MiniMaxRefDirector(io.ComfyNode):
         except (json.JSONDecodeError, TypeError):
             log.warning("[MiniMaxRefDirector] Failed to parse timeline_data.")
 
-        timeline_segments = tdata.get("segments", [])
-
         # --- Determine effective frame range based on display_mode ---
         if display_mode == "seconds":
             range_start = int(start_second * frame_rate)
@@ -167,19 +187,17 @@ class MiniMaxRefDirector(io.ComfyNode):
         range_end = max(range_end, range_start + 1)
         duration_frames = int(range_end - range_start)
 
+        audio_segments = tdata.get("audioSegments", None) if tdata.get("audioTrackEnabled", False) else None
+        audio_segments = fill_audio_gaps(audio_segments, range_start, range_end)
+
         # --- Build timeline_data array for guide_data ---
         guide_timeline = []
         segment_count = 0
+        timeline_segments = tdata.get("segments", [])
         timeline_data_len = len(timeline_segments)
-        last_frame_path = ""
 
         if timeline_data_len == 0:
-            timeline_segments = [{
-                "length": duration_frames,
-                "start": 0,
-                "prompt": "",
-                "imageFile": "",
-            }]
+            raise ValueError("[MiniMaxRefDirector] timeline_segments is required and must not be empty.")
         
         for i, seg in enumerate(timeline_segments):
             dur = int(seg.get("length", 1))
@@ -194,12 +212,13 @@ class MiniMaxRefDirector(io.ComfyNode):
             dur = seg_end_frames - seg_start_frames
             if dur <= 0:
                 continue
+            seg_audio = fill_audio_gaps(audio_segments, seg_start_frames, seg_end_frames)
             h3_prompt_json = seg.get("h3PromptJson", "")
             prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
             next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
             prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
-                                         raw_prompt=h3_prompt_json, previous_timeline_segment=prev_seg,
-                                         timeline_segment=seg, next_timeline_segment=next_seg)
+                                         prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
+                                         timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio)
             entry = {
                 "prompt": prompt_res["prompt"],
                 "subjects": prompt_res["subjects"],
@@ -209,12 +228,17 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "prevImageFile": prompt_res["prevImageFile"],
                 "prevType": prompt_res["prevType"],
                 "durationFrames": dur,
+                "startFrames": seg_start_frames,
                 "type": seg.get("type", "text"),
                 "imageFile": seg.get("imageFile", ""),
-                "motionContext": seg.get("motionContext", False)
+                "upscale": seg.get("upscale", False),
+                "guideStrength": seg.get("guideStrength", 16),
             }
             guide_timeline.append(entry)
             segment_count += 1
+
+        if segment_count == 0:
+            raise ValueError("[MiniMaxRefDirector] No valid segments found in timeline_data.")
 
         # --- Resolve output resolution ---
         out_w, out_h = calc_resolution(outpu_resolution, million_pixels)
@@ -234,9 +258,12 @@ class MiniMaxRefDirector(io.ComfyNode):
             "width": out_w,
             "height": out_h,
             "frame_rate": float(frame_rate),
+            "range_start": int(range_start),
+            "range_end": int(range_end),
             "global_prompt": global_prompt,
             "subject_data": subject,
             "timeline_data": guide_timeline,
+            "audio_segments": audio_segments,
             "_director_node_id": director_node_id,
         }
 
@@ -245,10 +272,10 @@ class MiniMaxRefDirector(io.ComfyNode):
             f"start_second: {start_second} | end_second: {end_second} | duration_seconds: {duration_seconds} | "
             f"start_frane: {start_frame} | end_frame: {end_frame} | duration_frames: {duration_frames} | "
             f"{out_w}×{out_h} ({outpu_resolution}, {million_pixels}MP) | "
-            f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
+            f"{len(subject)} subjects | {global_prompt} | audio_segments: {len(audio_segments)} | "
         )
 
-        result = io.NodeOutput(guide_data, segment_count + 1)
+        result = io.NodeOutput(guide_data, segment_count + 1, frame_rate)
         _director_cache[cache_key] = result
         return result
 

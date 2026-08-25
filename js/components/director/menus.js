@@ -375,7 +375,15 @@ export const menus = {
       items.push(this._menuDivider());
     }
 
-    // Group 7: Mark Selection + Delete
+    // Group 7: Latent Upscaler + Mark Selection + Delete
+    items.push(this._menuBtn("Latent Upscaler", {
+      onClick: () => {
+        seg.upscale = !seg.upscale;
+        this.commitChanges();
+        this.render();
+        this.dismissMenu();
+      }
+    }));
     items.push(this._menuBtn("Mark Selection", {
       onClick: () => {
         if (this.selectedSegmentIds && this.selectedSegmentIds.includes(seg.id)) this.markCurrentSelection();
@@ -426,7 +434,6 @@ export const menus = {
       }
       seg.id = seg.id.slice(0, -2)
       seg.type = newType;
-      seg.motionContext = true;
       // 视频→图片：回填首帧缩略图，保证转换后图片段仍有内容可显示
       if (newType === "image" && firstSrc) {
         seg.imageB64 = firstSrc;
@@ -438,7 +445,6 @@ export const menus = {
       if (newType === "video") {
         // 图片→视频：保留图片作为视频段首帧占位（避免空壳），并弹框让用户选择真实视频文件
         seg.type = newType;
-        seg.motionContext = false;
         const fi = document.createElement("input");
         fi.type = "file";
         fi.accept = "video/*";
@@ -452,13 +458,11 @@ export const menus = {
         delete seg.imageB64;
         delete seg.imgObj;
         seg.type = newType;
-        seg.motionContext = true;
         seg.autoEndFrame = true;
       }
     } else if (seg.type === "text") {
       delete seg.imageFile; delete seg.imageB64; delete seg.imgObj;
       delete seg.videoFile; delete seg.videoEl; delete seg.thumbnails;
-      seg.motionContext = false;
       if (newType === "image") {
           const fi = document.createElement("input");
           fi.type = "file";

@@ -26,6 +26,108 @@ import { RefModal } from "./modal.js";
 
 const html = htm.bind(h);
 
+// mention 选择器样式：与 subject.js 的 @mention 弹层保持一致（幂等注入）
+if (!document.getElementById("ref-ms-mention-styles")) {
+  const st = document.createElement("style");
+  st.id = "ref-ms-mention-styles";
+  st.textContent = `
+.ref-ms-mention-popup {
+    position: fixed;
+    z-index: 100000;
+    min-width: 170px;
+    max-width: 280px;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    padding: 4px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ref-ms-mention-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 0 4px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #333;
+    flex: 0 0 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.ref-ms-mention-tabs::-webkit-scrollbar {
+    display: none;
+}
+.ref-ms-mention-tab {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    background: transparent;
+    padding: 1px 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    line-height: 1.4;
+}
+.ref-ms-mention-tab:hover {
+    color: #aaa;
+    border-color: #555;
+}
+.ref-ms-mention-tab.active {
+    color: #4fc3f7;
+    background: rgba(79, 195, 247, 0.18);
+    border-color: rgba(79, 195, 247, 0.5);
+}
+.ref-ms-mention-list {
+    overflow-y: auto;
+    max-height: 176px;
+}
+.ref-ms-mention-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ref-ms-mention-item:hover,
+.ref-ms-mention-item.active {
+    background: #333;
+}
+.ref-ms-mention-item img,
+.ref-ms-mention-item video {
+    display: block;
+}
+.ref-ms-mention-type {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex: 0 0 auto;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+.ref-ms-mention-empty {
+    font-size: 11px;
+    color: #777;
+    padding: 6px 8px;
+    white-space: nowrap;
+}
+`;
+  document.head.appendChild(st);
+}
+
 // ---------- 工具函数 ----------
 
 function getSubjectsFromGraph() {
@@ -82,19 +184,23 @@ function getSubjectVlmSettings() {
       };
       const clean = (s) => (s === "None" ? "" : s || "");
       const v = findW("vlm_mode")?.value;
-      const out = { vlm_mode: "api", gguf_name: "", mmproj_path: "", provider: "GLM", api_key: "" };
+      const out = { vlm_mode: "api", gguf_name: "", mmproj_path: "", provider: "GLM", api_key: "", ollama_model: "", ollama_base_url: "" };
       if (v && typeof v === "object" && !Array.isArray(v)) {
         out.vlm_mode = v.vlm_mode || out.vlm_mode;
         out.gguf_name = clean(v.gguf_name);
         out.mmproj_path = clean(v.mmproj_path);
         out.provider = v.provider || out.provider;
         out.api_key = clean(v.api_key);
+        out.ollama_model = clean(v.ollama_model);
+        out.ollama_base_url = clean(v.ollama_base_url);
       } else {
         out.vlm_mode = v || out.vlm_mode;
         out.gguf_name = clean(findAny("vlm_mode.gguf_name", "gguf_name"));
         out.mmproj_path = clean(findAny("vlm_mode.mmproj_path", "mmproj_path"));
         out.provider = findAny("vlm_mode.provider", "provider") || out.provider;
         out.api_key = clean(findAny("vlm_mode.api_key", "api_key"));
+        out.ollama_model = clean(findAny("vlm_mode.ollama_model", "ollama_model"));
+        out.ollama_base_url = clean(findAny("vlm_mode.ollama_base_url", "ollama_base_url"));
       }
       // 主 widget 缺失或为空时，从子 widget 推断模式
       if (out.vlm_mode === "api") {
@@ -103,7 +209,7 @@ function getSubjectVlmSettings() {
           findW("vlm_mode.mmproj_path") || findW("mmproj_path");
         if (hasGguf) out.vlm_mode = "llama-cpp";
       }
-      if (!findW("vlm_mode") && !findW("vlm_mode.gguf_name") && !findW("vlm_mode.provider") && !findW("gguf_name") && !findW("provider")) {
+      if (!findW("vlm_mode") && !findW("vlm_mode.gguf_name") && !findW("vlm_mode.provider") && !findW("vlm_mode.ollama_model") && !findW("gguf_name") && !findW("provider") && !findW("ollama_model")) {
         console.warn("[Transfer] getSubjectVlmSettings: 未找到 vlm 相关 widget，当前 widget 列表:",
           widgets.map((w) => `${w.name}(${w.type})`).join(", "));
       }
@@ -124,41 +230,28 @@ function subjectImgSrc(s) {
 }
 
 // 主体媒体类型判断：优先按 type，其次按已有文件字段推断（兼容旧数据无 videoFile/type）
+// 返回 { kind: "audio"|"video"|"image"|"none", src }，kind 决定 .tr-resources 的渲染形态，
+// src 为可直接用于 <audio>/<video>/<img> 播放/显示的 URL（audio/video 分支包含 b64 与 viewUrl 兜底）。
 function subjectMediaPreview(s) {
   const t = s.type || "Subject";
-  if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile)) return { kind: "audio" };
+  if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile)) return { kind: "audio", src: s.audioB64 || (s.audioFile ? viewUrl(s.audioFile, "minimaxrefdirector") : "") };
   if (t === "Video" || s.videoFile) return { kind: "video", src: s.videoB64 || (s.videoFile ? viewUrl(s.videoFile, "minimaxrefdirector") : "") };
   if (t === "Picture" || s.imageFile) return { kind: "image", src: subjectImgSrc(s) };
   return { kind: "none" };
 }
 
-// 下拉菜单里的媒体缩略图：图片/视频显示资源，音频用图标占位
+// 下拉菜单里的媒体缩略图：
+//   audio → 音频图标；video → 视频图标；image → 图片；无媒体 → "T"（文本主体）
 // size：缩略图边长（px），默认 22（mention 菜单）；弹窗"添加主体"列表放大一倍用 44
 function subjectMediaThumb(s, size = 22) {
   const p = subjectMediaPreview(s);
   const base = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", objectFit: "cover" };
+  const iconBase = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: Math.round(size * 0.5) + "px", fontStyle: "normal", lineHeight: 1, background: "#1e3a5f", color: "#38bdf8" };
   if (p.kind === "image") return html`<img src=${p.src} alt="" style=${base} />`;
-  if (p.kind === "video") return html`<video src=${p.src} muted preload="metadata" style=${Object.assign({}, base, { background: "#000" })} />`;
-  if (p.kind === "audio") return html`<span title="音频" style=${{ width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#1e3a5f", color: "#38bdf8", fontSize: Math.round(size * 0.5) + "px", fontStyle: "normal" }}>♪</span>`;
-  return null;
-}
-
-// 从 H3 prompt 文本提取 <@name> / <#name:dialogue> 提及
-function extractH3Mentions(text) {
-  const names = new Set();
-  const dialogues = new Set();
-  const nameRe = /<@([^>]+)>/g;
-  const diaRe = /<#([^>:]+):/g;
-  let m;
-  while ((m = nameRe.exec(text || ""))) {
-    const n = m[1].trim();
-    if (n) names.add(n);
-  }
-  while ((m = diaRe.exec(text || ""))) {
-    const n = m[1].trim();
-    if (n) dialogues.add(n);
-  }
-  return { names, dialogues };
+  if (p.kind === "video") return html`<span title="视频" style=${Object.assign({}, iconBase, { color: "#a5d6a7" })}>▶</span>`;
+  if (p.kind === "audio") return html`<span title="音频" style=${iconBase}>♪</span>`;
+  // 无媒体（纯文本主体）：T 徽标
+  return html`<span title="文本" style=${Object.assign({}, iconBase, { background: "#333", color: "#ccc", fontSize: Math.round(size * 0.5) + "px" })}>T</span>`;
 }
 
 // 主体定义 / retention_analysis / 媒体列表（images / audios / videos）
@@ -167,73 +260,63 @@ function extractH3Mentions(text) {
 
 // 右侧 textarea 默认 JSON 数据结构（→ 生成结果会替代它）
 const DEFAULT_PROMPT_JSON = {
+  summary: "",
   detailed_description: "",
   overall_soundscape: "",
   non_diegetic_music: "",
 };
 
-// 将 prompt JSON 按展示规则格式化为 textarea 文本
-// 规则：
-//   detailed_description:
-//   [Shot 2]{shot2_description}（如果存在）
-//   ...
-//   {detailed_description}
-//   overall_soundscape:
-//   {overall_soundscape}或者N/A
-//   non_diegetic_music:
-//   {non_diegetic_music}N/A
-function formatPromptJson(data) {
-  const d = data && typeof data === "object" ? data : {};
-  const val = (v) => (v != null && String(v).trim() !== "" ? String(v) : "N/A");
-  const plain = (v) => (v != null ? String(v) : "");
-  const lines = ["detailed_description:"];
-  lines.push(plain(d.detailed_description) + "\n");
-  lines.push("overall_soundscape:");
-  lines.push(val(d.overall_soundscape) + "\n");
-  lines.push("non_diegetic_music:");
-  lines.push(val(d.non_diegetic_music) + "\n");
-  return lines.join("\n");
-}
+// H3 summary 任务类型标签（点击填入 summary 输入框光标处，title 提示 When to use it）
+const TASK_TYPES = [
+  { label: "keyframe completion", title: "When to use it: An image serves as the target video's first frame, keyframe, last frame, edited keyframe, or another concrete frame anchor" },
+  { label: "reference generation", title: "When to use it: An image, video, or audio asset provides generation guidance for a character, scene, style, action, camera movement, storyboard, and so on, without serving as a concrete frame or as the source video being edited or continued" },
+  { label: "video editing", title: "When to use it: An existing source video is directly modified; editing an image or generating between still keyframes does not belong to this type" },
+  { label: "video continuation", title: "When to use it: New content continues, extends, resumes, or transitions from an existing source video" },
+  { label: "audio reuse", title: "When to use it: The same audio signal is reused in full or in part" },
+  { label: "audio reference", title: "When to use it: The audio signal is not copied directly; only its music style, timbre, dialogue or lyric content, sound-effect texture, beat, or continuity is referenced" },
+];
 
-// 将右侧 textarea 的展示文本反向解析回 JSON 对象
-// （与 formatPromptJson 的规则对称，便于按钮增删 shotX_description）
-function parsePromptText(text) {
-  const obj = { detailed_description: "", overall_soundscape: "", non_diegetic_music: "" };
-  const lines = (text || "").split("\n");
-  let section = "detail"; // detail | overall | music
-  const detailLines = [];
-  for (const line of lines) {
-    if (line.startsWith("detailed_description:")) { section = "detail"; continue; }
-    if (line.startsWith("overall_soundscape:")) { section = "overall"; continue; }
-    if (line.startsWith("non_diegetic_music:")) { section = "music"; continue; }
-    if (section === "detail") {
-      detailLines.push(line);
-    } else if (section === "overall") {
-      if (line.trim() !== "" && line.trim() !== "N/A") obj.overall_soundscape = line;
-    } else if (section === "music") {
-      if (line.trim() !== "" && line.trim() !== "N/A") obj.non_diegetic_music = line;
+// 将 h3PromptJson / rightText 统一规范化为 JSON 对象。
+// 统一存储/编辑为 JSON 对象 { summary, detailed_description, overall_soundscape, non_diegetic_music }。
+function normalizePromptJson(v) {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return Object.assign({}, DEFAULT_PROMPT_JSON, v);
+  }
+  if (typeof v === "string" && v.trim()) {
+    try {
+      const parsed = JSON.parse(v);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return Object.assign({}, DEFAULT_PROMPT_JSON, parsed);
+      }
+    } catch (e) {
+      // 非 JSON 字符串（旧纯文本展示格式）不再解析，回退默认模板
     }
   }
-  obj.detailed_description = detailLines.join("\n");
-  return obj;
+  return Object.assign({}, DEFAULT_PROMPT_JSON);
 }
 
-// 更新右侧文本中某个字段
-function updateShotField(text, key, value) {
-  const obj = parsePromptText(text);
-  obj[key] = value;
-  return formatPromptJson(obj);
+// 将 JSON 对象各字段拼接为纯文本（供 parseResources 正则提取 <@name> / <#name:...> 引用）
+function promptJsonText(obj) {
+  const d = obj && typeof obj === "object" ? obj : {};
+  return [d.summary, d.detailed_description, d.overall_soundscape, d.non_diegetic_music]
+    .filter((v) => typeof v === "string")
+    .join("\n");
 }
 
-// 从右侧文本中删除某个字段
-function removeShotField(text, key) {
-  const obj = parsePromptText(text);
-  delete obj[key];
-  return formatPromptJson(obj);
+// 更新右侧 JSON 中某个字段（返回新对象触发 setState）
+function updateShotField(obj, key, value) {
+  return Object.assign({}, obj, { [key]: value });
 }
 
-// 素材追加计数器：每次 add_material 通知都会追加素材（不去重），
-// id 需唯一（同时用作 React key 与多选集合依据），故在 URL 后附加自增序号。
+// 从右侧 JSON 中删除某个字段
+function removeShotField(obj, key) {
+  const next = Object.assign({}, obj);
+  delete next[key];
+  return next;
+}
+
+// 素材自增序号：仅新素材（URL 在素材条中不存在）追加时递增；
+// 同 URL 重复通知（Combine 保存后 + Guide 收到 prev_tail）会更新已有条目而非新增。
 let materialSeq = 0;
 
 // 素材持久化 key：按 Director 节点 id 隔离（单 tab / 多 tab 均适用）。
@@ -275,7 +358,8 @@ const CLICK_MOVE_TOLERANCE = 6; // 卡片 click 位移容忍：按下/松开位�
 
 // 将后端 send_sync("minimax_ref_video_progress", ...) 通知里的 imageFile
 // （VHS_FILENAMES：字符串 / 单对象 / 对象数组）解析为视频素材项 { id, label, src }。
-// 基础 id 取文件 URL；实际 id 在追加时附加自增序号保证唯一（不做 URL/文件名去重）。
+// 基础 id 取文件 URL；新素材追加时附加自增序号保证唯一，
+// 同 URL 重复通知在 setMaterials 里按 src 去重（更新而非新增）。
 // 取文件名（兼容 Windows 反斜杠与 POSIX 斜杠）：
 // VHS/输出目录返回的可能是绝对路径 D:\...\xx.mp4，若只用 "/" 分割，
 // 整个绝对路径会变成 label 并被当作文件名上传到服务器。
@@ -320,18 +404,49 @@ const S = {
   col: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
   buttons: { display: "flex", gap: "6px", padding: "4px 0", flex: "0 0 auto" },
   resources: {
-    display: "flex", flexDirection: "row", flexWrap: "nowrap", overflow: "auto",
+    display: "flex", flexDirection: "row", flexWrap: "nowrap", overflow: "hidden",
     gap: "8px", padding: "4px 0", flex: "1 1 0", minHeight: "0",
-    alignItems: "flex-start", borderTop: "1px solid #333", scrollbarWidth: "thin",
+    alignItems: "flex-start", borderTop: "1px solid #333",
   },
   resourcesList: {
-    display: "flex", flexWrap: "wrap", gap: "8px"
+    display: "flex", flexWrap: "wrap", gap: "8px",
+    alignSelf: "stretch", minHeight: "0", overflowY: "auto", scrollbarWidth: "thin", alignContent: "flex-start",
   },
   res: {
-    flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
-    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "64px",
+    position: "relative", flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
+    background: "#2a2a2a", borderRadius: "6px", padding: "4px", width: "140px", height: "120px",
   },
-  img: { width: "48px", height: "48px", objectFit: "cover", borderRadius: "4px", background: "#111" },
+  resType: {
+    position: "absolute", top: "2px", left: "2px", zIndex: 2, fontSize: "9px", lineHeight: 1.4,
+    background: "rgba(0,0,0,0.55)", color: "#ffd54f", borderRadius: "3px", padding: "1px 4px",
+    maxWidth: "calc(100% - 8px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+  },
+  // Subject 类型主体标签：亮蓝与其他资源类型（Picture/Video/Audio，黄 #ffd54f）区分
+  resTypeSubject: {
+    position: "absolute", top: "2px", left: "2px", zIndex: 2, fontSize: "9px", lineHeight: 1.4,
+    background: "rgba(79, 195, 247, 0.2)", color: "#4fc3f7", borderRadius: "3px", padding: "1px 4px",
+    maxWidth: "calc(100% - 8px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    border: "1px solid rgba(79, 195, 247, 0.4)",
+  },
+  // relationship 非空的主体卡片可点击编辑 retention：pointer 光标 + hover 亮蓝高亮边框
+  resEditable: { cursor: "pointer" },
+  resHovered: { border: "1px solid #4fc3f7", boxShadow: "0 0 6px rgba(79, 195, 247, 0.35)" },
+  resEditHint: {
+    position: "absolute", right: "2px", top: "2px", zIndex: 2, fontSize: "9px", lineHeight: 1.4,
+    color: "#4fc3f7", background: "rgba(0,0,0,0.55)", borderRadius: "3px", padding: "1px 4px",
+  },
+  // retention 编辑弹窗（复用 RefModal，深色输入框 + 底部取消/保存）
+  retModalTitle: { fontSize: "13px", fontWeight: 600, color: "#4fc3f7", flexShrink: 0 },
+  retModalSub: { fontSize: "11px", color: "#aaa", lineHeight: 1.5, flexShrink: 0 },
+  retTextarea: {
+    flex: "1 1 0", minHeight: "0", width: "100%", boxSizing: "border-box", resize: "none", outline: "none",
+    background: "#1e1e1e", border: "1px solid #444", borderRadius: "4px", color: "#e0e0e0",
+    fontSize: "12px", lineHeight: "1.5", padding: "6px 8px", fontFamily: "monospace",
+  },
+  retFooter: { display: "flex", justifyContent: "flex-end", gap: "8px", paddingTop: "8px", flexShrink: 0 },
+  retBtnCancel: { background: "transparent", color: "#aaa", border: "1px solid #555" },
+  retBtnSave: { background: "#4fc3f7", color: "#0d1b24", border: "none", fontWeight: 600 },
+  img: { width: "100%", height: "calc(100% - 14px)", objectFit: "contain", borderRadius: "4px", background: "#111" },
   label: {
     fontSize: "10px", color: "#aaa", maxWidth: "64px", overflow: "hidden",
     textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -346,9 +461,39 @@ const S = {
   },
   audioIcon: { fontSize: "10px", color: "#ffb74d" },
   resAudio: {
-    width: "48px", height: "48px", borderRadius: "4px", background: "#1e3a5f",
+    width: "100%", height: "96px", borderRadius: "4px", background: "#1e3a5f",
     color: "#38bdf8", display: "inline-flex", alignItems: "center", justifyContent: "center",
     fontSize: "16px", flex: "0 0 auto",
+  },
+  resSubject: {
+    width: "100%", height: "96px", borderRadius: "4px", background: "#000000",
+    color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center",
+    fontSize: "16px", flex: "0 0 auto",
+  },
+  // .tr-resources 内 Video / Audio 主体播放器：带浏览器原生 controls，可直接播放
+  video: {
+    width: "100%", height: "calc(100% - 18px)", objectFit: "contain",
+    borderRadius: "4px", background: "#111", cursor: "pointer",
+  },
+  // 音频卡片：上方大 ♪ 封面（点击播放/暂停）+ 底部原生播放条
+  audioCard: {
+    position: "relative", width: "100%", height: "calc(100% - 18px)",
+    display: "flex", flexDirection: "column", alignItems: "center",
+    justifyContent: "flex-start", gap: "2px",
+  },
+  audioIconBig: {
+    width: "100%", height: "calc(100% - 30px)", borderRadius: "4px", background: "#1e3a5f",
+    color: "#38bdf8", display: "inline-flex", alignItems: "center", justifyContent: "center",
+    fontSize: "22px", cursor: "pointer", userSelect: "none", flex: "0 0 auto",
+  },
+  audio: {
+    width: "100%", height: "28px", flex: "0 0 auto", display: "block",
+  },
+  // 视频类型但无文件时的图标兜底（原样恢复 ♪ 系列风格）
+  resVideo: {
+    width: "100%", height: "96px", borderRadius: "4px", background: "#143a2e",
+    color: "#4ade80", display: "inline-flex", alignItems: "center", justifyContent: "center",
+    fontSize: "18px", flex: "0 0 auto",
   },
   defsWrap: {
     position: "relative", flex: "0 0 auto", display: "flex", alignItems: "center",
@@ -369,7 +514,7 @@ const S = {
   h3PreviewWrap: {
     flex: "0 0 50%", width: "50%", display: "flex", flexDirection: "column",
     alignSelf: "stretch", marginLeft: "auto", borderLeft: "1px solid #333",
-    paddingLeft: "8px", minHeight: "0", cursor: "pointer",
+    paddingLeft: "8px", minHeight: "0", cursor: "pointer", overflow: "hidden",
   },
   h3PreviewLabel: {
     fontSize: "10px", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px",
@@ -380,7 +525,7 @@ const S = {
     background: "rgba(30,30,30,.55)", color: "#fff", border: "1px dashed #444",
     borderRadius: "4px", padding: "4px 6px", fontFamily: "monospace", fontSize: "10px",
     lineHeight: "1.4", resize: "none", outline: "none", cursor: "pointer",
-    overflowY: "auto", scrollbarWidth: "thin", whiteSpace: "pre-wrap",
+    overflowY: "auto", scrollbarWidth: "thin", whiteSpace: "pre-wrap", overflowWrap: "break-word",
   },
   refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" },
   refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
@@ -414,6 +559,13 @@ const S = {
   materialReadyBadge: {
     position: "absolute", top: "4px", right: "4px", zIndex: 2,
     background: "rgba(40, 167, 69, .92)", color: "#fff", fontSize: "9px",
+    lineHeight: "14px", padding: "0 5px", borderRadius: "8px", pointerEvents: "none",
+    boxShadow: "0 0 4px rgba(0,0,0,.5)",
+  },
+  // 无损素材角标：素材携带 image_latent / audio_latent，可参与「无损合并」
+  materialLatentBadge: {
+    position: "absolute", top: "4px", left: "4px", zIndex: 2,
+    background: "rgba(92, 157, 255, .92)", color: "#fff", fontSize: "9px",
     lineHeight: "14px", padding: "0 5px", borderRadius: "8px", pointerEvents: "none",
     boxShadow: "0 0 4px rgba(0,0,0,.5)",
   },
@@ -545,20 +697,21 @@ function NumInput({ def, value, onCommit }) {
 
 export function TransferPanel({ director }) {
   const [leftText, setLeftText] = useState(() => director?.promptInput?.value || "");
-  const [rightText, setRightText] = useState(() => formatPromptJson(DEFAULT_PROMPT_JSON));
+  const [rightText, setRightText] = useState(() => ({ ...DEFAULT_PROMPT_JSON }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [subjects, setSubjects] = useState([]);
-  const [menu, setMenu] = useState(null); // { side, trigger, caret, x, y }
+  const [menu, setMenu] = useState(null); // { side, trigger, caret, x, y, field, tab }
   const [resources, setResources] = useState([]);
   const [editorOpen, setEditorOpen] = useState(false); // 统一弹窗（Segment Prompt / H3 Prompt / 添加主体）
   const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
-  const [motionCtxOn, setMotionCtxOn] = useState(false); // Motion Context 开关
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
+  const [retEdit, setRetEdit] = useState(null); // 主体 retention 编辑弹窗：{ name, value }，null 关闭
+  const [hoverRes, setHoverRes] = useState(null); // 当前 hover 的可编辑资源卡片 key（亮蓝高亮边框提示）
   // 视频素材条：接收后端 minimax_ref_video_progress 通知（status=add_material）。
   // 初始化时从 localStorage 恢复上次会话的素材（key 按节点 id 隔离），刷新页面后保留，
   // 只有点击删除才会移除。
@@ -606,6 +759,7 @@ export function TransferPanel({ director }) {
   const [dragReadyId, setDragReadyId] = useState(null); // 长按预取完成、可拖出到其他上传框的素材 id
   const [dragHint, setDragHint] = useState(""); // 长按拖出操作提示（自动消失）
   const [mergeBusy, setMergeBusy] = useState(false); // 素材合并请求进行中
+  const [losslessMergeBusy, setLosslessMergeBusy] = useState(false); // 无损合并请求进行中
   const longPressRef = useRef(null); // 长按状态 { id, fired, x, y, timer }
   const suppressClickRef = useRef(false); // 长按松手后抑制随后的 click（避免误改选中）
   const dragHintTimerRef = useRef(null); // 提示自动消失定时器
@@ -614,7 +768,11 @@ export function TransferPanel({ director }) {
 
   const leftRef = useRef(null);
   const stripRef = useRef(null); // 素材条横向滚动容器
-  const rightRef = useRef(null);
+  // 右侧 H3 Prompt 四分区输入框 ref（summary / detailed_description / overall_soundscape / non_diegetic_music）
+  const rightSummaryRef = useRef(null);
+  const rightDetailRef = useRef(null);
+  const rightOverallRef = useRef(null);
+  const rightMusicRef = useRef(null);
   const debounceRef = useRef(null);
   const bindDebounceRef = useRef(null); // 主体绑定接口请求防抖
   const bindSeqRef = useRef(0); // 绑定请求序号：只应用最新一次请求的返回，防并发乱序覆盖
@@ -636,7 +794,6 @@ export function TransferPanel({ director }) {
       director._transferSetLeft = setLeftText;
       director._transferSetSeg = (seg) => {
         setCurSeg(seg);
-        setMotionCtxOn(!!(seg && seg.motionContext));
         setAutoEndOn(!!(seg && seg.autoEndFrame));
         // 切换 segment 时加载该 segment 独立的 H3 prompt JSON（右侧）。
         // 同一 segment 的 UI 刷新（如生成首帧成功后回推）不重置右侧内容。
@@ -644,11 +801,7 @@ export function TransferPanel({ director }) {
         if (segId && segId !== lastSegIdRef.current) {
           lastSegIdRef.current = segId;
           // 无 segment JSON 时回退默认模板，避免残留上一个 segment 的内容
-          setRightText(
-            seg && typeof seg.h3PromptJson === "string"
-              ? seg.h3PromptJson
-              : formatPromptJson(DEFAULT_PROMPT_JSON)
-          );
+          setRightText(normalizePromptJson(seg?.h3PromptJson));
         } else if (!segId) {
           lastSegIdRef.current = null;
         }
@@ -664,15 +817,15 @@ export function TransferPanel({ director }) {
         ? (initSeg.prompt || "")
         : (director.promptInput?.value || "");
       setLeftText(initPrompt);
-      // 优先从当前 segment 的 h3PromptJson 恢复右侧内容；
+      // 优先从当前 segment 的 h3PromptJson 恢复右侧内容（JSON 对象或 JSON 字符串）；
       // 无 segment JSON 时兜底从节点 properties 恢复旧版 __rightPromptText（兼容旧 workflow）
-      const segJson = initSeg && typeof initSeg.h3PromptJson === "string" ? initSeg.h3PromptJson : "";
+      const segJson = initSeg && initSeg.h3PromptJson;
       if (segJson) {
         lastSegIdRef.current = initSeg.id;
-        setRightText(segJson);
+        setRightText(normalizePromptJson(segJson));
       } else {
         const savedRight = director.node?.properties?.__rightPromptText;
-        if (typeof savedRight === "string" && savedRight) setRightText(savedRight);
+        if (typeof savedRight === "string" && savedRight) setRightText(normalizePromptJson(savedRight));
       }
     }
     return () => {
@@ -699,11 +852,18 @@ export function TransferPanel({ director }) {
       if (!aliveRef.current) return;
       const d = e && e.detail ? e.detail : {};
       if (d.status !== "add_material" || d.type !== "video") return;
+      // ── 诊断：打印每条通知的字段与过滤决策（排查第二条素材缺 latent）──
+      try {
+        console.log("[Transfer] add_material recv:", JSON.stringify(d));
+      } catch (_e) { /* ignore */ }
       const myNodeId = director?.node?.id;
       const hasMine = myNodeId !== undefined && myNodeId !== null;
       if (d.director_node_id !== undefined && d.director_node_id !== null) {
         // 新后端：精确匹配 Director 节点 id
-        if (!hasMine || String(d.director_node_id) !== String(myNodeId)) return;
+        if (!hasMine || String(d.director_node_id) !== String(myNodeId)) {
+          console.log("[Transfer] add_material REJECT (director_node_id mismatch):", d.director_node_id, "vs mine", myNodeId);
+          return;
+        }
       } else if (d.node_id !== undefined && d.node_id !== null && hasMine) {
         // 旧版后端兜底：node_id 是 Guide 节点 id，无法直接比对，
         // 仅当当前 graph 中存在该节点时接收（来源属于本工作流）
@@ -711,21 +871,65 @@ export function TransferPanel({ director }) {
         try {
           const g = (typeof window !== "undefined" && window.app) ? window.app.graph : null;
           if (g && Array.isArray(g._nodes)) {
-            found = g._nodes.some((n) => String(n.id) === String(d.node_id));
+            found = g._nodes.some((n) => {
+              const id = String(n.id);
+              const raw = String(d.node_id);
+              // 精确匹配；forLoop 子图内后端可能发送虚拟路径（如
+              // "192.0.0.3.0.0.207"），支持 ".207" 后缀兜底匹配真实节点
+              return id === raw || raw.endsWith("." + id);
+            });
           }
         } catch (_e) { /* ignore */ }
-        if (!found) return;
+        if (!found) {
+          console.log("[Transfer] add_material REJECT (node_id not in graph):", d.node_id);
+          return;
+        }
       }
       // 无任何来源标识的极旧版本通知：直接接收（单 tab 正常行为）
-      const items = toVideoItems(d.imageFile);
+      let items = toVideoItems(d.imageFile);
+      // latent 素材：Combine 节点保存了 latent 但未解码视频时 imageFile 缺失，
+      // 仍以 latent 素材项加入素材条（可参与无损合并）
+      if (!items.length && d.image_latent) {
+        const latentLabel = basename(String(d.image_latent)) || "latent";
+        items = [{ id: "latent-" + String(d.image_latent), label: latentLabel, src: "", vw: null, vh: null }];
+      }
       if (!items.length) return;
       setMaterials((prev) => {
         const next = prev.slice();
         for (const it of items) {
-          // 不去重：后端每次 add_material 通知都追加（guide 正常轮与越界轮会各发一次同 URL）。
-          // id 附加自增序号保证唯一，避免 React key / 多选集合冲突。
+          // 同 URL 去重：同一段视频会被通知两次——Combine 节点保存后发一次，
+          // Guide 下一轮收到 prev_tail 又发一次（正常轮 + 越界轮）。命中已有条目
+          // 时更新而非新增，保证「一段视频在素材条只显示一条」。
+          // src 为空（纯 latent 素材）不参与匹配，始终新增。
+          const existIdx = it.src ? next.findIndex((m) => m.src && m.src === it.src) : -1;
+          if (existIdx >= 0) {
+            const old = next[existIdx];
+            next[existIdx] = {
+              ...it,
+              id: old.id,
+              vw: it.vw ?? old.vw,
+              vh: it.vh ?? old.vh,
+              // 无损合并字段以“已存在值优先”，避免后到的轻量通知（Guide 不带 latent）
+              // 把 Combine 通知写入的 latent / clip_audio / meta 字段清空。
+              imageLatent: old.imageLatent ?? d.image_latent,
+              audioLatent: old.audioLatent ?? d.audio_latent,
+              clipAudio: old.clipAudio ?? d.clip_audio,
+              meta: old.meta ?? d.meta,
+            };
+            continue;
+          }
+          // 新素材：id 附加自增序号保证唯一（React key / 多选集合依据）
           materialSeq += 1;
-          next.push({ ...it, id: it.id + "#" + materialSeq });
+          next.push({
+            ...it,
+            id: it.id + "#" + materialSeq,
+            // 无损合并素材字段：Combine 节点保存的 latent / clip_audio / meta；
+            // 旧素材无这些字段 → 视为像素素材，不参与无损合并
+            imageLatent: d.image_latent || null,
+            audioLatent: d.audio_latent || null,
+            clipAudio: d.clip_audio || null,
+            meta: d.meta || null,
+          });
         }
         return next;
       });
@@ -775,7 +979,7 @@ export function TransferPanel({ director }) {
     if (!aliveRef.current || !director?.node) return;
     const seg = curSeg;
     if (!seg || typeof seg.id === "undefined") return;
-    if (seg.h3PromptJson !== rightText) {
+    if (JSON.stringify(seg.h3PromptJson || {}) !== JSON.stringify(rightText)) {
       seg.h3PromptJson = rightText;
       // 经外壳 commitChanges 序列化（...rest 保留 h3PromptJson 自定义字段）
       director.commitChanges(true);
@@ -788,21 +992,22 @@ export function TransferPanel({ director }) {
   useEffect(() => {
     if (!menu) return;
     const onDown = (e) => {
-      if (e.target.closest && !e.target.closest(".tr-menu")) setMenu(null);
+      if (e.target.closest && !e.target.closest(".ref-ms-mention-popup")) setMenu(null);
     };
     window.addEventListener("mousedown", onDown, true);
     return () => window.removeEventListener("mousedown", onDown, true);
   }, [menu]);
 
-  // 右侧内容 debounce 解析资源引用
+  // 资源引用条：优先使用后端 /h3/build_subject_bindings 返回的 subjects
+  // （已包含 prompt 提及 + additionSubject 手动添加的主体，媒体字段权威），
+  // 不再本地正则解析 prompt；bindData 未就绪（未加载/请求失败）时 fallback 到 parseResources。
   useEffect(() => {
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      if (!aliveRef.current) return;
-      setResources(parseResources(rightText, subjects));
-    }, 500);
-    return () => clearTimeout(debounceRef.current);
-  }, [rightText, subjects, addVersion]);
+    if (bindData && Array.isArray(bindData.subjects)) {
+      setResources(resourcesFromBindings(bindData, curSeg));
+      return;
+    }
+    setResources(parseResources(promptJsonText(rightText), subjects));
+  }, [bindData, rightText, subjects, addVersion, curSeg]);
 
   // 右侧 H3 JSON / 主体 / 当前选中段 / 时间轴变化时 debounce 请求后端
   // /h3/build_subject_bindings（替代前端 buildFirstFramePayload 的绑定组装）。
@@ -835,11 +1040,33 @@ export function TransferPanel({ director }) {
       mmproj_path: v.mmproj_path || "",
       provider: v.provider || "GLM",
       api_key: v.api_key || "",
+      ollama_model: v.ollama_model || "",
+      ollama_base_url: v.ollama_base_url || "",
       ...extra,
     };
   };
 
   // textarea 高度由 flex:1 均分弹窗高度控制（auto-grow 已移除）
+
+  // 绑定成功后清理段级 retention 中已失效的键：
+  // 以绑定结果 subjects 的 name 集合为权威，集合外的主体（已删除 / 绑定结果不再
+  // 包含）对应的覆盖键自动删除。仅在最新一次成功响应时调用（fetchBindings 内保证
+  // seq 最新），避免请求乱序或失败误删；有变化时持久化到 timeline_data。
+  const pruneStaleRetention = (bind, seg) => {
+    if (!seg || !seg.retention || typeof seg.retention !== "object") return;
+    const names = new Set((bind?.subjects || []).map((s) => s?.name).filter(Boolean));
+    let changed = false;
+    for (const k of Object.keys(seg.retention)) {
+      if (!names.has(k)) {
+        delete seg.retention[k];
+        changed = true;
+      }
+    }
+    if (changed) {
+      director.commitChanges(true);
+      if (app.graph) app.graph.setDirtyCanvas(true, true);
+    }
+  };
 
   // 返回 subject_definitions / retention_analysis + images / audios / videos。
   // 替代前端 buildFirstFramePayload 中的绑定组装；绑定 prompt 中提到的主体 +
@@ -850,18 +1077,51 @@ export function TransferPanel({ director }) {
     try {
       // timeline_segment：当前选中 segment（含 additionSubject，供后端追加绑定未提及的主体）
       const seg = curSeg;
+      // 过滤 prompt 中已提及（<@name> 会由 prompt 绑定，后端将其写入 mapping）的主体，避免重复追加。
+      // 否则"已绑定→从 additionSubject 移除→解除绑定→回到候选"循环。
+      const boundMentions = new Set();
+      for (const k of Object.keys(bindData?.mapping || {})) {
+        const mm = /^<@([^>]+)>$/.exec(k);
+        if (mm) boundMentions.add(mm[1]);
+      }
+      // seg_audio：当前 segment 范围内的音频段（不是全局 timeline.audioSegments）。
+      // 供后端 build_h3_subject_bindings 判断该段是否有音频：该段有音频（非空）时
+      // suppress_audio=True（音频素材仅作参考绑定）；无音频（空数组）时正常绑定音频素材。
+      // 与后端 director.py 的 fill_audio_gaps 段筛选语义一致：裁剪到段范围、trimStart 同步右移。
+      const segAudio = [];
+      const tl = director?.timeline;
+      if (tl?.audioTrackEnabled !== false && Array.isArray(tl?.audioSegments)) {
+        const segStart = seg ? (Number(seg.start) || 0) : 0;
+        const segEnd = segStart + (seg ? (Number(seg.length) || 0) : 0);
+        for (const as of tl.audioSegments) {
+          const aStart = Number(as?.start) || 0;
+          const aEnd = aStart + (Number(as?.length) || 0);
+          const clipStart = Math.max(aStart, segStart);
+          const clipEnd = Math.min(aEnd, segEnd);
+          if (clipEnd <= clipStart) continue; // 不与该段重叠，跳过
+          const clipped = { start: clipStart, length: clipEnd - clipStart };
+          if (as?.trimStart !== undefined) {
+            clipped.trimStart = (Number(as.trimStart) || 0) + (clipStart - aStart);
+          }
+          segAudio.push(clipped);
+        }
+      }
       const body = {
         subject_data: { subjects: subjects || [] },
-        raw_prompt: rightText,
+        // prompt_json：JSON 格式（rightText 即 JSON 对象，直接发送，
+        // 后端 build_h3_subject_bindings 按 JSON 解析并返回对应绑定值替代）
+        prompt_json: rightText,
         timeline_segment: seg
           ? {
               type: seg.type,
               start: seg.start,
               videoFile: seg.videoFile || "",
               audioFile: seg.audioFile || "",
-              additionSubject: Array.isArray(seg.additionSubject) ? seg.additionSubject : [],
+              additionSubject: (Array.isArray(seg.additionSubject) ? seg.additionSubject : []).filter((n) => !boundMentions.has(n)),
+              retention: (seg.retention && typeof seg.retention === "object") ? seg.retention : {},
             }
           : {},
+        seg_audio: segAudio,
       };
       const res = await api.fetchApi("/minimax_ref/api/h3/build_subject_bindings", {
         method: "POST",
@@ -873,6 +1133,7 @@ export function TransferPanel({ director }) {
       // 旧请求的成功响应不再覆盖新请求的结果（失败时保留上次成功结果作为 fallback）。
       if (data && data.success && aliveRef.current && seq === bindSeqRef.current) {
         setBindData(data.data || null);
+        pruneStaleRetention(data.data || null, seg);
         return data.data || null;
       }
       return null;
@@ -889,17 +1150,6 @@ export function TransferPanel({ director }) {
       return srcOf((segs?.[director.selectedIndex] || null));
     return null;
   };
-
-  // Motion Context 开关：更新 timeline_data 对应字段。
-  // 提示词优化后并入 detailed_description，文字 / 视频节点不再写任何 shot 字段。
-  function toggleMotionContext() {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    const on = !motionCtxOn;
-    setMotionCtxOn(on);
-    seg.motionContext = on; // 更新 timeline_data 对应字段
-    director.commitChanges();
-  }
 
   // 图片节点：调用 /llm/generate_image_analysis 分析图片，图片内容 + 提示词合并优化后
   async function analyzeImageForDetailed(seg) {
@@ -924,7 +1174,7 @@ export function TransferPanel({ director }) {
           ? (pd.detailed_description || JSON.stringify(pd))
           : String(pd || "");
         // 追加而非覆盖，避免丢失已有 detailed_description
-        const cur = parsePromptText(rightText).detailed_description || "";
+        const cur = (rightText && rightText.detailed_description) || "";
         const merged = cur.trim() ? cur.trim() + "\n" + desc : desc;
         setRightText(updateShotField(rightText, "detailed_description", merged));
       } else {
@@ -957,10 +1207,15 @@ export function TransferPanel({ director }) {
     setBusy(true);
     setError("");
     const targetSeg = curSeg; // 记录发起请求时的 segment，返回结果写回该 segment
+    // 把目标 segment 的总时长（秒）传给后端，供提示词模板约束 [Shot N] 的时间戳分布
+    const durSecs = targetSeg && director
+      ? parseFloat(((Number(targetSeg.length) || 0) / Math.max(1, director.getFrameRate())).toFixed(2))
+      : 0;
     try {
       const body = vlmBody({
         prompt: source,
         image_path: firstFramePath(),
+        duration_seconds: durSecs > 0 ? durSecs : 0,
       });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",
@@ -970,16 +1225,8 @@ export function TransferPanel({ director }) {
       const data = await res.json();
       console.log("[Transfer] generate_prompt_json ->", data);
       if (data.success) {
-        let obj = data.json_data;
-        if (typeof obj === "string") {
-          try { obj = JSON.parse(obj); } catch { /* 保留原始字符串 */ }
-        }
-        const text =
-          obj && typeof obj === "object"
-            ? formatPromptJson(obj)
-            : typeof data.json_data === "string"
-              ? data.json_data
-              : JSON.stringify(data.json_data, null, 2);
+        // 生成结果统一规范化为 JSON 对象
+        const text = normalizePromptJson(data.json_data);
         // 生成结果写回发起请求时的 segment 的 H3 prompt JSON（随 timeline_data 持久化）
         if (targetSeg && typeof targetSeg.id !== "undefined") {
           targetSeg.h3PromptJson = text;
@@ -1010,7 +1257,74 @@ export function TransferPanel({ director }) {
     return null;
   }
 
-  function openMenu(e, side) {
+  // 精确测量 textarea 内光标（selectionStart）相对内容区的像素偏移：
+  // 用同字体/同内容宽/同 pre-wrap 软换行的隐藏镜像 div 重现"光标前文本"，
+  // 以 Range 测量光标所在视觉行的宽度与视觉行号，替代 col*charW 粗略估算——
+  // 后者在软换行、中文全角字符、字体宽度差异下会沿 x 轴偏离光标。
+  function measureCaretPos(el) {
+    const caret = el.selectionStart;
+    const before = el.value.slice(0, caret);
+    const cs = getComputedStyle(el);
+    const lh = parseFloat(cs.lineHeight) || 18;
+    const padL = parseFloat(cs.paddingLeft) || 0;
+    const padT = parseFloat(cs.paddingTop) || 0;
+    const contentW = el.clientWidth - padL - (parseFloat(cs.paddingRight) || 0);
+    const m = document.createElement("div");
+    m.style.cssText = "position:fixed;left:-99999px;top:0;visibility:hidden;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;box-sizing:border-box;margin:0;padding:0;border:0;";
+    m.style.width = Math.max(1, contentW) + "px";
+    m.style.fontFamily = cs.fontFamily;
+    m.style.fontSize = cs.fontSize;
+    m.style.fontWeight = cs.fontWeight;
+    m.style.lineHeight = lh + "px";
+    m.style.letterSpacing = cs.letterSpacing || "normal";
+    document.body.appendChild(m);
+    const logical = before.split("\n");
+    const lastIdx = logical.length - 1;
+    let visualLine = 0; // 光标前的视觉行数（0-based）
+    for (let i = 0; i < lastIdx; i++) {
+      m.textContent = logical[i];
+      visualLine += Math.max(1, Math.round(m.getBoundingClientRect().height / lh));
+    }
+    const last = logical[lastIdx];
+    m.textContent = last;
+    const lastWrap = Math.max(1, Math.round(m.getBoundingClientRect().height / lh));
+    visualLine += Math.max(1, lastWrap - 1); // 光标所在视觉行号
+    let visualX = 0;
+    const textNode = m.firstChild;
+    if (textNode && last.length > 0) {
+      if (lastWrap <= 1) {
+        const r = document.createRange();
+        r.selectNodeContents(textNode);
+        visualX = r.getBoundingClientRect().width;
+      } else {
+        // 最后逻辑行被软换行：二分定位"最后视觉行"起点，再测其像素宽
+        const full = document.createRange();
+        full.selectNodeContents(textNode);
+        const lastTop = full.getBoundingClientRect().bottom - lh;
+        let lo = 0, hi = last.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          const r = document.createRange();
+          r.setStart(textNode, mid);
+          r.setEnd(textNode, last.length);
+          if (r.getBoundingClientRect().top >= lastTop - 0.5) hi = mid;
+          else lo = mid + 1;
+        }
+        const r = document.createRange();
+        r.setStart(textNode, lo);
+        r.setEnd(textNode, last.length);
+        visualX = r.getBoundingClientRect().width;
+      }
+    }
+    document.body.removeChild(m);
+    return { x: padL + visualX, y: padT + (visualLine + 1) * lh };
+  }
+
+  // 右侧四分区 field → prompt 字段 key / ref（左侧为 "left"）
+  const RIGHT_FIELD_KEYS = { summary: "summary", detail: "detailed_description", overall: "overall_soundscape", music: "non_diegetic_music" };
+  const RIGHT_FIELD_REFS = { summary: rightSummaryRef, detail: rightDetailRef, overall: rightOverallRef, music: rightMusicRef };
+
+  function openMenu(e, side, field) {
     const el = e.target;
     const caret = el.selectionStart;
     const before = el.value.slice(0, caret);
@@ -1018,31 +1332,34 @@ export function TransferPanel({ director }) {
     const allowed = side === "left" ? "@" : "@#";
     if (!ch || !allowed.includes(ch)) return;
     const rect = el.getBoundingClientRect();
-    const lines = before.split("\n");
-    const line = lines.length - 1;
-    const col = lines[line].length;
-    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 18;
-    const charW = 7.5;
     // fixed 定位实际以最近 transform 祖先（图容器）为包含块解析，rect 是视口坐标，
     // 需减去包含块左上角，否则菜单整体偏移（可能移出可视区，表现为输入 @/# 无反应）。
+    // 注意与 modal.js 拖动定位一致：包含块在 ComfyUI 图容器（transform 平移/缩放）内时，
+    // getBoundingClientRect 是已含 scale 的视口坐标，写入 fixed 定位必须是布局值，
+    // 故差值必须除以缩放系数，否则画布缩放 ≠1 时菜单位置会被 scale 二次放大而偏离光标。
     const cb = getFixedCb(el);
     const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
-    const vw = cb ? cbRect.width : window.innerWidth;
-    const x = Math.max(4, Math.min(rect.left + col * charW - cbRect.left, vw - 200));
-    const y = rect.top + (line + 1) * lineHeight + 6 - cbRect.top;
+    const scale = cb && cb.offsetWidth > 0 && cbRect.width > 0 ? cbRect.width / cb.offsetWidth : 1;
+    const vw = cb ? cbRect.width / scale : window.innerWidth;
+    // 光标像素位置由镜像测量给出（含软换行/中文/字体差异）；textarea 内部滚动时
+    // rect 不随滚动变化而光标在内容区内的偏移会变，必须扣除 scrollTop/scrollLeft，
+    // 否则长 prompt 滚动后菜单会偏离光标。
+    const caretPos = measureCaretPos(el);
+    const x = Math.max(4, Math.min((rect.left - cbRect.left) / scale + caretPos.x - el.scrollLeft, vw - 200));
+    const y = (rect.top - cbRect.top) / scale + caretPos.y + 6 - el.scrollTop;
     // 打开菜单前刷新一次主体列表，确保新增的主体立即可选
     setSubjects(getSubjectsLatest());
-    setMenu({ side, trigger: ch, caret, x, y });
+    setMenu({ side, trigger: ch, caret, x, y, field, tab: "all" });
   }
 
-  function handleInput(e, side) {
+  function handleInput(e, side, field) {
     const el = e.target;
     const caret = el.selectionStart;
     const before = el.value.slice(0, caret);
     const ch = before.slice(-1) || "";
     const allowed = side === "left" ? "@" : "@#";
     if (ch && allowed.includes(ch)) {
-      openMenu(e, side);
+      openMenu(e, side, field);
     } else if (menu && menu.side === side) {
       setMenu(null);
     }
@@ -1053,9 +1370,12 @@ export function TransferPanel({ director }) {
     }
   }
 
+  // 菜单按当前 tab 类型过滤后的主体列表（"all" 展示全部）
+  const menuSubjects = menu ? subjects.filter(h => menu.tab === "all" || (h.type || "Subject") === menu.tab) : [];
+
   function pickSubject(s) {
     if (!menu) return;
-    const el = menu.side === "left" ? leftRef.current : rightRef.current;
+    const el = menu.side === "left" ? leftRef.current : (RIGHT_FIELD_REFS[menu.field] || {}).current;
     if (!el) return;
     const token = menu.trigger === "@" ? `<@${s.name}>` : `<#${s.name}:对话内容>`;
     const text = el.value;
@@ -1067,7 +1387,8 @@ export function TransferPanel({ director }) {
         director.promptInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
     } else {
-      setRightText(newText);
+      // 右侧：只更新触发 mention 的那个分区字段
+      setRightText(updateShotField(rightText, RIGHT_FIELD_KEYS[menu.field] || "detailed_description", newText));
     }
     const pos = menu.caret - 1 + token.length;
     requestAnimationFrame(() => {
@@ -1078,6 +1399,51 @@ export function TransferPanel({ director }) {
     setMenu(null);
   }
 
+  // summary 任务类型标签点击：在光标处填入 [tag]；若光标位于未闭合的方括号内则追加 " + tag"
+  function insertTaskTag(tag) {
+    const el = rightSummaryRef.current;
+    if (!el) return;
+    const caret = el.selectionStart ?? el.value.length;
+    const before = el.value.slice(0, caret);
+    const lastOpen = before.lastIndexOf("[");
+    const insideOpenBracket = lastOpen >= 0 && !before.slice(lastOpen).includes("]");
+    const token = insideOpenBracket ? ` + ${tag}` : `[${tag}]`;
+    const newText = el.value.slice(0, caret) + token + el.value.slice(caret);
+    setRightText(updateShotField(rightText, "summary", newText));
+    requestAnimationFrame(() => {
+      if (!aliveRef.current) return;
+      el.focus();
+      el.setSelectionRange(caret + token.length, caret + token.length);
+    });
+  }
+
+  // 资源引用条数据：直接使用后端 /h3/build_subject_bindings 返回的 subjects
+  // （后端已按 prompt 提及 + additionSubject 手动添加过滤，媒体字段为权威来源）。
+  // kind 依据当前 segment 的 additionSubject 区分，用于展示"＋"与移除按钮。
+  function resourcesFromBindings(bindData, seg) {
+    const out = [];
+    const added = new Set(Array.isArray(seg?.additionSubject) ? seg.additionSubject : []);
+    for (const s of bindData.subjects || []) {
+      if (!s || !s.name) continue;
+      const kind = added.has(s.name) ? "addition" : "subject";
+      // 生效 retention：段级覆盖值优先，其次回落主体自身定义值（与后端 _retention_for 同语义）
+      const ov = (seg?.retention && typeof seg.retention === "object") ? seg.retention[s.name] : "";
+      out.push({
+        key: (kind === "addition" ? "add-" : "subj-") + s.name,
+        label: s.name,
+        src: subjectImgSrc(s),
+        audio: s.audioFile,
+        kind,
+        type: s.type,
+        relationship: s.relationship || "",
+        retention: (typeof ov === "string" && ov.trim()) ? ov.trim() : ((s.retention || "").trim()),
+        media: subjectMediaPreview(s),
+      });
+    }
+    return out;
+  }
+
+  // 本地兜底解析：bindData 未就绪（未加载/请求失败）时从 prompt 文本提取引用
   function parseResources(text, subjectsList) {
     const out = [];
     const re = /<(?:@|#)([^>:]+)(?::[^>]*)?>/g;
@@ -1087,7 +1453,7 @@ export function TransferPanel({ director }) {
     for (const name of used) {
       const s = subjectsList.find(x => x.name === name);
       if (s) {
-        out.push({ key: "subj-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "subject" });
+        out.push({ key: "subj-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "subject", type: s.type, relationship: s.relationship || "", retention: (s.retention || "").trim(), media: subjectMediaPreview(s) });
       }
     }
     // additionSubject：用户在主体添加框手动加入、但未在 prompt 中提及的主体
@@ -1095,20 +1461,25 @@ export function TransferPanel({ director }) {
       if (used.has(name)) continue;
       const s = subjectsList.find(x => x.name === name);
       if (s) {
-        out.push({ key: "add-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "addition" });
+        out.push({ key: "add-" + name, label: name, src: subjectImgSrc(s), audio: s.audioFile, kind: "addition", type: s.type, relationship: s.relationship || "", retention: (s.retention || "").trim(), media: subjectMediaPreview(s) });
       }
     }
     return out;
   }
 
   // ---------- additionSubject 添加框 ----------
-  // 候选主体：未在右侧 prompt 中提及、且尚未添加的主体
-  const mentionNames = (() => {
-    const m = extractH3Mentions(rightText);
-    return new Set([...m.names, ...m.dialogues]);
-  })();
+  // 已绑定主体：后端 /h3/build_subject_bindings 返回的 subjects（仅非 Subject 资源主体）
+  // + mapping 中的 <@name> 提及（Subject 抽象主体绑定后只进 mapping，不进 subjects）。
+  const boundNames = new Set([
+    ...(bindData?.subjects || []).map((s) => s?.name).filter(Boolean),
+    ...Object.keys(bindData?.mapping || {})
+      .map((k) => { const m = /^<@([^>]+)>$/.exec(k); return m ? m[1] : null; })
+      .filter(Boolean),
+  ]);
   const addedNames = Array.isArray(curSeg?.additionSubject) ? curSeg.additionSubject : [];
-  const addCandidates = subjects.filter((s) => !mentionNames.has(s.name) && !addedNames.includes(s.name));
+  // 已被绑定的主体不再作为 additionSubject 展示
+  const visibleAdded = addedNames.filter((n) => !boundNames.has(n));
+  const addCandidates = subjects.filter((s) => !boundNames.has(s.name) && !addedNames.includes(s.name));
   const addSubject = (name) => {
     if (!curSeg || !director) return;
     if (!Array.isArray(curSeg.additionSubject)) curSeg.additionSubject = [];
@@ -1117,21 +1488,61 @@ export function TransferPanel({ director }) {
     setAddVersion((v) => v + 1);
     director.commitChanges(true);
   };
-  // 信息图标 tooltip：fixed 定位避免被 .tr-resources 的 overflow 裁剪；按视口空间决定向上/向下弹出
+  // 信息图标 tooltip：fixed 定位避免被 .tr-resources 的 overflow 裁剪；跟随鼠标坐标移动，
+  // 带 6px 移动阈值（鼠标慢速移动/停顿时 tooltip 留在原地，方便移入内部滚动），按包含块空间决定向上/向下弹出
+  const defsTimer = useRef(null); // 延迟关闭定时器：鼠标从图标滑向 tooltip 的间隙不关闭
+  const defsLastXY = useRef(null); // 上次定位的鼠标坐标，用于移动阈值判断
   const openDefsTip = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const up = rect.top > window.innerHeight * 0.55;
-    const left = Math.max(4, Math.min(rect.left, window.innerWidth - 300));
-    const top = up ? rect.top - 6 : rect.bottom + 6;
+    if (e.target && e.target.closest && e.target.closest(".tr-defs-tip")) return; // 鼠标在 tooltip 上时停止跟随，允许滚动内容
+    const last = defsLastXY.current;
+    if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 6) return; // 移动不足阈值：tooltip 原地不动，鼠标可移入
+    defsLastXY.current = { x: e.clientX, y: e.clientY };
+    // fixed 定位实际以最近 transform 祖先（图容器，带平移/缩放）为包含块解析，clientX/Y 是视口坐标，
+    // 需减包含块左上角并除以缩放系数，否则画布缩放 ≠1 时 tooltip 偏离鼠标、根本点不到。
+    // 与 openMenu / modal.js 拖动定位同一套换算。
+    const cb = getFixedCb(e.currentTarget);
+    const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
+    const scale = cb && cb.offsetWidth > 0 && cbRect.width > 0 ? cbRect.width / cb.offsetWidth : 1;
+    const cx = (e.clientX - cbRect.left) / scale;
+    const cy = (e.clientY - cbRect.top) / scale;
+    const cw = cb ? cbRect.width / scale : window.innerWidth;
+    const ch = cb ? cbRect.height / scale : window.innerHeight;
+    const up = cy > ch * 0.55;
+    const left = Math.max(4, Math.min(cx, cw - 300));
+    const top = up ? cy - 6 : cy + 14;
     setDefsPos({ left: left + "px", top: top + "px", up });
     setDefsOpen(true);
   };
+  // 延迟关闭：鼠标从图标移向 tooltip（中间空隙）时不关闭；进入 tooltip 后由 keepDefsOpen 取消
+  const delayCloseDefs = () => {
+    clearTimeout(defsTimer.current);
+    defsTimer.current = setTimeout(() => setDefsOpen(false), 150);
+  };
+  const keepDefsOpen = () => {
+    clearTimeout(defsTimer.current);
+    setDefsOpen(true);
+  };
+  useEffect(() => () => clearTimeout(defsTimer.current), []);
   const removeAddedSubject = (name) => {
     if (!curSeg || !director) return;
     if (!Array.isArray(curSeg.additionSubject)) return;
     curSeg.additionSubject = curSeg.additionSubject.filter((x) => x !== name);
     setAddVersion((v) => v + 1);
     director.commitChanges(true);
+  };
+  // 主体 retention 编辑保存：写入当前 segment 的 retention（name → 文本映射）。
+  // trim 后为空则删除覆盖键（回落主体节点定义值）。保存后触发重新绑定与资源刷新，
+  // 并持久化到 timeline_data（commitChanges 序列化保留自定义字段）。
+  const saveRetention = () => {
+    if (!retEdit || !curSeg || !director) return;
+    if (!curSeg.retention || typeof curSeg.retention !== "object") curSeg.retention = {};
+    const v = (retEdit.value || "").trim();
+    if (v) curSeg.retention[retEdit.name] = v;
+    else delete curSeg.retention[retEdit.name];
+    setRetEdit(null);
+    setAddVersion((x) => x + 1);
+    director.commitChanges(true);
+    if (app.graph) app.graph.setDirtyCanvas(true, true);
   };
 
   // ---------- 视频素材条 ----------
@@ -1246,6 +1657,54 @@ export function TransferPanel({ director }) {
       showDragHint(`合并失败：${err.message || "未知错误"}`);
     } finally {
       setMergeBusy(false);
+    }
+  };
+
+  // 无损合并选中的素材：请求后端 /minimax_ref/api/h3/merge_latents，
+  // 后端按选中顺序加载 joint latent → 像素域交叉淡化拼接 → VHS 编码，
+  // 完成后 send_sync 通知，素材条自动追加合并结果（无需手动 setMaterials）。
+  // 音频：每段 clip_audio 优先，否则 audio_latent 解码，拼接为 master_audio。
+  const losslessMergeSelectedMaterials = async () => {
+    if (selIds.size < 2 || losslessMergeBusy) return;
+    // 按用户选中顺序（selOrder）取素材，保证合并拼接顺序与序号一致
+    const byId = new Map(materials.map((m) => [m.id, m]));
+    let sel = selOrder.map((x) => byId.get(x)).filter(Boolean);
+    // 兜底：selOrder 中缺失的选中素材按素材条顺序补到末尾（正常流程不会出现）
+    for (const m of materials) {
+      if (selIds.has(m.id) && !sel.some((s) => s.id === m.id)) sel.push(m);
+    }
+    // 无损合并要求每段同时含 image_latent / audio_latent / clip_audio
+    //（Combine 节点在提供 clip_audio 时才保存 latent 素材并输出音频切片）
+    sel = sel.filter((m) => m.imageLatent && m.audioLatent && m.clipAudio);
+    if (sel.length < 2) {
+      showDragHint("无损合并需要至少 2 段含 latent 与音频的素材（Guide 需输出 clip_audio）");
+      return;
+    }
+    setLosslessMergeBusy(true);
+    try {
+      const res = await api.fetchApi("/minimax_ref/api/h3/merge_latents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          materials: sel.map((m) => ({
+            src: m.src,
+            imageLatent: m.imageLatent,
+            audioLatent: m.audioLatent,
+            clipAudio: m.clipAudio || null,
+            meta: m.meta || null,
+          })),
+          node_id: director?.node?.id,
+          context_frames: 39,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "无损合并失败");
+      showDragHint(`已无损合并 ${sel.length} 段，结果已加入素材条`);
+    } catch (err) {
+      console.error("[Transfer] 无损合并失败:", err);
+      showDragHint(`无损合并失败：${err.message || "未知错误"}`);
+    } finally {
+      setLosslessMergeBusy(false);
     }
   };
 
@@ -1406,9 +1865,25 @@ export function TransferPanel({ director }) {
   // 主体定义 / retention_analysis（来自后端 /h3/build_subject_bindings 的 debounce 结果）
   const bindings = bindData || {};
   const bindParts = [];
-  if (bindings.subject_definitions) bindParts.push("subject_definitions:\n" + bindings.subject_definitions);
-  if (bindings.retention_analysis) bindParts.push("retention_analysis:\n" + bindings.retention_analysis);
+  if (bindings.subject_definitions) bindParts.push("subject_definitions:\n" + bindings.subject_definitions_final);
+  if (bindings.retention_analysis) bindParts.push("retention_analysis:\n" + bindings.retention_analysis_final);
   const bindingsText = bindParts.join("\n\n");
+
+  // 完整 H3 prompt 预览文本：主体定义 / 留存分析来自 bindData，其余来自 rightText（实时编辑）
+  const h3PreviewSections = [
+    ["subject_definitions", bindings.subject_definitions],
+    ["summary", rightText.summary],
+    ["retention_analysis", bindings.retention_analysis],
+    ["detailed_description", rightText.detailed_description],
+    ["overall_soundscape", rightText.overall_soundscape],
+    ["non_diegetic_music", rightText.non_diegetic_music],
+  ];
+  const h3PreviewText = h3PreviewSections
+    .map(([key, val]) => {
+      const text = val == null ? "" : String(val);
+      return `${key}:\n${text.trim() ? text : "N/A"}`;
+    })
+    .join("\n\n");
 
   return html`
     <div class="tr-panel" style=${S.panel}>
@@ -1421,15 +1896,6 @@ export function TransferPanel({ director }) {
         ${
           curSeg && curSeg.type !== "audio"
             ? html`
-                ${
-                  curSeg.type === "text" || curSeg.type === "image" || curSeg.type === "video"
-                    ? html`<button
-                        class=${motionCtxOn ? "mrd-pr-btn toggle-on" : "mrd-pr-btn"}
-                        title="Toggle Auto First Frame for the selected segment"
-                        onClick=${toggleMotionContext}
-                      >Auto First Frame</button>`
-                    : null
-                }
                 ${
                   curSeg.type !== "audio"
                     ? html`<button
@@ -1457,20 +1923,56 @@ export function TransferPanel({ director }) {
             resources.length === 0
               ? html`<div style=${S.hint}>资源引用（主体 / 手动添加主体）会显示在这里</div>`
               : resources.map(r => {
-                  const hasImg = !!r.src;
-                  const isAudio = !hasImg || !!r.audio;
+                  const media = r.media && r.media.kind ? r.media : subjectMediaPreview(r);
+                  const isAudio = media.kind === "audio";
+                  // Subject 类型主体标签亮蓝区分；relationship 非空的主体卡片可点击编辑段级 retention
+                  const isSubject = r.type === "Subject";
+                  const editable = isSubject && !!r.relationship;
+                  const openRetEdit = () => {
+                    if (!editable) return;
+                    setRetEdit({ name: r.label, value: r.retention || "" });
+                  };
+                  const resCardStyle = Object.assign({}, S.res,
+                    editable ? S.resEditable : null,
+                    hoverRes === r.key ? S.resHovered : null);
                   return html`
-                  <div style=${S.res} key=${r.key}>
+                  <div
+                    style=${resCardStyle}
+                    key=${r.key}
+                    onClick=${openRetEdit}
+                    onMouseEnter=${() => setHoverRes(editable ? r.key : null)}
+                    onMouseLeave=${() => setHoverRes(null)}
+                    title=${editable ? "点击编辑该主体的 Retention（段级覆盖）" : (r.type ? "主体类型：" + r.type : "")}
+                  >
                     ${
-                      hasImg
-                        ? html`<img style=${S.img} src=${r.src} alt=${r.label} />`
-                        : html`<span style=${S.resAudio} title="音频主体">♪</span>`
+                      r.type
+                        ? html`<span style=${isSubject ? S.resTypeSubject : S.resType} title="主体类型">${r.type}</span>`
+                        : ""
+                    }
+                    ${editable ? html`<span style=${S.resEditHint} title="点击编辑 Retention">✎</span>` : ""}
+                    ${
+                      media.kind === "video" && media.src
+                        ? html`<video style=${S.video} src=${media.src} controls preload="metadata" title="视频主体（点击画面播放/暂停）"
+                            onClick=${(e) => { e.stopPropagation(); if (e.target === e.currentTarget) { const v = e.currentTarget; v.paused ? v.play() : v.pause(); } }}></video>`
+                        : media.kind === "image" && media.src
+                          ? html`<img style=${S.img} src=${media.src} alt=${r.label} onClick=${(e) => e.stopPropagation()} />`
+                          : media.kind === "audio" && media.src
+                            ? html`<div style=${S.audioCard} onClick=${(e) => e.stopPropagation()}>
+                                <span style=${S.audioIconBig} title="音频主体（点击播放/暂停）"
+                                  onClick=${(e) => { e.stopPropagation(); const a = e.currentTarget.parentElement.querySelector("audio"); if (a) { a.paused ? a.play() : a.pause(); } }}>♪</span>
+                                <audio style=${S.audio} src=${media.src} controls preload="metadata" onClick=${(e) => e.stopPropagation()}></audio>
+                              </div>`
+                            : media.kind === "video"
+                              ? html`<span style=${S.resVideo} title="视频主体（无文件）">▶</span>`
+                              : media.kind === "audio" 
+                                ? html`<span style=${S.resAudio} title="音频/无媒体主体">♪</span>`
+                                : html`<span style=${S.resSubject} title="主体">(‾◡◝)</span>`
                     }
                     ${
                       r.kind === "addition"
                         ? html`<span style=${{ display: "inline-flex", alignItems: "center", gap: "3px", maxWidth: "64px", overflow: "hidden", whiteSpace: "nowrap" }}>
                             <span style=${isAudio ? S.audioIcon : Object.assign({}, S.label, { color: "#a5d6a7" })}>${isAudio ? "♪ " : "＋"}${r.label}</span>
-                            <span title="移除" style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }} onClick=${() => removeAddedSubject(r.label)}>×</span>
+                            <span title="移除" style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }} onClick=${(e) => { e.stopPropagation(); removeAddedSubject(r.label); }}>×</span>
                           </span>`
                         : (isAudio
                             ? html`<span style=${S.audioIcon}>♪ ${r.label}</span>`
@@ -1494,15 +1996,17 @@ export function TransferPanel({ director }) {
               class="tr-defs"
               style=${S.defsWrap}
               onMouseEnter=${openDefsTip}
-              onMouseLeave=${() => setDefsOpen(false)}
+              onMouseMove=${openDefsTip}
+              onMouseLeave=${delayCloseDefs}
             >
               <span style=${S.defsIcon}>ℹ</span>
               ${
                 defsOpen && defsPos
                   ? html`<div
+                      class="tr-defs-tip"
                       style=${Object.assign({}, S.defsTip, { left: defsPos.left, top: defsPos.top }, defsPos.up ? { transform: "translateY(-100%)" } : null)}
-                      onMouseEnter=${() => setDefsOpen(true)}
-                      onMouseLeave=${() => setDefsOpen(false)}
+                      onMouseEnter=${keepDefsOpen}
+                      onMouseLeave=${delayCloseDefs}
                     >
                       ${
                         bindingsText
@@ -1517,7 +2021,7 @@ export function TransferPanel({ director }) {
           <textarea
             class="mrd-h3-preview-area"
             style=${S.h3PreviewArea}
-            value=${rightText}
+            value=${h3PreviewText}
             readOnly
             spellcheck=${false}
           ></textarea>
@@ -1541,6 +2045,18 @@ export function TransferPanel({ director }) {
                   onClick=${mergeSelectedMaterials}
                   onMouseDown=${(e) => e.preventDefault()}
                 >${mergeBusy ? "合并中…" : "合并"}</button>`
+              : null
+          }
+          ${
+            selIds.size >= 2
+              ? html`<button
+                  class="mrd-pr-btn"
+                  style=${S.materialsMergeBtn}
+                  disabled=${losslessMergeBusy}
+                  onClick=${losslessMergeSelectedMaterials}
+                  onMouseDown=${(e) => e.preventDefault()}
+                  title="按选中顺序把各段 latent 像素域交叉淡化拼接（clip_audio 优先，否则解码 audio_latent 拼接 master_audio）"
+                >${losslessMergeBusy ? "无损合并中…" : "无损合并"}</button>`
               : null
           }
           ${
@@ -1680,6 +2196,7 @@ export function TransferPanel({ director }) {
                       onMouseLeave=${stopAll}
                     >
                       ${orderNum > 0 ? html`<span style=${S.materialOrderBadge}>${orderNum}</span>` : null}
+                      ${m.imageLatent ? html`<span style=${S.materialLatentBadge}>无损</span>` : null}
                       ${dragReady ? html`<span style=${S.materialReadyBadge}>可拖出</span>` : null}
                       ${preview}
                       <span style=${S.materialLabel}>${m.label}</span>
@@ -1713,20 +2230,36 @@ export function TransferPanel({ director }) {
       ${
         menu
           ? html`
-            <div class="tr-menu" style=${Object.assign({}, S.menu, { left: menu.x + "px", top: menu.y + "px" })}>
-              ${
-                subjects.length === 0
-                  ? html`<div style=${{ padding: "6px 10px", color: "#888", fontSize: "12px" }}>没有可用主体（请先在主体节点中添加）</div>`
-                  : subjects.map(h => html`
-                      <button
-                        class="mrd-pr-btn"
-                        style=${Object.assign({}, S.trBtn, { display: "flex", alignItems: "center", gap: "6px", textAlign: "left", padding: "3px 6px" })}
-                        key=${h.name}
-                        onMouseDown=${(e) => e.preventDefault()}
-                        onClick=${() => pickSubject(h)}
-                      >${subjectMediaThumb(h)}<span>${h.name}</span></button>
-                    `)
-              }
+            <div class="ref-ms-mention-popup open" style=${{ left: menu.x + "px", top: menu.y + "px", zIndex: 100000 }}>
+              <div class="ref-ms-mention-tabs">
+                ${["all", "Subject", "Picture", "Video", "Audio"].map(t => html`
+                  <button
+                    type="button"
+                    class="ref-ms-mention-tab${menu.tab === t ? " active" : ""}"
+                    onMouseDown=${(e) => e.preventDefault()}
+                    onClick=${() => setMenu({ ...menu, tab: t })}
+                  >${t === "all" ? "全部" : t}</button>
+                `)}
+              </div>
+              <div class="ref-ms-mention-list">
+                ${
+                  menuSubjects.length === 0
+                    ? html`<div class="ref-ms-mention-empty">${subjects.length === 0 ? "暂无可用主体（请先在主体节点中添加）" : "暂无可用主体"}</div>`
+                    : menuSubjects.map(h => html`
+                        <div
+                          class="ref-ms-mention-item"
+                          key=${h.name}
+                          onMouseDown=${(e) => e.preventDefault()}
+                          onClick=${() => pickSubject(h)}
+                          title="插入 ${menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:对话内容>`}"
+                        >
+                          ${subjectMediaThumb(h, 22)}
+                          <span class="ref-ms-mention-type">${h.type || "Subject"}</span>
+                          <span>${h.name}</span>
+                        </div>
+                      `)
+                }
+              </div>
             </div>
           `
           : null
@@ -1738,6 +2271,7 @@ export function TransferPanel({ director }) {
         width="1500px"
         height="720px"
         onClose=${() => { setEditorOpen(false); setMenu(null); }}
+        help=${bindingsText || "暂无主体定义"}
       >
         <div style=${{ display: "flex", gap: "6px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
           <div class="mrd-pr-prompt-wrapper" style=${S.col}>
@@ -1760,19 +2294,69 @@ export function TransferPanel({ director }) {
               onClick=${() => runGenerate(leftText)}
             >→</button>
           </div>
-          <div class="mrd-pr-prompt-wrapper" style=${S.col}>
+          <div class="mrd-pr-prompt-wrapper" style=${{ ...S.col, gap: "8px" }}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>
               Minimax H3 Prompt
             </div>
-            <textarea
-              ref=${rightRef}
-              class="mrd-pr-prompt-area"
-              style=${S.refTextarea}
-              value=${rightText}
-              placeholder="生成结果（输入 @ 或 # 引用主体）"
-              spellcheck=${false}
-              onInput=${(e) => { setRightText(e.target.value); handleInput(e, "right"); }}
-            ></textarea>
+            <div style=${{ display: "flex", flexDirection: "column", gap: "8px", flex: "1 1 0", minHeight: "0" }}>
+              ${(() => {
+                const pObj = rightText;
+                const fieldStyle = (label) => ({ display: "flex", flexDirection: "column", minHeight: "0", ...label });
+                return html`
+                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>summary</div>
+                    <textarea
+                      ref=${rightSummaryRef}
+                      class="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "0 0 96px", height: "96px" }}
+                      value=${pObj.summary}
+                      placeholder=${"This section uses one short paragraph to summarize the target video and its reference relationships. It begins with a square-bracketed task-type prefix:\n\n[video editing + reference generation + audio reuse] The target video shows <@Anni> eating a cookie in <@Caff>. <@Tony> enters with <@May>, which lunges toward the cookie. The three-shot exchange uses <@Anni voice> as the voice-timbre reference for <@Anni> and ends with a canned audience laugh."}
+                      spellcheck=${false}
+                      onInput=${(e) => { setRightText(updateShotField(rightText, "summary", e.target.value)); handleInput(e, "right", "summary"); }}
+                    ></textarea>
+                    <div class="mrd-pr-tags" style=${{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "4px 8px 0" }}>
+                      ${TASK_TYPES.map((t) => html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#2a2a2a", border: "1px solid #444", borderRadius: "3px", color: "#9bb9ff", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t.title} onClick=${() => insertTaskTag(t.label)}>${t.label}</span>`)}
+                    </div>
+                  </div>
+                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "1 1 0" })}>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>detailed_description</div>
+                    <textarea
+                      ref=${rightDetailRef}
+                      class="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "1 1 0" }}
+                      value=${pObj.detailed_description}
+                      placeholder=${"[Shot 1] The scene opens in a crowded urban street...\n[Shot 2] At 00:09.000, the shot cuts to an extreme close-up..."}
+                      spellcheck=${false}
+                      onInput=${(e) => { setRightText(updateShotField(rightText, "detailed_description", e.target.value)); handleInput(e, "right", "detail"); }}
+                    ></textarea>
+                  </div>
+                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>overall_soundscape</div>
+                    <textarea
+                      ref=${rightOverallRef}
+                      class="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
+                      value=${pObj.overall_soundscape === "N/A" ? "" : pObj.overall_soundscape}
+                      placeholder=${"summarizes ambience and physical sounds across the full video. Dialogue, singing, and sound events synchronized to a particular shot remain in detailed_description:\n\nQuiet indoor room tone and a low ventilation hum continue throughout the video.\nor\nThe copied ambience layer from <@Anni voice> continues throughout the target video."}
+                      spellcheck=${false}
+                      onInput=${(e) => { setRightText(updateShotField(rightText, "overall_soundscape", e.target.value)); handleInput(e, "right", "overall"); }}
+                    ></textarea>
+                  </div>
+                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>non_diegetic_music</div>
+                    <textarea
+                      ref=${rightMusicRef}
+                      class="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
+                      value=${pObj.non_diegetic_music === "N/A" ? "" : pObj.non_diegetic_music}
+                      placeholder=${"describes background music that the characters cannot hear and that is audible only to the audience. When music is present, state its instrumentation, tempo, and dynamic development:\n\nA restrained solo-piano score at a slow tempo, with sustained low cello underneath and no swell.\nor\n<@Anni voice> is directly reused as the complete audience-only score."}
+                      spellcheck=${false}
+                      onInput=${(e) => { setRightText(updateShotField(rightText, "non_diegetic_music", e.target.value)); handleInput(e, "right", "music"); }}
+                    ></textarea>
+                  </div>
+                `;
+              })()}
+            </div>
           </div>
         </div>
         ${
@@ -1786,11 +2370,11 @@ export function TransferPanel({ director }) {
           <div style=${{ fontSize: "10px", fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 2px 2px" }}>添加主体（additionSubject）</div>
           <div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
             ${
-              addedNames.length === 0 && addCandidates.length === 0
+              visibleAdded.length === 0 && addCandidates.length === 0
                 ? html`<div style=${{ color: "#888", fontSize: "12px", padding: "2px" }}>没有可添加的主体（未提及的主体均已添加）</div>`
                 : html`
                     ${
-                      addedNames.map(n => {
+                      visibleAdded.map(n => {
                         const h = subjects.find(x => x.name === n);
                         return html`
                         <span
@@ -1818,6 +2402,35 @@ export function TransferPanel({ director }) {
             }
           </div>
         </div>
+      </${RefModal}>
+      <${RefModal}
+        open=${!!retEdit}
+        title="编辑主体 Retention（段级覆盖）"
+        width="520px"
+        height="320px"
+        onClose=${() => setRetEdit(null)}
+      >
+        ${
+          retEdit
+            ? html`
+              <div style=${{ display: "flex", flexDirection: "column", flex: "1 1 0", minHeight: "0" }}>
+                <div style=${S.retModalTitle}>${retEdit.name}</div>
+                <div style=${S.retModalSub}>该覆盖仅对当前时间轴片段生效，优先于主体节点中定义的 Retention；清空并保存后删除覆盖，回落主体默认值。</div>
+                <textarea
+                  style=${S.retTextarea}
+                  value=${retEdit.value}
+                  placeholder="描述该主体在此片段中的保留程度 / 需保留的信息（如：保留角色服装、发型与声音，表情可变化）"
+                  spellcheck=${false}
+                  onInput=${(e) => setRetEdit({ ...retEdit, value: e.target.value })}
+                ></textarea>
+                <div style=${S.retFooter}>
+                  <button class="mrd-pr-btn" style=${S.retBtnCancel} onClick=${() => setRetEdit(null)}>取消</button>
+                  <button class="mrd-pr-btn" style=${S.retBtnSave} onClick=${saveRetention}>保存</button>
+                </div>
+              </div>
+            `
+            : null
+        }
       </${RefModal}>
     </div>
   `;

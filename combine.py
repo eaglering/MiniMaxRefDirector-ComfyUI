@@ -1,0 +1,362 @@
+"""MiniMaxRefCombine — 视频合并/保存节点（像素 + latent 双路径）。
+
+- 像素路径：把 VAEDecode 的 IMAGE 帧与 VAEDecodeAudio 的 AUDIO 合并编码为
+  视频文件（原行为）。
+- latent 路径：把 joint H3 latent（视频+音频 NestedTensor）保存为
+  image_latent safetensors + sidecar meta + clip_audio wav（无损合并素材，
+  音频统一走 clip_audio，不再保存 audio_latent）；
+  接入 video_vae / audio_vae 时解码帧并编码视频；audio（clip_audio）优先作为
+  音轨，否则用 audio_vae 解码的音频流兜底。
+
+两条路径均输出 VHS_FILENAMES 4 元组 (filename, subfolder, type, full_path)，
+与 guide.py ``_vhs_tuple_path`` 的解析约定一致，可直连 Guide 的 prev_tail。
+
+实际编码逻辑复用 lib.video_combine.encode_frames_with_vhs：
+优先调用 VideoHelperSuite 的 VideoCombine（完整支持 AUDIO / metadata /
+多种容器格式），VHS 未安装或编码失败时回退到本地 ffmpeg（不含音频）。
+
+latent 路径执行后通过 send_sync("minimax_ref_video_progress") 通知前端
+（status="add_material"），携带视频路径 + image_latent/clip_audio 路径，
+供素材条「无损合并」使用。
+"""
+
+import logging
+
+from comfy_api.latest import io
+
+from .lib import latent as latent_lib
+from .lib.path import to_single_filename
+from .lib.video_combine import (
+    VIDEO_FORMATS,
+    build_vhs_filenames,
+    encode_frames_with_vhs,
+)
+from .guide import _send_progress
+
+log = logging.getLogger(__name__)
+
+
+def _trim_images_and_audio(images, audio, trim_frames, frame_rate):
+    """帧头裁剪 + 按帧率同步裁音频头 + 音频过短跳过警告（像素路径原逻辑）。
+
+    trim_frames 从解码帧头部裁掉 motion context 引导帧，并按帧率同步裁掉
+    音频头部，保持 A/V 对齐。音频比裁剪窗口还短时跳过音频裁剪（避免负长度），
+    帧数不足时跳过帧裁剪并告警。返回 (images, audio)。
+    """
+    if trim_frames > 0:
+        if images is not None and int(images.shape[0]) > trim_frames:
+            images = images[trim_frames:]
+            if audio is not None:
+                wave = audio["waveform"]
+                sr = int(audio["sample_rate"])
+                n = int(round(trim_frames / float(frame_rate) * sr))
+                if wave.shape[-1] > n:
+                    audio = {"waveform": wave[..., n:], "sample_rate": sr}
+                else:
+                    log.warning(
+                        "trim_frames=%d: audio shorter than trim window "
+                        "(%d samples); skip audio trim", trim_frames, int(wave.shape[-1]),
+                    )
+        else:
+            have = 0 if images is None else int(images.shape[0])
+            log.warning(
+                "trim_frames=%d >= available frames %d; skip frame trim",
+                trim_frames, have,
+            )
+    return images, audio
+
+
+class MiniMaxRefCombine(io.ComfyNode):
+    """合并解码后的 IMAGE 帧或 joint H3 latent 并保存，输出 VHS_FILENAMES。"""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="MiniMaxRefCombine",
+            display_name="MiniMax Ref Combine",
+            category="minimaxrefdirector",
+            description=(
+                "双路径合并/保存节点。\n"
+                "· 像素路径：IMAGE 帧（VAEDecode）+ 可选 AUDIO → VHS 视频（原行为）。\n"
+                "· latent 路径：joint H3 latent（视频+音频）→ 保存 image_latent "
+                "safetensors + meta + clip_audio wav（供「无损合并」使用，音频统一走 "
+                "clip_audio）；接入 video_vae 时解码帧并编码视频；无 clip_audio 时用 "
+                "audio_vae 解码的音频流兜底。\n"
+                "输出 VHS_FILENAMES 供 MiniMaxRefGuide 的 prev_tail 输入使用。"
+            ),
+            inputs=[
+                io.Image.Input(
+                    "images",
+                    optional=True,
+                    tooltip="视频帧 [B,H,W,C]，通常来自 VAEDecode。与 latent 二选一。",
+                ),
+                io.Audio.Input(
+                    "audio",
+                    optional=True,
+                    tooltip="可选音频轨（clip_audio）：优先作为音轨（master_audio 经 "
+                            "MiniMaxH3SongMaskedAVContext 处理后的本段分割音频，保真）；"
+                            "无 audio 时用 audio_vae 解码 latent 音频流兜底。",
+                ),
+                io.Latent.Input(
+                    "latent",
+                    optional=True,
+                    tooltip="joint H3 latent（视频+音频 NestedTensor）。提供时走 latent 路径，"
+                            "否则走像素路径。",
+                ),
+                io.Vae.Input(
+                    "video_vae",
+                    optional=True,
+                    tooltip="视频 VAE：latent 路径下解码视频帧并编码视频。",
+                ),
+                io.Vae.Input(
+                    "audio_vae",
+                    optional=True,
+                    tooltip="音频 VAE：latent 路径下无 audio 输入时，把音频流解码为音轨。",
+                ),
+                io.Int.Input(
+                    "context_frames",
+                    default=39,
+                    min=0,
+                    step=17,
+                    tooltip="该段的 context 引导帧数（H3 run 网格 5/22/39/56/...；"
+                            "AV 对齐建议 39/90/141）。接 MiniMax Ref Guide 的 "
+                            "context_frames 输出时自动取该段实际值；0 表示无 context。"
+                            "写入 meta 供无损合并使用。",
+                ),
+                io.Int.Input(
+                    "trim_frames",
+                    default=0,
+                    min=0,
+                    step=1,
+                    tooltip="像素路径下从解码帧头部裁掉的 motion context 引导帧数"
+                            "（接 MiniMax Ref Guide 的 trim_frames 输出），并按帧率"
+                            "同步裁掉音频头部保持 A/V 对齐。latent 路径不裁（保留完整"
+                            "帧供无损合并衔接），仅在 meta 中记录。",
+                ),
+                io.Float.Input(
+                    "frame_rate",
+                    default=24.0,
+                    min=1.0,
+                    step=0.1,
+                    tooltip="输出帧率。",
+                ),
+                io.Int.Input(
+                    "loop_count",
+                    default=0,
+                    min=0,
+                    step=1,
+                    tooltip="gif 输出循环次数（0 = 不循环）。",
+                ),
+                io.String.Input(
+                    "filename_prefix",
+                    default="MiniMaxRef/combine",
+                    tooltip="输出文件名前缀。",
+                ),
+                io.Combo.Input(
+                    "format",
+                    options=VIDEO_FORMATS,
+                    default="video/h264-mp4",
+                    tooltip="容器 / 编码格式。",
+                ),
+                io.Boolean.Input(
+                    "pingpong",
+                    default=False,
+                    tooltip="A-B-A 往返播放帧。",
+                ),
+                io.Boolean.Input(
+                    "save_output",
+                    default=True,
+                    tooltip="是否把视频保存到磁盘。",
+                ),
+            ],
+            outputs=[
+                io.String.Output(
+                    "Filename",
+                    tooltip=(
+                        "单个 Filename（形如 subfolder/filename，subfolder 为空时仅文件名），"
+                        "直连 MiniMaxRefGuide 的 prev_tail。"
+                    ),
+                ),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        # 强制每次 forLoop 迭代都重新执行（帧内容 / filename_prefix 随迭代变化）。
+        return float("NaN")
+
+    @classmethod
+    def execute(cls, images=None, audio=None, latent=None, video_vae=None,
+                audio_vae=None, context_frames=39,
+                trim_frames=0, frame_rate=24.0, loop_count=0,
+                filename_prefix="MiniMaxRef/combine", format="video/h264-mp4",
+                pingpong=False, save_output=True, prompt=None, extra_pnginfo=None):
+        if latent is not None:
+            return cls._execute_latent(
+                latent=latent,
+                audio=audio,
+                video_vae=video_vae,
+                audio_vae=audio_vae,
+                context_frames=context_frames,
+                trim_frames=trim_frames,
+                frame_rate=frame_rate,
+                loop_count=loop_count,
+                filename_prefix=filename_prefix,
+                format=format,
+                pingpong=pingpong,
+                save_output=save_output,
+                prompt=prompt,
+                extra_pnginfo=extra_pnginfo,
+            )
+
+        # ── 像素路径（原行为） ──────────────────────────────────────────
+        if not save_output:
+            return io.NodeOutput("", ui={"gifs": []})
+
+        # motion context 引导帧：解码帧头部 trim_frames 帧为 pinned context
+        # 延续，单段输出时裁掉；按帧率同步裁掉音频头部，保持 A/V 对齐。
+        images, audio = _trim_images_and_audio(
+            images, audio, int(trim_frames), float(frame_rate)
+        )
+
+        meta = encode_frames_with_vhs(
+            images=images,
+            audio=audio,
+            frame_rate=frame_rate,
+            loop_count=loop_count,
+            filename_prefix=filename_prefix,
+            format=format,
+            pingpong=pingpong,
+            save_output=True,
+            prompt=prompt,
+            extra_pnginfo=extra_pnginfo,
+        )
+        value = to_single_filename(build_vhs_filenames(meta))
+        return io.NodeOutput(value, ui=meta["ui"])
+
+    # ── latent 路径 ──────────────────────────────────────────────────────
+
+    @classmethod
+    def _execute_latent(cls, latent, audio, video_vae, audio_vae,
+                        context_frames, trim_frames, frame_rate, loop_count,
+                        filename_prefix, format, pingpong, save_output,
+                        prompt, extra_pnginfo):
+        video, audio_lat = latent_lib.split_joint_latent(latent)
+
+        meta_data = {
+            "frame_count": int(video.shape[2]),
+            "context_frames": int(context_frames),
+            "trim_frames": int(trim_frames),
+            "fps": float(frame_rate),
+            "width": int(video.shape[4]),
+            "height": int(video.shape[3]),
+            "audio_steps": int(audio_lat.shape[3]),
+            "video_vae": (
+                latent_lib.vae_display_name(video_vae) if video_vae is not None else ""
+            ),
+        }
+
+        # 分支 A：有 clip_audio（audio 输入）→ 保存 latent 素材 + clip_audio，音轨直接
+        # 用 clip_audio（master_audio 经 Song Masked Audio Context 处理后的本段分割音频，
+        # 原始素材切片，保真无损）；trim_frames 已在 meta_data 记录，不实际裁剪。
+        # 分支 B：无 clip_audio → 不保存素材；audio_vae 解码 latent 音频流仅作兜底
+        # （VAE 重建有损），编码前实际裁剪引导帧并同步裁音轨头。
+        has_clip_audio = audio is not None
+        saved = None
+        clip_audio_path = None
+        out_audio = None
+        if has_clip_audio:
+            saved = latent_lib.save_image_latent_files(latent, meta_data, filename_prefix)
+            # 同段素材的 latent / clip_audio 共享同一递增编号，防止不同段互相覆盖
+            save_id = saved.get("save_id")
+            out_audio = audio
+            try:
+                clip_audio_path = latent_lib.save_audio_clip(
+                    out_audio, filename_prefix, save_id=save_id
+                )["path"]
+            except Exception:
+                log.warning("failed to save clip_audio wav", exc_info=True)
+        elif audio_vae is not None:
+            try:
+                wave, sr = latent_lib.decode_audio_latent(audio_vae, audio_lat)
+                # 解码结果过短（<0.5s）说明 latent 音频流为空/无效：视为无音轨，
+                # 不输出假静音（让 VHS 不 mux 音频轨）。
+                if wave is not None and wave.shape[-1] >= max(1, int(sr) // 2):
+                    out_audio = {"waveform": wave, "sample_rate": sr}
+                else:
+                    log.info(
+                        "[MiniMaxRefCombine] audio latent decode produced too-short "
+                        "waveform (%s), treating as no audio track",
+                        tuple(wave.shape) if wave is not None else None)
+            except Exception:
+                log.warning(
+                    "[MiniMaxRefCombine] failed to decode audio latent, "
+                    "skipping audio track", exc_info=True)
+        if out_audio is not None:
+            w = out_audio.get("waveform")
+            try:
+                rms = float(w.float().pow(2).mean().sqrt()) if w is not None else 0.0
+            except Exception:
+                rms = -1.0
+            log.info("[MiniMaxRefCombine] audio track: waveform=%s sample_rate=%s rms=%.4f",
+                     tuple(w.shape) if w is not None else None,
+                     out_audio.get("sample_rate"), rms)
+
+        filenames = None
+        ui = {"gifs": []}
+        if video_vae is not None and save_output:
+            frames = latent_lib.decode_video_latent(video_vae, video)
+            if not has_clip_audio:
+                # 分支 B 无 clip_audio：实际裁剪引导帧并同步裁音轨头（保持 A/V 对齐）；
+                # 分支 A 有 clip_audio：保留完整帧供无损合并衔接（trim 仅记录在 meta）。
+                frames, out_audio = _trim_images_and_audio(
+                    frames, out_audio, int(trim_frames), float(frame_rate)
+                )
+            meta = encode_frames_with_vhs(
+                images=frames,
+                audio=out_audio,
+                frame_rate=frame_rate,
+                loop_count=loop_count,
+                filename_prefix=filename_prefix,
+                format=format,
+                pingpong=pingpong,
+                save_output=True,
+                prompt=prompt,
+                extra_pnginfo=extra_pnginfo,
+            )
+            filenames = build_vhs_filenames(meta)
+            ui = meta["ui"]
+
+        # 通知前端：分支 A 携带视频 + latent 文件路径 + clip_audio（供素材条「无损合并」）；
+        # 分支 B（无 clip_audio）仅视频路径。
+        payload: dict = {"status": "add_material", "type": "video"}
+        if filenames is not None:
+            payload["imageFile"] = to_single_filename(filenames)
+        if saved is not None:
+            payload["image_latent"] = saved["image_path"]
+            payload["meta_file"] = saved["meta_path"]
+            payload["meta"] = meta_data
+        if clip_audio_path:
+            payload["clip_audio"] = clip_audio_path
+        # 诊断：记录发送的 payload 与执行上下文 node_id（排查第二条素材缺 latent）
+        try:
+            from comfy_execution.utils import get_executing_context
+            _notify_ctx_node = getattr(get_executing_context(), "node_id", None)
+        except Exception:
+            _notify_ctx_node = None
+        log.info(
+            "[MiniMaxRefCombine] add_material send: imageFile=%s image_latent=%s "
+            "clip_audio=%s ctx_node_id=%s",
+            payload.get("imageFile"), payload.get("image_latent"),
+            payload.get("clip_audio"), _notify_ctx_node,
+        )
+        _send_progress(payload)
+
+        return io.NodeOutput(to_single_filename(filenames), ui=ui)
+
+
+NODE_CLASS_MAPPINGS = {
+    "MiniMaxRefCombine": MiniMaxRefCombine,
+}

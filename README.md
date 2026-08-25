@@ -1,6 +1,6 @@
 # MiniMaxRefDirector-ComfyUI
 
-**v3.0.0** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
+**v3.1.0** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
 
 ComfyUI 自定义节点包：在时间线上编排多段镜头，用 VLM 自动撰写分镜提示词，绑定参考图 / 参考视频 / 参考音频，逐段生成视频并跨段衔接（motion context），最终按顺序合并输出。
 
@@ -94,6 +94,12 @@ MiniMaxRefDirector-ComfyUI/
 ```
 
 ## 更新日志
+
+### v3.1.0
+
+- 修复音频链路误判：当时间线音频段越界、全为补白空白段、或源音频文件加载失败时，不再合成全零静音音轨，正确视为「无音频」——避免生成结果出现「无声 + 被标记无损（image_latent）」的错误分支。
+- 修复 `master_audio` 缓存误命中：缓存键由对象 id 改为内容指纹（sha1），消除 forLoop / 跨 prompt 场景下复用旧音频合成的隐患。
+- 新增轻量诊断日志：Guide / Director 输出 `audio_segments` 段数，便于排查音频链路。
 
 ### v3.0.0
 

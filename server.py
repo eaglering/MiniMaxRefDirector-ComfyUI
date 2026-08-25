@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import traceback
 
@@ -11,7 +12,7 @@ import folder_paths
 from aiohttp import web
 
 from .lib.image import load_image_tensor
-from .lib.llm import generate_prompt_with_api
+from .lib.llm import generate_prompt_with_api, generate_prompt_with_ollama
 from .lib.prompt import generate_h3_prompt, image_analysis
 from server import PromptServer
 
@@ -216,6 +217,16 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
                 return web.json_response({"success": False, "error": "gguf_path is required (no GGUF found under models/llm)"}, status=400)
             mmproj_path = _resolve_llm_file(mmproj_path)
             prompt_data = image_analysis(gguf_path, mmproj_path, prompt, image_path, seed)
+        elif vlm_mode == "ollama":
+            image = load_image_tensor(image_path) if image_path else None
+            text = generate_prompt_with_ollama(
+                image=image, prompt=prompt,
+                model=data.get("ollama_model", ""),
+                base_url=data.get("ollama_base_url", ""),
+                api_key=data.get("api_key", ""),
+                seed=seed,
+            )
+            prompt_data = {"detailed_description": text}
         else:
             provider = data.get("provider", "GLM")
             api_key = data.get("api_key", "")
@@ -243,11 +254,17 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         image_path = data.get("image_path", "")
         vlm_mode = data.get("vlm_mode", "llama-cpp")
         seed = data.get("seed", 42)
+        try:
+            duration_seconds = float(data.get("duration_seconds") or 0)
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
         options = {
             "gguf_path": data.get("gguf_path", ""),
             "mmproj_path": data.get("mmproj_path", ""),
             "provider": data.get("provider", "GLM"),
             "api_key": data.get("api_key", ""),
+            "ollama_model": data.get("ollama_model", ""),
+            "ollama_base_url": data.get("ollama_base_url", ""),
         }
         if not prompt:
             return web.json_response({"success": False, "error": "prompt is required"}, status=400)
@@ -260,8 +277,13 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             if not options["provider"]:
                 return web.json_response({"success": False, "error": "provider is required"}, status=400)
             # api_key 允许为空：generate_prompt_with_api 会回落 API 管理器配置 / 环境变量
-        json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed, 
-                                       vlm_mode=vlm_mode, options=options)
+        elif vlm_mode == "ollama":
+            # model / base_url 允许为空：generate_prompt_with_ollama 会回落
+            # API 管理器 ollama 服务配置 / 内置默认值（http://localhost:11434）
+            pass
+        json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed,
+                                       vlm_mode=vlm_mode, options=options,
+                                       duration_seconds=duration_seconds)
         return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()
@@ -282,7 +304,7 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
         from .lib.prompt import build_h3_subject_bindings
         data = await request.json()
         subject_data = data.get("subject_data", {}) or {}
-        raw_prompt = data.get("raw_prompt", "") or ""
+        prompt_json = data.get("prompt_json", {}) or {}
         if isinstance(subject_data, str):
             try:
                 subject_data = json.loads(subject_data)
@@ -290,13 +312,20 @@ async def build_subject_bindings_api(request: web.Request) -> web.Response:
                 subject_data = {}
         if not isinstance(subject_data, dict):
             return web.json_response({"success": False, "error": "subject_data must be an object"}, status=400)
-        if not raw_prompt.strip():
-            return web.json_response({"success": False, "error": "raw_prompt must be an object"}, status=400)
+        if isinstance(prompt_json, str):
+            try:
+                prompt_json = json.loads(prompt_json)
+            except (json.JSONDecodeError, TypeError):
+                prompt_json = {}
+        if not isinstance(prompt_json, dict):
+            return web.json_response({"success": False, "error": "prompt_json must be an object"}, status=400)
         timeline_segment = data.get("timeline_segment", None)
+        seg_audio = data.get("seg_audio", []) or []
         result = build_h3_subject_bindings(
             subject_data=subject_data,
-            raw_prompt=raw_prompt,
+            prompt_json=prompt_json,
             timeline_segment=timeline_segment,
+            seg_audio=seg_audio,
         )
         return web.json_response({"success": True, "data": result})
     except Exception as e:
@@ -800,6 +829,194 @@ async def merge_videos_api(request: web.Request) -> web.Response:
             payload["director_node_id"] = node_id
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
         return web.json_response({"success": True, "name": f"whatdreamscost/{name}", "file": file_info})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+# ── 无损合并：选中素材 latent 像素域交叉淡化 → VHS 编码 → 通知前端追加素材 ──
+
+@_routes.post(f"{API_PREFIX}/h3/merge_latents")
+async def merge_latents_api(request: web.Request) -> web.Response:
+    """无损合并：按选中顺序加载 joint latent，像素域交叉淡化拼接后编码视频。
+
+    请求体：
+    {
+      "materials": [
+        {"src": viewUrl, "imageLatent": path, "audioLatent": path,
+         "clipAudio": path, "meta": {...} | null}
+      ],
+      "node_id": str | null,        # Director 节点 id（通知定向）
+      "context_frames": int         # 兜底 context 帧数（素材 meta 优先），默认 39
+    }
+
+    音频策略（用户确认）：每段必须有 clip_audio（Combine 节点在提供音频段时才
+    保存 latent 素材并输出 clip_audio）；各段按绝对帧边界拼接为 master_audio
+    随视频一起编码。
+    产物复制到 input/whatdreamscost/merge_latent_{ts}.mp4 并 send_sync 通知。
+    """
+    try:
+        data = await request.json()
+        materials = data.get("materials") or []
+        if not isinstance(materials, list) or len(materials) < 2:
+            return web.json_response(
+                {"success": False, "error": "请至少选择 2 段含 latent 的素材"},
+                status=400,
+            )
+
+        node_id = data.get("node_id")
+        default_context = int(data.get("context_frames") or 39)
+
+        from .lib import latent as latent_lib
+        from .lib import latent_merge as latent_merge_lib
+
+        # 1) 校验每段均有 latent 文件，解析为本地绝对路径
+        entries: list[dict] = []
+        for i, mat in enumerate(materials):
+            image_latent = _material_src_to_local_path(mat.get("imageLatent") or "")
+            audio_latent = _material_src_to_local_path(mat.get("audioLatent") or "")
+            if image_latent is None:
+                return web.json_response(
+                    {"success": False, "error": f"素材 {i + 1} 缺少 image_latent 文件"},
+                    status=400,
+                )
+            clip_audio = _material_src_to_local_path(str(mat.get("clipAudio") or ""))
+            if clip_audio is None:
+                return web.json_response(
+                    {"success": False, "error": f"素材 {i + 1} 缺少 clip_audio 音频文件"},
+                    status=400,
+                )
+            entries.append({
+                "image_latent": image_latent,
+                # audio_latent 已不再保存（音频统一走 clip_audio）；旧素材可能仍携带
+                "audio_latent": audio_latent,
+                "clip_audio": clip_audio,
+            })
+
+        # 2) 首段 meta 提供 VAE 文件名；后续段以首段 VAE 为准（工作流同一组 VAE）
+        first_meta = latent_lib.load_joint_latent_files(
+            entries[0]["image_latent"], entries[0]["audio_latent"]
+        )[1]
+        video_vae_name = first_meta.get("video_vae") or ""
+        if not video_vae_name:
+            return web.json_response(
+                {"success": False,
+                 "error": "素材缺少 video_vae 信息，无法解码。请在 Combine 节点连接 "
+                          "video_vae 后重新生成素材。"},
+                status=400,
+            )
+
+        def _run_merge():
+            video_vae = latent_lib.load_vae_by_name(video_vae_name)
+
+            videos: list[dict] = []
+            clip_audios: list[dict | None] = []
+            raw_frames: list[int] = []
+            contexts: list[int] = []
+            for entry in entries:
+                joint_latent, meta = latent_lib.load_joint_latent_files(
+                    entry["image_latent"], entry["audio_latent"]
+                )
+                videos.append(joint_latent)
+                clip_audios.append(
+                    latent_lib.load_audio_from_file(entry["clip_audio"])
+                    if entry["clip_audio"] else None
+                )
+                video_t, _audio_t = latent_lib.split_joint_latent(joint_latent)
+                tokens = int(meta.get("frame_count") or video_t.shape[2])
+                raw_frames.append(latent_lib.pixel_frames(tokens))
+
+            # contexts 必须吸附为精确 AV 网格（39/90/141...），且 ≤ min(请求,
+            # 前段可用帧, 本段帧数-1)，保证重叠切片不越界、AV 相位对齐。
+            # 首段作为 base，其 context 不参与接缝（占位 = min(请求, 自身帧数)）。
+            from .lib import timing as timing_lib
+
+            contexts = []
+            available = raw_frames[0]
+            for i, frames in enumerate(raw_frames):
+                meta = latent_lib.load_joint_latent_files(
+                    entries[i]["image_latent"], entries[i]["audio_latent"]
+                )[1]
+                requested = int(meta.get("context_frames") or default_context)
+                if i == 0:
+                    contexts.append(min(requested, frames))
+                else:
+                    try:
+                        contexts.append(
+                            timing_lib.snap_av_context_length(requested, available, frames)
+                        )
+                    except ValueError:
+                        # 短素材段无法构成精确 AV 接缝（需 ≥39 可用帧）：
+                        # 降级为最大 H3 video run（音频由 _conform_waveform_length
+                        # 按绝对帧边界做亚样本时间对正），过短则 context=0 硬切。
+                        cap = min(int(requested), int(available), int(frames) - 1)
+                        run = timing_lib.largest_h3_video_run(cap)
+                        logging.getLogger(__name__).warning(
+                            "[MiniMaxRefCombine] merge_latents: segment %d cannot form an "
+                            "exact AV context boundary (usable source frames=%d); "
+                            "fallback context=%d%s",
+                            i + 1, cap, run,
+                            " (hard cut, no crossfade)" if run == 0
+                            else " (H3 video run, audio time-conformed)",
+                        )
+                        contexts.append(run)
+                available = frames
+
+            overlap = contexts[0] if contexts else default_context
+            return latent_merge_lib.merge_latents_to_video(
+                video_vae=video_vae,
+                audio_vae=None,
+                videos=videos,
+                clip_audios=clip_audios,
+                raw_frames=raw_frames,
+                contexts=contexts,
+                overlap=overlap,
+                filename_prefix="MiniMaxRef/merge_latent",
+                frame_rate=float(first_meta.get("fps") or 24.0),
+                lazy=True,
+            )
+
+        meta_out = await asyncio.to_thread(_run_merge)
+        merged_path = meta_out.get("full_path")
+        if not merged_path or not os.path.isfile(merged_path):
+            return web.json_response(
+                {"success": False, "error": "无损合并失败：未生成输出文件"}, status=500
+            )
+
+        # 3) 复制到素材库目录 input/whatdreamscost/，保证可预览、可再参与合并
+        import datetime
+        import shutil
+
+        input_dir = folder_paths.get_input_directory()
+        mat_dir = os.path.join(input_dir, "whatdreamscost")
+        os.makedirs(mat_dir, exist_ok=True)
+        ext = os.path.splitext(merged_path)[1] or ".mp4"
+        if ext.lower() not in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"):
+            ext = ".mp4"
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"merge_latent_{ts}{ext}"
+        dst = os.path.join(mat_dir, name)
+        n = 1
+        while os.path.exists(dst):
+            name = f"merge_latent_{ts}_{n}{ext}"
+            dst = os.path.join(mat_dir, name)
+            n += 1
+        shutil.copy2(merged_path, dst)
+
+        file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
+        payload = {
+            "status": "add_material",
+            "type": "video",
+            "imageFile": file_info,
+            "image_latent": None,
+            "audio_latent": None,
+        }
+        if node_id is not None:
+            payload["director_node_id"] = node_id
+        PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
+        return web.json_response(
+            {"success": True, "name": f"whatdreamscost/{name}", "file": file_info}
+        )
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)

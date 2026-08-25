@@ -387,6 +387,25 @@ export const render = {
           this.ctx.lineWidth = 1.5;
           this.ctx.strokeRect(startX, RULER_HEIGHT + 1, pxWidth, this.blockHeight - 2);
         }
+
+        // Latent Upscaler 标记：segment.upscale === true 时在段右上角显示 X2
+        if (seg.upscale && seg.type !== "ghost" && pxWidth > 44) {
+          const badgeW = 22;
+          const badgeX = startX + pxWidth - badgeW - 3;
+          const badgeY = RULER_HEIGHT + 1;
+          this.ctx.save();
+          this.ctx.beginPath();
+          this.ctx.rect(startX, RULER_HEIGHT, pxWidth, this.blockHeight);
+          this.ctx.clip();
+          this.ctx.fillStyle = "rgba(255, 145, 0, 0.9)";
+          this.ctx.fillRect(badgeX, badgeY, badgeW, 15);
+          this.ctx.fillStyle = "#fff";
+          this.ctx.font = "bold 10px sans-serif";
+          this.ctx.textAlign = "center";
+          this.ctx.textBaseline = "middle";
+          this.ctx.fillText("X2", badgeX + badgeW / 2, badgeY + 7.5);
+          this.ctx.restore();
+        }
         this.ctx.globalAlpha = 1.0;
       }
 

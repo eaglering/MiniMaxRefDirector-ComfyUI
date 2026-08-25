@@ -102,8 +102,18 @@ class MiniMaxRefSubject(io.ComfyNode):
                                 tooltip="Optional API key override; falls back to the API manager config, then to the matching env var.",
                             ),
                         ]),
+                        io.DynamicCombo.Option("ollama", [
+                            io.String.Input(
+                                "ollama_model", default="",
+                                tooltip="Ollama model tag (e.g. llava, qwen2.5vl:7b). Empty falls back to the API manager ollama service, then to 'llava'.",
+                            ),
+                            io.String.Input(
+                                "ollama_base_url", default="",
+                                tooltip="Ollama endpoint. Empty defaults to http://localhost:11434/api/chat (an OpenAI-compatible .../v1/chat/completions URL also works).",
+                            ),
+                        ]),
                     ],
-                    tooltip="How the H3 prompt is generated: locally with llama-cpp (GGUF) or via a cloud API.",
+                    tooltip="How the H3 prompt is generated: locally with llama-cpp (GGUF), via a cloud API, or with a local Ollama server.",
                 ),
                 io.String.Input(
                     "global_prompt", multiline=True, default="", optional=True,
@@ -132,12 +142,16 @@ class MiniMaxRefSubject(io.ComfyNode):
         mmproj_path = ""
         provider = ""
         api_key = ""
+        ollama_model = ""
+        ollama_base_url = ""
         if isinstance(vlm_mode, dict):
             mode = str(vlm_mode.get("vlm_mode") or "llama-cpp")
             gguf_name = str(vlm_mode.get("gguf_name") or "")
             mmproj_path = str(vlm_mode.get("mmproj_path") or "")
             provider = str(vlm_mode.get("provider") or "")
             api_key = str(vlm_mode.get("api_key") or "")
+            ollama_model = str(vlm_mode.get("ollama_model") or "")
+            ollama_base_url = str(vlm_mode.get("ollama_base_url") or "")
 
         subjects = []
         try:
@@ -153,13 +167,15 @@ class MiniMaxRefSubject(io.ComfyNode):
 
         for subj in subjects:
             entry = {
-                "name": str(subj.get("name", ""))[:128],
-                "description": str(subj.get("description", ""))[:1024],
+                "name": str(subj.get("name", "")),
+                "audioRef": str(subj.get("audioRef", "")),
+                "description": str(subj.get("description", "")),
                 "imageFile": str(subj.get("imageFile", "")),
                 "audioFile": str(subj.get("audioFile", "")),
-                "type": str(subj.get("type", "") or "Subject")[:32],
-                "relationship": str(subj.get("relationship", "") or "fully_preserved")[:64],
-                "audio_relationship": str(subj.get("audio_relationship", "") or "reference")[:64],
+                "videoFile": str(subj.get("videoFile", "")),
+                "type": str(subj.get("type", "")),
+                "relationship": str(subj.get("relationship", "")),
+                "retention": str(subj.get("retention", "")),
             }
             output["subjects"].append(entry)
 
@@ -187,6 +203,7 @@ class MiniMaxRefSubject(io.ComfyNode):
         for s in output["subjects"]:
             s["imageFile"] = _resolve_file(s["imageFile"])
             s["audioFile"] = _resolve_file(s["audioFile"])
+            s["videoFile"] = _resolve_file(s["videoFile"])
 
         # Unified config: VLM opts (consumed by the H3 prompt generator) + subject data.
         opts = {
@@ -197,6 +214,8 @@ class MiniMaxRefSubject(io.ComfyNode):
             "mmproj_path": _resolve_llm_path(mmproj_path),
             "provider": provider,
             "api_key": api_key,
+            "ollama_model": ollama_model,
+            "ollama_base_url": ollama_base_url,
         }
         config = {
             "opts": opts,
@@ -205,6 +224,7 @@ class MiniMaxRefSubject(io.ComfyNode):
             "subject_count": subject_count,
         }
 
+        log.info(f"[MiniMaxRefSubject] config: {json.dumps(config, indent=2)}")
         return io.NodeOutput(
             config,
         )

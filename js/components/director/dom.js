@@ -710,12 +710,39 @@ export const dom = {
 
     this.strengthLabel = document.createElement("span");
     this.strengthLabel.className = "mrd-pr-strength-label";
+    this.strengthLabel.style.marginLeft = "0px";
     this.strengthLabel.textContent = "Guide Strength:";
+
+    // --- Segment Duration Input（Guide Strength 左侧；秒，两位小数） ---
+    this.durationLabel = document.createElement("span");
+    this.durationLabel.className = "mrd-pr-strength-label";
+    this.durationLabel.textContent = "Duration:";
+
+    this.durationValue = document.createElement("input");
+    this.durationValue.type = "text";
+    this.durationValue.className = "mrd-pr-strength-input";
+    this.durationValue.value = "";
+    this.durationValue.disabled = true;
+    this.durationValue.style.cursor = "text";
+    this.durationValue.style.width = "58px";
+    this.durationValue.title = "段时长。单位跟随 display_mode：帧模式为整数帧，秒模式为两位小数秒。切换焦点（blur/change）应用到当前段；段时长变化时此处同步。";
+
+    // 切换焦点时应用 duration 到当前 seg；阻止全局快捷键（如 Delete）在输入框内生效
+    this.durationValue.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") this.durationValue.blur();
+    });
+    this.durationValue.addEventListener("change", () => {
+      this._applyDurationInput();
+    });
+    this.durationValue.addEventListener("blur", () => {
+      this._applyDurationInput();
+    });
 
     this.strengthValue = document.createElement("input");
     this.strengthValue.type = "text";
     this.strengthValue.className = "mrd-pr-strength-input";
-    this.strengthValue.value = "1.00";
+    this.strengthValue.value = "39";
     this.strengthValue.disabled = true;
     this.strengthValue.style.cursor = "ew-resize";
 
@@ -728,7 +755,7 @@ export const dom = {
     this.strengthValue.addEventListener("mousedown", (e) => {
       if (this.strengthValue.disabled) return;
       startX = e.clientX;
-      startVal = parseFloat(this.strengthValue.value) || 1.0;
+      startVal = parseInt(this.strengthValue.value) || 39;
       hasMoved = false;
 
       const onMouseMove = (moveEvent) => {
@@ -740,20 +767,18 @@ export const dom = {
 
         if (isDragging) {
           moveEvent.preventDefault();
-          const sensitivity = 0.002;
+          const sensitivity = 0.2;
           let newVal = startVal + deltaX * sensitivity;
 
           if (newVal < 0) newVal = 0;
-          if (newVal > 1) newVal = 1;
+          if (newVal > 9999) newVal = 9999;
 
-          this.strengthValue.value = newVal.toFixed(2);
+          this.strengthValue.value = parseInt(newVal);
 
-          if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
+          if (this.timeline.segments[this.selectedIndex]) {
             const seg = this.timeline.segments[this.selectedIndex];
-            if (seg.type !== "text") {
-              seg.guideStrength = newVal;
+            seg.guideStrength = newVal;
               this.commitChanges();
-            }
           }
         }
       };
@@ -774,21 +799,21 @@ export const dom = {
     });
 
     this.strengthValue.addEventListener("change", (e) => {
-      let val = parseFloat(e.target.value);
-      if (isNaN(val)) val = 1;
-      val = Math.max(0, Math.min(1, val));
-      this.strengthValue.value = val.toFixed(2);
-      if (this.selectionType === "image" && this.timeline.segments[this.selectedIndex]) {
+      let val = parseInt(e.target.value);
+      if (isNaN(val)) val = 39;
+      val = Math.max(0, Math.min(9999, val));
+      this.strengthValue.value = val;
+      if (this.timeline.segments[this.selectedIndex]) {
         const seg = this.timeline.segments[this.selectedIndex];
-        if (seg.type !== "text") {
-          seg.guideStrength = val;
+        seg.guideStrength = val;
           this.commitChanges();
-        }
       }
     });
 
     this.strengthRow.appendChild(this.timeCodeDisplay);
     this.strengthRow.appendChild(this.segmentBoundsDisplay);
+    this.strengthRow.appendChild(this.durationLabel);
+    this.strengthRow.appendChild(this.durationValue);
     this.strengthRow.appendChild(this.strengthLabel);
     this.strengthRow.appendChild(this.strengthValue);
 
@@ -915,7 +940,7 @@ export const dom = {
       this.commitChanges(true);
       this.render();
     });
-
+    this.mainTrackLabel._eyeBtn.style.display = "none";
     this.audioTrackLabel = createTrackLabel("AUDIO", "#1e1e1e", "audio", this.audioTrackEnabled, () => {
       this.audioTrackEnabled = !this.audioTrackEnabled;
       updateTrackIcon(this.audioTrackLabel._eyeBtn, "audio", this.audioTrackEnabled);

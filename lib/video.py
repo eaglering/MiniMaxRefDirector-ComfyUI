@@ -45,6 +45,16 @@ def get_ffmpeg_path(name: str = "ffmpeg") -> str | None:
         ):
             if os.path.isfile(path):
                 return path
+    # VideoHelperSuite 依赖 imageio-ffmpeg 的捆绑二进制（不在 PATH 中），
+    # 作为最后回退查找，保证本地 ffmpeg 编码路径在任意环境可用。
+    try:
+        import imageio_ffmpeg
+        if name.lower() in ("ffmpeg", "ffmpeg.exe"):
+            exe = imageio_ffmpeg.get_ffmpeg_exe()
+            if exe and os.path.isfile(exe):
+                return exe
+    except Exception:  # noqa: BLE001
+        pass
     return None
 
 
@@ -436,19 +446,52 @@ def _next_video_filename(folder: str, prefix: str, ext: str) -> str:
         n += 1
 
 
-def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
-    """Local fallback: encode a [B,H,W,C] float frame batch to a video file with ffmpeg."""
+def _iter_video_frames(frames):
+    """统一产出单帧（[1,H,W,C]），兼容 tensor 与一次性帧流。
+
+    tensor 输入按 index 取帧；可迭代帧流（如 VHS 的 _OneShotFrameSequence）
+    直接迭代。ffmpeg 回退路径全程流式，不物化全部帧。
+    """
+    if hasattr(frames, "shape"):
+        for i in range(int(frames.shape[0])):
+            yield frames[i]
+    else:
+        yield from frames
+
+
+def _replay_frame_input(frames):
+    """若帧输入是一次性帧流（VHS 失败后可能已被消费），重置为可重放。
+
+    tensor / numpy 没有 reset，直接跳过；帧流 reset 后重新流式解码，
+    保证 ffmpeg 回退拿得到完整帧数据且不累积显存。
+    """
+    reset = getattr(frames, "reset", None)
+    if callable(reset):
+        try:
+            reset()
+        except Exception:  # noqa: BLE001 - 尽力而为
+            pass
+
+
+def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4", audio: dict | None = None) -> dict:
+    """Local fallback: encode a [B,H,W,C] float frame batch to a video file with ffmpeg.
+
+    ``audio``（ComfyUI AUDIO dict）可选：先写成临时 WAV，再作为第二条输入流 mux
+    进最终文件（mp4/mov -> aac，webm -> libopus）。None 时只编码视频流。
+    音频 mux 失败（如编码器缺失）时降级为纯视频输出，不让整个合并流程失败。
+    """
     import folder_paths
     from PIL import Image
+    from .audio import save_audio_to_temp_wav
 
     fmt_map = {
-        "video/h264-mp4": ("libx264", "mp4"),
-        "video/h265-mp4": ("libx265", "mp4"),
-        "video/vp9": ("libvpx-vp9", "webm"),
-        "video/av1": ("libaom-av1", "webm"),
-        "video/h264-webm": ("libx264", "webm"),
+        "video/h264-mp4": ("libx264", "mp4", "aac"),
+        "video/h265-mp4": ("libx265", "mp4", "aac"),
+        "video/vp9": ("libvpx-vp9", "webm", "libopus"),
+        "video/av1": ("libaom-av1", "webm", "libopus"),
+        "video/h264-webm": ("libx264", "webm", "libopus"),
     }
-    codec, ext = fmt_map.get(format, ("libx264", "mp4"))
+    codec, ext, audio_codec = fmt_map.get(format, ("libx264", "mp4", "aac"))
 
     ffmpeg = get_ffmpeg_path("ffmpeg")
     if not ffmpeg:
@@ -462,38 +505,72 @@ def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format
     filename = _next_video_filename(full_out_dir, prefix, ext)
     full_out = os.path.join(full_out_dir, filename)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for i in range(frames.shape[0]):
-            frame = frames[i]
-            if frame.ndim == 4:  # [1,H,W,C] -> [H,W,C]
-                frame = frame[0]
-            img = Image.fromarray((frame.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy()))
-            img.save(os.path.join(tmpdir, f"frame_{i:05d}.png"))
-        cmd = [
-            ffmpeg, "-y", "-framerate", str(fps),
-            "-i", os.path.join(tmpdir, "frame_%05d.png"),
-            "-c:v", codec, "-pix_fmt", "yuv420p", full_out,
-        ]
-        res = subprocess.run(cmd, capture_output=True)
-        if res.returncode != 0:
-            raise RuntimeError(f"ffmpeg encode failed: {res.stderr.decode(errors='replace')[:2000]}")
+    audio_path = None
+    if audio is not None:
+        audio_path = save_audio_to_temp_wav(audio)
+        if audio_path is None:
+            raise RuntimeError("ffmpeg encode: could not serialize AUDIO input to wav")
+        audio_path = str(audio_path)
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i, frame in enumerate(_iter_video_frames(frames)):
+                if frame.ndim == 4:  # [1,H,W,C] -> [H,W,C]
+                    frame = frame[0]
+                img = Image.fromarray((frame.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy()))
+                img.save(os.path.join(tmpdir, f"frame_{i:05d}.png"))
+            cmd = [
+                ffmpeg, "-y", "-framerate", str(fps),
+                "-i", os.path.join(tmpdir, "frame_%05d.png"),
+            ]
+            if audio_path is not None:
+                cmd += ["-i", audio_path]
+            cmd += ["-c:v", codec, "-pix_fmt", "yuv420p"]
+            if audio_path is not None:
+                cmd += ["-c:a", audio_codec, "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+            cmd.append(full_out)
+            res = subprocess.run(cmd, capture_output=True)
+            if res.returncode != 0 and audio_path is not None:
+                # 音频 mux 失败（容器/编码器不支持等）时降级为纯视频，
+                # 避免音频问题让整个合并流程失败。
+                logger.warning(
+                    "ffmpeg encode with audio failed (rc=%d), retrying without audio: %s",
+                    res.returncode, res.stderr.decode(errors="replace")[-400:],
+                )
+                cmd = [
+                    ffmpeg, "-y", "-framerate", str(fps),
+                    "-i", os.path.join(tmpdir, "frame_%05d.png"),
+                    "-c:v", codec, "-pix_fmt", "yuv420p", full_out,
+                ]
+                res = subprocess.run(cmd, capture_output=True)
+            if res.returncode != 0:
+                raise RuntimeError(f"ffmpeg encode failed: {res.stderr.decode(errors='replace')[:2000]}")
+    finally:
+        if audio_path is not None:
+            try:
+                os.unlink(audio_path)
+            except OSError:
+                pass
 
     return {"filename": filename, "subfolder": subfolder, "type": "output"}
 
 
-def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
-    """Encode a [B,H,W,C] float frame batch into a video file.
+def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4", try_vhs: bool = True, audio: dict | None = None) -> dict:
+    """Encode a [B,H,W,C] float frame batch (or a lazy frame stream) into a video file.
+
+    ``audio``（ComfyUI AUDIO dict）可选，传给本地 ffmpeg 回退路径 mux 音轨；
+    VHS 路径的音频由调用方（encode_frames_with_vhs）直接传给 VideoCombine。
 
     Returns {"filename", "subfolder", "type"} suitable for send_sync / /view.
     Uses VideoHelperSuite when installed (soft dependency), otherwise falls back
     to local ffmpeg (lib.video._encode_video_frames_ffmpeg).
     """
     try:
-        from videohelpersuite.videohelpersuite.nodes import VideoCombine
+        from videohelpersuite.nodes import VideoCombine
     except ImportError:
         VideoCombine = None
 
-    if VideoCombine is not None:
+    if VideoCombine is not None and try_vhs:
         try:
             vc = VideoCombine()
             out = vc.combine_video(
@@ -512,7 +589,9 @@ def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = 
         except Exception as exc:  # noqa: BLE001
             logger.warning("VideoCombine encode failed, falling back to local ffmpeg: %s", exc)
 
-    return _encode_video_frames_ffmpeg(frames, fps, filename_prefix, format)
+    # ffmpeg 回退：一次性帧流可能已被 VHS 消费，重放后再流式逐帧编码。
+    _replay_frame_input(frames)
+    return _encode_video_frames_ffmpeg(frames, fps, filename_prefix, format, audio=audio)
 
 
 def _load_wav_audio(path: str) -> dict:
@@ -529,7 +608,17 @@ def _load_wav_audio(path: str) -> dict:
             waveform, sample_rate = torchaudio.load(path)
             return {"waveform": waveform.unsqueeze(0), "sample_rate": int(sample_rate)}
         except Exception as exc:
-            raise RuntimeError("Failed to load extracted audio with soundfile or torchaudio.") from exc
+            # 最后回退：av (PyAV) 解码任意容器（mp3/m4a/ogg...）。
+            # soundfile 的 Windows libsndfile 常不支持 mp3，
+            # 新版 torchaudio 又依赖 torchcodec，故用项目已依赖的 av 兜底。
+            from .audio import load_audio_tensor
+
+            try:
+                return load_audio_tensor(path)
+            except Exception as av_exc:
+                raise RuntimeError(
+                    "Failed to load audio with soundfile, torchaudio or av: %r" % (path,)
+                ) from av_exc
 
 
 def ffmpeg_extract_audio(video_path: str) -> dict | None:
@@ -733,12 +822,126 @@ def _collect_video_components(
     return torch.cat(all_images, dim=0), merged_audio
 
 
+def _write_merged_video_with_pyav(
+    images: torch.Tensor,
+    audio: "dict | None",
+    fps: Fraction,
+    path: str,
+) -> bool:
+    """Encode merged [B,H,W,C] frames (+ optional audio) to an MP4 via PyAV.
+
+    The audio is AAC-encoded in small chunks (1024 samples) and the audio stream
+    gets an explicit ``time_base``. The official ``VideoFromComponents.save_to()``
+    instead muxes the whole waveform as one giant AudioFrame, which hangs or fails
+    on some PyAV builds, so we cannot rely on it when FFmpeg is unavailable.
+    Returns True on success; a partial file is removed on failure.
+    """
+    try:
+        import av
+        import numpy as np
+    except ImportError:
+        logger.warning("PyAV is not available for tensor-merge encoding — pip install av")
+        return False
+
+    output = None
+    try:
+        output = av.open(path, mode="w", options={"movflags": "use_metadata_tags+faststart"})
+
+        frame_rate = Fraction(fps).limit_denominator(1000)
+        video_stream = output.add_stream("h264", rate=frame_rate)
+        video_stream.width = int(images.shape[2])
+        video_stream.height = int(images.shape[1])
+        video_stream.pix_fmt = "yuv420p"
+        video_stream.codec_context.max_b_frames = 0
+
+        audio_stream = None
+        sr = 0
+        layout = "mono"
+        waveform = None
+        if audio is not None:
+            waveform = audio.get("waveform")
+            raw_sr = audio.get("sample_rate")
+            if waveform is not None and raw_sr:
+                sr = int(raw_sr)
+                if waveform.dim() == 2:
+                    channels = int(waveform.shape[0])
+                else:
+                    channels = int(waveform.shape[1]) if waveform.shape[1] <= 6 else 1
+                layout = {1: "mono", 2: "stereo", 6: "5.1"}.get(channels, "stereo")
+                audio_stream = output.add_stream("aac", rate=sr, layout=layout)
+                # Required: without this the muxer fails with
+                # "Cannot rebase to zero time" when writing AAC.
+                audio_stream.time_base = Fraction(1, sr)
+
+        np_images = images.float().cpu().clamp(0.0, 1.0).mul(255.0).byte().numpy()
+        if np_images.ndim != 4:
+            raise ValueError(f"expected [B,H,W,C] images, got shape {np_images.shape}")
+        if np_images.shape[-1] == 4:
+            np_images = np.ascontiguousarray(np_images[..., :3])
+        elif np_images.shape[-1] == 1:
+            np_images = np.broadcast_to(np_images, (*np_images.shape[:3], 3))
+
+        for i in range(np_images.shape[0]):
+            frame = av.VideoFrame.from_ndarray(
+                np.ascontiguousarray(np_images[i]), format="rgb24",
+            )
+            frame = frame.reformat(format="yuv420p")
+            for packet in video_stream.encode(frame):
+                output.mux(packet)
+        for packet in video_stream.encode(None):
+            output.mux(packet)
+
+        if audio_stream is not None:
+            wav = waveform
+            if wav.dim() == 3:
+                wav = wav[0]
+            wav = wav.float().cpu().contiguous()
+            total_samples = wav.shape[1]
+            chunk = 1024
+            start = 0
+            while start < total_samples:
+                seg = wav[:, start:start + chunk]
+                a_frame = av.AudioFrame.from_ndarray(
+                    np.ascontiguousarray(seg.numpy()), format="fltp", layout=layout,
+                )
+                a_frame.sample_rate = sr
+                a_frame.pts = start
+                for packet in audio_stream.encode(a_frame):
+                    output.mux(packet)
+                start += chunk
+            for packet in audio_stream.encode(None):
+                output.mux(packet)
+
+        output.close()
+        output = None
+        return os.path.isfile(path) and os.path.getsize(path) > 0
+    except Exception as exc:
+        logger.warning("PyAV merged-video encode failed: %s", exc)
+        return False
+    finally:
+        if output is not None:
+            try:
+                output.close()
+            except Exception:
+                pass
+        if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
 def _tensor_merge_video_files(
     sources: list[str],
     total: int,
     progress: "callable[[int, str], None]",
-):
-    """Load video files and merge them frame-by-frame using torch.cat (tensor fallback)."""
+) -> "tuple[Input.Video, str | None]":
+    """Load video files and merge them frame-by-frame using torch.cat (tensor fallback).
+
+    When possible the merged result is encoded to a real MP4 via PyAV and returned
+    as ``(VideoFromFile(path), path)``; otherwise it falls back to the in-memory
+    ``(VideoFromComponents, None)`` so callers can degrade gracefully.
+    """
     progress(total, "Loading clips for tensor merge…")
     videos = []
     for i, source in enumerate(sources, start=1):
@@ -751,13 +954,44 @@ def _tensor_merge_video_files(
     progress(total + 1, "Merging frames…")
     merged_images, merged_audio = _collect_video_components(videos, specs[0].has_audio)
 
-    return InputImpl.VideoFromComponents(
+    merged = InputImpl.VideoFromComponents(
         Types.VideoComponents(
             images=merged_images,
             audio=merged_audio,
             frame_rate=specs[0].fps,
         )
     )
+
+    # Without FFmpeg the in-memory VideoFromComponents cannot produce a usable
+    # output file (official save_to() chokes on the single-frame AAC mux in some
+    # PyAV builds), so write a real MP4 here when possible.
+    merged_path: str | None = None
+    try:
+        fd, merged_path = tempfile.mkstemp(suffix=".mp4", dir=folder_paths.get_temp_directory())
+        os.close(fd)
+    except OSError as exc:
+        logger.warning("tensor-merge could not create temp file: %s", exc)
+        merged_path = None
+
+    if merged_path:
+        try:
+            if _write_merged_video_with_pyav(merged_images, merged_audio, specs[0].fps, merged_path):
+                logger.info("tensor-merge encoded merged video to %s", merged_path)
+                return InputImpl.VideoFromFile(merged_path), merged_path
+            logger.warning("tensor-merge PyAV encode failed — falling back to in-memory merge")
+            try:
+                os.unlink(merged_path)
+            except OSError:
+                pass
+        except Exception as exc:
+            logger.warning("tensor-merge PyAV encode error: %s — falling back to in-memory merge", exc)
+            try:
+                os.unlink(merged_path)
+            except OSError:
+                pass
+        merged_path = None
+
+    return merged, None
 
 
 def _parse_path_list(paths: "str | list[str]") -> list[str]:
@@ -1240,11 +1474,15 @@ class RefMergeVideosFromPaths(io.ComfyNode):
 
             # --- Slow fallback: tensor-based merge ---
             logger.info("%s backend=tensor-merge, transition=none (ffmpeg unavailable)", tag)
-            merged_video = _tensor_merge_video_files(resolved, total, _progress)
+            merged_video, merged_path = _tensor_merge_video_files(resolved, total, _progress)
+            owned_outputs: set[str] = set(generated_outputs)
+            if merged_path:
+                owned_outputs.add(merged_path)
             return _finalize_video(
                 merged_video,
                 f"Done — merged {total} clips",
-                owned_paths=generated_outputs,
+                owned_paths=owned_outputs,
+                final_path=merged_path,
             )
         finally:
             _cleanup_owned(generated_outputs)
