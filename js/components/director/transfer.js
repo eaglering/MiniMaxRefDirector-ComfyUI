@@ -221,6 +221,22 @@ function getSubjectVlmSettings() {
   return null;
 }
 
+function getSubjectGlobalPrompt() {
+  // 从 graph 中的 MiniMaxRefSubject 节点读取 global_prompt widget 值
+  // （subject.js 中该 widget 被隐藏，由自定义 Global Prompt 输入框实时双向同步）
+  try {
+    const nodes = app.graph?._nodes || [];
+    for (const n of nodes) {
+      if (n.type !== "MiniMaxRefSubject") continue;
+      const w = (n.widgets || []).find((x) => x.name === "global_prompt");
+      if (w) return w.value || "";
+    }
+  } catch (e) {
+    console.warn("[Transfer] getSubjectGlobalPrompt failed:", e);
+  }
+  return "";
+}
+
 function subjectImgSrc(s) {
   if (s.imageB64) return s.imageB64;
   if (s.imageFile && api) {
@@ -1868,13 +1884,14 @@ export function TransferPanel({ director }) {
   if (bindings.subject_definitions) bindParts.push("subject_definitions:\n" + bindings.subject_definitions_final);
   if (bindings.retention_analysis) bindParts.push("retention_analysis:\n" + bindings.retention_analysis_final);
   const bindingsText = bindParts.join("\n\n");
+  const globalPrompt = getSubjectGlobalPrompt();
 
   // 完整 H3 prompt 预览文本：主体定义 / 留存分析来自 bindData，其余来自 rightText（实时编辑）
   const h3PreviewSections = [
     ["subject_definitions", bindings.subject_definitions],
     ["summary", rightText.summary],
     ["retention_analysis", bindings.retention_analysis],
-    ["detailed_description", rightText.detailed_description],
+    ["detailed_description", globalPrompt + "\n" + rightText.detailed_description],
     ["overall_soundscape", rightText.overall_soundscape],
     ["non_diegetic_music", rightText.non_diegetic_music],
   ];
