@@ -465,6 +465,11 @@ const S = {
     color: "#38bdf8", display: "inline-flex", alignItems: "center", justifyContent: "center",
     fontSize: "16px", flex: "0 0 auto",
   },
+  resSubject: {
+    width: "100%", height: "96px", borderRadius: "4px", background: "#000000",
+    color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center",
+    fontSize: "16px", flex: "0 0 auto",
+  },
   // .tr-resources 内 Video / Audio 主体播放器：带浏览器原生 controls，可直接播放
   video: {
     width: "100%", height: "calc(100% - 18px)", objectFit: "contain",
@@ -1940,7 +1945,9 @@ export function TransferPanel({ director }) {
                               </div>`
                             : media.kind === "video"
                               ? html`<span style=${S.resVideo} title="视频主体（无文件）">▶</span>`
-                              : html`<span style=${S.resAudio} title="音频/无媒体主体">♪</span>`
+                              : media.kind === "audio" 
+                                ? html`<span style=${S.resAudio} title="音频/无媒体主体">♪</span>`
+                                : html`<span style=${S.resSubject} title="主体">(‾◡◝)</span>`
                     }
                     ${
                       r.kind === "addition"
