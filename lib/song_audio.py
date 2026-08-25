@@ -4,7 +4,9 @@
 提供 master_audio 合成（把 director 补齐后的 audio_segments 拼成完整音频）、
 context_length 吸附与第三方节点模块定位。被 guide.py 的段条件构建使用。
 """
+import hashlib
 import importlib.util
+import json
 import logging
 import os
 import sys
@@ -108,7 +110,7 @@ def _synthesize_master_audio(guide_data):
     位置拼接。返回 {"waveform": [1, 2, L], "sample_rate": sr}；无音频段返回 None。
     """
     segments = guide_data.get("audio_segments") or []
-    if not segments:
+    if not segments or all(s.get("silence") for s in segments):
         return None
     frame_rate = float(guide_data.get("frame_rate", 24))
     range_start = int(guide_data.get("range_start", 0))
@@ -119,7 +121,13 @@ def _synthesize_master_audio(guide_data):
     if total_frames <= 0:
         return None
 
-    cache_key = ("master_audio", id(guide_data), range_start, range_end, frame_rate)
+    try:
+        content_fp = hashlib.sha1(
+            json.dumps(segments, ensure_ascii=False, sort_keys=True,
+                       default=str).encode("utf-8")).hexdigest()
+    except Exception:
+        content_fp = str(segments)
+    cache_key = ("master_audio", content_fp, range_start, range_end, frame_rate)
     if cache_key in _MASTER_AUDIO_CACHE:
         return _MASTER_AUDIO_CACHE[cache_key]
 
@@ -145,7 +153,9 @@ def _synthesize_master_audio(guide_data):
         if target_sr is None:
             target_sr = int(loaded[path]["sample_rate"])
     if target_sr is None:
-        target_sr = 32000
+        log.warning("[MiniMaxRefGuide] master_audio: no audio source loaded, "
+                    "treating as no audio")
+        return None
 
     samples_per_frame = target_sr / frame_rate
     total_samples = max(1, int(round(total_frames * samples_per_frame)))
@@ -194,5 +204,7 @@ def _synthesize_master_audio(guide_data):
         out[..., pos_sample:end] = chunk[..., :end - pos_sample]
 
     master = {"waveform": out, "sample_rate": target_sr}
+    if len(_MASTER_AUDIO_CACHE) > 32:
+        _MASTER_AUDIO_CACHE.clear()
     _MASTER_AUDIO_CACHE[cache_key] = master
     return master

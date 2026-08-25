@@ -195,7 +195,6 @@ class MiniMaxRefDirector(io.ComfyNode):
         segment_count = 0
         timeline_segments = tdata.get("segments", [])
         timeline_data_len = len(timeline_segments)
-        last_frame_path = ""
 
         if timeline_data_len == 0:
             raise ValueError("[MiniMaxRefDirector] timeline_segments is required and must not be empty.")
@@ -273,7 +272,7 @@ class MiniMaxRefDirector(io.ComfyNode):
             f"start_second: {start_second} | end_second: {end_second} | duration_seconds: {duration_seconds} | "
             f"start_frane: {start_frame} | end_frame: {end_frame} | duration_frames: {duration_frames} | "
             f"{out_w}×{out_h} ({outpu_resolution}, {million_pixels}MP) | "
-            f"{len(subject)} subjects | {global_prompt} | {last_frame_path}"
+            f"{len(subject)} subjects | {global_prompt} | audio_segments: {len(audio_segments)} | "
         )
 
         result = io.NodeOutput(guide_data, segment_count + 1, frame_rate)

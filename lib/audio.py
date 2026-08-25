@@ -220,6 +220,8 @@ def fill_audio_gaps(audio_segments, range_start, range_end) -> list[dict]:
             # 左边缘裁剪了多少帧，源文件内切割起点就相应右移多少帧
             new_seg["trimStart"] = int(s.get("trimStart", 0)) + (clip_start - start)
         clipped.append(new_seg)
+    if not clipped:
+        return []
     result = []
     cursor = range_start
     for s in clipped:

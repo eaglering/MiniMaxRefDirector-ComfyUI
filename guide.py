@@ -196,6 +196,7 @@ class MiniMaxRefGuide(io.ComfyNode):
         width = int(guide_data.get("width", 1024))
         height = int(guide_data.get("height", 576))
         length = int(entry.get("durationFrames", 0))
+        audio_segments = guide_data.get("audio_segments", [])
         if length <= 0:
             raise ValueError(f"[MiniMaxRefGuide] segment {idx} has invalid durationFrames={length}.")
 
@@ -209,7 +210,7 @@ class MiniMaxRefGuide(io.ComfyNode):
             raise ValueError("[MiniMaxRefGuide] needs a VIDEO_VAE input to prepare the latent.")
 
         log.info(f"[MiniMaxRefGuide] guide_index={idx} prompt={prompt} "
-                 f"images={images} videos={videos} audios={audios} seed={seed}")
+                 f"images={images} videos={videos} audios={audios} seed={seed} audio_segments={len(audio_segments)} ")
 
         try:
             unload_llama_models()
