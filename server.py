@@ -875,9 +875,9 @@ async def merge_latents_api(request: web.Request) -> web.Response:
         for i, mat in enumerate(materials):
             image_latent = _material_src_to_local_path(mat.get("imageLatent") or "")
             audio_latent = _material_src_to_local_path(mat.get("audioLatent") or "")
-            if image_latent is None or audio_latent is None:
+            if image_latent is None:
                 return web.json_response(
-                    {"success": False, "error": f"素材 {i + 1} 缺少 image_latent / audio_latent 文件"},
+                    {"success": False, "error": f"素材 {i + 1} 缺少 image_latent 文件"},
                     status=400,
                 )
             clip_audio = _material_src_to_local_path(str(mat.get("clipAudio") or ""))
@@ -888,6 +888,7 @@ async def merge_latents_api(request: web.Request) -> web.Response:
                 )
             entries.append({
                 "image_latent": image_latent,
+                # audio_latent 已不再保存（音频统一走 clip_audio）；旧素材可能仍携带
                 "audio_latent": audio_latent,
                 "clip_audio": clip_audio,
             })
@@ -897,18 +898,16 @@ async def merge_latents_api(request: web.Request) -> web.Response:
             entries[0]["image_latent"], entries[0]["audio_latent"]
         )[1]
         video_vae_name = first_meta.get("video_vae") or ""
-        audio_vae_name = first_meta.get("audio_vae") or ""
         if not video_vae_name:
             return web.json_response(
                 {"success": False,
                  "error": "素材缺少 video_vae 信息，无法解码。请在 Combine 节点连接 "
-                          "video_vae / audio_vae 后重新生成素材。"},
+                          "video_vae 后重新生成素材。"},
                 status=400,
             )
 
         def _run_merge():
             video_vae = latent_lib.load_vae_by_name(video_vae_name)
-            audio_vae = latent_lib.load_vae_by_name(audio_vae_name) if audio_vae_name else None
 
             videos: list[dict] = []
             clip_audios: list[dict | None] = []
@@ -966,7 +965,7 @@ async def merge_latents_api(request: web.Request) -> web.Response:
             overlap = contexts[0] if contexts else default_context
             return latent_merge_lib.merge_latents_to_video(
                 video_vae=video_vae,
-                audio_vae=audio_vae,
+                audio_vae=None,
                 videos=videos,
                 clip_audios=clip_audios,
                 raw_frames=raw_frames,

@@ -3,7 +3,8 @@
 - 像素路径：把 VAEDecode 的 IMAGE 帧与 VAEDecodeAudio 的 AUDIO 合并编码为
   视频文件（原行为）。
 - latent 路径：把 joint H3 latent（视频+音频 NestedTensor）保存为
-  image_latent / audio_latent 两个 safetensors + sidecar meta（无损合并素材）；
+  image_latent safetensors + sidecar meta + clip_audio wav（无损合并素材，
+  音频统一走 clip_audio，不再保存 audio_latent）；
   接入 video_vae / audio_vae 时解码帧并编码视频；audio（clip_audio）优先作为
   音轨，否则用 audio_vae 解码的音频流兜底。
 
@@ -15,8 +16,8 @@
 多种容器格式），VHS 未安装或编码失败时回退到本地 ffmpeg（不含音频）。
 
 latent 路径执行后通过 send_sync("minimax_ref_video_progress") 通知前端
-（status="add_material"），携带视频路径 + image_latent/audio_latent/clip_audio
-路径，供素材条「无损合并」使用。
+（status="add_material"），携带视频路径 + image_latent/clip_audio 路径，
+供素材条「无损合并」使用。
 """
 
 import logging
@@ -77,10 +78,10 @@ class MiniMaxRefCombine(io.ComfyNode):
             description=(
                 "双路径合并/保存节点。\n"
                 "· 像素路径：IMAGE 帧（VAEDecode）+ 可选 AUDIO → VHS 视频（原行为）。\n"
-                "· latent 路径：joint H3 latent（视频+音频）→ 保存 image_latent / "
-                "audio_latent safetensors + meta（供「无损合并」使用）；接入 video_vae "
-                "时解码帧并编码视频；audio（clip_audio）优先作为音轨，否则用 audio_vae "
-                "解码的音频流兜底。\n"
+                "· latent 路径：joint H3 latent（视频+音频）→ 保存 image_latent "
+                "safetensors + meta + clip_audio wav（供「无损合并」使用，音频统一走 "
+                "clip_audio）；接入 video_vae 时解码帧并编码视频；无 clip_audio 时用 "
+                "audio_vae 解码的音频流兜底。\n"
                 "输出 VHS_FILENAMES 供 MiniMaxRefGuide 的 prev_tail 输入使用。"
             ),
             inputs=[
@@ -255,9 +256,6 @@ class MiniMaxRefCombine(io.ComfyNode):
             "video_vae": (
                 latent_lib.vae_display_name(video_vae) if video_vae is not None else ""
             ),
-            "audio_vae": (
-                latent_lib.vae_display_name(audio_vae) if audio_vae is not None else ""
-            ),
         }
 
         # 分支 A：有 clip_audio（audio 输入）→ 保存 latent 素材 + clip_audio，音轨直接
@@ -270,7 +268,7 @@ class MiniMaxRefCombine(io.ComfyNode):
         clip_audio_path = None
         out_audio = None
         if has_clip_audio:
-            saved = latent_lib.save_joint_latent_files(latent, meta_data, filename_prefix)
+            saved = latent_lib.save_image_latent_files(latent, meta_data, filename_prefix)
             # 同段素材的 latent / clip_audio 共享同一递增编号，防止不同段互相覆盖
             save_id = saved.get("save_id")
             out_audio = audio
@@ -338,7 +336,6 @@ class MiniMaxRefCombine(io.ComfyNode):
             payload["imageFile"] = to_single_filename(filenames)
         if saved is not None:
             payload["image_latent"] = saved["image_path"]
-            payload["audio_latent"] = saved["audio_path"]
             payload["meta_file"] = saved["meta_path"]
             payload["meta"] = meta_data
         if clip_audio_path:
@@ -351,9 +348,9 @@ class MiniMaxRefCombine(io.ComfyNode):
             _notify_ctx_node = None
         log.info(
             "[MiniMaxRefCombine] add_material send: imageFile=%s image_latent=%s "
-            "audio_latent=%s clip_audio=%s ctx_node_id=%s",
+            "clip_audio=%s ctx_node_id=%s",
             payload.get("imageFile"), payload.get("image_latent"),
-            payload.get("audio_latent"), payload.get("clip_audio"), _notify_ctx_node,
+            payload.get("clip_audio"), _notify_ctx_node,
         )
         _send_progress(payload)
 

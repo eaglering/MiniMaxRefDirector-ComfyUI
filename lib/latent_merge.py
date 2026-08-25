@@ -7,9 +7,10 @@
   覆盖前段尾部受保护 context 重叠（保留生成侧音频 feather）
 - _OneShotFrameSequence：惰性帧流（段数少 / 内存充裕时降级为全量 list）
 
-音频来源按用户确认的策略逐段选择：clip_audio（AUDIO dict / wav 文件）优先，
-否则把 audio_latent 经 audio_vae 解码；各段最终拼接为 master_audio 随视频
-一起编码。
+音频来源按用户确认的策略：各段统一携带 clip_audio（AUDIO dict / wav 文件），
+最终拼接为 master_audio 随视频一起编码。audio_latent 经 audio_vae 解码的兜底
+分支保留（audio_vae=None 时跳过），但当前合并入口统一传 None（素材不再保存
+audio_latent，音轨全部来自 clip_audio）。
 
 编码复用 lib.video_combine.encode_frames_with_vhs（VHS 优先，ffmpeg 回退）。
 """
@@ -42,6 +43,43 @@ def _release_decode_memory():
         comfy.model_management.soft_empty_cache()
     except Exception:  # noqa: BLE001 - 尽力而为
         pass
+
+
+def _vram_log(tag: str) -> None:
+    """GPU 显存诊断日志（尽力而为，无 GPU 时静默）。"""
+    if not torch.cuda.is_available():
+        return
+    try:
+        free_b, total_b = torch.cuda.mem_get_info()
+        log.info(
+            "[merge] %s: torch_alloc=%.2f GiB, torch_reserved=%.2f GiB, "
+            "cuda_free=%.2f GiB / %.2f GiB",
+            tag,
+            torch.cuda.memory_allocated() / 2**30,
+            torch.cuda.memory_reserved() / 2**30,
+            free_b / 2**30,
+            total_b / 2**30,
+        )
+    except Exception:  # noqa: BLE001 - 尽力而为
+        pass
+
+
+def _release_all_models(tag: str) -> None:
+    """卸载 ComfyUI 跟踪的全部模型并清缓存，为解码腾出整卡显存。
+
+    合并前调用可驱逐生成阶段残留的 H3 大模型（例如 10B DiT 权重，
+    否则仅 5GB VAE 加载就会触发 torch 的 OOM）。
+    """
+    gc.collect()
+    try:
+        comfy.model_management.unload_all_models()
+    except Exception:  # noqa: BLE001 - 尽力而为
+        pass
+    try:
+        comfy.model_management.soft_empty_cache()
+    except Exception:  # noqa: BLE001 - 尽力而为
+        pass
+    _vram_log(tag)
 
 
 # ── 音频辅助（照搬 MultiRef existing_video_extension）────────────────────
@@ -171,46 +209,112 @@ def _yield_segments_and_hold(segments, hold_frames):
     return tail.contiguous()
 
 
-def _generated_frame_generator(video_vae, videos, raw_frames, contexts, overlap, log_prefix):
-    """逐段解码并交叉淡化，流式产出像素帧（与 MultiRef 同缝数学）。"""
+def _generated_frame_generator(
+    video_vae, videos, raw_frames, contexts, overlap, log_prefix,
+    chunks_per_slice: int | None = None,
+):
+    """逐段流式解码 + 交叉淡化，边解码边出帧（内存有界）。
+
+    与旧版（整段解码 + _yield_segments_and_hold）像素级一致：接缝 alpha=
+    linspace(0,1,ov+2)[1:-1]、tail 保留帧数完全不变；只是每段内部改为按 VAE
+    chunk 边界分片流式解码（latent_lib.iter_decode_video_latent），任意时刻
+    GPU 只驻留 chunks_per_slice 个 chunk 的时间跨度（None 时按分辨率自动选取），
+    CPU 只驻留一个分片像素 + 接缝窗口，长素材不再整段驻留显存/内存。
+    """
     seam_ovs = _seam_overlaps(raw_frames, contexts, overlap)
     tail = None
 
     for i, video_latent in enumerate(videos):
         video_t, _audio_t = latent_lib.split_joint_latent(video_latent)
-        decoded = latent_lib.decode_video_latent(video_vae, video_t)
-        if int(decoded.shape[0]) != int(raw_frames[i]):
-            raise RuntimeError(
-                "%s: Clip %d video decode produced %d frames; expected %d"
-                % (log_prefix, i + 1, int(decoded.shape[0]), int(raw_frames[i]))
-            )
+        expected = int(raw_frames[i])
+        ctx = int(contexts[i]) if i > 0 else 0
+        ov = int(seam_ovs[i])
+        next_hold = int(seam_ovs[i + 1]) if i + 1 < len(videos) else 0
 
-        if i == 0:
-            segments = [decoded]
-        else:
-            ctx = int(contexts[i])
-            ov = int(seam_ovs[i])
+        blend_src = []            # 接缝窗口 [ctx-ov, ctx) 的 ov 帧（CPU）
+        blend_done = (i == 0)     # 第 1 段没有 context，无需缝合
+        seen = 0                  # 本段解码产出的总帧数
+        clip_tail = []            # 滚动保留最后 next_hold 帧（CPU）
+        hold_n = 0
+
+        def _emit(frame):
+            nonlocal hold_n
+            clip_tail.append(frame.detach().to("cpu", dtype=torch.float32))
+            hold_n += 1
+            if hold_n > next_hold:
+                yield clip_tail.pop(0)
+                hold_n -= 1
+
+        def _blend_and_emit():
+            """把 tail 与 blend_src（[ctx-ov, ctx) 帧）交叉淡化后经 _emit 输出。"""
+            nonlocal blend_done, tail
             if ov > 0:
                 if tail is None or int(tail.shape[0]) != ov:
                     raise RuntimeError(
                         "%s: seam %d retained tail mismatch (%s != %d)"
-                        % (log_prefix, i, 0 if tail is None else int(tail.shape[0]), ov)
+                        % (
+                            log_prefix,
+                            i + 1,
+                            0 if tail is None else int(tail.shape[0]),
+                            ov,
+                        )
                     )
-                dst = decoded[ctx - ov : ctx]
+                dst = torch.stack(blend_src, dim=0)
+                if int(dst.shape[0]) != ov:
+                    raise RuntimeError(
+                        "%s: seam %d blend window has %d frames; expected %d "
+                        "(context exceeds clip length)" % (
+                            log_prefix, i + 1, int(dst.shape[0]), ov
+                        )
+                    )
                 alpha = torch.linspace(
                     0.0, 1.0, ov + 2, dtype=torch.float32, device="cpu"
                 )[1:-1].view(-1, 1, 1, 1)
                 tail.mul_(1.0 - alpha).add_(dst * alpha)
                 del dst, alpha
-                segments = [tail, decoded[ctx:]]
+                for f in tail:
+                    yield from _emit(f)
             else:
-                segments = [decoded[ctx:]]
                 tail = None
+            del blend_src[:]
+            blend_done = True
 
-        next_hold = int(seam_ovs[i + 1]) if i + 1 < len(videos) else 0
-        new_tail = yield from _yield_segments_and_hold(segments, next_hold)
-        tail = new_tail
-        del decoded, segments, new_tail
+        for frame_start, frames in latent_lib.iter_decode_video_latent(
+            video_vae, video_t, chunks_per_slice=chunks_per_slice
+        ):
+            for j in range(int(frames.shape[0])):
+                p = frame_start + j
+                if p >= expected:
+                    break
+                seen += 1
+                if blend_done:
+                    yield from _emit(frames[j])
+                    continue
+                if p < ctx - ov:
+                    continue          # 前文重复 context 帧，丢弃
+                if p < ctx:
+                    blend_src.append(frames[j].detach().to("cpu", dtype=torch.float32))
+                    if len(blend_src) > ov:
+                        blend_src.pop(0)
+                    continue
+                # p == ctx：开始输出本段，先缝合 tail 与解码帧 [ctx-ov, ctx)
+                yield from _blend_and_emit()
+                yield from _emit(frames[j])
+            del frames
+
+        if not blend_done:
+            # 整段都是 context（ctx >= expected）：p 到不了 ctx，接缝淡化
+            # 从未触发；旧算法此处 segments=[blended]、decoded[ctx:] 为空，
+            # 仍照常输出淡化后的 tail。
+            yield from _blend_and_emit()
+
+        if seen != expected:
+            raise RuntimeError(
+                "%s: Clip %d video decode produced %d frames; expected %d"
+                % (log_prefix, i + 1, seen, expected)
+            )
+        tail = torch.stack(clip_tail, dim=0) if (next_hold > 0 and clip_tail) else None
+        del clip_tail, blend_src
         _release_decode_memory()
 
     if tail is not None:
@@ -258,6 +362,21 @@ class _OneShotFrameSequence:
         self._first = None
         yield first
         yield from self._generator
+
+    def reset(self):
+        """重置一次性状态，允许 ffmpeg 回退重放帧流（VHS 消费/失败后恢复）。
+
+        video.py 的 ffmpeg 回退路径会调用 _replay_frame_input，依赖此方法
+        重置后重新流式解码，避免 one-shot 错误导致合并中断。重置同时清一次
+        GPU 缓存池：VHS 尝试可能已解码部分帧（常规/tiled 双路径），回退重放
+        前清场，防止两轮解码的 reserved 池叠加（用户环境 allocated 虚涨到
+        31 GiB 的主因之一）。
+        """
+        self._generator = None
+        self._first = None
+        self._primed = False
+        self._iterated = False
+        _release_decode_memory()
 
 
 # ── 音频组装 ──────────────────────────────────────────────────────────────
@@ -359,7 +478,6 @@ def _assemble_av_audio(audio_vae, seg_audios, raw_frames, contexts, fps=FPS):
 
 def merge_latents_to_video(
     video_vae,
-    audio_vae,
     videos,
     clip_audios,
     raw_frames,
@@ -371,15 +489,21 @@ def merge_latents_to_video(
     lazy=True,
     prompt=None,
     extra_pnginfo=None,
+    audio_vae=None,
+    chunks_per_slice: int | None = None,
 ):
-    """像素域交叉淡化拼接 + 音频（clip_audio 优先 / audio_latent 兜底）+ 视频编码。
+    """像素域交叉淡化拼接 + 音频（clip_audio；audio_vae 兜底可选）+ 视频编码。
 
+    :param audio_vae: 音频 VAE（可选）；段无 clip_audio 时兜底解码 audio_latent，
+        当前合并入口统一传 None（素材携带 clip_audio，不保存 audio_latent）
     :param videos: list[joint latent dict]（每段 NestedTensor，与 raw_frames 等长）
     :param clip_audios: list[AUDIO dict | None]，clip_audio 优先，None 表示无
     :param raw_frames:  list[int] 每段 b_n（H3 run）
     :param contexts:    list[int] 每段 context_length_n
     :param overlap:     交叉淡化重叠帧数（建议 = contexts[0]）
     :param lazy:        惰性帧流（True）还是全量 list（False，内存充裕时更快）
+    :param chunks_per_slice: 每次 decode 的 chunk 数（>=3）。None（默认）按 latent
+        分辨率自动选取，控制单次 decode 的 GPU 驻留（4K 长片防 OOM）。
     :return: {"filename","subfolder","type","full_path","ui","frame_count"}
     """
     if len(videos) < 2:
@@ -389,6 +513,9 @@ def merge_latents_to_video(
             "merge_latents: length mismatch videos=%d raw_frames=%d contexts=%d"
             % (len(videos), len(raw_frames), len(contexts))
         )
+
+    # 合并前清场：驱逐生成阶段残留的 H3 大模型，给 VAE 解码腾出整卡显存
+    _release_all_models("start")
 
     # 音频：逐段 clip_audio 优先，否则 audio_latent 解码
     seg_audios = []
@@ -412,6 +539,9 @@ def merge_latents_to_video(
 
     audio = _assemble_av_audio(audio_vae, seg_audios, raw_frames, contexts)
 
+    # 音频已组装到 CPU，清场腾出显存给视频解码（audio_vae 当前入口恒为 None）
+    _release_all_models("after audio")
+
     # 视频帧流：惰性帧流仅在 VHS 可用时启用（VHS 兼容 Sequence 探测）；
     # ffmpeg 回退路径需要完整帧张量，此时降级为全量 list 解码。
     total_frames = int(raw_frames[0]) + sum(
@@ -425,13 +555,15 @@ def merge_latents_to_video(
         images = _OneShotFrameSequence(
             total_frames,
             lambda: _generated_frame_generator(
-                video_vae, videos, raw_frames, contexts, overlap, "merge_latents"
+                video_vae, videos, raw_frames, contexts, overlap, "merge_latents",
+                chunks_per_slice=chunks_per_slice,
             ),
         )
     else:
         frame_list = list(
             _generated_frame_generator(
-                video_vae, videos, raw_frames, contexts, overlap, "merge_latents"
+                video_vae, videos, raw_frames, contexts, overlap, "merge_latents",
+                chunks_per_slice=chunks_per_slice,
             )
         )
         images = torch.stack(frame_list, dim=0)
@@ -449,4 +581,6 @@ def merge_latents_to_video(
         extra_pnginfo=extra_pnginfo,
     )
     meta["frame_count"] = total_frames
+    # 合并完成，卸载 VAE 恢复干净状态（ComfyUI 需要时自动重载）
+    _release_all_models("done")
     return meta

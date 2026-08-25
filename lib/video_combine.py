@@ -24,6 +24,20 @@ from .video import (
 log = logging.getLogger(__name__)
 
 
+def _vhs_frame_budget_ok(frames, max_frames: int = 96) -> bool:
+    """VHS GPU 编码对长视频极易 OOM；帧数超预算直接跳过 VHS 走本地 ffmpeg。
+
+    长视频若先尝试 VHS，会先在 GPU 上完整解码一次（显存峰值 = 整段解码），
+    失败回退 ffmpeg 时又需重新解码，双重解码是显存雪崩的主因。预算内仍走
+    VHS（支持音频/metadata），超出直接 ffmpeg（CPU 编码，不占 GPU）。
+    """
+    try:
+        n = int(len(frames))
+        return n <= max_frames
+    except Exception:  # noqa: BLE001 - 无法探测时保守尝试 VHS（内部失败会回退）
+        return True
+
+
 def _ensure_vhs_importable() -> None:
     """让 ``videohelpersuite`` 可按顶层包导入（VHS 的 custom node 目录不在 sys.path 上）。
 
@@ -102,7 +116,7 @@ def encode_frames_with_vhs(
     """把 [B,H,W,C] 帧张量编码为视频文件。
 
     优先使用 VideoHelperSuite 的 VideoCombine（支持 AUDIO / metadata / 多容器）；
-    VHS 未安装或编码失败时回退到本地 ffmpeg（忽略 AUDIO 输入）。
+    VHS 未安装或编码失败时回退到本地 ffmpeg（AUDIO 由 ffmpeg mux 进最终文件）。
 
     返回 {"filename", "subfolder", "type", "full_path", "ui"}；
     ui 为 VideoCombine 的原始 UI（含 gifs）或 ffmpeg 回退时构造的等价结构。
@@ -111,7 +125,10 @@ def encode_frames_with_vhs(
     # 不物化全部帧，显存峰值保持在单段解码水平（与 motion-context-multiref 一致）。
     # VHS 失败后由 encode_video_frames 的 ffmpeg 回退统一 reset 帧流再重放。
     vhs_error: Exception | None = None
-    if VideoCombine is not None:
+    vhs_available = VideoCombine is not None
+    vhs_budget_ok = _vhs_frame_budget_ok(images) if vhs_available else False
+    if vhs_available and vhs_budget_ok:
+        assert VideoCombine is not None  # 类型收窄：vhs_available 为 True
         try:
             vc = VideoCombine()
             out = vc.combine_video(
@@ -153,23 +170,28 @@ def encode_frames_with_vhs(
             log.warning("[video_combine] VideoCombine encode failed, "
                         "falling back to ffmpeg: %s", exc)
 
-    if audio is not None:
+    if audio is not None and not (vhs_available and vhs_budget_ok and vhs_error is None):
         if vhs_error is not None:
             log.warning(
-                "[video_combine] VideoCombine 失败（%s）回退到本地 ffmpeg："
-                "ffmpeg 回退不含音轨。此处音频来自 audio_vae 解码的 latent "
-                "（audio 输入为空时的自动行为）。", vhs_error,
+                "[video_combine] VideoCombine 失败（%s）回退到本地 ffmpeg，"
+                "音轨由 ffmpeg mux 进最终文件（视频将包含声音）。", vhs_error,
+            )
+        elif not vhs_budget_ok:
+            log.warning(
+                "[video_combine] 帧数超过 VHS 编码预算，跳过 VideoCombine 回退到本地"
+                "ffmpeg，音轨由 ffmpeg mux 进最终文件（视频将包含声音）。"
             )
         else:
             log.warning(
-                "[video_combine] VideoCombine 未返回结果，回退到本地 ffmpeg："
-                "ffmpeg 回退不含音轨。此处音频来自 audio_vae 解码的 latent "
-                "（audio 输入为空时的自动行为）。"
+                "[video_combine] VideoHelperSuite 不可用，回退到本地 ffmpeg，"
+                "音轨由 ffmpeg mux 进最终文件（视频将包含声音）。"
             )
 
     # try_vhs=False：本函数已尝试过 VideoCombine（上方），失败后直接走
     # ffmpeg 回退，避免二次 VHS 尝试重复消费一次性帧流。
-    meta = encode_video_frames(images, float(frame_rate), filename_prefix, format, try_vhs=False)
+    meta = encode_video_frames(
+        images, float(frame_rate), filename_prefix, format, try_vhs=False, audio=audio,
+    )
     filename = meta["filename"]
     subfolder = meta.get("subfolder", "")
     ftype = meta.get("type", "output")

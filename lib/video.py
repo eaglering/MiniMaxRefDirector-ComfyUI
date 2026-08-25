@@ -45,6 +45,16 @@ def get_ffmpeg_path(name: str = "ffmpeg") -> str | None:
         ):
             if os.path.isfile(path):
                 return path
+    # VideoHelperSuite 依赖 imageio-ffmpeg 的捆绑二进制（不在 PATH 中），
+    # 作为最后回退查找，保证本地 ffmpeg 编码路径在任意环境可用。
+    try:
+        import imageio_ffmpeg
+        if name.lower() in ("ffmpeg", "ffmpeg.exe"):
+            exe = imageio_ffmpeg.get_ffmpeg_exe()
+            if exe and os.path.isfile(exe):
+                return exe
+    except Exception:  # noqa: BLE001
+        pass
     return None
 
 
@@ -463,19 +473,25 @@ def _replay_frame_input(frames):
             pass
 
 
-def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4") -> dict:
-    """Local fallback: encode a [B,H,W,C] float frame batch to a video file with ffmpeg."""
+def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4", audio: dict | None = None) -> dict:
+    """Local fallback: encode a [B,H,W,C] float frame batch to a video file with ffmpeg.
+
+    ``audio``（ComfyUI AUDIO dict）可选：先写成临时 WAV，再作为第二条输入流 mux
+    进最终文件（mp4/mov -> aac，webm -> libopus）。None 时只编码视频流。
+    音频 mux 失败（如编码器缺失）时降级为纯视频输出，不让整个合并流程失败。
+    """
     import folder_paths
     from PIL import Image
+    from .audio import save_audio_to_temp_wav
 
     fmt_map = {
-        "video/h264-mp4": ("libx264", "mp4"),
-        "video/h265-mp4": ("libx265", "mp4"),
-        "video/vp9": ("libvpx-vp9", "webm"),
-        "video/av1": ("libaom-av1", "webm"),
-        "video/h264-webm": ("libx264", "webm"),
+        "video/h264-mp4": ("libx264", "mp4", "aac"),
+        "video/h265-mp4": ("libx265", "mp4", "aac"),
+        "video/vp9": ("libvpx-vp9", "webm", "libopus"),
+        "video/av1": ("libaom-av1", "webm", "libopus"),
+        "video/h264-webm": ("libx264", "webm", "libopus"),
     }
-    codec, ext = fmt_map.get(format, ("libx264", "mp4"))
+    codec, ext, audio_codec = fmt_map.get(format, ("libx264", "mp4", "aac"))
 
     ffmpeg = get_ffmpeg_path("ffmpeg")
     if not ffmpeg:
@@ -489,26 +505,61 @@ def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format
     filename = _next_video_filename(full_out_dir, prefix, ext)
     full_out = os.path.join(full_out_dir, filename)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for i, frame in enumerate(_iter_video_frames(frames)):
-            if frame.ndim == 4:  # [1,H,W,C] -> [H,W,C]
-                frame = frame[0]
-            img = Image.fromarray((frame.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy()))
-            img.save(os.path.join(tmpdir, f"frame_{i:05d}.png"))
-        cmd = [
-            ffmpeg, "-y", "-framerate", str(fps),
-            "-i", os.path.join(tmpdir, "frame_%05d.png"),
-            "-c:v", codec, "-pix_fmt", "yuv420p", full_out,
-        ]
-        res = subprocess.run(cmd, capture_output=True)
-        if res.returncode != 0:
-            raise RuntimeError(f"ffmpeg encode failed: {res.stderr.decode(errors='replace')[:2000]}")
+    audio_path = None
+    if audio is not None:
+        audio_path = save_audio_to_temp_wav(audio)
+        if audio_path is None:
+            raise RuntimeError("ffmpeg encode: could not serialize AUDIO input to wav")
+        audio_path = str(audio_path)
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i, frame in enumerate(_iter_video_frames(frames)):
+                if frame.ndim == 4:  # [1,H,W,C] -> [H,W,C]
+                    frame = frame[0]
+                img = Image.fromarray((frame.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy()))
+                img.save(os.path.join(tmpdir, f"frame_{i:05d}.png"))
+            cmd = [
+                ffmpeg, "-y", "-framerate", str(fps),
+                "-i", os.path.join(tmpdir, "frame_%05d.png"),
+            ]
+            if audio_path is not None:
+                cmd += ["-i", audio_path]
+            cmd += ["-c:v", codec, "-pix_fmt", "yuv420p"]
+            if audio_path is not None:
+                cmd += ["-c:a", audio_codec, "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+            cmd.append(full_out)
+            res = subprocess.run(cmd, capture_output=True)
+            if res.returncode != 0 and audio_path is not None:
+                # 音频 mux 失败（容器/编码器不支持等）时降级为纯视频，
+                # 避免音频问题让整个合并流程失败。
+                logger.warning(
+                    "ffmpeg encode with audio failed (rc=%d), retrying without audio: %s",
+                    res.returncode, res.stderr.decode(errors="replace")[-400:],
+                )
+                cmd = [
+                    ffmpeg, "-y", "-framerate", str(fps),
+                    "-i", os.path.join(tmpdir, "frame_%05d.png"),
+                    "-c:v", codec, "-pix_fmt", "yuv420p", full_out,
+                ]
+                res = subprocess.run(cmd, capture_output=True)
+            if res.returncode != 0:
+                raise RuntimeError(f"ffmpeg encode failed: {res.stderr.decode(errors='replace')[:2000]}")
+    finally:
+        if audio_path is not None:
+            try:
+                os.unlink(audio_path)
+            except OSError:
+                pass
 
     return {"filename": filename, "subfolder": subfolder, "type": "output"}
 
 
-def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4", try_vhs: bool = True) -> dict:
+def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = "video/h264-mp4", try_vhs: bool = True, audio: dict | None = None) -> dict:
     """Encode a [B,H,W,C] float frame batch (or a lazy frame stream) into a video file.
+
+    ``audio``（ComfyUI AUDIO dict）可选，传给本地 ffmpeg 回退路径 mux 音轨；
+    VHS 路径的音频由调用方（encode_frames_with_vhs）直接传给 VideoCombine。
 
     Returns {"filename", "subfolder", "type"} suitable for send_sync / /view.
     Uses VideoHelperSuite when installed (soft dependency), otherwise falls back
@@ -540,7 +591,7 @@ def encode_video_frames(frames, fps: float, filename_prefix: str, format: str = 
 
     # ffmpeg 回退：一次性帧流可能已被 VHS 消费，重放后再流式逐帧编码。
     _replay_frame_input(frames)
-    return _encode_video_frames_ffmpeg(frames, fps, filename_prefix, format)
+    return _encode_video_frames_ffmpeg(frames, fps, filename_prefix, format, audio=audio)
 
 
 def _load_wav_audio(path: str) -> dict:
