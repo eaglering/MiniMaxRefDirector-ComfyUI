@@ -338,7 +338,9 @@ def build_h3_subject_bindings(
             detailed_description / overall_soundscape / non_diegetic_music.
         timeline_segment: current timeline segment dict; its "additionSubject"
             list (subject names added in the editor but not mentioned in the
-            prompt) is bound in addition.
+            prompt) is bound in addition. Its "retention" mapping
+            ({name: retention text}) takes precedence over the subject-defined
+            retention in retention_analysis (segment-level override).
 
     Returns:
         {
@@ -355,6 +357,20 @@ def build_h3_subject_bindings(
     # （工作流反序列化后为 dict，或 JSON 字符串），解析失败按空 dict 兜底。
     prompt_json = _normalize_h3_prompt_json(prompt_json)
     subjects_in = (subject_data or {}).get("subjects", []) or []
+    # 段级 retention 覆盖映射：编辑器中针对该 segment 手动覆盖的 retention
+    # （{name: 文本}）。绑定生成 retention_analysis 时优先取覆盖值，其次回落
+    # 主体自身定义的 retention。非 dict / 空值按空映射兜底，兼容旧段数据。
+    seg_retentions = (timeline_segment or {}).get("retention", {}) or {}
+    if not isinstance(seg_retentions, dict):
+        seg_retentions = {}
+
+    def _retention_for(_name: str, _subj: dict) -> str:
+        """返回该主体的生效 retention：段级覆盖值优先（strip 后非空才生效），
+        否则回落主体自身定义的 retention。"""
+        _override = seg_retentions.get(_name, "")
+        if isinstance(_override, str) and _override.strip():
+            return _override.strip()
+        return (_subj.get("retention", "") or "").strip()
     # 用户提交了有效 audiosegment（type=Audio 且 audioFile 非空）时，音频素材仅作
     # 参考绑定（mapping）供前端使用：不写入 subject_definitions / retention_analysis，
     # 也不放入 audios 资源数组（音频由 Combine 节点 clip_audio 通道直接传递）。
@@ -440,7 +456,7 @@ def build_h3_subject_bindings(
             _dType = _subj.get("type", "") or "Subject"
             _description = _subj.get("description", "")
             _relationship = _subj.get("relationship", "")
-            _retention = (_subj.get("retention", "") or "").strip()
+            _retention = _retention_for(_name, _subj)
             if _bind_media(_subj, _dType, _name) is None:
                 continue
             _label = _next_label(_dType)
@@ -471,7 +487,7 @@ def build_h3_subject_bindings(
         subj = subjects_in[idx]
         description = subj.get("description", "")
         relationship = subj.get("relationship", "")
-        retention = (subj.get("retention", "") or "").strip()
+        retention = _retention_for(name, subj)
         audio_ref = (subj.get("audioRef", "") or "").strip()
         # 对话说话者一定是主体（Subject）：抽象对象，无媒体资源可绑定，直接编号
         label = _next_label("Subject")
@@ -484,6 +500,7 @@ def build_h3_subject_bindings(
             _retention_line(f"<@{name}>", relationship, retention, shot_mentions.get(name, []))
         )
         seen.add(name)
+        subjects_out.append(subj)
         mapping[f"<@{name}>"] = label
         # 递归处理描述中的 <@提及>（在 seen 之后调用，防止 <@自身> 自引用无限递归）
         if description:
@@ -540,7 +557,7 @@ def build_h3_subject_bindings(
                 subject_definitions.append(f"{audio_label} {audio_description_text}")
                 subject_definitions_text.append(f"<@{audio_ref}> {audio_description_text}")
                 text = _AUDIO_RELATION_TEXT.get(audio_relationship, _AUDIO_RELATION_TEXT["reference"])
-                retention_descritpion = audio_subj.get("retention", "").strip()
+                retention_descritpion = _retention_for(audio_ref, audio_subj)
                 retention_descritpion_text = f" - {retention_descritpion}" if retention_descritpion else f" - {text.format(n=audio_label)}"
                 retention_analysis.append(f"{audio_label}: {audio_relationship}{retention_descritpion_text}")
                 retention_analysis_text.append(f"<@{audio_ref}>: {audio_relationship}{retention_descritpion_text}")
@@ -562,7 +579,7 @@ def build_h3_subject_bindings(
         if relationship:
             subject_definitions.append(f"{label} {description}")
             subject_definitions_text.append(f"<@{name}> {description}")
-            retention = (subj.get("retention", "") or "").strip()
+            retention = _retention_for(name, subj)
             retention_analysis.append(
                 _retention_line(label, relationship, retention, shot_mentions.get(name, []))
             )
@@ -594,7 +611,7 @@ def build_h3_subject_bindings(
             subject_definitions.append(f"{label} {description}")
             subject_definitions_text.append(f"<@{name}> {description}")
             # additionSubject 未在 prompt 中提及，shot_mentions 为空 → (appears in []): reference
-            retention = (subj.get("retention", "") or "").strip()
+            retention = _retention_for(name, subj)
             retention_analysis.append(
                 _retention_line(label, relationship, retention, shot_mentions.get(name, []))
             )

@@ -466,8 +466,6 @@ const MSCSS = `
     z-index: 9999;
     min-width: 170px;
     max-width: 280px;
-    max-height: 190px;
-    overflow-y: auto;
     background: #1e1e1e;
     border: 1px solid #444;
     border-radius: 6px;
@@ -475,9 +473,54 @@ const MSCSS = `
     padding: 4px;
     display: none;
     box-sizing: border-box;
+    flex-direction: column;
+    overflow: hidden;
 }
 .ref-ms-mention-popup.open {
-    display: block;
+    display: flex;
+}
+/* 顶部主体类型 tab 条：固定不随列表滚动，选中态亮蓝强调 */
+.ref-ms-mention-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 0 4px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #333;
+    flex: 0 0 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.ref-ms-mention-tabs::-webkit-scrollbar {
+    display: none;
+}
+.ref-ms-mention-tab {
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    background: transparent;
+    padding: 1px 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    line-height: 1.4;
+}
+.ref-ms-mention-tab:hover {
+    color: #aaa;
+    border-color: #555;
+}
+.ref-ms-mention-tab.active {
+    color: #4fc3f7;
+    background: rgba(79, 195, 247, 0.18);
+    border-color: rgba(79, 195, 247, 0.5);
+}
+/* 主体列表容器：纵向滚动，max-height 由 popup 顶部 tab 条让位 */
+.ref-ms-mention-list {
+    overflow-y: auto;
+    max-height: 176px;
 }
 .ref-ms-mention-item {
     display: flex;
@@ -524,7 +567,7 @@ styleEl.textContent = MSCSS;
 
 // --- @mention 主体选择器（描述输入框输入 @ 弹出，插入 <@name> 供 H3 绑定） ---
 let mentionPopup = null;
-let mentionCtx = null; // { ta, idx, start, query, items, active, save }
+let mentionCtx = null; // { ta, idx, start, query, items, active, save, allSubjects }
 
 document.addEventListener("mousedown", (e) => {
     if (mentionPopup && !mentionPopup.contains(e.target)) closeMention();
@@ -534,6 +577,7 @@ function closeMention() {
     if (mentionPopup) {
         mentionPopup.classList.remove("open");
         mentionPopup.innerHTML = "";
+        delete mentionPopup.dataset.tab; // 重置 tab 选中，下次打开回到「全部」
     }
     mentionCtx = null;
 }
@@ -572,7 +616,9 @@ function setMentionActive(i) {
     if (!mentionCtx) return;
     mentionCtx.active = i;
     const pop = buildMentionPopup();
-    [...pop.children].forEach((el, j) => {
+    const list = pop.querySelector(".ref-ms-mention-list");
+    if (!list) return;
+    [...list.children].forEach((el, j) => {
         el.classList.toggle("active", j === i);
     });
 }
@@ -639,44 +685,79 @@ function acceptMention() {
     closeMention();
 }
 
+// 渲染弹窗内容：顶部主体类型 tab 条（全部 / 可引用类型）+ 列表容器。
+// 当前 tab 存 pop.dataset.tab（popup 为缓存单例：input 重建时保持选中态，
+// closeMention 时重置回到「全部」）。tab 点击仅重渲染列表，不重建 mentionCtx
+// （保留 caret / query，键盘导航与 active 索引随之更新）。
+function renderMentionList(pop, allowed) {
+    const ctx = mentionCtx;
+    if (!ctx) return;
+    const tab = pop.dataset.tab || "";
+    pop.innerHTML = "";
+    // 顶部 tab 条："" 表示「全部」，其余为当前主体可引用的类型
+    const tabTypes = [""].concat(allowed || []);
+    const tabs = document.createElement("div");
+    tabs.className = "ref-ms-mention-tabs";
+    tabTypes.forEach((t) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ref-ms-mention-tab" + (t === tab ? " active" : "");
+        b.textContent = t || "全部";
+        b.addEventListener("mousedown", (e) => {
+            e.preventDefault(); // 保持 textarea 焦点
+            if (pop.dataset.tab === t) return;
+            pop.dataset.tab = t;
+            renderMentionList(pop, allowed);
+        });
+        tabs.appendChild(b);
+    });
+    pop.appendChild(tabs);
+    // 列表容器（滚动区域）
+    const list = document.createElement("div");
+    list.className = "ref-ms-mention-list";
+    // 过滤链：排除自身 + allowed 类型 + 名称非空 + 关键词匹配 + 当前 tab 类型
+    ctx.items = ctx.allSubjects
+        .map((s, i) => ({ s, i }))
+        .filter(({ s, i }) => i !== ctx.idx && allowed.includes(s.type) && (s.name || "").trim()
+            && s.name.toLowerCase().includes(ctx.query.toLowerCase())
+            && (tab === "" || s.type === tab));
+    ctx.active = 0;
+    if (ctx.items.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "ref-ms-mention-empty";
+        empty.textContent = "暂无可用主体";
+        list.appendChild(empty);
+    } else {
+        ctx.items.forEach((it, i) => {
+            const item = document.createElement("div");
+            item.className = "ref-ms-mention-item" + (i === 0 ? " active" : "");
+            const type = document.createElement("span");
+            type.className = "ref-ms-mention-type";
+            type.textContent = it.s.type || "Subject";
+            const name = document.createElement("span");
+            name.textContent = it.s.name;
+            item.appendChild(mentionMedia(it.s, 22));
+            item.appendChild(name);
+            item.appendChild(type);
+            item.addEventListener("mousedown", (e) => {
+                e.preventDefault(); // 保持 textarea 焦点
+                mentionCtx.active = i;
+                acceptMention();
+            });
+            item.addEventListener("mouseenter", () => setMentionActive(i));
+            list.appendChild(item);
+        });
+    }
+    pop.appendChild(list);
+}
+
 function updateMention(ta, idx, subjects, save) {
     const q = mentionQuery(ta);
     if (!q) { closeMention(); return; }
     const allowed = REF_MENTION_TYPES[subjects[idx].type] || [];
-    const items = subjects
-        .map((s, i) => ({ s, i }))
-        .filter(({ s, i }) => i !== idx && allowed.includes(s.type) && (s.name || "").trim() && s.name.toLowerCase().includes(q.query.toLowerCase()));
     const pop = buildMentionPopup();
-    pop.innerHTML = "";
-    mentionCtx = { ta, idx, start: q.start, query: q.query, items, active: 0, save };
-    if (items.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "ref-ms-mention-empty";
-        empty.textContent = "暂无其他主体可引用";
-        pop.appendChild(empty);
-        pop.classList.add("open");
-        positionMentionPopup(ta);
-        return;
-    }
-    items.forEach((it, i) => {
-        const item = document.createElement("div");
-        item.className = "ref-ms-mention-item" + (i === 0 ? " active" : "");
-        const type = document.createElement("span");
-        type.className = "ref-ms-mention-type";
-        type.textContent = it.s.type || "Subject";
-        const name = document.createElement("span");
-        name.textContent = it.s.name;
-        item.appendChild(mentionMedia(it.s, 22));
-        item.appendChild(name);
-        item.appendChild(type);
-        item.addEventListener("mousedown", (e) => {
-            e.preventDefault(); // 保持 textarea 焦点
-            mentionCtx.active = i;
-            acceptMention();
-        });
-        item.addEventListener("mouseenter", () => setMentionActive(i));
-        pop.appendChild(item);
-    });
+    mentionCtx = { ta, idx, start: q.start, query: q.query, items: [], active: 0, save, allSubjects: subjects };
+    renderMentionList(pop, allowed);
     pop.classList.add("open");
     positionMentionPopup(ta);
 }
