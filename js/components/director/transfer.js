@@ -1675,7 +1675,7 @@ export function TransferPanel({ director }) {
     }
     // 无损合并要求每段同时含 image_latent / audio_latent / clip_audio
     //（Combine 节点在提供 clip_audio 时才保存 latent 素材并输出音频切片）
-    sel = sel.filter((m) => m.imageLatent && m.audioLatent && m.clipAudio);
+    sel = sel.filter((m) => m.imageLatent && m.clipAudio);
     if (sel.length < 2) {
       showDragHint("无损合并需要至少 2 段含 latent 与音频的素材（Guide 需输出 clip_audio）");
       return;
@@ -1689,7 +1689,7 @@ export function TransferPanel({ director }) {
           materials: sel.map((m) => ({
             src: m.src,
             imageLatent: m.imageLatent,
-            audioLatent: m.audioLatent,
+            audioLatent: m.audioLatent || null,
             clipAudio: m.clipAudio || null,
             meta: m.meta || null,
           })),
