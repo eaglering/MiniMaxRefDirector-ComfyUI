@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
 import { api, app, viewUrl, ICONS } from "./shared.js";
 import { RefModal } from "./modal.js";
+import { getLocale, t } from "../i18n.js";
 
 const html = htm.bind(h);
 
@@ -264,10 +265,10 @@ function subjectMediaThumb(s, size = 22) {
   const base = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", objectFit: "cover" };
   const iconBase = { width: size + "px", height: size + "px", borderRadius: "3px", flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: Math.round(size * 0.5) + "px", fontStyle: "normal", lineHeight: 1, background: "#1e3a5f", color: "#38bdf8" };
   if (p.kind === "image") return html`<img src=${p.src} alt="" style=${base} />`;
-  if (p.kind === "video") return html`<span title="视频" style=${Object.assign({}, iconBase, { color: "#a5d6a7" })}>▶</span>`;
-  if (p.kind === "audio") return html`<span title="音频" style=${iconBase}>♪</span>`;
+  if (p.kind === "video") return html`<span title=${t("Video")} style=${Object.assign({}, iconBase, { color: "#a5d6a7" })}>▶</span>`;
+  if (p.kind === "audio") return html`<span title=${t("Audio")} style=${iconBase}>♪</span>`;
   // 无媒体（纯文本主体）：T 徽标
-  return html`<span title="文本" style=${Object.assign({}, iconBase, { background: "#333", color: "#ccc", fontSize: Math.round(size * 0.5) + "px" })}>T</span>`;
+  return html`<span title=${t("Text")} style=${Object.assign({}, iconBase, { background: "#333", color: "#ccc", fontSize: Math.round(size * 0.5) + "px" })}>T</span>`;
 }
 
 // 主体定义 / retention_analysis / 媒体列表（images / audios / videos）
@@ -1194,7 +1195,7 @@ export function TransferPanel({ director }) {
         const merged = cur.trim() ? cur.trim() + "\n" + desc : desc;
         setRightText(updateShotField(rightText, "detailed_description", merged));
       } else {
-        setError((data && data.error) || "图像分析失败");
+        setError((data && data.error) || t("Image analysis failed"));
       }
     } catch (e) {
       console.error("[Transfer] analyzeImageForDetailed failed:", e);
@@ -1217,7 +1218,7 @@ export function TransferPanel({ director }) {
   async function runGenerate(source) {
     if (busy) return;
     if (!source) {
-      setError("请输入左侧 Segment Prompt 后再生成");
+      setError(t("Please enter the left Segment Prompt before generating"));
       return;
     }
     setBusy(true);
@@ -1232,6 +1233,7 @@ export function TransferPanel({ director }) {
         prompt: source,
         image_path: firstFramePath(),
         duration_seconds: durSecs > 0 ? durSecs : 0,
+        lang: getLocale(),
       });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",
@@ -1251,7 +1253,7 @@ export function TransferPanel({ director }) {
         // 右侧编辑器仅在仍处于同一 segment 时刷新，避免请求期间切换 segment 被误覆盖
         if (targetSeg === curSeg) setRightText(text);
       } else {
-        setError(data.error || "生成失败");
+        setError(data.error || t("Generation failed"));
       }
     } catch (err) {
       console.error("[Transfer] generate failed:", err);
@@ -1666,11 +1668,11 @@ export function TransferPanel({ director }) {
         }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || "合并失败");
-      showDragHint(`已合并 ${sel.length} 段视频，结果已加入素材条`);
+      if (!data.success) throw new Error(data.error || t("Merge failed"));
+      showDragHint(t("Merged {n} videos; the result was added to the material strip", { n: sel.length }));
     } catch (err) {
       console.error("[Transfer] 合并失败:", err);
-      showDragHint(`合并失败：${err.message || "未知错误"}`);
+      showDragHint(t("Merge failed: {msg}", { msg: err.message || t("Unknown error") }));
     } finally {
       setMergeBusy(false);
     }
@@ -1693,7 +1695,7 @@ export function TransferPanel({ director }) {
     //（Combine 节点在提供 clip_audio 时才保存 latent 素材并输出音频切片）
     sel = sel.filter((m) => m.imageLatent && m.clipAudio);
     if (sel.length < 2) {
-      showDragHint("无损合并需要至少 2 段含 latent 与音频的素材（Guide 需输出 clip_audio）");
+      showDragHint(t("Lossless merge requires at least 2 materials with latent and audio (Guide must output clip_audio)"));
       return;
     }
     setLosslessMergeBusy(true);
@@ -1714,11 +1716,11 @@ export function TransferPanel({ director }) {
         }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || "无损合并失败");
-      showDragHint(`已无损合并 ${sel.length} 段，结果已加入素材条`);
+      if (!data.success) throw new Error(data.error || t("Lossless merge failed"));
+      showDragHint(t("Losslessly merged {n} segments; the result was added to the material strip", { n: sel.length }));
     } catch (err) {
       console.error("[Transfer] 无损合并失败:", err);
-      showDragHint(`无损合并失败：${err.message || "未知错误"}`);
+      showDragHint(t("Lossless merge failed: {msg}", { msg: err.message || t("Unknown error") }));
     } finally {
       setLosslessMergeBusy(false);
     }
@@ -1815,7 +1817,7 @@ export function TransferPanel({ director }) {
         const done = (file) => {
           if (longPressRef.current && longPressRef.current.id === m.id && file) {
             setDragReadyId(m.id);
-            showDragHint("已就绪：按住并拖动即可把视频拖到其他上传框");
+            showDragHint(t("Ready: press and drag to move this video into other upload boxes"));
           }
         };
         if (materialFileCache.has(m.id)) {
@@ -1867,9 +1869,9 @@ export function TransferPanel({ director }) {
         );
       } catch (err) { /* 忽略 */ }
     } else if (longPressRef.current && longPressRef.current.id === m.id && longPressRef.current.fired) {
-      showDragHint("正在预取视频，请稍候再拖动");
+      showDragHint(t("Prefetching video, please wait a moment before dragging"));
     } else {
-      showDragHint("请先长按素材约 0.4 秒，出现“可拖出”角标后再拖动");
+      showDragHint(t("Long-press the material for ~0.4s until the drag badge appears, then drag"));
     }
   };
 
@@ -1907,9 +1909,9 @@ export function TransferPanel({ director }) {
       <div style=${S.buttons}>
         <button
           class="mrd-pr-btn"
-          title="编辑 Segment Prompt / Minimax H3 Prompt / 添加主体"
+          title=${t("Edit Segment Prompt / Minimax H3 Prompt / Add Subjects")}
           onClick=${() => setEditorOpen(true)}
-        >✎ Prompt & Subjects</button>
+        >✎ ${t("Prompt & Subjects")}</button>
         ${
           curSeg && curSeg.type !== "audio"
             ? html`
@@ -1917,9 +1919,9 @@ export function TransferPanel({ director }) {
                   curSeg.type !== "audio"
                     ? html`<button
                         class=${autoEndOn ? "mrd-pr-btn toggle-on" : "mrd-pr-btn"}
-                        title="Toggle Auto End Frame for the selected segment"
+                        title=${t("Toggle Auto End Frame for the selected segment")}
                         onClick=${toggleAutoEndFrame}
-                      >Auto End Frame</button>`
+                      >${t("Auto End Frame")}</button>`
                     : null
                 }`
             : null
@@ -1928,7 +1930,7 @@ export function TransferPanel({ director }) {
 
       ${
         busy
-          ? html`<div style=${S.status}>生成中…</div>`
+          ? html`<div style=${S.status}>${t("Generating…")}</div>`
           : error
             ? html`<div style=${S.error}>${error}</div>`
             : html`<div style=${S.status}></div>`
@@ -1938,7 +1940,7 @@ export function TransferPanel({ director }) {
         <div style=${S.resourcesList}>
           ${
             resources.length === 0
-              ? html`<div style=${S.hint}>资源引用（主体 / 手动添加主体）会显示在这里</div>`
+              ? html`<div style=${S.hint}>${t("Subject references (subjects / manually added subjects) will appear here")}</div>`
               : resources.map(r => {
                   const media = r.media && r.media.kind ? r.media : subjectMediaPreview(r);
                   const isAudio = media.kind === "audio";
@@ -1959,37 +1961,37 @@ export function TransferPanel({ director }) {
                     onClick=${openRetEdit}
                     onMouseEnter=${() => setHoverRes(editable ? r.key : null)}
                     onMouseLeave=${() => setHoverRes(null)}
-                    title=${editable ? "点击编辑该主体的 Retention（段级覆盖）" : (r.type ? "主体类型：" + r.type : "")}
+                    title=${editable ? t("Click to edit this subject's Retention (segment-level override)") : (r.type ? t("Subject type: ") + r.type : "")}
                   >
                     ${
                       r.type
-                        ? html`<span style=${isSubject ? S.resTypeSubject : S.resType} title="主体类型">${r.type}</span>`
+                        ? html`<span style=${isSubject ? S.resTypeSubject : S.resType} title=${t("Subject type")}>${r.type}</span>`
                         : ""
                     }
-                    ${editable ? html`<span style=${S.resEditHint} title="点击编辑 Retention">✎</span>` : ""}
+                    ${editable ? html`<span style=${S.resEditHint} title=${t("Click to edit Retention")}>✎</span>` : ""}
                     ${
                       media.kind === "video" && media.src
-                        ? html`<video style=${S.video} src=${media.src} controls preload="metadata" title="视频主体（点击画面播放/暂停）"
+                        ? html`<video style=${S.video} src=${media.src} controls preload="metadata" title=${t("Video subject (click to play/pause)")}
                             onClick=${(e) => { e.stopPropagation(); if (e.target === e.currentTarget) { const v = e.currentTarget; v.paused ? v.play() : v.pause(); } }}></video>`
                         : media.kind === "image" && media.src
                           ? html`<img style=${S.img} src=${media.src} alt=${r.label} onClick=${(e) => e.stopPropagation()} />`
                           : media.kind === "audio" && media.src
                             ? html`<div style=${S.audioCard} onClick=${(e) => e.stopPropagation()}>
-                                <span style=${S.audioIconBig} title="音频主体（点击播放/暂停）"
+                                <span style=${S.audioIconBig} title=${t("Audio subject (click to play/pause)")}
                                   onClick=${(e) => { e.stopPropagation(); const a = e.currentTarget.parentElement.querySelector("audio"); if (a) { a.paused ? a.play() : a.pause(); } }}>♪</span>
                                 <audio style=${S.audio} src=${media.src} controls preload="metadata" onClick=${(e) => e.stopPropagation()}></audio>
                               </div>`
                             : media.kind === "video"
-                              ? html`<span style=${S.resVideo} title="视频主体（无文件）">▶</span>`
+                              ? html`<span style=${S.resVideo} title=${t("Video subject (no file)")}>▶</span>`
                               : media.kind === "audio" 
-                                ? html`<span style=${S.resAudio} title="音频/无媒体主体">♪</span>`
-                                : html`<span style=${S.resSubject} title="主体">(‾◡◝)</span>`
+                                ? html`<span style=${S.resAudio} title=${t("Audio / no-media subject")}>♪</span>`
+                                : html`<span style=${S.resSubject} title=${t("Subject")}>(‾◡◝)</span>`
                     }
                     ${
                       r.kind === "addition"
                         ? html`<span style=${{ display: "inline-flex", alignItems: "center", gap: "3px", maxWidth: "64px", overflow: "hidden", whiteSpace: "nowrap" }}>
                             <span style=${isAudio ? S.audioIcon : Object.assign({}, S.label, { color: "#a5d6a7" })}>${isAudio ? "♪ " : "＋"}${r.label}</span>
-                            <span title="移除" style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }} onClick=${(e) => { e.stopPropagation(); removeAddedSubject(r.label); }}>×</span>
+                            <span title=${t("Remove")} style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }} onClick=${(e) => { e.stopPropagation(); removeAddedSubject(r.label); }}>×</span>
                           </span>`
                         : (isAudio
                             ? html`<span style=${S.audioIcon}>♪ ${r.label}</span>`
@@ -2003,12 +2005,12 @@ export function TransferPanel({ director }) {
         <div
           class="tr-h3-preview"
           style=${S.h3PreviewWrap}
-          title="点击打开 Prompt & Subjects 编辑器"
+          title=${t("Click to open the Prompt & Subjects editor")}
           onClick=${() => setEditorOpen(true)}
           onMouseDown=${(e) => e.preventDefault()}
         >
           <div style="display:flex;align-items:center">
-            <div style=${S.h3PreviewLabel}>Minimax H3 Prompt</div>
+            <div style=${S.h3PreviewLabel}>${t("Minimax H3 Prompt")}</div>
             <div
               class="tr-defs"
               style=${S.defsWrap}
@@ -2028,7 +2030,7 @@ export function TransferPanel({ director }) {
                       ${
                         bindingsText
                           ? html`<div style=${{ whiteSpace: "pre-wrap" }}>${bindingsText}</div>`
-                          : html`<div style=${S.defsTipEmpty}>暂无主体定义</div>`
+                          : html`<div style=${S.defsTipEmpty}>${t("No subject definitions yet")}</div>`
                       }
                     </div>`
                   : null
@@ -2047,10 +2049,10 @@ export function TransferPanel({ director }) {
 
       <div class="tr-materials" style=${S.materialsWrap}>
         <div style=${S.materialsHead}>
-          <span style=${S.materialsTitle}>视频素材</span>
+          <span style=${S.materialsTitle}>${t("Video materials")}</span>
           ${
             selIds.size
-              ? html`<span style=${S.materialsSel}>已选 ${selIds.size} 项</span>`
+              ? html`<span style=${S.materialsSel}>${t("{n} selected", { n: selIds.size })}</span>`
               : null
           }
           ${
@@ -2061,7 +2063,7 @@ export function TransferPanel({ director }) {
                   disabled=${mergeBusy}
                   onClick=${mergeSelectedMaterials}
                   onMouseDown=${(e) => e.preventDefault()}
-                >${mergeBusy ? "合并中…" : "合并"}</button>`
+                >${mergeBusy ? t("Merging…") : t("Merge")}</button>`
               : null
           }
           ${
@@ -2072,8 +2074,8 @@ export function TransferPanel({ director }) {
                   disabled=${losslessMergeBusy}
                   onClick=${losslessMergeSelectedMaterials}
                   onMouseDown=${(e) => e.preventDefault()}
-                  title="按选中顺序把各段 latent 像素域交叉淡化拼接（clip_audio 优先，否则解码 audio_latent 拼接 master_audio）"
-                >${losslessMergeBusy ? "无损合并中…" : "无损合并"}</button>`
+                  title=${t("LosslessMergeHint")}
+                >${losslessMergeBusy ? t("Lossless merging…") : t("Lossless merge")}</button>`
               : null
           }
           ${
@@ -2083,7 +2085,7 @@ export function TransferPanel({ director }) {
                   style=${S.materialsDelBtn}
                   onClick=${deleteSelectedMaterials}
                   onMouseDown=${(e) => e.preventDefault()}
-                >删除</button>`
+                >${t("Delete")}</button>`
               : null
           }
         </div>
@@ -2118,7 +2120,7 @@ export function TransferPanel({ director }) {
         >
           ${
             materials.length === 0
-              ? html`<div style=${S.hint}>运行 MiniMaxRefGuide 后，各段生成的视频（prev_tail）会显示在这里</div>`
+              ? html`<div style=${S.hint}>${t("GuideTailHint")}</div>`
               : materials.map((m) => {
                   const sel = selIds.has(m.id);
                   const orderNum = selOrder.indexOf(m.id) + 1; // 合并序号：0 表示未选中
@@ -2174,7 +2176,7 @@ export function TransferPanel({ director }) {
                         dragReady ? S.materialCardReady : null
                       )}
                       key=${m.id}
-                      title=${m.label + "\n长按约 0.4 秒后可把视频拖到其他文件上传框"}
+                      title=${m.label + "\n" + t("LongPressDragHint")}
                       draggable="true"
                       onClick=${(e) => {
                         // 长按松手后抑制一次 click，避免误改选中状态
@@ -2213,8 +2215,8 @@ export function TransferPanel({ director }) {
                       onMouseLeave=${stopAll}
                     >
                       ${orderNum > 0 ? html`<span style=${S.materialOrderBadge}>${orderNum}</span>` : null}
-                      ${m.imageLatent ? html`<span style=${S.materialLatentBadge}>无损</span>` : null}
-                      ${dragReady ? html`<span style=${S.materialReadyBadge}>可拖出</span>` : null}
+                      ${m.imageLatent ? html`<span style=${S.materialLatentBadge}>${t("Lossless")}</span>` : null}
+                      ${dragReady ? html`<span style=${S.materialReadyBadge}>${t("Draggable")}</span>` : null}
                       ${preview}
                       <span style=${S.materialLabel}>${m.label}</span>
                     </div>
@@ -2233,9 +2235,9 @@ export function TransferPanel({ director }) {
               <div class="tr-viewer-box" style=${S.viewerBox}>
                 <div style=${S.viewerHead}>
                   <span style=${S.viewerTitle} title=${viewer.label}>${viewer.label}</span>
-                  <button class="mrd-pr-btn" style=${S.viewerBtn} title="下载视频" onClick=${() => downloadMaterial(viewer)}>下载</button>
-                  <button class="mrd-pr-btn" style=${S.viewerBtn} title="在新标签页打开" onClick=${() => window.open(viewer.src, "_blank")}>打开</button>
-                  <button class="mrd-pr-btn" style=${S.viewerBtn} title="关闭 (Esc)" onClick=${() => setViewer(null)}>关闭</button>
+                  <button class="mrd-pr-btn" style=${S.viewerBtn} title=${t("Download video")} onClick=${() => downloadMaterial(viewer)}>${t("Download")}</button>
+                  <button class="mrd-pr-btn" style=${S.viewerBtn} title=${t("Open in new tab")} onClick=${() => window.open(viewer.src, "_blank")}>${t("Open")}</button>
+                  <button class="mrd-pr-btn" style=${S.viewerBtn} title=${t("Close (Esc)")} onClick=${() => setViewer(null)}>${t("Close")}</button>
                 </div>
                 <video src=${viewer.src} controls autoplay playsinline style=${S.viewerVideo}></video>
               </div>
@@ -2249,26 +2251,26 @@ export function TransferPanel({ director }) {
           ? html`
             <div class="ref-ms-mention-popup open" style=${{ left: menu.x + "px", top: menu.y + "px", zIndex: 100000 }}>
               <div class="ref-ms-mention-tabs">
-                ${["all", "Subject", "Picture", "Video", "Audio"].map(t => html`
+                ${["all", "Subject", "Picture", "Video", "Audio"].map(tab => html`
                   <button
                     type="button"
-                    class="ref-ms-mention-tab${menu.tab === t ? " active" : ""}"
+                    class="ref-ms-mention-tab${menu.tab === tab ? " active" : ""}"
                     onMouseDown=${(e) => e.preventDefault()}
-                    onClick=${() => setMenu({ ...menu, tab: t })}
-                  >${t === "all" ? "全部" : t}</button>
+                    onClick=${() => setMenu({ ...menu, tab })}
+                  >${tab === "all" ? t("All") : tab}</button>
                 `)}
               </div>
               <div class="ref-ms-mention-list">
                 ${
                   menuSubjects.length === 0
-                    ? html`<div class="ref-ms-mention-empty">${subjects.length === 0 ? "暂无可用主体（请先在主体节点中添加）" : "暂无可用主体"}</div>`
+                    ? html`<div class="ref-ms-mention-empty">${subjects.length === 0 ? t("No subjects available (add some in the subject node first)") : t("No subjects available")}</div>`
                     : menuSubjects.map(h => html`
                         <div
                           class="ref-ms-mention-item"
                           key=${h.name}
                           onMouseDown=${(e) => e.preventDefault()}
                           onClick=${() => pickSubject(h)}
-                          title="插入 ${menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:对话内容>`}"
+                          title=${t("Insert {token}", { token: menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:${t("Dialogue")}>` })}
                         >
                           ${subjectMediaThumb(h, 22)}
                           <span class="ref-ms-mention-type">${h.type || "Subject"}</span>
@@ -2284,21 +2286,21 @@ export function TransferPanel({ director }) {
 
       <${RefModal}
         open=${editorOpen}
-        title="Segment Prompt / H3 Prompt / 添加主体"
+        title=${t("Segment Prompt / H3 Prompt / Add Subjects")}
         width="1500px"
         height="720px"
         onClose=${() => { setEditorOpen(false); setMenu(null); }}
-        help=${bindingsText || "暂无主体定义"}
+        help=${bindingsText || t("No subject definitions yet")}
       >
         <div style=${{ display: "flex", gap: "6px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
           <div class="mrd-pr-prompt-wrapper" style=${S.col}>
-            <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>Segment Prompt</div>
+            <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>${t("Segment Prompt")}</div>
             <textarea
               ref=${leftRef}
               class="mrd-pr-prompt-area"
               style=${S.refTextarea}
               value=${leftText}
-              placeholder="原始 prompt（输入 @ 引用主体）"
+              placeholder=${t("Original prompt (type @ to reference a subject)")}
               spellcheck=${false}
               onInput=${(e) => { setLeftText(e.target.value); handleInput(e, "left"); }}
             ></textarea>
@@ -2306,14 +2308,14 @@ export function TransferPanel({ director }) {
           <div style=${{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: "22px", flex: "0 0 auto" }}>
             <button
               class="mrd-pr-btn"
-              title="以左侧为源生成 H3 Prompt，结果展示在右侧"
+              title=${t("Generate the H3 Prompt from the left side; the result is shown on the right")}
               disabled=${busy}
               onClick=${() => runGenerate(leftText)}
             >→</button>
           </div>
           <div class="mrd-pr-prompt-wrapper" style=${{ ...S.col, gap: "8px" }}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>
-              Minimax H3 Prompt
+              ${t("Minimax H3 Prompt")}
             </div>
             <div style=${{ display: "flex", flexDirection: "column", gap: "8px", flex: "1 1 0", minHeight: "0" }}>
               ${(() => {
@@ -2327,12 +2329,12 @@ export function TransferPanel({ director }) {
                       class="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "0 0 96px", height: "96px" }}
                       value=${pObj.summary}
-                      placeholder=${"This section uses one short paragraph to summarize the target video and its reference relationships. It begins with a square-bracketed task-type prefix:\n\n[video editing + reference generation + audio reuse] The target video shows <@Anni> eating a cookie in <@Caff>. <@Tony> enters with <@May>, which lunges toward the cookie. The three-shot exchange uses <@Anni voice> as the voice-timbre reference for <@Anni> and ends with a canned audience laugh."}
+                      placeholder=${t("SummaryPlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "summary", e.target.value)); handleInput(e, "right", "summary"); }}
                     ></textarea>
                     <div class="mrd-pr-tags" style=${{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "4px 8px 0" }}>
-                      ${TASK_TYPES.map((t) => html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#2a2a2a", border: "1px solid #444", borderRadius: "3px", color: "#9bb9ff", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t.title} onClick=${() => insertTaskTag(t.label)}>${t.label}</span>`)}
+                      ${TASK_TYPES.map((task) => html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#2a2a2a", border: "1px solid #444", borderRadius: "3px", color: "#9bb9ff", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(task.title)} onClick=${() => insertTaskTag(task.label)}>${task.label}</span>`)}
                     </div>
                   </div>
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "1 1 0" })}>
@@ -2342,7 +2344,7 @@ export function TransferPanel({ director }) {
                       class="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "1 1 0" }}
                       value=${pObj.detailed_description}
-                      placeholder=${"[Shot 1] The scene opens in a crowded urban street...\n[Shot 2] At 00:09.000, the shot cuts to an extreme close-up..."}
+                      placeholder=${t("DetailPlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "detailed_description", e.target.value)); handleInput(e, "right", "detail"); }}
                     ></textarea>
@@ -2354,7 +2356,7 @@ export function TransferPanel({ director }) {
                       class="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
                       value=${pObj.overall_soundscape === "N/A" ? "" : pObj.overall_soundscape}
-                      placeholder=${"summarizes ambience and physical sounds across the full video. Dialogue, singing, and sound events synchronized to a particular shot remain in detailed_description:\n\nQuiet indoor room tone and a low ventilation hum continue throughout the video.\nor\nThe copied ambience layer from <@Anni voice> continues throughout the target video."}
+                      placeholder=${t("SoundscapePlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "overall_soundscape", e.target.value)); handleInput(e, "right", "overall"); }}
                     ></textarea>
@@ -2366,7 +2368,7 @@ export function TransferPanel({ director }) {
                       class="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
                       value=${pObj.non_diegetic_music === "N/A" ? "" : pObj.non_diegetic_music}
-                      placeholder=${"describes background music that the characters cannot hear and that is audible only to the audience. When music is present, state its instrumentation, tempo, and dynamic development:\n\nA restrained solo-piano score at a slow tempo, with sustained low cello underneath and no swell.\nor\n<@Anni voice> is directly reused as the complete audience-only score."}
+                      placeholder=${t("MusicPlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "non_diegetic_music", e.target.value)); handleInput(e, "right", "music"); }}
                     ></textarea>
@@ -2378,17 +2380,17 @@ export function TransferPanel({ director }) {
         </div>
         ${
           busy
-            ? html`<div style=${S.status}>生成中…</div>`
+            ? html`<div style=${S.status}>${t("Generating…")}</div>`
             : error
               ? html`<div style=${S.error}>${error}</div>`
               : html`<div style=${S.status}></div>`
         }
         <div style=${{ borderTop: "1px solid #333", marginTop: "8px", paddingTop: "6px", display: "flex", flexDirection: "column", gap: "4px" }}>
-          <div style=${{ fontSize: "10px", fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 2px 2px" }}>添加主体（additionSubject）</div>
+          <div style=${{ fontSize: "10px", fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 2px 2px" }}>${t("Add subject (additionSubject)")}</div>
           <div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
             ${
               visibleAdded.length === 0 && addCandidates.length === 0
-                ? html`<div style=${{ color: "#888", fontSize: "12px", padding: "2px" }}>没有可添加的主体（未提及的主体均已添加）</div>`
+                ? html`<div style=${{ color: "#888", fontSize: "12px", padding: "2px" }}>${t("No subjects to add (all unmentioned subjects have been added)")}</div>`
                 : html`
                     ${
                       visibleAdded.map(n => {
@@ -2397,9 +2399,9 @@ export function TransferPanel({ director }) {
                         <span
                           style=${{ display: "inline-flex", alignItems: "center", gap: "6px", background: "#1e3a5f", color: "#a5d6a7", border: "1px solid #2b4a6f", borderRadius: "10px", padding: "2px 8px 2px 2px", fontSize: "12px" }}
                           key=${"added-" + n}
-                          title=${h ? "已添加主体：" + n : n}
+                          title=${h ? t("Added subject: ") + n : n}
                         >${h ? subjectMediaThumb(h, 44) : null}<span>＋${n}</span><span
-                            title="移除"
+                            title=${t("Remove")}
                             style=${{ cursor: "pointer", color: "#ef5350", lineHeight: 1 }}
                             onClick=${() => removeAddedSubject(n)}
                           >×</span></span>`;
@@ -2422,7 +2424,7 @@ export function TransferPanel({ director }) {
       </${RefModal}>
       <${RefModal}
         open=${!!retEdit}
-        title="编辑主体 Retention（段级覆盖）"
+        title=${t("Edit subject Retention (segment-level override)")}
         width="520px"
         height="320px"
         onClose=${() => setRetEdit(null)}
@@ -2432,17 +2434,17 @@ export function TransferPanel({ director }) {
             ? html`
               <div style=${{ display: "flex", flexDirection: "column", flex: "1 1 0", minHeight: "0" }}>
                 <div style=${S.retModalTitle}>${retEdit.name}</div>
-                <div style=${S.retModalSub}>该覆盖仅对当前时间轴片段生效，优先于主体节点中定义的 Retention；清空并保存后删除覆盖，回落主体默认值。</div>
+                <div style=${S.retModalSub}>${t("RetentionOverrideHint")}</div>
                 <textarea
                   style=${S.retTextarea}
                   value=${retEdit.value}
-                  placeholder="描述该主体在此片段中的保留程度 / 需保留的信息（如：保留角色服装、发型与声音，表情可变化）"
+                  placeholder=${t("RetentionDescribeHint")}
                   spellcheck=${false}
                   onInput=${(e) => setRetEdit({ ...retEdit, value: e.target.value })}
                 ></textarea>
                 <div style=${S.retFooter}>
-                  <button class="mrd-pr-btn" style=${S.retBtnCancel} onClick=${() => setRetEdit(null)}>取消</button>
-                  <button class="mrd-pr-btn" style=${S.retBtnSave} onClick=${saveRetention}>保存</button>
+                  <button class="mrd-pr-btn" style=${S.retBtnCancel} onClick=${() => setRetEdit(null)}>${t("Cancel")}</button>
+                  <button class="mrd-pr-btn" style=${S.retBtnSave} onClick=${saveRetention}>${t("Save")}</button>
                 </div>
               </div>
             `
@@ -2499,19 +2501,19 @@ export function GlobalParamsPanel({ director }) {
 
   return html`
     <div class="tr-gp">
-      <div class="tr-gp-head">全局参数</div>
+      <div class="tr-gp-head">${t("Global Parameters")}</div>
       <div class="tr-gp-grid">
         ${
           defs.map(def => html`
             <label class="tr-gp-item" key=${def.name}>
-              <span class="tr-gp-label">${def.label}</span>
+              <span class="tr-gp-label">${t(def.label)}</span>
               ${
                 def.type === "select"
                   ? html`<select
                       class="tr-gp-select"
                       value=${gp[def.name]}
                       onChange=${(e) => setGlobal(def.name, e.target.value)}
-                    >${def.options.map(o => html`<option value=${o}>${o}</option>`)}</select>`
+                    >${def.options.map(o => html`<option value=${o}>${t(o)}</option>`)}</select>`
                   : html`<${NumInput}
                       def=${def}
                       value=${gp[def.name]}

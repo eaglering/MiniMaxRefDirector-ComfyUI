@@ -4,6 +4,7 @@
 // 重构: 统一浮动菜单壳 openMenu/dismissMenu，合并原 showGapContextMenu 与 showGapMenu，
 //       showContextMenu 改用配置数组式构建，公共逻辑提取为 _menuBtn/_menuDivider/_copySegment/_applyUploadedImage。
 import { ICONS, RULER_HEIGHT, genId, viewUrl, uploadImage } from "./shared.js";
+import { t } from "../i18n.js";
 
 const VID_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`;
 
@@ -65,13 +66,13 @@ export const menus = {
             btn.disabled = true;
             btn.style.opacity = "0.4";
             btn.style.cursor = "not-allowed";
-            btn.title = "No image found in clipboard";
+            btn.title = t("No image found in clipboard");
           }
         } else if (status.state === "denied") {
           btn.disabled = true;
           btn.style.opacity = "0.4";
           btn.style.cursor = "not-allowed";
-          btn.title = "Clipboard permission denied";
+          btn.title = t("Clipboard permission denied");
         }
       }
     } catch (e) {
@@ -89,13 +90,13 @@ export const menus = {
             btn.disabled = true;
             btn.style.opacity = "0.4";
             btn.style.cursor = "not-allowed";
-            btn.title = "No text found in clipboard";
+            btn.title = t("No text found in clipboard");
           }
         } else if (status.state === "denied") {
           btn.disabled = true;
           btn.style.opacity = "0.4";
           btn.style.cursor = "not-allowed";
-          btn.title = "Clipboard permission denied";
+          btn.title = t("Clipboard permission denied");
         }
       }
     } catch (e) {
@@ -212,21 +213,21 @@ export const menus = {
     // Group 1: Split at Playhead (if available)
     const splitFrame = Math.round(this.currentFrame);
     if (splitFrame > seg.start && splitFrame < seg.start + seg.length) {
-      items.push(this._menuBtn("Split at Playhead", { onClick: () => { this.splitSegmentAtPlayhead(seg, trackType); this.dismissMenu(); } }));
+      items.push(this._menuBtn(t("Split at Playhead"), { onClick: () => { this.splitSegmentAtPlayhead(seg, trackType); this.dismissMenu(); } }));
       items.push(this._menuDivider());
     }
 
     // Group 2: Segment Options (always)
-    items.push(this._menuBtn("Copy Segment", { onClick: () => { this._copySegment(seg, trackType); this.dismissMenu(); } }));
-    items.push(this._menuBtn("Paste Segment", {
-      disabled: !canPaste, title: "No matching segment copied to clipboard",
+    items.push(this._menuBtn(t("Copy Segment"), { onClick: () => { this._copySegment(seg, trackType); this.dismissMenu(); } }));
+    items.push(this._menuBtn(t("Paste Segment"), {
+      disabled: !canPaste, title: t("No matching segment copied to clipboard"),
       onClick: () => {
         this.pasteSegmentAtFrame(copiedSegData, this.getCanonicalTrack(copiedTrack), copiedSibData, Math.round(this.currentFrame));
         this.dismissMenu();
       }
     }));
-    items.push(this._menuBtn("Replace Segment", {
-      disabled: !canPaste, title: "No matching segment copied to clipboard",
+    items.push(this._menuBtn(t("Replace Segment"), {
+      disabled: !canPaste, title: t("No matching segment copied to clipboard"),
       onClick: () => {
         const targetArray = this.getSegmentArray(this.getCanonicalTrack(trackType));
         const idx = targetArray.findIndex(s => s.id === seg.id);
@@ -241,13 +242,13 @@ export const menus = {
 
     // Group 3: Prompt Options (if not audio)
     if (trackType !== "audio") {
-      items.push(this._menuBtn("Copy Prompt", {
+      items.push(this._menuBtn(t("Copy Prompt"), {
         onClick: async () => {
           try { await navigator.clipboard.writeText(seg.prompt || ""); } catch (err) { console.error("Failed to copy prompt", err); }
           this.dismissMenu();
         }
       }));
-      const pastePromptBtn = this._menuBtn("Paste Prompt", {
+      const pastePromptBtn = this._menuBtn(t("Paste Prompt"), {
         onClick: async () => {
           try {
             const text = await navigator.clipboard.readText();
@@ -270,7 +271,7 @@ export const menus = {
 
     // Group 4: Image Options (if isImage)
     if (isImage) {
-      items.push(this._menuBtn("Copy Image", {
+      items.push(this._menuBtn(t("Copy Image"), {
         onClick: async () => {
           try {
             const img = new Image();
@@ -287,7 +288,7 @@ export const menus = {
           this.dismissMenu();
         }
       }));
-      items.push(this._menuBtn("Save Image", {
+      items.push(this._menuBtn(t("Save Image"), {
         onClick: () => {
           const a = document.createElement("a");
           a.href = fullResUrl;
@@ -296,7 +297,7 @@ export const menus = {
           this.dismissMenu();
         }
       }));
-      items.push(this._menuBtn("Open Image in New Tab", {
+      items.push(this._menuBtn(t("Open Image in New Tab"), {
         onClick: () => {
           const win = window.open();
           if (win) {
@@ -306,7 +307,7 @@ export const menus = {
           this.dismissMenu();
         }
       }));
-      const replaceImgBtn = this._menuBtn("Replace with Copied Image", {
+      const replaceImgBtn = this._menuBtn(t("Replace with Copied Image"), {
         onClick: async () => {
           try {
             const items = await navigator.clipboard.read();
@@ -324,7 +325,7 @@ export const menus = {
       });
       this._checkClipboardForImage(replaceImgBtn);
       items.push(replaceImgBtn);
-      items.push(this._menuBtn("Replace with...", {
+      items.push(this._menuBtn(t("Replace with..."), {
         onClick: () => {
           this.dismissMenu();
           const fi = document.createElement("input");
@@ -345,7 +346,7 @@ export const menus = {
       const convertTargets = seg.type === "text" ? ["image", "video"]
         : ["text"];
       for (const target of convertTargets) {
-        const label = "Convert to " + (target === "text" ? "Text" : target === "image" ? "Image" : "Video");
+        const label = t(target === "text" ? "Convert to Text" : target === "image" ? "Convert to Image" : "Convert to Video");
         items.push(this._menuBtn(label, {
           onClick: () => {
             this._convertSegmentType(seg, trackType, target);
@@ -363,7 +364,7 @@ export const menus = {
       ? this.timeline[isVidLink ? "audioSegments" : "segments"].find(s => s.id === seg.id.slice(0, -2) + (isVidLink ? "_a" : "_v"))
       : null;
     if (siblingForUnlink) {
-      items.push(this._menuBtn("Unlink Media", {
+      items.push(this._menuBtn(t("Unlink Media"), {
         onClick: () => {
           seg.id = genId();
           siblingForUnlink.id = genId();
@@ -376,7 +377,7 @@ export const menus = {
     }
 
     // Group 7: Latent Upscaler + Mark Selection + Delete
-    items.push(this._menuBtn("Latent Upscaler", {
+    items.push(this._menuBtn(t("Latent Upscaler"), {
       onClick: () => {
         seg.upscale = !seg.upscale;
         this.commitChanges();
@@ -384,7 +385,7 @@ export const menus = {
         this.dismissMenu();
       }
     }));
-    items.push(this._menuBtn("Mark Selection", {
+    items.push(this._menuBtn(t("Mark Selection"), {
       onClick: () => {
         if (this.selectedSegmentIds && this.selectedSegmentIds.includes(seg.id)) this.markCurrentSelection();
         else this.markSegment(seg);
@@ -392,7 +393,7 @@ export const menus = {
       }
     }));
     items.push(this._menuDivider());
-    items.push(this._menuBtn("Delete", {
+    items.push(this._menuBtn(t("Delete"), {
       color: "#ff4444",
       onClick: () => {
         this.selectionType = trackType;
@@ -511,8 +512,8 @@ export const menus = {
     const gapLength = gap.frameEnd - gap.frameStart;
 
     const items = [];
-    items.push(this._menuBtn("Paste Segment", {
-      disabled: !canPaste, title: "No matching segment copied to clipboard",
+    items.push(this._menuBtn(t("Paste Segment"), {
+      disabled: !canPaste, title: t("No matching segment copied to clipboard"),
       onClick: () => {
         this.pasteSegmentAtFrame(copiedSegData, this.getCanonicalTrack(copiedTrack), copiedSibData, startAt);
         this.dismissMenu();
@@ -520,7 +521,7 @@ export const menus = {
     }));
 
     if (currentTrack === "image") {
-      const pasteImageBtn = this._menuBtn(`${ICONS.upload} Paste Image`, {
+      const pasteImageBtn = this._menuBtn(`${ICONS.upload} ${t("Paste Image")}`, {
         onClick: async () => {
           this.dismissMenu();
           try {
@@ -539,10 +540,10 @@ export const menus = {
       });
       this._checkClipboardForImage(pasteImageBtn);
       items.push(pasteImageBtn);
-      items.push(this._menuBtn(`${ICONS.text} Text Segment`, {
+      items.push(this._menuBtn(`${ICONS.text} ${t("Text Segment")}`, {
         onClick: () => { this.addSegmentInGap(gap.frameStart, gap.frameEnd, "text"); this.dismissMenu(); }
       }));
-      items.push(this._menuBtn(`${ICONS.upload} Image Segment`, {
+      items.push(this._menuBtn(`${ICONS.upload} ${t("Image Segment")}`, {
         onClick: () => {
           this.dismissMenu();
           const fi = document.createElement("input");
@@ -554,7 +555,7 @@ export const menus = {
           fi.click();
         }
       }));
-      items.push(this._menuBtn(`${VID_ICON} Video Segment`, {
+      items.push(this._menuBtn(`${VID_ICON} ${t("Video Segment")}`, {
         onClick: () => {
           this.dismissMenu();
           const fi = document.createElement("input");
@@ -567,7 +568,7 @@ export const menus = {
         }
       }));
     } else if (currentTrack === "audio") {
-      items.push(this._menuBtn(`${ICONS.audio} Audio Segment`, {
+      items.push(this._menuBtn(`${ICONS.audio} ${t("Audio Segment")}`, {
         onClick: () => { this.promptAddAudioInGap(gap.frameStart, gap.frameEnd); this.dismissMenu(); }
       }));
     }

@@ -1,6 +1,7 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: updateSelectionFromBox, syncSelectionTypeAndIndex, growTimelineIfNeeded, getMaxZoom, getVisualDurationFrames, updateZoomSliderMax, updateUIFromSelection, updateSidebarHeights
 import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, RULER_HEIGHT, MIN_SEGMENT_LENGTH, app } from "./shared.js";
+import { t } from "../i18n.js";
 
 // transfer 面板（.mrd-pr-transfer-mount）显示时保证的最小 prop 区高度：
 // buttons 行 + status + resources 预览条（含 H3 prompt 预览，min 450px）+ 间距
@@ -173,7 +174,7 @@ export const state = {
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
       if (this.promptInput) {
         this.promptInput.value = "";
-        this.promptInput.placeholder = "(Multiple Segments Selected)";
+        this.promptInput.placeholder = t("(Multiple Segments Selected)");
         this.promptInput.disabled = true;
         this.promptInput.style.opacity = "0.35";
         if (this._transferSetLeft) this._transferSetLeft("");
@@ -181,7 +182,7 @@ export const state = {
 
       if (this.segmentPromptLabel) {
         this.segmentPromptLabel.style.display = "block";
-        this.segmentPromptLabel.textContent = "Segment Prompt";
+        this.segmentPromptLabel.textContent = t("Segment Prompt");
       }
 
       if (this.strengthRow) this.strengthRow.style.display = "flex";
@@ -189,7 +190,7 @@ export const state = {
       if (this.strengthValue) {
         this.strengthValue.style.display = "inline-block";
         this.strengthValue.value = "";
-        this.strengthValue.placeholder = "(Multiple)";
+        this.strengthValue.placeholder = t("(Multiple)");
         this.strengthValue.disabled = true;
         this.strengthValue.style.opacity = "0.35";
       }
@@ -197,7 +198,7 @@ export const state = {
       if (this.durationValue) {
         this.durationValue.style.display = "inline-block";
         this.durationValue.value = "";
-        this.durationValue.placeholder = "(Multiple)";
+        this.durationValue.placeholder = t("(Multiple)");
         this.durationValue.disabled = true;
         this.durationValue.style.opacity = "0.35";
       }
@@ -205,7 +206,7 @@ export const state = {
       if (this.audioInfoArea) this.audioInfoArea.style.display = "none";
 
       if (this.segmentBoundsDisplay) {
-        this.segmentBoundsDisplay.textContent = "Multiple Segments Selected";
+        this.segmentBoundsDisplay.textContent = t("Multiple Segments Selected");
       }
       if (this._transferSetSeg) this._transferSetSeg(null);
       this._setTransferVisible(false);
@@ -250,13 +251,13 @@ export const state = {
       this._setTransferVisible(false);
       this.strengthRow.style.display = "flex";
       this.strengthLabel.style.display = "inline";
-      this.strengthLabel.textContent = "Guide Strength:";
+      this.strengthLabel.textContent = t("Guide Strength:");
       this.strengthValue.style.display = "inline-block";
       this.audioInfoArea.style.display = "block";
       this.audioInfoArea.innerHTML = `
-        File: <span>${seg.fileName || "Unknown"}</span><br>
-        Length: <span>${this.formatTime(seg.audioDurationFrames)}</span> Output Length: <span>${this.formatTime(seg.length)}</span><br>
-        Trim-in: <span>${this.formatTime(Math.round(seg.trimStart))}</span> Trim-Out: <span>${this.formatTime(Math.round(seg.audioDurationFrames - (seg.trimStart + seg.length)))}</span>
+        ${t("File")}: <span>${seg.fileName || t("Unknown")}</span><br>
+        ${t("Length")}: <span>${this.formatTime(seg.audioDurationFrames)}</span> ${t("Output Length")}: <span>${this.formatTime(seg.length)}</span><br>
+        ${t("Trim-in")}: <span>${this.formatTime(Math.round(seg.trimStart))}</span> ${t("Trim-Out")}: <span>${this.formatTime(Math.round(seg.audioDurationFrames - (seg.trimStart + seg.length)))}</span>
       `;
       this.strengthValue.value = "39";
       this.strengthValue.disabled = true;
@@ -269,19 +270,19 @@ export const state = {
     } else {
       if (this.segmentPromptLabel) {
         this.segmentPromptLabel.style.display = "block";
-        this.segmentPromptLabel.textContent = "Segment Prompt";
+        this.segmentPromptLabel.textContent = t("Segment Prompt");
       }
       this.audioInfoArea.style.display = "none";
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
       this.strengthRow.style.display = "flex";
       this.strengthLabel.style.display = "inline";
-      this.strengthLabel.textContent = "Guide Strength:";
+      this.strengthLabel.textContent = t("Guide Strength:");
       this.strengthValue.style.display = "inline-block";
 
       if (seg) {
         this.promptInput.value = seg.prompt || "";
         if (this._transferSetLeft) this._transferSetLeft(this.promptInput.value);
-        this.promptInput.placeholder = "Enter prompt for selected segment...";
+        this.promptInput.placeholder = t("Enter prompt for selected segment...");
         this.promptInput.disabled = false;
         this.promptInput.style.opacity = "1.0";
         this._setTransferVisible(true);
@@ -299,7 +300,7 @@ export const state = {
       } else {
         this.promptInput.value = "";
         if (this._transferSetLeft) this._transferSetLeft("");
-        this.promptInput.placeholder = "No segment selected!";
+        this.promptInput.placeholder = t("No segment selected!");
         this.promptInput.disabled = true;
         this.promptInput.style.opacity = "0.4";
         this._setTransferVisible(false);
@@ -320,9 +321,9 @@ export const state = {
         const startStr = this.formatTime(seg.start, true);
         const endStr = this.formatTime(seg.start + seg.length, true);
         const lengthStr = this.formatTime(seg.length, true);
-        this.segmentBoundsDisplay.textContent = `Start: ${startStr} | End: ${endStr} | Length: ${lengthStr}`;
+        this.segmentBoundsDisplay.textContent = t("Start: {s} | End: {e} | Length: {l}", { s: startStr, e: endStr, l: lengthStr });
       } else {
-        this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
+        this.segmentBoundsDisplay.textContent = t("Start: - | End: - | Length: -");
       }
     }
 
@@ -427,7 +428,7 @@ export const state = {
       const startStr = this.formatTime(seg.start, true);
       const endStr = this.formatTime(seg.start + seg.length, true);
       const lengthStr = this.formatTime(seg.length, true);
-      this.segmentBoundsDisplay.textContent = `Start: ${startStr} | End: ${endStr} | Length: ${lengthStr}`;
+      this.segmentBoundsDisplay.textContent = t("Start: {s} | End: {e} | Length: {l}", { s: startStr, e: endStr, l: lengthStr });
     }
     this.commitChanges(true);
     this.render();

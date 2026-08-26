@@ -254,6 +254,7 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         image_path = data.get("image_path", "")
         vlm_mode = data.get("vlm_mode", "llama-cpp")
         seed = data.get("seed", 42)
+        lang = data.get("lang", "en")
         try:
             duration_seconds = float(data.get("duration_seconds") or 0)
         except (TypeError, ValueError):
@@ -283,7 +284,7 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             pass
         json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed,
                                        vlm_mode=vlm_mode, options=options,
-                                       duration_seconds=duration_seconds)
+                                       duration_seconds=duration_seconds, lang=lang)
         return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()

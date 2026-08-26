@@ -1,6 +1,7 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: render, drawAudioSegmentVisuals
 import { RULER_HEIGHT } from "./shared.js";
+import { t } from "../i18n.js";
 
 export const render = {
   render() {
@@ -114,7 +115,7 @@ export const render = {
           this.ctx.textAlign = "center";
           this.ctx.textBaseline = "middle";
           this.ctx.font = "bold 12px sans-serif";
-          this.ctx.fillText("Drop to Place", startX + pxWidth / 2, RULER_HEIGHT + this.blockHeight / 2);
+          this.ctx.fillText(t("Drop to Place"), startX + pxWidth / 2, RULER_HEIGHT + this.blockHeight / 2);
         } else {
           this.ctx.fillStyle = seg.type === "text" ? "#000b12" : "#000";
           this.ctx.fillRect(startX, RULER_HEIGHT + 1, pxWidth, this.blockHeight - 2);
@@ -212,7 +213,7 @@ export const render = {
               this.ctx.rect(startX, RULER_HEIGHT, pxWidth, this.blockHeight);
               this.ctx.clip();
               this.ctx.font = "bold 9px sans-serif";
-              const upText = seg._extractingThumbs ? "Loading..." : "Uploading...";
+              const upText = seg._extractingThumbs ? t("Loading...") : t("Uploading...");
               const upW = this.ctx.measureText(upText).width + 10;
               this.ctx.fillStyle = "rgba(0, 14, 37, 0.7)";
               this.ctx.fillRect(startX + 1, RULER_HEIGHT + this.blockHeight - 17, upW, 16);
@@ -437,7 +438,7 @@ export const render = {
           this.ctx.textAlign = "center";
           this.ctx.textBaseline = "middle";
           this.ctx.font = "bold 12px sans-serif";
-          this.ctx.fillText("Drop Audio", startX + pxWidth / 2, trackY + this.audioTrackHeight / 2);
+          this.ctx.fillText(t("Drop Audio"), startX + pxWidth / 2, trackY + this.audioTrackHeight / 2);
         } else {
           const showHandles = !this.isMultiSelectActive();
           const outlineColor = isSelected ? "#fff" : null;
@@ -711,7 +712,7 @@ export const render = {
     ctx.rect(startX, yOffset + 2, pxWidth, trackHeight - 3);
     ctx.clip();
 
-    let text = seg.fileName || "Audio Track";
+    let text = seg.fileName || t("Audio Track");
     const maxWidth = pxWidth - 12;
     if (ctx.measureText(text).width > maxWidth && maxWidth > 0) {
       while (text.length > 0 && ctx.measureText(text + "...").width > maxWidth) {
@@ -730,7 +731,7 @@ export const render = {
       ctx.rect(startX, yOffset + 2, pxWidth, trackHeight - 3);
       ctx.clip();
       ctx.font = "bold 9px sans-serif";
-      const upText = seg._decoding ? "Decoding..." : "Uploading...";
+      const upText = seg._decoding ? t("Decoding...") : t("Uploading...");
       const upW = ctx.measureText(upText).width + 10;
       ctx.fillStyle = "rgba(0, 14, 37, 0.7)";
       ctx.fillRect(startX + 1, yOffset + trackHeight - 17, upW, 14);

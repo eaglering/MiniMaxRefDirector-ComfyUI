@@ -8,6 +8,7 @@
 // ============================================================
 import { h } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
+import { t } from "../i18n.js";
 import htm from "../../vendor/htm.module.js";
 
 const html = htm.bind(h);
@@ -211,7 +212,7 @@ export function RefModal({ open, title, width, height, onClose, children, footer
             <span class="ref-modal-title">${title}</span>
             <div
               class="ref-modal-help"
-              title="查看说明"
+              title=${t("View help")}
               onPointerDown=${(e) => e.stopPropagation()}
               onDblClick=${(e) => e.stopPropagation()}
               onMouseEnter=${openHelp}
@@ -225,15 +226,15 @@ export function RefModal({ open, title, width, height, onClose, children, footer
                     style=${Object.assign({ left: helpPos.left, top: helpPos.top }, helpPos.up ? { transform: "translateY(-100%)" } : null)}
                     onMouseEnter=${keepHelpOpen}
                     onMouseLeave=${delayCloseHelp}
-                  >${help || "拖动标题栏移动，双击还原居中，拖拽右下角调整大小，ESC 或点击遮罩关闭。"}</div>`
+                  >${help || t("ModalDragHint")}</div>`
                 : null
             }
           </div>
-          <button class="ref-modal-close" title="关闭" onClick=${(e) => { e.stopPropagation(); onClose && onClose(); }}>✕</button>
+          <button class="ref-modal-close" title=${t("Close")} onClick=${(e) => { e.stopPropagation(); onClose && onClose(); }}>✕</button>
         </div>
         <div class="ref-modal-body">${children}</div>
         ${footer ? html`<div class="ref-modal-foot">${footer}</div>` : null}
-        <div class="ref-modal-resize" onPointerDown=${(e) => beginDrag(e, "resize")} title="拖动调整大小"></div>
+        <div class="ref-modal-resize" onPointerDown=${(e) => beginDrag(e, "resize")} title=${t("Drag to resize")}></div>
       </div>
     </div>
   `;

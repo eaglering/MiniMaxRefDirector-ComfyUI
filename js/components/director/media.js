@@ -1,6 +1,7 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: _ensureThumbnails, _ensureVideoEl, _getOrExtractAudio, _extractAudioOnClient, _isAudioDecodingAllowed, _preloadAudioSegment, loadMedia, handleImageUpload, _uploadVideoFile, handleVideoUpload, generateVideoPreviewThumbs, handleAudioUpload
 import { api, genId, uploadImage, viewUrl } from "./shared.js";
+import { t } from "../i18n.js";
 
 export const media = {
   async _ensureThumbnails(seg) {
@@ -799,7 +800,7 @@ export const media = {
           vid.onerror = (e) => {
             console.error("Video load error", e);
             URL.revokeObjectURL(blobUrl);
-            alert("Video Load Error:\n\nThis video format or codec is not supported by your web browser (e.g., MKV or ProRes).\n\nPlease convert the video to a standard MP4 (H.264 / AAC) to use it on the timeline.");
+            alert(t("Video Load Error:\n\nThis video format or codec is not supported by your web browser (e.g., MKV or ProRes).\n\nPlease convert the video to a standard MP4 (H.264 / AAC) to use it on the timeline."));
             resolve();
           };
 

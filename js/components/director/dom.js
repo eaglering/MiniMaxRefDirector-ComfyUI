@@ -3,6 +3,7 @@
 import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget } from "./shared.js";
 import { h, render } from "../../vendor/preact.module.js";
 import { GlobalParamsPanel, mountTransfer } from "./transfer.js";
+import { t } from "../i18n.js";
 
 // Debounce ComfyUI auto-save（segment prompt 输入 300ms 后触发）
 let saveTimeout = null;
@@ -263,11 +264,11 @@ export const dom = {
     this.audioFileInput = makeFileInput("audio/*", true, (e) => this.handleAudioUpload(e.target.files));
     this.videoFileInput = makeFileInput("video/*", true, (e) => this.handleVideoUpload(e.target.files));
 
-    this.uploadBtn = toolBtn(`${ICONS.upload} Add Image`, () => this.fileInput.click());
-    this.uploadAudioBtn = toolBtn(`${ICONS.audio} Add Audio`, () => this.audioFileInput.click());
-    this.uploadVideoBtn = toolBtn(`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Add Video`, () => this.videoFileInput.click());
-    this.addTextBtn = toolBtn(`${ICONS.text} Add Text`, () => this.addTextSegmentFreeSpace());
-    this.deleteBtn = toolBtn(`${ICONS.trash} Delete`, () => this.deleteSelectedSegment(), { danger: true });
+    this.uploadBtn = toolBtn(`${ICONS.upload} ${t("Add Image")}`, () => this.fileInput.click());
+    this.uploadAudioBtn = toolBtn(`${ICONS.audio} ${t("Add Audio")}`, () => this.audioFileInput.click());
+    this.uploadVideoBtn = toolBtn(`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> ${t("Add Video")}`, () => this.videoFileInput.click());
+    this.addTextBtn = toolBtn(`${ICONS.text} ${t("Add Text")}`, () => this.addTextSegmentFreeSpace());
+    this.deleteBtn = toolBtn(`${ICONS.trash} ${t("Delete")}`, () => this.deleteSelectedSegment(), { danger: true });
 
     actionGroup.appendChild(this.fileInput);
     actionGroup.appendChild(this.audioFileInput);
@@ -285,13 +286,13 @@ export const dom = {
 
     this.segmentBoundsDisplay = document.createElement("div");
     this.segmentBoundsDisplay.className = "mrd-pr-segment-bounds";
-    this.segmentBoundsDisplay.textContent = "Start: - | End: - | Length: -";
+    this.segmentBoundsDisplay.textContent = t("Start: - | End: - | Length: -");
 
     this.timeCodeDisplay = document.createElement("div");
     this.timeCodeDisplay.className = "mrd-pr-timecode";
     this.timeCodeDisplay.textContent = this.formatTime(0);
 
-    const settingsBtn = iconBtn(ICONS.gear, "Settings", () => {
+    const settingsBtn = iconBtn(ICONS.gear, t("Settings"), () => {
       if (this._settingsMenu) {
         this.dismissSettingsMenu();
       } else {
@@ -299,13 +300,13 @@ export const dom = {
       }
     });
 
-    const helpBtn = iconBtn(ICONS.help, "Help / Documentation", () => {
+    const helpBtn = iconBtn(ICONS.help, t("Help / Documentation"), () => {
       window.open("https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI", "_blank");
     });
 
     this.isSnapping = this.node.properties.isSnapping !== false;
 
-    const snapBtn = iconBtn(ICONS.magnet, "Enable Snapping (Magnet)", () => {
+    const snapBtn = iconBtn(ICONS.magnet, t("Enable Snapping (Magnet)"), () => {
       this.isSnapping = !this.isSnapping;
       this.node.properties.isSnapping = this.isSnapping;
       this.updateSnapStyle();
@@ -314,7 +315,7 @@ export const dom = {
     });
 
     const updateSnapStyle = () => {
-      snapBtn.title = this.isSnapping ? "Disable Snapping (Magnet)" : "Enable Snapping (Magnet)";
+      snapBtn.title = this.isSnapping ? t("Disable Snapping (Magnet)") : t("Enable Snapping (Magnet)");
       if (this.isSnapping) {
         snapBtn.classList.add("toggle-on");
       } else {
@@ -324,7 +325,7 @@ export const dom = {
     this.updateSnapStyle = updateSnapStyle;
     updateSnapStyle();
 
-    const startBtn = iconBtn(ICONS.start, "Set Start Frame", () => {
+    const startBtn = iconBtn(ICONS.start, t("Set Start Frame"), () => {
       if (this.startFramesWidget) {
         this.startFramesWidget.value = this.currentFrame;
         if (this.startFramesWidget.callback) {
@@ -335,7 +336,7 @@ export const dom = {
       }
     });
 
-    const endBtn = iconBtn(ICONS.end, "Set End Frame", () => {
+    const endBtn = iconBtn(ICONS.end, t("Set End Frame"), () => {
       if (this.endFramesWidget) {
         this.endFramesWidget.value = this.currentFrame;
         if (this.endFramesWidget.callback) {
@@ -346,7 +347,7 @@ export const dom = {
       }
     });
 
-    const markBtn = iconBtn(ICONS.mark, "Mark Selection (X)", () => {
+    const markBtn = iconBtn(ICONS.mark, t("Mark Selection (X)"), () => {
       this.markCurrentSelection();
     });
 
@@ -425,7 +426,7 @@ export const dom = {
     });
 
     // --- Text Area (Image/Text) ---
-    const promptArea = makePromptArea(this, "Segment Prompt", "No segment selected!", { hidden: true, opacity: "0.4" });
+    const promptArea = makePromptArea(this, t("Segment Prompt"), t("No segment selected!"), { hidden: true, opacity: "0.4" });
     this.promptWrapper = promptArea.wrapper;
     this.segmentPromptLabel = promptArea.label;
     this.promptInput = promptArea.input;
@@ -614,8 +615,8 @@ export const dom = {
     const playerControls = document.createElement("div");
     playerControls.className = "mrd-pr-player-controls";
 
-    this.playBtn = miniIconBtn(ICONS.play, "Play/Pause Audio", () => this.togglePlay());
-    this.loopBtn = miniIconBtn(ICONS.loop, "Toggle Loop", () => this.toggleLoop());
+    this.playBtn = miniIconBtn(ICONS.play, t("Play/Pause Audio"), () => this.togglePlay());
+    this.loopBtn = miniIconBtn(ICONS.loop, t("Toggle Loop"), () => this.toggleLoop());
 
     this.seekBar = document.createElement("input");
     this.seekBar.type = "range";
@@ -637,7 +638,7 @@ export const dom = {
     const zoomControls = document.createElement("div");
     zoomControls.className = "mrd-pr-zoom-controls";
 
-    const zoomOutBtn = miniIconBtn(ICONS.minus, "Zoom Out", () => {
+    const zoomOutBtn = miniIconBtn(ICONS.minus, t("Zoom Out"), () => {
       const currentZoom = parseFloat(this.zoomSlider.value);
       this.zoomSlider.value = Math.max(1, currentZoom - 0.5);
       this.zoomSlider.dispatchEvent(new Event("input"));
@@ -650,7 +651,7 @@ export const dom = {
     this.zoomSlider.max = "1"; // Updated dynamically via updateZoomSliderMax()
     this.zoomSlider.step = "0.1";
     this.zoomSlider.value = "1";
-    this.zoomSlider.title = "Zoom Level";
+    this.zoomSlider.title = t("Zoom Level");
     this.zoomSlider.addEventListener("input", (e) => {
       this.zoomLevel = parseFloat(e.target.value);
 
@@ -672,13 +673,13 @@ export const dom = {
       else if (window.app && window.app.graph) window.app.graph.setDirtyCanvas(true, true);
     });
 
-    const zoomInBtn = miniIconBtn(ICONS.plus, "Zoom In", () => {
+    const zoomInBtn = miniIconBtn(ICONS.plus, t("Zoom In"), () => {
       const currentZoom = parseFloat(this.zoomSlider.value);
       this.zoomSlider.value = Math.min(this.getMaxZoom(), currentZoom + 0.5);
       this.zoomSlider.dispatchEvent(new Event("input"));
     });
 
-    const zoomFitBtn = miniIconBtn(ICONS.fit, "Zoom to Fit (show full timeline)", () => {
+    const zoomFitBtn = miniIconBtn(ICONS.fit, t("Zoom to Fit (show full timeline)"), () => {
       this.zoomLevel = 1;
       this.zoomSlider.value = 1;
       const viewportWidth = this.viewport.clientWidth;
@@ -711,12 +712,12 @@ export const dom = {
     this.strengthLabel = document.createElement("span");
     this.strengthLabel.className = "mrd-pr-strength-label";
     this.strengthLabel.style.marginLeft = "0px";
-    this.strengthLabel.textContent = "Guide Strength:";
+    this.strengthLabel.textContent = t("Guide Strength:");
 
     // --- Segment Duration Input（Guide Strength 左侧；秒，两位小数） ---
     this.durationLabel = document.createElement("span");
     this.durationLabel.className = "mrd-pr-strength-label";
-    this.durationLabel.textContent = "Duration:";
+    this.durationLabel.textContent = t("Duration:");
 
     this.durationValue = document.createElement("input");
     this.durationValue.type = "text";
@@ -725,7 +726,7 @@ export const dom = {
     this.durationValue.disabled = true;
     this.durationValue.style.cursor = "text";
     this.durationValue.style.width = "58px";
-    this.durationValue.title = "段时长。单位跟随 display_mode：帧模式为整数帧，秒模式为两位小数秒。切换焦点（blur/change）应用到当前段；段时长变化时此处同步。";
+    this.durationValue.title = t("SegmentDurationHint");
 
     // 切换焦点时应用 duration 到当前 seg；阻止全局快捷键（如 Delete）在输入框内生效
     this.durationValue.addEventListener("keydown", (e) => {
