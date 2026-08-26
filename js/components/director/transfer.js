@@ -12,7 +12,7 @@
 //  3. 中间列：→ 按钮垂直居中；按住中间列（按钮除外）左右拖动可调节两个 textarea 的宽度
 //  4. 点击 →：以左侧为源请求 /llm/generate_prompt_json，
 //     返回的 JSON 按展示规则格式化后写入右侧 textarea（替代默认 JSON）
-//  5. 左侧输入 @、右侧输入 @ / # → 弹出主体选择器；
+//  5. 左侧输入 @、右侧输入 @ / #、retention 弹窗输入 @ → 弹出主体选择器；
 //     选择后转换：@主体 → <@主体>；#主体 → <#主体:[Chinese]对话内容>
 //  6. 右侧内容 debounce 500ms 解析资源引用（首帧 / 尾帧 / 主体），
 //     在下方横排展示资源预览条（不换行，x 轴滑动）；
@@ -104,6 +104,13 @@ if (!document.getElementById("ref-ms-mention-styles")) {
 .ref-ms-mention-item:hover,
 .ref-ms-mention-item.active {
     background: #333;
+}
+.ref-ms-mention-item.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.ref-ms-mention-item.disabled:hover {
+    background: transparent;
 }
 .ref-ms-mention-item img,
 .ref-ms-mention-item video {
@@ -790,6 +797,7 @@ export function TransferPanel({ director }) {
   const rightDetailRef = useRef(null);
   const rightOverallRef = useRef(null);
   const rightMusicRef = useRef(null);
+  const retRef = useRef(null); // retention 编辑弹窗 textarea（支持 @ 主体选择器）
   const debounceRef = useRef(null);
   const bindDebounceRef = useRef(null); // 主体绑定接口请求防抖
   const bindSeqRef = useRef(0); // 绑定请求序号：只应用最新一次请求的返回，防并发乱序覆盖
@@ -1347,7 +1355,7 @@ export function TransferPanel({ director }) {
     const caret = el.selectionStart;
     const before = el.value.slice(0, caret);
     const ch = before.slice(-1) || "";
-    const allowed = side === "left" ? "@" : "@#";
+    const allowed = side === "ret" ? "@" : (side === "left" ? "@" : "@#");
     if (!ch || !allowed.includes(ch)) return;
     const rect = el.getBoundingClientRect();
     // fixed 定位实际以最近 transform 祖先（图容器）为包含块解析，rect 是视口坐标，
@@ -1375,7 +1383,7 @@ export function TransferPanel({ director }) {
     const caret = el.selectionStart;
     const before = el.value.slice(0, caret);
     const ch = before.slice(-1) || "";
-    const allowed = side === "left" ? "@" : "@#";
+    const allowed = side === "ret" ? "@" : (side === "left" ? "@" : "@#");
     if (ch && allowed.includes(ch)) {
       openMenu(e, side, field);
     } else if (menu && menu.side === side) {
@@ -1393,7 +1401,8 @@ export function TransferPanel({ director }) {
 
   function pickSubject(s) {
     if (!menu) return;
-    const el = menu.side === "left" ? leftRef.current : (RIGHT_FIELD_REFS[menu.field] || {}).current;
+    // if (!s.relationship || s.relationship === "none") return; // relation:none（仅引用）的主体不可选择
+    const el = menu.side === "left" ? leftRef.current : (menu.side === "ret" ? retRef.current : (RIGHT_FIELD_REFS[menu.field] || {}).current);
     if (!el) return;
     const token = menu.trigger === "@" ? `<@${s.name}>` : `<#${s.name}:对话内容>`;
     const text = el.value;
@@ -1404,6 +1413,9 @@ export function TransferPanel({ director }) {
         director.promptInput.value = newText;
         director.promptInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
+    } else if (menu.side === "ret") {
+      // retention 编辑弹窗：插入 <@主体> 并保留原有文本
+      setRetEdit((prev) => (prev ? { ...prev, value: newText } : prev));
     } else {
       // 右侧：只更新触发 mention 的那个分区字段
       setRightText(updateShotField(rightText, RIGHT_FIELD_KEYS[menu.field] || "detailed_description", newText));
@@ -2264,19 +2276,23 @@ export function TransferPanel({ director }) {
                 ${
                   menuSubjects.length === 0
                     ? html`<div class="ref-ms-mention-empty">${subjects.length === 0 ? t("No subjects available (add some in the subject node first)") : t("No subjects available")}</div>`
-                    : menuSubjects.map(h => html`
+                    : menuSubjects.map(h => {
+                        // relation:none（relationship 为空或 "none"，仅引用）的主体禁止在选择器中选取
+                        const noRel = !h.relationship || h.relationship === "none";
+                        return html`
                         <div
-                          class="ref-ms-mention-item"
+                          class="ref-ms-mention-item${noRel ? " disabled" : ""}"
                           key=${h.name}
                           onMouseDown=${(e) => e.preventDefault()}
                           onClick=${() => pickSubject(h)}
-                          title=${t("Insert {token}", { token: menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:${t("Dialogue")}>` })}
+                          title=${noRel ? t("Relation") + ":none" : t("Insert {token}", { token: menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:${t("Dialogue")}>` })}
                         >
                           ${subjectMediaThumb(h, 22)}
                           <span class="ref-ms-mention-type">${h.type || "Subject"}</span>
                           <span>${h.name}</span>
                         </div>
-                      `)
+                      `;
+                      })
                 }
               </div>
             </div>
@@ -2434,7 +2450,7 @@ export function TransferPanel({ director }) {
         title=${t("Edit subject Retention (segment-level override)")}
         width="520px"
         height="320px"
-        onClose=${() => setRetEdit(null)}
+        onClose=${() => { setRetEdit(null); setMenu(null); }}
       >
         ${
           retEdit
@@ -2443,11 +2459,12 @@ export function TransferPanel({ director }) {
                 <div style=${S.retModalTitle}>${retEdit.name}</div>
                 <div style=${S.retModalSub}>${t("RetentionOverrideHint")}</div>
                 <textarea
+                  ref=${retRef}
                   style=${S.retTextarea}
                   value=${retEdit.value}
                   placeholder=${t("RetentionDescribeHint")}
                   spellcheck=${false}
-                  onInput=${(e) => setRetEdit({ ...retEdit, value: e.target.value })}
+                  onInput=${(e) => { setRetEdit({ ...retEdit, value: e.target.value }); handleInput(e, "ret", ""); }}
                 ></textarea>
                 <div style=${S.retFooter}>
                   <button class="mrd-pr-btn" style=${S.retBtnCancel} onClick=${() => setRetEdit(null)}>${t("Cancel")}</button>
