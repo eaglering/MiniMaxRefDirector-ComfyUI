@@ -1,7 +1,7 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: render, drawAudioSegmentVisuals
 import { RULER_HEIGHT } from "./shared.js";
-import { t } from "../i18n.js";
+import { t } from "../../i18n.js";
 
 export const render = {
   render() {

@@ -218,16 +218,109 @@ _H3_DEFAULT_OPTIONS: dict = {
 }
 
 
+# 翻译时禁止改写的片段：<@主体名>、<#主体名:对白>、<d>[语言]对白</d>。
+# 对白是视频实际发声内容、主体名可能含中文，均必须保持原语言。
+_PROTECTED_FRAGMENT_RE = re.compile(r"<@[^>]*>|<#[^>]*>|<d>.*?</d>", re.DOTALL)
+# 占位符使用 PUA 私有区字符（U+E000 与 U+F8FF）+ 序号，几乎不可能出现在正常文本或模型输出中
+_PH_PREFIX = "\ue000"
+_PH_SUFFIX = "\uf8ff"
+
+
+def _mask_protected(text: str) -> tuple[str, dict[str, str]]:
+    """把禁止改写的片段替换为唯一占位符，返回 (掩码文本, {占位符: 原文})。"""
+    if not text:
+        return text, {}
+    placeholders: dict[str, str] = {}
+
+    def _repl(m: re.Match) -> str:
+        token = f"{_PH_PREFIX}{len(placeholders)}{_PH_SUFFIX}"
+        placeholders[token] = m.group(0)
+        return token
+
+    return _PROTECTED_FRAGMENT_RE.sub(_repl, text), placeholders
+
+
+def _unmask_protected(text: str, placeholders: dict[str, str]) -> str:
+    """将占位符还原为原始片段。"""
+    for token, original in placeholders.items():
+        text = text.replace(token, original)
+    return text
+
+
+def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) -> str:
+    """将整段视频提示词文本翻译为英文。
+
+    调用方负责将禁止改写的片段（主体名/对白）掩码为占位符（如 MASKED_0），
+    翻译后还原；本函数在指令中提示模型原样保留占位符 token。翻译失败回退原文，
+    不抛出异常、不中断流程。
+    """
+    try:
+        full_prompt = (
+            "You are a professional video prompt translator. Translate the following "
+            "video prompt text into fluent, natural English.\n\n"
+            "Rules:\n"
+            "- Keep fixed structural markers unchanged: [Shot N], At MM:SS.mmm, "
+            "<@...>, <#...>, <d>...</d>.\n"
+            "- Keep every placeholder token such as MASKED_0 exactly as-is, at the "
+            "same position and in the same order. Never translate, delete, or reorder them.\n"
+            "- Output only the translated text, with no extra commentary.\n\n"
+            "## Text to translate\n\n"
+            + text
+        )
+        if vlm_mode == "api":
+            generated = generate_prompt_with_api(
+                image=None, prompt=full_prompt,
+                provider=options.get("provider", "GLM"),
+                api_key=options.get("api_key", ""), seed=seed,
+            )
+        elif vlm_mode == "llama-cpp":
+            generated = generate_prompt_with_llama(
+                image=None, prompt=full_prompt,
+                gguf_path=options["gguf_path"],
+                mmproj_path=options["mmproj_path"], seed=seed,
+            )
+        elif vlm_mode == "ollama":
+            generated = generate_prompt_with_ollama(
+                image=None, prompt=full_prompt,
+                model=options.get("ollama_model", ""),
+                base_url=options.get("ollama_base_url", ""),
+                api_key=options.get("api_key", "ollama"),
+                seed=seed,
+            )
+        else:
+            return text
+        result = str(generated).strip()
+        # 模型偶尔把整段输出包在引号里，去掉首尾成对引号
+        if len(result) >= 2 and result[0] == result[-1] and result[0] in ('"', "'"):
+            result = result[1:-1].strip()
+        return result or text
+    except Exception as exc:
+        log.warning(f"[MiniMaxRefDirector] failed to translate prompt text to English: {exc}")
+        return text
+
+
 def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, seed: int) -> dict:
     """将四字段提示词翻译为英文。
 
     读取 prompt_translate_to_en.txt 组装翻译 skill，复用 llm.py 的生成函数
     （image=None 纯文本模式）。翻译保留 [Shot N] / At MM:SS.mmm / <@...> / <#...>
     等固定标签，字段名不变；角色名与对白内容保持原语言（对白是视频实际发声内容，
-    不可改写）。翻译失败或解析失败时回退原 dict，不抛出异常、不中断流程。
+    不可改写）。实现上先对 <@...> / <#...> / <d>...</d> 做占位符掩码，模型只看到
+    无意义占位符、从源头杜绝改写，翻译后还原。若模型破坏/丢失了占位符，则该字段
+    整体回退原文。翻译失败或解析失败时回退原 dict，不抛出异常、不中断流程。
     """
     try:
-        input_json = json.dumps(json_data, ensure_ascii=False, indent=2)
+        # 掩码保护片段：翻译前替换为 PUA 占位符，翻译后还原
+        protected: dict[str, str] = {}
+        masked: dict[str, str] = {}
+        for key, value in json_data.items():
+            if isinstance(value, str) and value.strip():
+                m_text, ph = _mask_protected(value)
+                masked[key] = m_text
+                protected.update(ph)
+            else:
+                masked[key] = value
+        input_json = json.dumps(masked, ensure_ascii=False, indent=2)
         with open(_TRANSLATE_TO_EN_TEMPLATE_PATH, "r", encoding="utf-8") as f:
             skill = f.read()
         full_prompt = skill.replace("{{INPUT_JSON}}", input_json)
@@ -252,11 +345,18 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
         else:
             return json_data
         translated = parse_generated_json(generate_text)
-        # 逐字段回填：翻译结果缺字段或为空时保留原字段
+        # 逐字段回填：翻译结果缺字段或为空时保留原字段；
+        # 若模型删改/丢失了掩码占位符（对白或主体名被污染），该字段整体回退原文
         out = dict(json_data)
         for key in ("summary", "detailed_description", "overall_soundscape", "non_diegetic_music"):
             if isinstance(translated.get(key), str) and translated[key].strip():
-                out[key] = translated[key]
+                missing = [
+                    token for token in protected
+                    if token in masked.get(key, "") and token not in translated[key]
+                ]
+                if missing:
+                    continue
+                out[key] = _unmask_protected(translated[key], protected)
         return out
     except Exception as exc:
         log.warning(f"[MiniMaxRefDirector] prompt translation to EN failed, falling back to original: {exc}")
@@ -279,16 +379,15 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
       - ollama_model: vlm_mode="ollama" 时的模型名（空则回落 API 管理器 ollama 服务 / "llava"）
       - ollama_base_url: vlm_mode="ollama" 时的端点（空则默认 http://localhost:11434/api/chat）
       - clip_type: CLIP 模型类型（"minimax" / "qwen3vl" / "gemma"）
-      - lang: "zh" 使用中文模板生成（随后翻译为英文）；其余语言使用英文模板直接输出
+      - lang: "zh" 使用中文模板直接生成中文；其余语言使用英文模板直接输出
 
     The output JSON includes summary / detailed_description /
     overall_soundscape / non_diegetic_music (a provided reference image is
     merged into detailed_description, not treated as a first frame). Character
     names are wrapped as <@名字> and dialogue as <#名字:[Language]对话> directly
     by the model, with a language tag such as [Chinese] or [English] before the
-    dialogue text. No mapping is returned. When lang != "en", the generated
-    four-field JSON is additionally translated to English via a second LLM call;
-    translation failure falls back to the original text without interrupting.
+    dialogue text. No mapping is returned. lang="zh" 直接输出中文（中文模板生成），
+    lang="en" 直接输出英文。
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
@@ -318,10 +417,6 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
         json_data = parse_generated_json(generate_text)
     else:
         raise ValueError(f"Unsupported vlm_mode: {vlm_mode}")
-    # 非英文语言：额外调用一次语言模型将四字段翻译为英文（保留固定标签；
-    # 角色名与对白保持原语言）。翻译失败回退原文，不中断流程。
-    if lang != "en":
-        json_data = _translate_h3_prompt_to_en(json_data, vlm_mode, opts, seed)
     return json_data
 
 

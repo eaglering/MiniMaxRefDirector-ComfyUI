@@ -1,7 +1,7 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: _ensureThumbnails, _ensureVideoEl, _getOrExtractAudio, _extractAudioOnClient, _isAudioDecodingAllowed, _preloadAudioSegment, loadMedia, handleImageUpload, _uploadVideoFile, handleVideoUpload, generateVideoPreviewThumbs, handleAudioUpload
 import { api, genId, uploadImage, viewUrl } from "./shared.js";
-import { t } from "../i18n.js";
+import { t } from "../../i18n.js";
 
 export const media = {
   async _ensureThumbnails(seg) {

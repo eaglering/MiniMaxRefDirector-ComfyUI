@@ -8,7 +8,7 @@
 // ============================================================
 import { h } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
-import { t } from "../i18n.js";
+import { t } from "../../i18n.js";
 import htm from "../../vendor/htm.module.js";
 
 const html = htm.bind(h);

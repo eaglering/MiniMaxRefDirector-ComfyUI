@@ -4,7 +4,7 @@
 // 重构: 统一浮动菜单壳 openMenu/dismissMenu，合并原 showGapContextMenu 与 showGapMenu，
 //       showContextMenu 改用配置数组式构建，公共逻辑提取为 _menuBtn/_menuDivider/_copySegment/_applyUploadedImage。
 import { ICONS, RULER_HEIGHT, genId, viewUrl, uploadImage } from "./shared.js";
-import { t } from "../i18n.js";
+import { t } from "../../i18n.js";
 
 const VID_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`;
 

@@ -3,7 +3,7 @@
 import { CANVAS_HEIGHT, ICONS, RULER_HEIGHT, app, clamp, hideWidget } from "./shared.js";
 import { h, render } from "../../vendor/preact.module.js";
 import { GlobalParamsPanel, mountTransfer } from "./transfer.js";
-import { t } from "../i18n.js";
+import { t } from "../../i18n.js";
 
 // Debounce ComfyUI auto-save（segment prompt 输入 300ms 后触发）
 let saveTimeout = null;

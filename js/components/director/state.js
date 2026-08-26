@@ -1,7 +1,7 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: updateSelectionFromBox, syncSelectionTypeAndIndex, growTimelineIfNeeded, getMaxZoom, getVisualDurationFrames, updateZoomSliderMax, updateUIFromSelection, updateSidebarHeights
 import { AUDIO_TRACK_HEIGHT, BLOCK_HEIGHT, RULER_HEIGHT, MIN_SEGMENT_LENGTH, app } from "./shared.js";
-import { t } from "../i18n.js";
+import { t } from "../../i18n.js";
 
 // transfer 面板（.mrd-pr-transfer-mount）显示时保证的最小 prop 区高度：
 // buttons 行 + status + resources 预览条（含 H3 prompt 预览，min 450px）+ 间距

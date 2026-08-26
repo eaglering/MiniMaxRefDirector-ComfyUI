@@ -23,7 +23,7 @@ import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
 import { api, app, viewUrl, ICONS } from "./shared.js";
 import { RefModal } from "./modal.js";
-import { getLocale, t } from "../i18n.js";
+import { getLocale, t } from "../../i18n.js";
 
 const html = htm.bind(h);
 
@@ -416,7 +416,7 @@ const S = {
   area: {
     flex: 1, resize: "none", boxSizing: "border-box", width: "100%", minHeight: 0,
     background: "#1e1e1e", color: "#ccc", border: "1px solid #444", borderRadius: "4px",
-    padding: "6px", fontFamily: "monospace", fontSize: "12px", lineHeight: "1.5", outline: "none",
+    padding: "6px", fontFamily: "inherit", fontSize: "12px", lineHeight: "1.5", outline: "none",
   },
   col: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
   buttons: { display: "flex", gap: "6px", padding: "4px 0", flex: "0 0 auto" },
@@ -458,7 +458,7 @@ const S = {
   retTextarea: {
     flex: "1 1 0", minHeight: "0", width: "100%", boxSizing: "border-box", resize: "none", outline: "none",
     background: "#1e1e1e", border: "1px solid #444", borderRadius: "4px", color: "#e0e0e0",
-    fontSize: "12px", lineHeight: "1.5", padding: "6px 8px", fontFamily: "monospace",
+    fontSize: "12px", lineHeight: "1.5", padding: "6px 8px", fontFamily: "inherit",
   },
   retFooter: { display: "flex", justifyContent: "flex-end", gap: "8px", paddingTop: "8px", flexShrink: 0 },
   retBtnCancel: { background: "transparent", color: "#aaa", border: "1px solid #555" },
@@ -522,7 +522,7 @@ const S = {
     background: "#2d2d2d", border: "1px solid #555", borderRadius: "6px",
     padding: "8px 10px", minWidth: "280px", maxWidth: "460px", maxHeight: "60vh",
     overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.5)",
-    fontSize: "11px", color: "#ccc", fontFamily: "monospace", lineHeight: "1.5",
+    fontSize: "11px", color: "#ccc", fontFamily: "inherit", lineHeight: "1.5",
   },
   defsTipEmpty: { color: "#888" },
   trBtn: { width: "100%", margin: "1px 0"},
@@ -540,11 +540,11 @@ const S = {
   h3PreviewArea: {
     flex: "1 1 0", minHeight: "0", width: "100%", boxSizing: "border-box",
     background: "rgba(30,30,30,.55)", color: "#fff", border: "1px dashed #444",
-    borderRadius: "4px", padding: "4px 6px", fontFamily: "monospace", fontSize: "10px",
+    borderRadius: "4px", padding: "4px 6px", fontFamily: "inherit", fontSize: "10px",
     lineHeight: "1.4", resize: "none", outline: "none", cursor: "pointer",
     overflowY: "auto", scrollbarWidth: "thin", whiteSpace: "pre-wrap", overflowWrap: "break-word",
   },
-  refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "monospace" },
+  refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "inherit" },
   refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
   // 视频素材条（接收后端 minimax_ref_video_progress 通知）：面板底部、x 轴排列、可横向滚动
   materialsWrap: {
@@ -1215,7 +1215,7 @@ export function TransferPanel({ director }) {
     director.commitChanges();
   }
 
-  async function runGenerate(source) {
+  async function runGenerate(source, lang = 'en') {
     if (busy) return;
     if (!source) {
       setError(t("Please enter the left Segment Prompt before generating"));
@@ -1233,7 +1233,7 @@ export function TransferPanel({ director }) {
         prompt: source,
         image_path: firstFramePath(),
         duration_seconds: durSecs > 0 ? durSecs : 0,
-        lang: getLocale(),
+        lang,
       });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",
@@ -1890,12 +1890,12 @@ export function TransferPanel({ director }) {
 
   // 完整 H3 prompt 预览文本：主体定义 / 留存分析来自 bindData，其余来自 rightText（实时编辑）
   const h3PreviewSections = [
-    ["subject_definitions", bindings.subject_definitions],
-    ["summary", rightText.summary],
-    ["retention_analysis", bindings.retention_analysis],
-    ["detailed_description", globalPrompt + "\n" + rightText.detailed_description],
-    ["overall_soundscape", rightText.overall_soundscape],
-    ["non_diegetic_music", rightText.non_diegetic_music],
+    [t("subject_definitions"), bindings.subject_definitions],
+    [t("summary"), rightText.summary],
+    [t("retention_analysis"), bindings.retention_analysis],
+    [t("detailed_description"), globalPrompt + "\n" + rightText.detailed_description],
+    [t("overall_soundscape"), rightText.overall_soundscape],
+    [t("non_diegetic_music"), rightText.non_diegetic_music],
   ];
   const h3PreviewText = h3PreviewSections
     .map(([key, val]) => {
@@ -2310,8 +2310,15 @@ export function TransferPanel({ director }) {
               class="mrd-pr-btn"
               title=${t("Generate the H3 Prompt from the left side; the result is shown on the right")}
               disabled=${busy}
-              onClick=${() => runGenerate(leftText)}
-            >→</button>
+              onClick=${() => runGenerate(leftText, 'en')}
+            >${t("ShortEnglish")}→</button>
+            <button
+              class="mrd-pr-btn"
+              style="margin-top: 8px;"
+              title=${t("Generate Chinese H3 Prompt from the left side; the result is shown on the right")}
+              disabled=${busy}
+              onClick=${() => runGenerate(leftText, 'zh')}
+            >${t("ShortChinese")}→</button>
           </div>
           <div class="mrd-pr-prompt-wrapper" style=${{ ...S.col, gap: "8px" }}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>
@@ -2323,7 +2330,7 @@ export function TransferPanel({ director }) {
                 const fieldStyle = (label) => ({ display: "flex", flexDirection: "column", minHeight: "0", ...label });
                 return html`
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
-                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>summary</div>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("summary")}</div>
                     <textarea
                       ref=${rightSummaryRef}
                       class="mrd-pr-prompt-area"
@@ -2338,7 +2345,7 @@ export function TransferPanel({ director }) {
                     </div>
                   </div>
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "1 1 0" })}>
-                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>detailed_description</div>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("detailed_description")}</div>
                     <textarea
                       ref=${rightDetailRef}
                       class="mrd-pr-prompt-area"
@@ -2350,7 +2357,7 @@ export function TransferPanel({ director }) {
                     ></textarea>
                   </div>
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
-                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>overall_soundscape</div>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("overall_soundscape")}</div>
                     <textarea
                       ref=${rightOverallRef}
                       class="mrd-pr-prompt-area"
@@ -2362,7 +2369,7 @@ export function TransferPanel({ director }) {
                     ></textarea>
                   </div>
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
-                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>non_diegetic_music</div>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("non_diegetic_music")}</div>
                     <textarea
                       ref=${rightMusicRef}
                       class="mrd-pr-prompt-area"

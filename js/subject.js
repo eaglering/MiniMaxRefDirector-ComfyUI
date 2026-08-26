@@ -102,7 +102,7 @@ const MSCSS = `
 .ref-ms-row-group {
     display: flex;
     flex: 1;
-    gap: 4px;
+    gap: 6px;
     align-items: center;
 }
 .ref-ms-label,.ref-ms-label-sm {
