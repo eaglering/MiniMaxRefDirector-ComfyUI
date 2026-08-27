@@ -72,10 +72,19 @@ def image_analysis(gguf_path: str, mmproj_path: str, prompt: str,
 
 
 # ── H3 skills 模板 ──────────────────────────────────────────────
-_H3_SKILLS_TEMPLATE_PATH = os.path.join(
+_PROMPT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "prompt", "minimaxh3_custom_ref2v_prompt_writing.txt",
+    "prompt",
 )
+_H3_SKILLS_TEMPLATE_PATH = os.path.join(_PROMPT_DIR, "minimaxh3_custom_ref2v_prompt_writing.txt")
+_H3_SKILLS_TEMPLATE_PATH_ZH = os.path.join(_PROMPT_DIR, "minimaxh3_custom_ref2v_prompt_writing_zh.txt")
+# 提示词翻译为英文的 skill 模板（非英文语言生成后调用）
+_TRANSLATE_TO_EN_TEMPLATE_PATH = os.path.join(_PROMPT_DIR, "prompt_translate_to_en.txt")
+# 按语言选择 skills 模板：仅中/英双语，其他语言回退英文模板
+_H3_SKILLS_TEMPLATES = {
+    "zh": _H3_SKILLS_TEMPLATE_PATH_ZH,
+    "en": _H3_SKILLS_TEMPLATE_PATH,
+}
 # 音频关系 -> retention_analysis 文案模板（{n} 为 Audio 编号）
 _AUDIO_RELATION_TEXT = {
     "fully_copy": "{n} is reused 1:1 as the target video's complete final audio track.",
@@ -84,13 +93,17 @@ _AUDIO_RELATION_TEXT = {
     "weak_reference": "Only broad similarity in category or atmosphere from {n} is retained.",
 }
 
-def _load_h3_skills_template() -> str:
-    """Load the custom H3 skills template (four-field output)."""
-    with open(_H3_SKILLS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+def _load_h3_skills_template(lang: str = "en") -> str:
+    """Load the custom H3 skills template (four-field output) for the given language.
+
+    lang == "zh" 使用中文模板，其余语言一律使用英文模板。
+    """
+    path = _H3_SKILLS_TEMPLATES.get(lang, _H3_SKILLS_TEMPLATES["en"])
+    with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
 
-def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0) -> str:
+def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en") -> str:
     """Build the full prompt sent to the local GGUF VLM.
 
     Includes the custom skills guide, the required JSON output format
@@ -98,15 +111,24 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
     and the <@角色名称> / <#角色名称:对话内容> placeholder rules. When a reference
     image is provided it is NOT treated as a first frame; instead its contents
     are merged into "detailed_description" together with the user's input.
+    lang == "zh" 使用中文组装（输出中文），其余语言使用英文组装。
     """
+    zh = lang == "zh"
     image_note = ""
     if has_image:
-        image_note = (
-            "- If a reference image is provided, analyze what is visible in it "
-            "(scene, characters, lighting, atmosphere) and merge it with the "
-            "user's input into \"detailed_description\". The image is not a "
-            "first frame and must not be output as its own field.\n"
-        )
+        if zh:
+            image_note = (
+                "- 如果提供了参考图，请分析图中可见内容（场景、角色、光照、氛围）"
+                "并与用户输入一起合并进 \"detailed_description\"。参考图不是首帧，"
+                "不能作为独立字段输出。\n"
+            )
+        else:
+            image_note = (
+                "- If a reference image is provided, analyze what is visible in it "
+                "(scene, characters, lighting, atmosphere) and merge it with the "
+                "user's input into \"detailed_description\". The image is not a "
+                "first frame and must not be output as its own field.\n"
+            )
 
     duration_note = ""
     if duration_seconds and duration_seconds > 0:
@@ -114,6 +136,41 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
             "The target video's total duration is %.2f seconds. "
         ) % (float(duration_seconds))
 
+    if zh:
+        return f"""你是一位专业的视频提示词撰写专家。请遵循下面的技能指南。
+
+## 技能指南
+{skills}
+
+## 任务
+将用户的输入提示词改写为全参考视频提示词。
+
+## 输出语言
+四个字段一律使用中文撰写。仅保留固定结构标记（"[Shot N]"、"At MM:SS.mmm"、"<@...>"、"<#...>"）与字段名保持不变。角色名、对白与画面中可见的文字始终保留原语言。
+
+## 输出格式
+仅输出包含以下四个键的 JSON 对象：
+  - "summary": string
+  - "detailed_description": string
+  - "overall_soundscape": string
+  - "non_diegetic_music": string
+## 占位符规则
+在 "summary" 中：每个角色名包裹为 <@角色名称>，例如 <@张三>。summary 是纯概括，不含对白。
+在 "detailed_description"、"overall_soundscape" 和 "non_diegetic_music" 中：
+1. 每个角色名包裹为 <@角色名称>，例如 <@张三>。即使用户写的名字是裸词（例如"小李做了什么"必须变为"<@小李>做了什么"）。
+2. 每段对白包裹为 <#角色名称:对话内容>，例如 <#Zhang San:Hello!> 或 <#李四:你好！>。
+3. 角色名与对白保留原语言，绝不翻译。
+
+## "summary" 格式
+用一小段话概括目标视频及其参考关系，开头使用方括号任务类型前缀，例如 "[reference generation]" 或 "[video editing + reference generation + audio reuse]"。根据每个参考素材在目标视频中实际扮演的角色选择任务类型：keyframe completion（图片作为具体帧锚点）、reference generation（素材提供生成参考）、video editing（直接修改源视频）、video continuation（新内容从源视频继续）、audio reuse（完整或部分复用同一条音频信号）、audio reference（仅参考音频特征）。同时满足多种关系时用 " + " 组合任务类型且不重复。使用 <@角色名称> 占位符描述主要主体与镜头流，例如 <@张三>，不引入超出用户输入的内容，也不引用任何对白。
+
+## 严格性
+- "detailed_description" 必须以 "[Shot 1]" 开头，其前不得出现任何文字。若用户输入没有明确镜头标记，以 "[Shot 1]" 开头。
+- 严格遵循用户输入提示词：仅格式化用户提供的内容，不得添加超出用户输入的额外描述、动作、镜头或对白。
+{image_note}## 用户输入提示词
+{duration_note}{prompt}
+
+仅输出 JSON 对象，前后不得添加任何文字。"""
     return f"""You are an expert video prompt writer. Follow the skills guide below.
 
 ## Skills Guide
@@ -161,7 +218,158 @@ _H3_DEFAULT_OPTIONS: dict = {
 }
 
 
-def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0) -> dict:
+# 翻译时禁止改写的片段：<@主体名>、<#主体名:对白>、<d>[语言]对白</d>，
+# 以及双引号（含全角引号）包裹的内容（台词/标语/歌名等）。
+# 对白是视频实际发声内容、主体名可能含中文，均必须保持原语言。
+# 引号保护：半角 "..." 与全角 \u201c...\u201d \u2018...\u2019。
+# 注意：不含半角单引号 '...'，避免与英文撇号（don't / it's）冲突。
+_PROTECTED_FRAGMENT_RE = re.compile(
+    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
+    re.DOTALL,
+)
+# 占位符使用 PUA 私有区字符（U+E000 与 U+F8FF）+ 序号，几乎不可能出现在正常文本或模型输出中
+_PH_PREFIX = "\ue000"
+_PH_SUFFIX = "\uf8ff"
+
+
+def _mask_protected(text: str) -> tuple[str, dict[str, str]]:
+    """把禁止改写的片段替换为唯一占位符，返回 (掩码文本, {占位符: 原文})。"""
+    if not text:
+        return text, {}
+    placeholders: dict[str, str] = {}
+
+    def _repl(m: re.Match) -> str:
+        token = f"{_PH_PREFIX}{len(placeholders)}{_PH_SUFFIX}"
+        placeholders[token] = m.group(0)
+        return token
+
+    return _PROTECTED_FRAGMENT_RE.sub(_repl, text), placeholders
+
+
+def _unmask_protected(text: str, placeholders: dict[str, str]) -> str:
+    """将占位符还原为原始片段。"""
+    for token, original in placeholders.items():
+        text = text.replace(token, original)
+    return text
+
+
+def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) -> str:
+    """将整段视频提示词文本翻译为英文。
+
+    调用方负责将禁止改写的片段（主体名/对白）掩码为占位符（如 MASKED_0），
+    翻译后还原；本函数在指令中提示模型原样保留占位符 token。翻译失败回退原文，
+    不抛出异常、不中断流程。
+    """
+    try:
+        full_prompt = (
+            "You are a professional video prompt translator. Translate the following "
+            "video prompt text into fluent, natural English.\n\n"
+            "Rules:\n"
+            "- Keep fixed structural markers unchanged: [Shot N], At MM:SS.mmm, "
+            "<@...>, <#...>, <d>...</d>.\n"
+            "- Keep every placeholder token such as MASKED_0 exactly as-is, at the "
+            "same position and in the same order. Never translate, delete, or reorder them.\n"
+            "- Output only the translated text, with no extra commentary.\n\n"
+            "## Text to translate\n\n"
+            + text
+        )
+        if vlm_mode == "api":
+            generated = generate_prompt_with_api(
+                image=None, prompt=full_prompt,
+                provider=options.get("provider", "GLM"),
+                api_key=options.get("api_key", ""), seed=seed,
+            )
+        elif vlm_mode == "llama-cpp":
+            generated = generate_prompt_with_llama(
+                image=None, prompt=full_prompt,
+                gguf_path=options["gguf_path"],
+                mmproj_path=options["mmproj_path"], seed=seed,
+            )
+        elif vlm_mode == "ollama":
+            generated = generate_prompt_with_ollama(
+                image=None, prompt=full_prompt,
+                model=options.get("ollama_model", ""),
+                base_url=options.get("ollama_base_url", ""),
+                api_key=options.get("api_key", "ollama"),
+                seed=seed,
+            )
+        else:
+            return text
+        result = str(generated).strip()
+        # 模型偶尔把整段输出包在引号里，去掉首尾成对引号
+        if len(result) >= 2 and result[0] == result[-1] and result[0] in ('"', "'"):
+            result = result[1:-1].strip()
+        return result or text
+    except Exception as exc:
+        log.warning(f"[MiniMaxRefDirector] failed to translate prompt text to English: {exc}")
+        return text
+
+
+def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, seed: int) -> dict:
+    """将四字段提示词翻译为英文。
+
+    读取 prompt_translate_to_en.txt 组装翻译 skill，复用 llm.py 的生成函数
+    （image=None 纯文本模式）。翻译保留 [Shot N] / At MM:SS.mmm / <@...> / <#...>
+    等固定标签，字段名不变；角色名与对白内容保持原语言（对白是视频实际发声内容，
+    不可改写）。实现上先对 <@...> / <#...> / <d>...</d> 做占位符掩码，模型只看到
+    无意义占位符、从源头杜绝改写，翻译后还原。若模型破坏/丢失了占位符，则该字段
+    整体回退原文。翻译失败或解析失败时回退原 dict，不抛出异常、不中断流程。
+    """
+    try:
+        # 掩码保护片段：翻译前替换为 PUA 占位符，翻译后还原
+        protected: dict[str, str] = {}
+        masked: dict[str, str] = {}
+        for key, value in json_data.items():
+            if isinstance(value, str) and value.strip():
+                m_text, ph = _mask_protected(value)
+                masked[key] = m_text
+                protected.update(ph)
+            else:
+                masked[key] = value
+        input_json = json.dumps(masked, ensure_ascii=False, indent=2)
+        with open(_TRANSLATE_TO_EN_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+            skill = f.read()
+        full_prompt = skill.replace("{{INPUT_JSON}}", input_json)
+        if vlm_mode == "api":
+            generate_text = generate_prompt_with_api(
+                image=None, prompt=full_prompt, provider=options.get("provider", "GLM"),
+                api_key=options.get("api_key", ""), seed=seed,
+            )
+        elif vlm_mode == "llama-cpp":
+            generate_text = generate_prompt_with_llama(
+                image=None, prompt=full_prompt, gguf_path=options["gguf_path"],
+                mmproj_path=options["mmproj_path"], seed=seed,
+            )
+        elif vlm_mode == "ollama":
+            generate_text = generate_prompt_with_ollama(
+                image=None, prompt=full_prompt,
+                model=options.get("ollama_model", ""),
+                base_url=options.get("ollama_base_url", ""),
+                api_key=options.get("api_key", "ollama"),
+                seed=seed,
+            )
+        else:
+            return json_data
+        translated = parse_generated_json(generate_text)
+        # 逐字段回填：翻译结果缺字段或为空时保留原字段；
+        # 若模型删改/丢失了掩码占位符（对白或主体名被污染），该字段整体回退原文
+        out = dict(json_data)
+        for key in ("summary", "detailed_description", "overall_soundscape", "non_diegetic_music"):
+            if isinstance(translated.get(key), str) and translated[key].strip():
+                missing = [
+                    token for token in protected
+                    if token in masked.get(key, "") and token not in translated[key]
+                ]
+                if missing:
+                    continue
+                out[key] = _unmask_protected(translated[key], protected)
+        return out
+    except Exception as exc:
+        log.warning(f"[MiniMaxRefDirector] prompt translation to EN failed, falling back to original: {exc}")
+        return json_data
+
+
+def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en") -> dict:
     """Generate an H3 full-reference prompt JSON.
 
     options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
@@ -177,32 +385,34 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
       - ollama_model: vlm_mode="ollama" 时的模型名（空则回落 API 管理器 ollama 服务 / "llava"）
       - ollama_base_url: vlm_mode="ollama" 时的端点（空则默认 http://localhost:11434/api/chat）
       - clip_type: CLIP 模型类型（"minimax" / "qwen3vl" / "gemma"）
+      - lang: "zh" 使用中文模板直接生成中文；其余语言使用英文模板直接输出
 
     The output JSON includes summary / detailed_description /
     overall_soundscape / non_diegetic_music (a provided reference image is
     merged into detailed_description, not treated as a first frame). Character
     names are wrapped as <@名字> and dialogue as <#名字:[Language]对话> directly
     by the model, with a language tag such as [Chinese] or [English] before the
-    dialogue text. No mapping is returned.
+    dialogue text. No mapping is returned. lang="zh" 直接输出中文（中文模板生成），
+    lang="en" 直接输出英文。
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
     image = load_image_tensor(image_path) if image_path else None
-    skills = _load_h3_skills_template()
-    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds)
+    skills = _load_h3_skills_template(lang)
+    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds, lang)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
             image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
             api_key=opts.get("api_key", ""), seed=seed,
         )
-        return parse_generated_json(generate_text)
-    if vlm_mode == "llama-cpp":
+        json_data = parse_generated_json(generate_text)
+    elif vlm_mode == "llama-cpp":
         generate_text = generate_prompt_with_llama(
             image=image, prompt=full_prompt, gguf_path=opts["gguf_path"],
             mmproj_path=opts["mmproj_path"], seed=seed,
         )
-        return parse_generated_json(generate_text)
-    if vlm_mode == "ollama":
+        json_data = parse_generated_json(generate_text)
+    elif vlm_mode == "ollama":
         generate_text = generate_prompt_with_ollama(
             image=image, prompt=full_prompt,
             model=opts.get("ollama_model", ""),
@@ -210,8 +420,10 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
             api_key=opts.get("api_key", "ollama"),
             seed=seed,
         )
-        return parse_generated_json(generate_text)
-    raise ValueError(f"Unsupported vlm_mode: {vlm_mode}")
+        json_data = parse_generated_json(generate_text)
+    else:
+        raise ValueError(f"Unsupported vlm_mode: {vlm_mode}")
+    return json_data
 
 
 # ── H3 主体绑定 ──────────────────────────────────────────────────

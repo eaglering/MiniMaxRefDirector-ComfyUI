@@ -1,6 +1,8 @@
 import { app } from "../../scripts/app.js";
 import { viewUrl } from "./components/director/shared.js";
+import { createHighlightedTextarea } from "./components/director/highlight.js";
 import { api } from "../../scripts/api.js";
+import { getLocale, t } from "./i18n.js";
 
 function hideWidget(w) {
     if (!w) return;
@@ -26,7 +28,6 @@ const MSCSS = `
     width: 100%;
     box-sizing: border-box;
     padding: 6px 6px 6px 6px;
-    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 .ref-ms-wrapper::-webkit-scrollbar {
     width: 6px;
@@ -101,7 +102,7 @@ const MSCSS = `
 .ref-ms-row-group {
     display: flex;
     flex: 1;
-    gap: 4px;
+    gap: 6px;
     align-items: center;
 }
 .ref-ms-label,.ref-ms-label-sm {
@@ -124,7 +125,6 @@ const MSCSS = `
     color: #e0e0e0;
     padding: 4px 8px;
     font-size: 12px;
-    font-family: inherit;
     outline: none;
     box-sizing: border-box;
     transition: border-color 0.2s;
@@ -141,7 +141,6 @@ const MSCSS = `
     color: #e0e0e0;
     padding: 4px 6px;
     font-size: 11px;
-    font-family: inherit;
     outline: none;
     box-sizing: border-box;
     cursor: pointer;
@@ -163,7 +162,6 @@ const MSCSS = `
     color: #e0e0e0;
     padding: 3px 8px;
     font-size: 11px;
-    font-family: inherit;
     outline: none;
     resize: vertical;
     min-height: 90px;
@@ -190,7 +188,6 @@ const MSCSS = `
     color: #e0e0e0;
     padding: 3px 8px;
     font-size: 11px;
-    font-family: inherit;
     outline: none;
     resize: none;
     min-height: 60px;
@@ -642,14 +639,14 @@ function mentionMedia(s, size) {
     };
     if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile) || (s.audioRef && t === "Subject")) {
         const el = document.createElement("span");
-        el.title = "音频";
+        el.title = t("Audio");
         el.textContent = "♪";
         Object.assign(el.style, base);
         return el;
     }
     if (t === "Video" || s.videoFile) {
         const el = document.createElement("span");
-        el.title = "视频";
+        el.title = t("Video");
         el.textContent = "▶";
         Object.assign(el.style, base, { color: "#a5d6a7" });
         return el;
@@ -663,7 +660,7 @@ function mentionMedia(s, size) {
     }
     // 无媒体 → 文本主体 T 徽标
     const el = document.createElement("span");
-    el.title = "文本";
+    el.title = t("Text");
     el.textContent = "T";
     Object.assign(el.style, base, { background: "#333", color: "#ccc" });
     return el;
@@ -698,15 +695,15 @@ function renderMentionList(pop, allowed) {
     const tabTypes = [""].concat(allowed || []);
     const tabs = document.createElement("div");
     tabs.className = "ref-ms-mention-tabs";
-    tabTypes.forEach((t) => {
+    tabTypes.forEach((tabType) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "ref-ms-mention-tab" + (t === tab ? " active" : "");
-        b.textContent = t || "全部";
+        b.className = "ref-ms-mention-tab" + (tabType === tab ? " active" : "");
+        b.textContent = tabType || t("All");
         b.addEventListener("mousedown", (e) => {
             e.preventDefault(); // 保持 textarea 焦点
-            if (pop.dataset.tab === t) return;
-            pop.dataset.tab = t;
+            if (pop.dataset.tab === tabType) return;
+            pop.dataset.tab = tabType;
             renderMentionList(pop, allowed);
         });
         tabs.appendChild(b);
@@ -725,7 +722,7 @@ function renderMentionList(pop, allowed) {
     if (ctx.items.length === 0) {
         const empty = document.createElement("div");
         empty.className = "ref-ms-mention-empty";
-        empty.textContent = "暂无可用主体";
+        empty.textContent = t("No subjects available");
         list.appendChild(empty);
     } else {
         ctx.items.forEach((it, i) => {
@@ -733,7 +730,7 @@ function renderMentionList(pop, allowed) {
             item.className = "ref-ms-mention-item" + (i === 0 ? " active" : "");
             const type = document.createElement("span");
             type.className = "ref-ms-mention-type";
-            type.textContent = it.s.type || "Subject";
+            type.textContent = t(it.s.type || "Subject");
             const name = document.createElement("span");
             name.textContent = it.s.name;
             item.appendChild(mentionMedia(it.s, 22));
@@ -865,10 +862,10 @@ app.registerExtension({
                 globalPromptBox.className = "ref-ms-global-prompt";
                 const globalPromptLabel = document.createElement("div");
                 globalPromptLabel.className = "ref-ms-global-prompt-label";
-                globalPromptLabel.textContent = "Global Prompt";
+                globalPromptLabel.textContent = t("Global Prompt");
                 const globalPromptInput = document.createElement("textarea");
                 globalPromptInput.className = "ref-ms-global-prompt-input";
-                globalPromptInput.placeholder = "Conditions the entire video (anchors persistent characters, objects, scene context)...";
+                globalPromptInput.placeholder = t("GlobalPromptHint");
                 globalPromptInput.spellcheck = false;
                 globalPromptBox.appendChild(globalPromptLabel);
                 globalPromptBox.appendChild(globalPromptInput);
@@ -898,11 +895,11 @@ app.registerExtension({
 
                 const addBtn = document.createElement("button");
                 addBtn.className = "ref-ms-add-btn";
-                addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add Subject`;
+                addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> ${t("Add Subject")}`;
 
                 const footer = document.createElement("div");
                 footer.className = "ref-ms-footer";
-                footer.textContent = "Up 9 subjects，3 audios per shot";
+                footer.textContent = t("Up 9 subjects，3 audios per shot");
 
                 wrapper.appendChild(globalPromptBox);
                 wrapper.appendChild(tabBar);
@@ -1067,10 +1064,10 @@ app.registerExtension({
                 function updatePlayBtnIcon(btn, isPlaying) {
                     if (!btn) return;
                     if (isPlaying) {
-                        btn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Stop`;
+                        btn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> ${t("Stop")}`;
                         btn.classList.add("playing");
                     } else {
-                        btn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
+                        btn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> ${t("Play")}`;
                         btn.classList.remove("playing");
                     }
                 }
@@ -1177,12 +1174,12 @@ app.registerExtension({
                         header.className = "ref-ms-card-header";
                         const indexLabel = document.createElement("span");
                         indexLabel.className = "ref-ms-card-index";
-                        indexLabel.textContent = `${subj.type || activeTab} ${i + 1}`;
+                        indexLabel.textContent = `${t(subj.type || activeTab)} ${i + 1}`;
                         header.appendChild(indexLabel);
 
                         const removeBtn = document.createElement("button");
                         removeBtn.className = "ref-ms-card-remove";
-                        removeBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Remove`;
+                        removeBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> ${t("Remove")}`;
                         if (subjects.length <= 1) {
                             removeBtn.disabled = true;
                             removeBtn.style.opacity = "0.35";
@@ -1206,15 +1203,15 @@ app.registerExtension({
                         nameCell.className = "ref-ms-cell";
                         const nameLabel = document.createElement("span");
                         nameLabel.className = "ref-ms-label-sm";
-                        nameLabel.textContent = "Name *";
-                        nameLabel.title = "Required";
+                        nameLabel.textContent = t("Name *");
+                        nameLabel.title = t("Required");
                         const nameInput = document.createElement("input");
                         nameInput.className = "ref-ms-input";
                         nameInput.type = "text";
-                        nameInput.placeholder = "Subject name...";
+                        nameInput.placeholder = t("Subject name...");
                         nameInput.value = subj.name || "";
                         nameInput.maxLength = 128;
-                        nameInput.title = "Required";
+                        nameInput.title = t("Required");
                         if (!(subj.name || "").trim()) nameInput.classList.add("required-missing");
                         nameInput.addEventListener("input", () => {
                             subjects[idx].name = nameInput.value;
@@ -1228,8 +1225,8 @@ app.registerExtension({
                         relCell.className = "ref-ms-cell";
                         const relLabel = document.createElement("span");
                         relLabel.className = "ref-ms-label-sm";
-                        relLabel.textContent = "Relation *";
-                        relLabel.title = "Required";
+                        relLabel.textContent = t("Relation *");
+                        relLabel.title = t("Required");
                         const relSelect = document.createElement("select");
                         relSelect.className = "ref-ms-select";
                         const relOptions = REF_TYPE_RELATIONSHIPS[activeTab] || REF_RELATIONSHIPS_SUBJECT;
@@ -1265,21 +1262,42 @@ app.registerExtension({
                         descRowGroup.className = "ref-ms-row-group";
                         const descLabel = document.createElement("span");
                         descLabel.className = "ref-ms-label";
-                        descLabel.textContent = "Definition";
-                        const descInput = document.createElement("textarea");
-                        descInput.className = "ref-ms-textarea";
-                        descInput.placeholder = "Subject definition... (type @ to mention another subject)";
-                        descInput.value = subj.description || "";
-                        descInput.rows = 1;
-                        descInput.addEventListener("input", () => {
-                            subjects[idx].description = descInput.value;
+                        descLabel.textContent = t("Definition");
+                        // 高亮 textarea（overlay：真实 ta + 底层高亮 pre），样式与 .ref-ms-textarea 一致
+                        const descInput = createHighlightedTextarea({
+                            className: "ref-ms-textarea",
+                            style: {
+                                flex: "1",
+                                minWidth: "0",
+                                minHeight: "90px",
+                                background: "#2a2a2a",
+                                color: "#e0e0e0",
+                                padding: "3px 8px",
+                                fontSize: "11px",
+                                boxSizing: "border-box",
+                                resize: "vertical",
+                                borderWidth: "1px",
+                                borderStyle: "solid",
+                                borderRadius: "4px",
+                            },
+                            value: subj.description || "",
+                            placeholder: t("Subject definition... (type @ to mention another subject)"),
+                            spellcheck: false,
+                        });
+                        const descInputEl = descInput.ta;
+                        const descInputWrap = descInput.wrap;
+                        descInputEl.rows = 1;
+                        descInputEl.addEventListener("input", () => {
+                            subjects[idx].description = descInputEl.value;
                             saveState();
                         });
-                        // textarea 手动拉伸（resize: vertical）后重算节点高度
-                        descInput.addEventListener("resize", updateNodeSize);
-                        attachMention(descInput, idx, subjects, (v) => {
+                        // wrapper 手动拉伸（resize: vertical）后重算节点高度
+                        descInputWrap.addEventListener("resize", updateNodeSize);
+                        attachMention(descInputEl, idx, subjects, (v) => {
                             subjects[idx].description = v;
                             saveState();
+                            // acceptMention 直接写 ta.value 不触发 input，需手动刷新高亮层
+                            descInput.refresh();
                         });
                         // relationship 为空（引用）时隐藏 Description 输入
                         const syncDescriptionVisibility = () => {
@@ -1287,7 +1305,7 @@ app.registerExtension({
                         };
                         syncDescriptionVisibility();
                         descRowGroup.appendChild(descLabel);
-                        descRowGroup.appendChild(descInput);
+                        descRowGroup.appendChild(descInputWrap);
                         descRow.appendChild(descRowGroup);
                         card.appendChild(descRow);
 
@@ -1308,7 +1326,7 @@ app.registerExtension({
                         } else {
                             const icon = document.createElement("div");
                             icon.className = "ref-ms-media-icon";
-                            icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><span>Image</span>`;
+                            icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><span>${t("Image")}</span>`;
                             imgBox.appendChild(icon);
                         }
 
@@ -1317,7 +1335,7 @@ app.registerExtension({
 
                         const imgAddBtn = document.createElement("button");
                         imgAddBtn.className = "ref-ms-media-action";
-                        imgAddBtn.textContent = subj.imageFile ? "Change" : "Add";
+                        imgAddBtn.textContent = subj.imageFile ? t("Change") : t("Add");
                         imgAddBtn.addEventListener("click", (e) => {
                             e.stopPropagation();
                             createFileInput("image/*", (filename, imgUrl) => {
@@ -1362,7 +1380,7 @@ app.registerExtension({
                             } else {
                                 const icon = document.createElement("div");
                                 icon.className = "ref-ms-media-icon";
-                                icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg><span>Audio</span>`;
+                                icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon></svg><span>${t("Audio")}</span>`;
                                 audioBox.appendChild(icon);
                             }
 
@@ -1371,7 +1389,7 @@ app.registerExtension({
 
                             const audAddBtn = document.createElement("button");
                             audAddBtn.className = "ref-ms-media-action";
-                            audAddBtn.textContent = subj.audioFile ? "Change" : "Add";
+                            audAddBtn.textContent = subj.audioFile ? t("Change") : t("Add");
                             audAddBtn.addEventListener("click", (e) => {
                                 e.stopPropagation();
                                 createFileInput("audio/*", (filename) => {
@@ -1386,7 +1404,7 @@ app.registerExtension({
                             if (subj.audioFile) {
                                 const playBtn = document.createElement("button");
                                 playBtn.className = "ref-ms-media-action play-btn";
-                                playBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play`;
+                                playBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> ${t("Play")}`;
                                 playBtn.addEventListener("click", (e) => {
                                     e.stopPropagation();
                                     playAudio(subj.audioFile, playBtn);
@@ -1411,18 +1429,35 @@ app.registerExtension({
                         }
 
                         // ----- Retention textarea（Rel 下，各类型均有）-----
+                        // 高亮 textarea（overlay：真实 ta + 底层高亮 pre），样式与 .ref-ms-retention 一致
                         const buildRetentionInput = () => {
-                            const ta = document.createElement("textarea");
-                            ta.className = "ref-ms-retention";
-                            ta.placeholder = "the young man's short wavy brown hair and dark-grey hoodie are retained.";
-                            ta.value = subj.retention || "";
+                            const descInput = createHighlightedTextarea({
+                                className: "ref-ms-retention",
+                                style: {
+                                    flex: "1",
+                                    minWidth: "0",
+                                    background: "#2a2a2a",
+                                    border: "1px solid #444",
+                                    borderRadius: "4px",
+                                    color: "#e0e0e0",
+                                    padding: "3px 8px",
+                                    fontSize: "11px",
+                                    outline: "none",
+                                    minHeight: "60px",
+                                    lineHeight: "1.35",
+                                    boxSizing: "border-box",
+                                },
+                                value: subj.retention || "",
+                                placeholder: t("the young man's short wavy brown hair and dark-grey hoodie are retained."),
+                                spellcheck: false,
+                            });
+                            const ta = descInput.ta;
                             ta.rows = 1;
-                            ta.spellcheck = false;
                             ta.addEventListener("input", () => {
                                 subjects[idx].retention = ta.value;
                                 saveState();
                             });
-                            return ta;
+                            return descInput.wrap;
                         };
 
                         // ----- Subject：Audio Ref 选择器（50% 宽，label inline）-----
@@ -1432,12 +1467,12 @@ app.registerExtension({
                             audioRefRow.style.width = "50%";
                             const audioRefLabel = document.createElement("span");
                             audioRefLabel.className = "ref-ms-label-sm";
-                            audioRefLabel.textContent = "Audio";
+                            audioRefLabel.textContent = t("Audio");
                             const audioRefSelect = document.createElement("select");
                             audioRefSelect.className = "ref-ms-select";
                             const noneOpt = document.createElement("option");
                             noneOpt.value = "";
-                            noneOpt.textContent = "None";
+                            noneOpt.textContent = t("None");
                             audioRefSelect.appendChild(noneOpt);
                             subjects.forEach((a) => {
                                 if (a.type === "Audio" && a.name.trim()) {
@@ -1462,7 +1497,7 @@ app.registerExtension({
                         retentionRow.className = "ref-ms-row";
                         const retentionLabel = document.createElement("span");
                         retentionLabel.className = "ref-ms-label";
-                        retentionLabel.textContent = "Retention";
+                        retentionLabel.textContent = t("Retention");
                         retentionRow.appendChild(retentionLabel);
                         const retentionInput = buildRetentionInput();
                         retentionRow.appendChild(retentionInput);
@@ -1494,7 +1529,7 @@ app.registerExtension({
                             const icon = document.createElement("div");
                             icon.className = "ref-ms-media-icon";
                             icon.style.cssText = "flex-direction: row; gap: 8px;";
-                            icon.innerHTML = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg><span>Upload Video</span>`;
+                            icon.innerHTML = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg><span>${t("Upload Video")}</span>`;
                             videoRow.appendChild(icon);
                         }
 
@@ -1504,8 +1539,8 @@ app.registerExtension({
 
                         const vidAddBtn = document.createElement("button");
                         vidAddBtn.className = "ref-ms-video-action";
-                        vidAddBtn.textContent = subj.videoFile ? "Change" : "Add";
-                        vidAddBtn.title = "替换视频";
+                        vidAddBtn.textContent = subj.videoFile ? t("Change") : t("Add");
+                        vidAddBtn.title = t("Replace Video");
                         vidAddBtn.addEventListener("click", (e) => {
                             e.stopPropagation();
                             createFileInput("video/*", (filename, videoUrl) => {
@@ -1521,8 +1556,8 @@ app.registerExtension({
                         if (subj.videoFile) {
                             const vidDelBtn = document.createElement("button");
                             vidDelBtn.className = "ref-ms-video-action del";
-                            vidDelBtn.textContent = "Delete";
-                            vidDelBtn.title = "删除视频";
+                            vidDelBtn.textContent = t("Delete");
+                            vidDelBtn.title = t("Delete Video");
                             vidDelBtn.addEventListener("click", (e) => {
                                 e.stopPropagation();
                                 subjects[idx].videoFile = null;
@@ -1542,8 +1577,10 @@ app.registerExtension({
 
                     // Update add button state
                     addBtn.disabled = false;
-                    addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Add ${activeTab}`;
-                    footer.textContent = `${visible.length} ${activeTab}${visible.length !== 1 ? "s" : ""}`;
+                    addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> ${t("Add")} ${t(activeTab)}`;
+                    const typeLabel = t(activeTab);
+                    const pluralS = getLocale() === "en" && visible.length !== 1 ? "s" : "";
+                    footer.textContent = `${visible.length} ${typeLabel}${pluralS}`;
                 }
 
                 function basename(path) {

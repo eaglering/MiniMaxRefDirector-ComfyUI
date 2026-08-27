@@ -1,6 +1,7 @@
 # MiniMaxRefDirector-ComfyUI
 
-**v3.1.1** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
+
+**v3.1.2** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
 
 ComfyUI 自定义节点包：在时间线上编排多段镜头，用 VLM 自动撰写分镜提示词，绑定参考图 / 参考视频 / 参考音频，逐段生成视频并跨段衔接（motion context），最终按顺序合并输出。
 
@@ -94,6 +95,16 @@ MiniMaxRefDirector-ComfyUI/
 ```
 
 ## 更新日志
+
+### v3.1.2
+
+- 提示词输入框关键词高亮：时间线编辑器与主体卡片的全部 prompt textarea（Segment Prompt、summary / detailed_description / overall_soundscape / non_diegetic_music、保留描述、H3 预览）支持 `<@主体>`、`<#主体:对白>`、`<d>...</d>` 彩色高亮，所见即所得。
+- 保留描述（段级覆盖）弹窗允许引用 `relation:none`（仅引用）的主体；左右 prompt 中仍保持禁用。
+- 生成提示词时间戳位置规则强化：`At MM:SS.mmm` 必须紧跟所属 `[Shot N]` 标记之后，禁止前置，避免模型生成"时间戳在镜头标记前"的错误写法。
+- 翻译保护增强：
+  - 双引号（含全角 `"…"` / `'…'`）包裹的内容在翻译时保持原语言，不做占位掩码，杜绝改写（单引号 `'` 不参与保护，避免与英文撇号冲突）。
+  - 翻译模板明确：引号内台词/标语/歌名等逐字保留。
+- 视频素材去除"下载/投屏"按钮：`controlsList="nodownload noremoteplayback"` + `disablePictureInPicture`；并隐藏 360 等浏览器视频扩展注入的悬浮操作层。
 
 ### v3.1.1
 

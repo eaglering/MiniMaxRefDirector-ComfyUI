@@ -29,7 +29,7 @@ summary: [reference generation] The target video shows <@Zhang San> eating a coo
 The main body of the prompt. Describe visuals, actions, camera movement, sound, and dialogue shot by shot in target-video playback order.
 
 - The text MUST begin with `[Shot 1]` — no title, intro, or other text may appear before it. If the user's input does not contain an explicit shot marker, open with `[Shot 1]` followed by the scene description.
-- `[Shot 1]` marks the opening shot and has no timestamp. Later shots use `[Shot N] At MM:SS.mmm, ...` to mark cut times.
+- `[Shot 1]` marks the opening shot and has no timestamp. Later shots use `[Shot 2] At MM:SS.mmm, ..., [Shot N] At MM:SS.mmm, ...` to mark cut times.
 - For each shot, clearly establish the current composition, subject appearance and position, environment and lighting, actions and state changes, camera movement, and current sound.
 - Write camera movement in the same language as the output (the language of the user's input) within the current shot, including movement type, amplitude, and speed when they need to be expressed.
 - Keep dialogue in its original language.

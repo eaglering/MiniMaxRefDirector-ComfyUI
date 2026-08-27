@@ -1,6 +1,7 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: get_settingsWidgetNames, hideSettingsWidgets, showSettingsWidgets, handleLoadTimeline, _applyLoadedTimeline, _getTimelineSavePayload, handleSaveTimeline, handleSaveTimelineAs, _makeSettingRow, showSettingsMenu, dismissSettingsMenu
 import { ICONS, api, app, hideWidget, parseInitial, showWidget } from "./shared.js";
+import { t } from "../../i18n.js";
 
 export const settings = {
   hideSettingsWidgets() {
@@ -93,7 +94,7 @@ export const settings = {
     try {
       if (window.showOpenFilePicker) {
         const [fileHandle] = await window.showOpenFilePicker({
-          types: [{ description: 'Timeline JSON', accept: { 'application/json': ['.json'] } }],
+          types: [{ description: t('Timeline JSON'), accept: { 'application/json': ['.json'] } }],
           multiple: false
         });
         const file = await fileHandle.getFile();
@@ -116,7 +117,7 @@ export const settings = {
     } catch (e) {
       if (e.name !== "AbortError") {
         console.error("Failed to load timeline:", e);
-        alert("Failed to load timeline. See console for details.");
+        alert(t("Failed to load timeline. See console for details."));
       }
     }
   }
@@ -203,7 +204,7 @@ export const settings = {
       }, 100);
     } catch (e) {
       console.error("Invalid timeline JSON:", e);
-      alert("Invalid timeline file.");
+      alert(t("Invalid timeline file."));
     }
   }
 ,
@@ -256,7 +257,7 @@ export const settings = {
       this.dismissSettingsMenu();
     } catch (e) {
       console.error("Failed to save timeline:", e);
-      alert("Failed to save. You may need to use Save As.");
+      alert(t("Failed to save. You may need to use Save As."));
     }
   }
 ,
@@ -268,7 +269,7 @@ export const settings = {
       if (window.showSaveFilePicker) {
         const fileHandle = await window.showSaveFilePicker({
           suggestedName: "timeline_export.json",
-          types: [{ description: 'Timeline JSON', accept: { 'application/json': ['.json'] } }]
+          types: [{ description: t('Timeline JSON'), accept: { 'application/json': ['.json'] } }]
         });
         const writable = await fileHandle.createWritable();
         await writable.write(payload);
@@ -406,12 +407,12 @@ export const settings = {
     titleContainer.style.justifyContent = "space-between";
     titleContainer.style.alignItems = "center";
     const titleText = document.createElement("span");
-    titleText.textContent = "Timeline Settings";
+    titleText.textContent = t("Timeline Settings");
     titleContainer.appendChild(titleText);
     const closeBtn = document.createElement("button");
     closeBtn.className = "mrd-pr-settings-close-btn";
     closeBtn.innerHTML = ICONS.close;
-    closeBtn.title = "Close Settings";
+    closeBtn.title = t("Close Settings");
     closeBtn.addEventListener("click", () => this.dismissSettingsMenu());
     titleContainer.appendChild(closeBtn);
     menu.appendChild(titleContainer);
@@ -423,18 +424,18 @@ export const settings = {
     grid.style.gap = "6px";
     grid.style.marginBottom = "4px";
     for (const { text, onClick } of [
-      { text: "Save Timeline", onClick: () => this.handleSaveTimeline() },
-      { text: "Save Timeline As", onClick: () => this.handleSaveTimelineAs() },
-      { text: "Load Timeline", onClick: () => this.handleLoadTimeline() },
+      { text: t("Save Timeline"), onClick: () => this.handleSaveTimeline() },
+      { text: t("Save Timeline As"), onClick: () => this.handleSaveTimelineAs() },
+      { text: t("Load Timeline"), onClick: () => this.handleLoadTimeline() },
     ]) grid.appendChild(btn(text, onClick));
     const widgetsVisible = () => !!(this.node.widgets?.find(w => w.name === "display_mode" && !(w.options && w.options.hidden)));
-    const toggleBtn = btn(widgetsVisible() ? "Hide Widgets" : "Show Widgets", () => {
+    const toggleBtn = btn(widgetsVisible() ? t("Hide Widgets") : t("Show Widgets"), () => {
       if (widgetsVisible()) {
         this.hideSettingsWidgets();
       } else {
         this.showSettingsWidgets();
       }
-      toggleBtn.textContent = widgetsVisible() ? "Hide Widgets" : "Show Widgets";
+      toggleBtn.textContent = widgetsVisible() ? t("Hide Widgets") : t("Show Widgets");
     });
     grid.appendChild(toggleBtn);
     menu.appendChild(grid);
@@ -443,8 +444,8 @@ export const settings = {
     // Display Mode segmented control
     const dmWidget = this.node.widgets?.find(w => w.name === "display_mode");
     if (dmWidget) {
-      menu.appendChild(this._makeSettingRow("Display Mode", segmented(
-        [{ value: "seconds", label: "Seconds" }, { value: "frames", label: "Frames" }],
+      menu.appendChild(this._makeSettingRow(t("Display Mode"), segmented(
+        [{ value: "seconds", label: t("Seconds") }, { value: "frames", label: t("Frames") }],
         dmWidget.value,
         (val) => {
           fire(dmWidget, val);
@@ -456,8 +457,8 @@ export const settings = {
     }
 
     // Show Filenames segmented control
-    menu.appendChild(this._makeSettingRow("Show Filenames", segmented(
-      [{ value: "true", label: "On" }, { value: "false", label: "Off" }],
+    menu.appendChild(this._makeSettingRow(t("Show Filenames"), segmented(
+      [{ value: "true", label: t("On") }, { value: "false", label: t("Off") }],
       !!this.node.properties.showFilenames,
       (val) => {
         this.node.properties.showFilenames = val === "true";
@@ -470,9 +471,9 @@ export const settings = {
 
     // Numeric scrub controls (Epsilon / Divisible By / Img Compression)
     for (const [label, name, step, min, max, isFloat] of [
-      ["Epsilon", "epsilon", 0.0001, 0.0001, 0.99, true],
-      ["Divisible By", "divisible_by", 1, 1, 256, false],
-      ["Img Compression", "img_compression", 1, 0, 100, false],
+      [t("Epsilon"), "epsilon", 0.0001, 0.0001, 0.99, true],
+      [t("Divisible By"), "divisible_by", 1, 1, 256, false],
+      [t("Img Compression"), "img_compression", 1, 0, 100, false],
     ]) {
       const w = this.node.widgets?.find(x => x.name === name);
       if (w) menu.appendChild(this._makeSettingRow(label, scrub(w, step, min, max, isFloat)));
@@ -481,20 +482,20 @@ export const settings = {
     menu.appendChild(divider());
 
     // Workspace Folder button
-    const btnOpenFolder = btn("Open", async () => {
+    const btnOpenFolder = btn(t("Open"), async () => {
       try {
         const response = await api.fetchApi("/minimax_ref/api/h3/ltx_director_open_folder");
         const data = await response.json();
         if (!data.success) {
           console.error("Failed to open workspace folder:", data.error || "Unknown error");
-          alert("Could not open workspace folder. This option is only supported when running ComfyUI locally.");
+          alert(t("Could not open workspace folder. This option is only supported when running ComfyUI locally."));
         }
       } catch (err) {
         console.error("Error opening workspace folder:", err);
-        alert("Error opening workspace folder: " + err.message);
+        alert(t("Error opening workspace folder: ") + err.message);
       }
     }, { width: "98px", margin: "0" });
-    menu.appendChild(this._makeSettingRow("Workspace Folder", btnOpenFolder));
+    menu.appendChild(this._makeSettingRow(t("Workspace Folder"), btnOpenFolder));
 
     // Position the menu below the anchor button (pop down)
     document.body.appendChild(menu);

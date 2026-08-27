@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { t } from "./i18n.js";
 
 const API_PREFIX = "/minimax_ref/api";
 
@@ -28,10 +29,10 @@ export class APIConfigManager {
     try {
       data = await resp.json();
     } catch {
-      throw new Error(`服务器响应异常 (HTTP ${resp.status})`);
+      throw new Error(t("Server responded with an error (HTTP {status})", { status: resp.status }));
     }
     if (!data.success) {
-      throw new Error(data.error || "加载配置失败");
+      throw new Error(data.error || t("Failed to load configuration"));
     }
     this.config = data.config;
   }
@@ -44,7 +45,7 @@ export class APIConfigManager {
     });
     const data = await resp.json();
     if (!data.success) {
-      throw new Error(data.error || "保存失败");
+      throw new Error(data.error || t("Failed to save"));
     }
   }
 
@@ -54,7 +55,7 @@ export class APIConfigManager {
     }
     this.loadConfig()
       .then(() => this.render())
-      .catch((e) => this._toast("error", "加载配置失败", e.message));
+      .catch((e) => this._toast("error", t("Failed to load configuration"), e.message));
   }
 
   closeDialog() {
@@ -92,7 +93,7 @@ export class APIConfigManager {
     header.style.borderBottom = "1px solid #444";
 
     const title = document.createElement("h2");
-    title.textContent = "MiniMax API 管理器";
+    title.textContent = t("MiniMax API Manager");
     title.style.margin = "0";
     title.style.fontSize = "16px";
     header.appendChild(title);
@@ -152,22 +153,22 @@ export class APIConfigManager {
 
       panel.appendChild(
         this._row(
-          "服务商名称",
+          t("Provider name"),
           this._input(svc.name, (v) => (svc.name = v))
         )
       );
       panel.appendChild(
-        this._row("Base URL", this._input(svc.base_url, null, true))
+        this._row(t("Base URL"), this._input(svc.base_url, null, true))
       );
       panel.appendChild(
         this._row(
-          "API Key",
+          t("API Key"),
           this._input(svc.api_key || "", (v) => (svc.api_key = v), false, "password")
         )
       );
       panel.appendChild(
         this._row(
-          "默认 LLM",
+          t("Default LLM"),
           this._modelSelect(
             svc.llm_models,
             this.config.current.llm.service === svc.id
@@ -181,7 +182,7 @@ export class APIConfigManager {
       );
       panel.appendChild(
         this._row(
-          "默认 VLM",
+          t("Default VLM"),
           this._modelSelect(
             svc.vlm_models,
             this.config.current.vlm.service === svc.id
@@ -198,9 +199,7 @@ export class APIConfigManager {
       help.style.marginTop = "12px";
       help.style.fontSize = "12px";
       help.style.color = "#aaa";
-      help.textContent =
-        "提示：节点上 api_key 留空时，会自动使用此处设置的默认 VLM 配置；" +
-        "节点手动填写 api_key 时优先使用手动值。";
+      help.textContent = t("ApiKeyHint");
       panel.appendChild(help);
     };
 
@@ -217,7 +216,7 @@ export class APIConfigManager {
     footer.style.borderTop = "1px solid #444";
 
     const cancelBtn = document.createElement("button");
-    cancelBtn.textContent = "取消";
+    cancelBtn.textContent = t("Cancel");
     cancelBtn.type = "button";
     cancelBtn.className = "p-button p-component p-button-secondary";
     cancelBtn.style.cursor = "pointer";
@@ -225,7 +224,7 @@ export class APIConfigManager {
     footer.appendChild(cancelBtn);
 
     const saveBtn = document.createElement("button");
-    saveBtn.textContent = "保存";
+    saveBtn.textContent = t("Save");
     saveBtn.type = "button";
     saveBtn.className = "p-button p-component p-button-primary";
     saveBtn.style.cursor = "pointer";
@@ -233,9 +232,9 @@ export class APIConfigManager {
       try {
         await this.saveConfig();
         this.closeDialog();
-        this._toast("success", "保存成功", "API 配置已保存");
+        this._toast("success", t("Saved successfully"), t("API configuration saved"));
       } catch (e) {
-        this._toast("error", "保存失败", e.message);
+        this._toast("error", t("Failed to save"), e.message);
       }
     };
     footer.appendChild(saveBtn);
@@ -299,7 +298,7 @@ export class APIConfigManager {
 
     const empty = document.createElement("option");
     empty.value = "";
-    empty.textContent = "-- 选择模型 --";
+    empty.textContent = t("Select Model");
     select.appendChild(empty);
 
     (models || []).forEach((m) => {

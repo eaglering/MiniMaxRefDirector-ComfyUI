@@ -2,11 +2,13 @@ import hashlib
 import json
 import os
 import logging
+import re
 from comfy_api.latest import io
 
 from .lib.audio import fill_audio_gaps
 from .lib.image import calc_resolution
-from .lib.prompt import build_h3_prompt
+from .lib.llm import unload_llama_models
+from .lib.prompt import build_h3_prompt, _translate_text_to_en
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")
@@ -24,6 +26,59 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _director_cache: dict[str, io.NodeOutput] = {}
 # 最近一次执行的 prompt_id：跨 prompt 时整体清空旧缓存（旧条目不会再被命中，避免无界增长）
 _last_prompt_id: object = None
+
+# 判断"非英文"：出现 CJK 字符即视为需要翻译成英文。
+# 对白 <d>...</d> / 主体标签 <@...>、<#...> 以及双引号（含全角引号）包裹的内容
+# 为禁止翻译片段（可能含中文），检测前先剥离，避免仅中文主体名/对白触发无谓的翻译调用。
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+# 引号保护：半角 "..." 与全角 \u201c...\u201d \u2018...\u2019（台词/标语/歌名等保持原语言）。
+# 注意：不含半角单引号 '...'，避免与英文撇号（don't / it's）冲突。
+_PROTECTED_FRAGMENT_RE = re.compile(
+    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
+    re.DOTALL,
+)
+
+
+def _needs_translate(prompt: str) -> bool:
+    return bool(_CJK_RE.search(_PROTECTED_FRAGMENT_RE.sub("", prompt)))
+
+
+def _translate_prompt_to_en(prompt: str, opts: dict) -> str:
+    """段提示词含中文时，将保护片段替换为英文占位符后整段翻译为英文，再还原占位符。
+
+    <@主体名> / <#主体名:对白> / <d>对白</d> 可能含中文且必须保持原语言（对白是
+    视频实际发声内容、主体名需保持原语言），翻译前掩码为 MASKED_N 英文占位符，
+    模型看不到原文，从源头杜绝改写；翻译后按顺序还原。若模型破坏/丢失了占位符，
+    则整体回退原文，保证对白/角色名不被污染。
+    翻译失败时 _translate_text_to_en 内部回退原文，不抛异常。
+    """
+    # 1. 保护片段 → 英文占位符
+    placeholders: dict[str, str] = {}
+
+    def _repl(m: re.Match) -> str:
+        token = f"MASKED_{len(placeholders)}"
+        placeholders[token] = m.group(0)
+        return token
+
+    masked = _PROTECTED_FRAGMENT_RE.sub(_repl, prompt)
+    # 2. 掩码后仍含中文才需要翻译（仅中文主体名/对白不会触发翻译）
+    if not _CJK_RE.search(masked):
+        return prompt
+    # 3. 整段翻译为英文（subject_definitions / retention_analysis 等英文结构
+    #    一并过模型，模型保持其英文原样，占位符被显式要求原样保留）
+    translated = _translate_text_to_en(
+        masked,
+        vlm_mode=str(opts.get("vlm_mode") or "llama-cpp"),
+        options=opts,
+        seed=int(opts.get("seed") or 42),
+    )
+    # 4. 占位符被模型删改 → 整体回退原文，避免对白/主体名丢失
+    missing = [token for token in placeholders if token not in translated]
+    if missing:
+        return prompt
+    for token, original in placeholders.items():
+        translated = translated.replace(token, original)
+    return translated
 
 
 class MiniMaxRefDirector(io.ComfyNode):
@@ -198,44 +253,62 @@ class MiniMaxRefDirector(io.ComfyNode):
 
         if timeline_data_len == 0:
             raise ValueError("[MiniMaxRefDirector] timeline_segments is required and must not be empty.")
-        
-        for i, seg in enumerate(timeline_segments):
-            dur = int(seg.get("length", 1))
-            seg_start_frames = int(seg.get("start", 0))
-            seg_end_frames = seg_start_frames + dur
 
-            if seg_start_frames < range_start:
-                seg_start_frames = range_start
-            if seg_end_frames > range_end:
-                seg_end_frames = range_end
+        # 段提示词可能以中文编写（编辑器"中→"按钮生成）：下游 MiniMax 视频模型需要
+        # 英文提示词，此处对含中文的段提示词调用 LLM 翻译为英文。opts 从 config 透传
+        # （vlm_mode / gguf_path / mmproj_path / provider / api_key 等）；翻译会加载
+        # 本地 llama-cpp 模型，结束后在 finally 统一释放内存。
+        vlm_opts = ((config or {}).get("opts") or {}) if config else {}
+        translated_any = False
+        try:
+            for i, seg in enumerate(timeline_segments):
+                dur = int(seg.get("length", 1))
+                seg_start_frames = int(seg.get("start", 0))
+                seg_end_frames = seg_start_frames + dur
 
-            dur = seg_end_frames - seg_start_frames
-            if dur <= 0:
-                continue
-            seg_audio = fill_audio_gaps(audio_segments, seg_start_frames, seg_end_frames)
-            h3_prompt_json = seg.get("h3PromptJson", "")
-            prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
-            next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
-            prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
-                                         prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
-                                         timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio)
-            entry = {
-                "prompt": prompt_res["prompt"],
-                "subjects": prompt_res["subjects"],
-                "images": prompt_res["images"],
-                "audios": prompt_res["audios"],
-                "videos": prompt_res["videos"],
-                "prevImageFile": prompt_res["prevImageFile"],
-                "prevType": prompt_res["prevType"],
-                "durationFrames": dur,
-                "startFrames": seg_start_frames,
-                "type": seg.get("type", "text"),
-                "imageFile": seg.get("imageFile", ""),
-                "upscale": seg.get("upscale", False),
-                "guideStrength": seg.get("guideStrength", 16),
-            }
-            guide_timeline.append(entry)
-            segment_count += 1
+                if seg_start_frames < range_start:
+                    seg_start_frames = range_start
+                if seg_end_frames > range_end:
+                    seg_end_frames = range_end
+
+                dur = seg_end_frames - seg_start_frames
+                if dur <= 0:
+                    continue
+                seg_audio = fill_audio_gaps(audio_segments, seg_start_frames, seg_end_frames)
+                h3_prompt_json = seg.get("h3PromptJson", "")
+                prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
+                next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
+                prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
+                                             prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
+                                             timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio)
+                # 非英文（含中文，且非仅出现在对白/主体标签中）的段提示词翻译为英文
+                if _needs_translate(prompt_res["prompt"]):
+                    prompt_res["prompt"] = _translate_prompt_to_en(prompt_res["prompt"], vlm_opts)
+                    translated_any = True
+                entry = {
+                    "prompt": prompt_res["prompt"],
+                    "subjects": prompt_res["subjects"],
+                    "images": prompt_res["images"],
+                    "audios": prompt_res["audios"],
+                    "videos": prompt_res["videos"],
+                    "prevImageFile": prompt_res["prevImageFile"],
+                    "prevType": prompt_res["prevType"],
+                    "durationFrames": dur,
+                    "startFrames": seg_start_frames,
+                    "type": seg.get("type", "text"),
+                    "imageFile": seg.get("imageFile", ""),
+                    "upscale": seg.get("upscale", False),
+                    "guideStrength": seg.get("guideStrength", 16),
+                }
+                guide_timeline.append(entry)
+                segment_count += 1
+        finally:
+            # 释放 llama-cpp 模型内存（翻译用 LLM 加载后不再驻留；未触发翻译/无模型时为空操作）
+            if translated_any:
+                try:
+                    unload_llama_models()
+                except Exception as e:
+                    log.warning(f"[MiniMaxRefDirector] Failed to unload Llama models: {e}")
 
         if segment_count == 0:
             raise ValueError("[MiniMaxRefDirector] No valid segments found in timeline_data.")
