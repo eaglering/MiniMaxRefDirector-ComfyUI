@@ -1,7 +1,7 @@
 # MiniMaxRefDirector-ComfyUI
 
 
-**v3.1.2** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
+**v3.1.3** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
 
 ComfyUI 自定义节点包：在时间线上编排多段镜头，用 VLM 自动撰写分镜提示词，绑定参考图 / 参考视频 / 参考音频，逐段生成视频并跨段衔接（motion context），最终按顺序合并输出。
 
@@ -95,6 +95,11 @@ MiniMaxRefDirector-ComfyUI/
 ```
 
 ## 更新日志
+
+### v3.1.3
+
+- 修复 LLM 生成中文提示词偶发报错：`parse_generated_json` 改为 `json.loads(..., strict=False)`，允许 JSON 字符串值内出现未转义的控制字符（模型直接写原始换行/制表符），不再报 `Invalid control character at: ...`。
+- 中文提示词输出语言强制：生成 prompt 末尾追加 `## Output Language` 强制指令（中/英文模板分别约束），中文模板的示例与语言规则同步改为中文，避免模型被模板中的英文正文/示例带偏——点「中」按钮后仍输出英文的问题。
 
 ### v3.1.2
 

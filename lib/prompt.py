@@ -103,7 +103,7 @@ def _load_h3_skills_template(lang: str = "en") -> str:
         return f.read()
 
 
-def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0) -> str:
+def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en") -> str:
     """Build the full prompt sent to the local GGUF VLM.
 
     Includes the custom skills guide, the required JSON output format
@@ -126,6 +126,27 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
         duration_note = (
             "The target video's total duration is %.2f seconds. "
         ) % (float(duration_seconds))
+
+    # 输出语言指令放在 prompt 末尾（模型注意力最强的位置），
+    # 避免被模板中大量英文正文/示例带偏语言
+    if lang == "zh":
+        lang_note = (
+            "## Output Language\n"
+            "IMPORTANT: All four JSON field values MUST be written entirely in Chinese "
+            "(中文) with Chinese punctuation `，` `。` `？` `！`. Do NOT output English "
+            "descriptions, even if the user's input is in English. Only the fixed "
+            "structural markers ([Shot N], At MM:SS.mmm, <@...>, <#...>), the four "
+            "field names, character names, and scene-visible text/dialogue may keep "
+            "their original language.\n"
+        )
+    else:
+        lang_note = (
+            "## Output Language\n"
+            "IMPORTANT: All four JSON field values MUST be written entirely in English. "
+            "Only the fixed structural markers ([Shot N], At MM:SS.mmm, <@...>, "
+            "<#...>), the four field names, character names, and scene-visible "
+            "text/dialogue may keep their original language.\n"
+        )
 
     return f"""You are an expert video prompt writer. Follow the skills guide below.
 
@@ -154,7 +175,7 @@ Write one short paragraph summarizing the target video and its reference relatio
 ## Strictness
 - "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".
 - Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
-{image_note}## User Input Prompt
+{image_note}{lang_note}## User Input Prompt
 {duration_note}{prompt}
 
 Output ONLY the JSON object. Do not add any text before or after it."""
@@ -338,7 +359,8 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
       - ollama_model: vlm_mode="ollama" 时的模型名（空则回落 API 管理器 ollama 服务 / "llava"）
       - ollama_base_url: vlm_mode="ollama" 时的端点（空则默认 http://localhost:11434/api/chat）
       - clip_type: CLIP 模型类型（"minimax" / "qwen3vl" / "gemma"）
-      - lang: 仅用于选择 skills 模板文件（"zh" 加载中文模板，其余语言一律加载英文模板）
+      - lang: "zh" 加载中文模板，其余语言加载英文模板；同时在 prompt 末尾
+        追加对应的输出语言强制指令（弥补模板正文以英文为主导致模型语言漂移的问题）
 
     The output JSON includes summary / detailed_description /
     overall_soundscape / non_diegetic_music (a provided reference image is
@@ -352,7 +374,7 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
     image = load_image_tensor(image_path) if image_path else None
     skills = _load_h3_skills_template(lang)
-    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds)
+    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds, lang)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
             image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
