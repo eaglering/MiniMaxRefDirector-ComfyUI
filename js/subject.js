@@ -1429,18 +1429,35 @@ app.registerExtension({
                         }
 
                         // ----- Retention textarea（Rel 下，各类型均有）-----
+                        // 高亮 textarea（overlay：真实 ta + 底层高亮 pre），样式与 .ref-ms-retention 一致
                         const buildRetentionInput = () => {
-                            const ta = document.createElement("textarea");
-                            ta.className = "ref-ms-retention";
-                            ta.placeholder = t("the young man's short wavy brown hair and dark-grey hoodie are retained.");
-                            ta.value = subj.retention || "";
+                            const descInput = createHighlightedTextarea({
+                                className: "ref-ms-retention",
+                                style: {
+                                    flex: "1",
+                                    minWidth: "0",
+                                    background: "#2a2a2a",
+                                    border: "1px solid #444",
+                                    borderRadius: "4px",
+                                    color: "#e0e0e0",
+                                    padding: "3px 8px",
+                                    fontSize: "11px",
+                                    outline: "none",
+                                    minHeight: "60px",
+                                    lineHeight: "1.35",
+                                    boxSizing: "border-box",
+                                },
+                                value: subj.retention || "",
+                                placeholder: t("the young man's short wavy brown hair and dark-grey hoodie are retained."),
+                                spellcheck: false,
+                            });
+                            const ta = descInput.ta;
                             ta.rows = 1;
-                            ta.spellcheck = false;
                             ta.addEventListener("input", () => {
                                 subjects[idx].retention = ta.value;
                                 saveState();
                             });
-                            return ta;
+                            return descInput.wrap;
                         };
 
                         // ----- Subject：Audio Ref 选择器（50% 宽，label inline）-----

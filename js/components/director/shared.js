@@ -216,9 +216,12 @@ const STYLES = `
 .tr-out-input:focus{border-color:#888}
 .tr-out-input::-webkit-outer-spin-button,.tr-out-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .tr-out-input[type=number]{-moz-appearance:textfield}
+/* 隐藏浏览器视频扩展（360 等）注入的"下载/投屏"悬浮操作层；只隐藏按钮层，不影响视频本身 */
+[id^="xl_chrome_ext_video_tag_wrapper"] [class^="_video_op_wrapper"],
+[id^="xl_chrome_ext_video_tag_wrapper"] ul[class^="_video_op_list"]{display:none !important}
 `;
 
-const STYLE_VERSION = "20260816-d"; // 开发期改样式后递增；在 DevTools Console 检查是否打印，确认浏览器加载的是最新模块
+const STYLE_VERSION = "20260816-e"; // 开发期改样式后递增；在 DevTools Console 检查是否打印，确认浏览器加载的是最新模块
 // 注意：id 必须唯一！WhatDreamsCost-ComfyUI 的 ltx_director.js 也用 "prompt-relay-styles" 并会覆盖 textContent，
 // 因此这里使用本扩展专属 id 避免样式被整体覆盖。
 const STYLE_ID = "minimax-ref-director-styles";
