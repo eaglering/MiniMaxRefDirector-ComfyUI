@@ -103,7 +103,7 @@ def _load_h3_skills_template(lang: str = "en") -> str:
         return f.read()
 
 
-def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en") -> str:
+def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0) -> str:
     """Build the full prompt sent to the local GGUF VLM.
 
     Includes the custom skills guide, the required JSON output format
@@ -111,24 +111,15 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
     and the <@角色名称> / <#角色名称:对话内容> placeholder rules. When a reference
     image is provided it is NOT treated as a first frame; instead its contents
     are merged into "detailed_description" together with the user's input.
-    lang == "zh" 使用中文组装（输出中文），其余语言使用英文组装。
     """
-    zh = lang == "zh"
     image_note = ""
     if has_image:
-        if zh:
-            image_note = (
-                "- 如果提供了参考图，请分析图中可见内容（场景、角色、光照、氛围）"
-                "并与用户输入一起合并进 \"detailed_description\"。参考图不是首帧，"
-                "不能作为独立字段输出。\n"
-            )
-        else:
-            image_note = (
-                "- If a reference image is provided, analyze what is visible in it "
-                "(scene, characters, lighting, atmosphere) and merge it with the "
-                "user's input into \"detailed_description\". The image is not a "
-                "first frame and must not be output as its own field.\n"
-            )
+        image_note = (
+            "- If a reference image is provided, analyze what is visible in it "
+            "(scene, characters, lighting, atmosphere) and merge it with the "
+            "user's input into \"detailed_description\". The image is not a "
+            "first frame and must not be output as its own field.\n"
+        )
 
     duration_note = ""
     if duration_seconds and duration_seconds > 0:
@@ -136,41 +127,6 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
             "The target video's total duration is %.2f seconds. "
         ) % (float(duration_seconds))
 
-    if zh:
-        return f"""你是一位专业的视频提示词撰写专家。请遵循下面的技能指南。
-
-## 技能指南
-{skills}
-
-## 任务
-将用户的输入提示词改写为全参考视频提示词。
-
-## 输出语言
-四个字段一律使用中文撰写。仅保留固定结构标记（"[Shot N]"、"At MM:SS.mmm"、"<@...>"、"<#...>"）与字段名保持不变。角色名、对白与画面中可见的文字始终保留原语言。
-
-## 输出格式
-仅输出包含以下四个键的 JSON 对象：
-  - "summary": string
-  - "detailed_description": string
-  - "overall_soundscape": string
-  - "non_diegetic_music": string
-## 占位符规则
-在 "summary" 中：每个角色名包裹为 <@角色名称>，例如 <@张三>。summary 是纯概括，不含对白。
-在 "detailed_description"、"overall_soundscape" 和 "non_diegetic_music" 中：
-1. 每个角色名包裹为 <@角色名称>，例如 <@张三>。即使用户写的名字是裸词（例如"小李做了什么"必须变为"<@小李>做了什么"）。
-2. 每段对白包裹为 <#角色名称:对话内容>，例如 <#Zhang San:Hello!> 或 <#李四:你好！>。
-3. 角色名与对白保留原语言，绝不翻译。
-
-## "summary" 格式
-用一小段话概括目标视频及其参考关系，开头使用方括号任务类型前缀，例如 "[reference generation]" 或 "[video editing + reference generation + audio reuse]"。根据每个参考素材在目标视频中实际扮演的角色选择任务类型：keyframe completion（图片作为具体帧锚点）、reference generation（素材提供生成参考）、video editing（直接修改源视频）、video continuation（新内容从源视频继续）、audio reuse（完整或部分复用同一条音频信号）、audio reference（仅参考音频特征）。同时满足多种关系时用 " + " 组合任务类型且不重复。使用 <@角色名称> 占位符描述主要主体与镜头流，例如 <@张三>，不引入超出用户输入的内容，也不引用任何对白。
-
-## 严格性
-- "detailed_description" 必须以 "[Shot 1]" 开头，其前不得出现任何文字。若用户输入没有明确镜头标记，以 "[Shot 1]" 开头。
-- 严格遵循用户输入提示词：仅格式化用户提供的内容，不得添加超出用户输入的额外描述、动作、镜头或对白。
-{image_note}## 用户输入提示词
-{duration_note}{prompt}
-
-仅输出 JSON 对象，前后不得添加任何文字。"""
     return f"""You are an expert video prompt writer. Follow the skills guide below.
 
 ## Skills Guide
@@ -178,9 +134,6 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
 
 ## Task
 Rewrite the user's input prompt into a full-reference video prompt.
-
-## Output Language
-Write every field in the same language as the user's input (Chinese input -> Chinese output, English input -> English output; follow any other input language accordingly). Keep only fixed structural markers ("[Shot N]", "At MM:SS.mmm", "<@...>", "<#...>") and field names unchanged. Character names, dialogue, and text visible in the scene always stay in their original language.
 
 ## Output Format
 Output ONLY a JSON object with exactly these keys:
@@ -385,21 +338,21 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
       - ollama_model: vlm_mode="ollama" 时的模型名（空则回落 API 管理器 ollama 服务 / "llava"）
       - ollama_base_url: vlm_mode="ollama" 时的端点（空则默认 http://localhost:11434/api/chat）
       - clip_type: CLIP 模型类型（"minimax" / "qwen3vl" / "gemma"）
-      - lang: "zh" 使用中文模板直接生成中文；其余语言使用英文模板直接输出
+      - lang: 仅用于选择 skills 模板文件（"zh" 加载中文模板，其余语言一律加载英文模板）
 
     The output JSON includes summary / detailed_description /
     overall_soundscape / non_diegetic_music (a provided reference image is
     merged into detailed_description, not treated as a first frame). Character
     names are wrapped as <@名字> and dialogue as <#名字:[Language]对话> directly
     by the model, with a language tag such as [Chinese] or [English] before the
-    dialogue text. No mapping is returned. lang="zh" 直接输出中文（中文模板生成），
-    lang="en" 直接输出英文。
+    dialogue text. No mapping is returned. 输出语言由所选 skills 模板决定：
+    lang="zh" 中文模板强制中文，其余语言英文模板强制英文。
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
     image = load_image_tensor(image_path) if image_path else None
     skills = _load_h3_skills_template(lang)
-    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds, lang)
+    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
             image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
