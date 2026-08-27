@@ -1,5 +1,6 @@
 # MiniMaxRefDirector-ComfyUI
 
+
 **v3.1.2** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
 
 ComfyUI 自定义节点包：在时间线上编排多段镜头，用 VLM 自动撰写分镜提示词，绑定参考图 / 参考视频 / 参考音频，逐段生成视频并跨段衔接（motion context），最终按顺序合并输出。
@@ -54,7 +55,7 @@ pip install -r requirements.txt   # 仅 av 一个额外依赖，其余由 ComfyU
 4. `MiniMaxRefGuide` 置于循环内，逐段取出 `guide_data` 构建 conditioning，送入 H3 采样器生成视频。
 5. 生成结果自动回填 Director 素材条；多选素材后可**按选中顺序**合并，得到完整成片。
 
-> 推荐搭配 [ComfyUI-H3-Motion-Context](https://github.com/niuro3/ComfyUI-H3-Motion-Context) 使用，以实现跨段 motion context 衔接（相邻段尾部画面作为下一段参考）。
+> 推荐搭配 [ComfyUI-H3-Motion-Context-MultiRef](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context-MultiRef) 使用，以实现跨段 motion context 衔接（相邻段尾部画面作为下一段参考）。v3.1.1 起仅依赖 MultiRef 变体，旧版 `ComfyUI-H3-Motion-Context` 需从 `custom_nodes` 中移除或改名为 `.disable`。
 
 ## 提示词模板
 
@@ -104,6 +105,11 @@ MiniMaxRefDirector-ComfyUI/
   - 双引号（含全角 `"…"` / `'…'`）包裹的内容在翻译时保持原语言，不做占位掩码，杜绝改写（单引号 `'` 不参与保护，避免与英文撇号冲突）。
   - 翻译模板明确：引号内台词/标语/歌名等逐字保留。
 - 视频素材去除"下载/投屏"按钮：`controlsList="nodownload noremoteplayback"` + `disablePictureInPicture`；并隐藏 360 等浏览器视频扩展注入的悬浮操作层。
+
+### v3.1.1
+
+- 修复 motion context 模块误命中：`_get_motion_context_module()` 此前按目录名前缀匹配，可能加载旧版 `ComfyUI-H3-Motion-Context`，其 `MiniMaxH3MotionContext.apply()` 缺少 `encode_mode` 参数，运行时报 `TypeError: apply() got an unexpected keyword argument 'encode_mode'`。
+- 现在仅匹配 **`ComfyUI-H3-Motion-Context-MultiRef`**（其 `apply()` 支持 `encode_mode` / `anchor_mode` / `crop` 显式参数），MultiRef 不存在时抛出明确错误提示，不再尝试兼容旧版。
 
 ### v3.1.0
 

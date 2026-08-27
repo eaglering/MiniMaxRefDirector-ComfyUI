@@ -60,27 +60,31 @@ def _safe_mc_frames(latent, requested, available):
 
 
 def _get_motion_context_module():
-    """定位并返回 ComfyUI-H3-Motion-Context 的 nodes 模块（含 MiniMaxH3MotionContext）。
+    """定位并返回 ComfyUI-H3-Motion-Context-MultiRef 的 nodes 模块（含 MiniMaxH3MotionContext）。
 
+    仅接受 MultiRef 变体：其 MiniMaxH3MotionContext.apply() 支持 encode_mode /
+    anchor_mode / crop 显式参数，与 _apply_motion_context 的调用签名匹配；旧版
+    ComfyUI-H3-Motion-Context 不支持这些参数，且目录名前缀被 MultiRef 包含，
+    容易在 sys.modules 遍历时误命中，故直接排除。MultiRef 不存在时明确报错。
     ComfyUI 启动时会 import custom_nodes 下每个目录，因此该包（及其 nodes 子模块）
     通常已在 sys.modules 中。其 nodes.py 含相对导入（from .patch_layout ...），无法
     用 importlib 以单个文件方式加载，兜底按包加载以解析相对导入。
     """
     for mod in list(sys.modules.values()):
         f = getattr(mod, "__file__", None) or ""
-        if "ComfyUI-H3-Motion-Context" in f.replace("\\", "/") \
+        if "ComfyUI-H3-Motion-Context-MultiRef" in f.replace("\\", "/") \
                 and hasattr(mod, "MiniMaxH3MotionContext"):
             return mod
 
     root = os.path.join(folder_paths.base_path, "custom_nodes",
-                        "ComfyUI-H3-Motion-Context")
+                        "ComfyUI-H3-Motion-Context-MultiRef")
     if not os.path.isdir(root):
         raise RuntimeError(
-            "[MiniMaxRefGuide] motion context requires ComfyUI-H3-Motion-Context. "
-            "Clone https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context into "
+            "[MiniMaxRefGuide] motion context requires ComfyUI-H3-Motion-Context-MultiRef. "
+            "Clone https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context-MultiRef into "
             "custom_nodes and restart ComfyUI."
         )
-    pkg_name = "ComfyUI-H3-Motion-Context"
+    pkg_name = "ComfyUI-H3-Motion-Context-MultiRef"
     nodes_name = pkg_name + ".nodes"
     if nodes_name not in sys.modules:
         pkg_spec = importlib.util.spec_from_file_location(
@@ -93,7 +97,7 @@ def _get_motion_context_module():
     if mod is None or not hasattr(mod, "MiniMaxH3MotionContext"):
         raise RuntimeError(
             "[MiniMaxRefGuide] could not load MiniMaxH3MotionContext from "
-            "ComfyUI-H3-Motion-Context. See the ComfyUI console for details."
+            "ComfyUI-H3-Motion-Context-MultiRef. See the ComfyUI console for details."
         )
     return mod
 
