@@ -28,10 +28,15 @@ _director_cache: dict[str, io.NodeOutput] = {}
 _last_prompt_id: object = None
 
 # 判断"非英文"：出现 CJK 字符即视为需要翻译成英文。
-# 对白 <d>...</d> / 主体标签 <@...>、<#...> 为禁止翻译片段（可能含中文），
-# 检测前先剥离，避免仅中文主体名/对白触发无谓的翻译调用。
+# 对白 <d>...</d> / 主体标签 <@...>、<#...> 以及双引号（含全角引号）包裹的内容
+# 为禁止翻译片段（可能含中文），检测前先剥离，避免仅中文主体名/对白触发无谓的翻译调用。
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
-_PROTECTED_FRAGMENT_RE = re.compile(r"<@[^>]*>|<#[^>]*>|<d>.*?</d>", re.DOTALL)
+# 引号保护：半角 "..." 与全角 \u201c...\u201d \u2018...\u2019（台词/标语/歌名等保持原语言）。
+# 注意：不含半角单引号 '...'，避免与英文撇号（don't / it's）冲突。
+_PROTECTED_FRAGMENT_RE = re.compile(
+    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
+    re.DOTALL,
+)
 
 
 def _needs_translate(prompt: str) -> bool:

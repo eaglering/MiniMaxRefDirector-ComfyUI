@@ -15,12 +15,12 @@ const html = htm.bind(h);
 
 const MODAL_CSS = `
 .ref-modal-overlay{position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}
-.ref-modal{position:relative;background:#2d2d2d;border:1px solid #666;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.6);display:flex;flex-direction:column;max-width:94vw;max-height:90vh;min-width:320px;min-height:180px;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
+.ref-modal{position:relative;background:#2d2d2d;border:1px solid #666;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.6);display:flex;flex-direction:column;max-width:94vw;max-height:90vh;min-width:320px;min-height:180px;overflow:hidden}
 .ref-modal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid #444;flex-shrink:0;cursor:move;user-select:none;-webkit-user-select:none;touch-action:none}
 .ref-modal-title{font-size:12px;font-weight:600;color:#e0e0e0;text-transform:uppercase;letter-spacing:.5px;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .ref-modal-help{flex:0 0 auto;display:inline-flex;align-items:center;padding:0 3px;cursor:help;font-size:13px;color:#5c9dff;line-height:1;user-select:none;-webkit-user-select:none}
 .ref-modal-help:hover{color:#8ab8ff}
-.ref-modal-help-tip{position:fixed;z-index:99999;background:#2d2d2d;border:1px solid #555;border-radius:6px;padding:8px 10px;min-width:240px;max-width:400px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.5);font-size:11px;color:#ccc;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;line-height:1.6;white-space:pre-wrap}
+.ref-modal-help-tip{position:fixed;z-index:99999;background:#2d2d2d;border:1px solid #555;border-radius:6px;padding:8px 10px;min-width:240px;max-width:400px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.5);font-size:11px;color:#ccc;line-height:1.6;white-space:pre-wrap}
 .ref-modal-close{background:transparent;border:none;color:#aaa;cursor:pointer;font-size:15px;line-height:1;padding:2px 8px;border-radius:4px;flex-shrink:0;transition:all .15s}
 .ref-modal-close:hover{background:rgba(255,255,255,.12);color:#fff}
 .ref-modal-body{padding:10px 12px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;box-sizing:border-box;flex:1;min-height:0}

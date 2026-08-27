@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
 import { api, app, viewUrl, ICONS } from "./shared.js";
 import { RefModal } from "./modal.js";
+import { HighlightedTextarea } from "./highlight.js";
 import { getLocale, t } from "../../i18n.js";
 
 const html = htm.bind(h);
@@ -417,13 +418,12 @@ function toVideoItems(imageFile) {
 const S = {
   panel: {
     boxSizing: "border-box", width: "100%", height: "100%",
-    display: "flex", flexDirection: "column", gap: "4px",
-    fontFamily: "inherit", overflow: "hidden",
+    display: "flex", flexDirection: "column", gap: "4px", overflow: "hidden",
   },
   area: {
     flex: 1, resize: "none", boxSizing: "border-box", width: "100%", minHeight: 0,
     background: "#1e1e1e", color: "#ccc", border: "1px solid #444", borderRadius: "4px",
-    padding: "6px", fontFamily: "inherit", fontSize: "12px", lineHeight: "1.5", outline: "none",
+    padding: "6px", fontSize: "12px", lineHeight: "1.5", outline: "none",
   },
   col: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
   buttons: { display: "flex", gap: "6px", padding: "4px 0", flex: "0 0 auto" },
@@ -465,7 +465,7 @@ const S = {
   retTextarea: {
     flex: "1 1 0", minHeight: "0", width: "100%", boxSizing: "border-box", resize: "none", outline: "none",
     background: "#1e1e1e", border: "1px solid #444", borderRadius: "4px", color: "#e0e0e0",
-    fontSize: "12px", lineHeight: "1.5", padding: "6px 8px", fontFamily: "inherit",
+    fontSize: "12px", lineHeight: "1.5", padding: "6px 8px"
   },
   retFooter: { display: "flex", justifyContent: "flex-end", gap: "8px", paddingTop: "8px", flexShrink: 0 },
   retBtnCancel: { background: "transparent", color: "#aaa", border: "1px solid #555" },
@@ -529,7 +529,7 @@ const S = {
     background: "#2d2d2d", border: "1px solid #555", borderRadius: "6px",
     padding: "8px 10px", minWidth: "280px", maxWidth: "460px", maxHeight: "60vh",
     overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.5)",
-    fontSize: "11px", color: "#ccc", fontFamily: "inherit", lineHeight: "1.5",
+    fontSize: "11px", color: "#ccc", lineHeight: "1.5",
   },
   defsTipEmpty: { color: "#888" },
   trBtn: { width: "100%", margin: "1px 0"},
@@ -547,11 +547,11 @@ const S = {
   h3PreviewArea: {
     flex: "1 1 0", minHeight: "0", width: "100%", boxSizing: "border-box",
     background: "rgba(30,30,30,.55)", color: "#fff", border: "1px dashed #444",
-    borderRadius: "4px", padding: "4px 6px", fontFamily: "inherit", fontSize: "10px",
+    borderRadius: "4px", padding: "4px 6px", fontSize: "10px",
     lineHeight: "1.4", resize: "none", outline: "none", cursor: "pointer",
     overflowY: "auto", scrollbarWidth: "thin", whiteSpace: "pre-wrap", overflowWrap: "break-word",
   },
-  refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4", fontFamily: "inherit" },
+  refTextarea: { position: "static", flex: "1 1 0", minHeight: "0", height: "100%", width: "100%", boxSizing: "border-box", background: "#1e1e1e", border: "none", resize: "none", outline: "none", padding: "4px 8px 8px", color: "#e0e0e0", fontSize: "12px", lineHeight: "1.4" },
   refTextareaLabel: { position: "static", flexShrink: 0, margin: "6px 0 2px 8px" },
   // 视频素材条（接收后端 minimax_ref_video_progress 通知）：面板底部、x 轴排列、可横向滚动
   materialsWrap: {
@@ -1401,7 +1401,8 @@ export function TransferPanel({ director }) {
 
   function pickSubject(s) {
     if (!menu) return;
-    // if (!s.relationship || s.relationship === "none") return; // relation:none（仅引用）的主体不可选择
+    // relation:none（仅引用）的主体在左右 prompt 中不可选择；retention 段级覆盖允许（保留描述可引用任意主体）
+    if (menu.side !== "ret" && (!s.relationship || s.relationship === "none")) return;
     const el = menu.side === "left" ? leftRef.current : (menu.side === "ret" ? retRef.current : (RIGHT_FIELD_REFS[menu.field] || {}).current);
     if (!el) return;
     const token = menu.trigger === "@" ? `<@${s.name}>` : `<#${s.name}:对话内容>`;
@@ -2049,13 +2050,13 @@ export function TransferPanel({ director }) {
               }
             </div>
           </div>
-          <textarea
-            class="mrd-h3-preview-area"
+          <${HighlightedTextarea}
+            className="mrd-h3-preview-area"
             style=${S.h3PreviewArea}
             value=${h3PreviewText}
             readOnly
             spellcheck=${false}
-          ></textarea>
+          />
         </div>
       </div>
 
@@ -2277,14 +2278,14 @@ export function TransferPanel({ director }) {
                   menuSubjects.length === 0
                     ? html`<div class="ref-ms-mention-empty">${subjects.length === 0 ? t("No subjects available (add some in the subject node first)") : t("No subjects available")}</div>`
                     : menuSubjects.map(h => {
-                        // relation:none（relationship 为空或 "none"，仅引用）的主体禁止在选择器中选取
-                        const noRel = !h.relationship || h.relationship === "none";
+                        // relation:none（仅引用）的主体：左右 prompt 禁止选取；retention 段级覆盖允许（保留描述可引用任意主体）
+                        const noRel = menu.side !== "ret" && (!h.relationship || h.relationship === "none");
                         return html`
                         <div
                           class="ref-ms-mention-item${noRel ? " disabled" : ""}"
                           key=${h.name}
                           onMouseDown=${(e) => e.preventDefault()}
-                          onClick=${() => pickSubject(h)}
+                          onClick=${noRel ? undefined : () => pickSubject(h)}
                           title=${noRel ? t("Relation") + ":none" : t("Insert {token}", { token: menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:${t("Dialogue")}>` })}
                         >
                           ${subjectMediaThumb(h, 22)}
@@ -2311,26 +2312,27 @@ export function TransferPanel({ director }) {
         <div style=${{ display: "flex", gap: "6px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
           <div class="mrd-pr-prompt-wrapper" style=${S.col}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>${t("Segment Prompt")}</div>
-            <textarea
-              ref=${leftRef}
-              class="mrd-pr-prompt-area"
+            <${HighlightedTextarea}
+              taRef=${leftRef}
+              className="mrd-pr-prompt-area"
               style=${S.refTextarea}
               value=${leftText}
               placeholder=${t("Original prompt (type @ to reference a subject)")}
               spellcheck=${false}
               onInput=${(e) => { setLeftText(e.target.value); handleInput(e, "left"); }}
-            ></textarea>
+            />
           </div>
           <div style=${{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: "22px", flex: "0 0 auto" }}>
             <button
               class="mrd-pr-btn"
+              style="padding:0"
               title=${t("Generate the H3 Prompt from the left side; the result is shown on the right")}
               disabled=${busy}
               onClick=${() => runGenerate(leftText, 'en')}
             >${t("ShortEnglish")}→</button>
             <button
               class="mrd-pr-btn"
-              style="margin-top: 8px;"
+              style="margin-top: 8px;padding: 0"
               title=${t("Generate Chinese H3 Prompt from the left side; the result is shown on the right")}
               disabled=${busy}
               onClick=${() => runGenerate(leftText, 'zh')}
@@ -2347,54 +2349,54 @@ export function TransferPanel({ director }) {
                 return html`
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
                     <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("summary")}</div>
-                    <textarea
-                      ref=${rightSummaryRef}
-                      class="mrd-pr-prompt-area"
-                      style=${{ ...S.refTextarea, flex: "0 0 96px", height: "96px" }}
+                    <${HighlightedTextarea}
+                      taRef=${rightSummaryRef}
+                      className="mrd-pr-prompt-area"
+                      style=${{ ...S.refTextarea, flex: "0 0 66px", height: "66px" }}
                       value=${pObj.summary}
                       placeholder=${t("SummaryPlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "summary", e.target.value)); handleInput(e, "right", "summary"); }}
-                    ></textarea>
+                    />
                     <div class="mrd-pr-tags" style=${{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "4px 8px 0" }}>
                       ${TASK_TYPES.map((task) => html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#2a2a2a", border: "1px solid #444", borderRadius: "3px", color: "#9bb9ff", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(task.title)} onClick=${() => insertTaskTag(task.label)}>${task.label}</span>`)}
                     </div>
                   </div>
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "1 1 0" })}>
                     <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("detailed_description")}</div>
-                    <textarea
-                      ref=${rightDetailRef}
-                      class="mrd-pr-prompt-area"
+                    <${HighlightedTextarea}
+                      taRef=${rightDetailRef}
+                      className="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "1 1 0" }}
                       value=${pObj.detailed_description}
                       placeholder=${t("DetailPlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "detailed_description", e.target.value)); handleInput(e, "right", "detail"); }}
-                    ></textarea>
+                    />
                   </div>
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
                     <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("overall_soundscape")}</div>
-                    <textarea
-                      ref=${rightOverallRef}
-                      class="mrd-pr-prompt-area"
+                    <${HighlightedTextarea}
+                      taRef=${rightOverallRef}
+                      className="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
                       value=${pObj.overall_soundscape === "N/A" ? "" : pObj.overall_soundscape}
                       placeholder=${t("SoundscapePlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "overall_soundscape", e.target.value)); handleInput(e, "right", "overall"); }}
-                    ></textarea>
+                    />
                   </div>
                   <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
                     <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("non_diegetic_music")}</div>
-                    <textarea
-                      ref=${rightMusicRef}
-                      class="mrd-pr-prompt-area"
+                    <${HighlightedTextarea}
+                      taRef=${rightMusicRef}
+                      className="mrd-pr-prompt-area"
                       style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
                       value=${pObj.non_diegetic_music === "N/A" ? "" : pObj.non_diegetic_music}
                       placeholder=${t("MusicPlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "non_diegetic_music", e.target.value)); handleInput(e, "right", "music"); }}
-                    ></textarea>
+                    />
                   </div>
                 `;
               })()}
@@ -2458,14 +2460,14 @@ export function TransferPanel({ director }) {
               <div style=${{ display: "flex", flexDirection: "column", flex: "1 1 0", minHeight: "0" }}>
                 <div style=${S.retModalTitle}>${retEdit.name}</div>
                 <div style=${S.retModalSub}>${t("RetentionOverrideHint")}</div>
-                <textarea
-                  ref=${retRef}
+                <${HighlightedTextarea}
+                  taRef=${retRef}
                   style=${S.retTextarea}
                   value=${retEdit.value}
                   placeholder=${t("RetentionDescribeHint")}
                   spellcheck=${false}
                   onInput=${(e) => { setRetEdit({ ...retEdit, value: e.target.value }); handleInput(e, "ret", ""); }}
-                ></textarea>
+                />
                 <div style=${S.retFooter}>
                   <button class="mrd-pr-btn" style=${S.retBtnCancel} onClick=${() => setRetEdit(null)}>${t("Cancel")}</button>
                   <button class="mrd-pr-btn" style=${S.retBtnSave} onClick=${saveRetention}>${t("Save")}</button>

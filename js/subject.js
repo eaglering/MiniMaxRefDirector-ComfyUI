@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { viewUrl } from "./components/director/shared.js";
+import { createHighlightedTextarea } from "./components/director/highlight.js";
 import { api } from "../../scripts/api.js";
 import { getLocale, t } from "./i18n.js";
 
@@ -27,7 +28,6 @@ const MSCSS = `
     width: 100%;
     box-sizing: border-box;
     padding: 6px 6px 6px 6px;
-    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 .ref-ms-wrapper::-webkit-scrollbar {
     width: 6px;
@@ -125,7 +125,6 @@ const MSCSS = `
     color: #e0e0e0;
     padding: 4px 8px;
     font-size: 12px;
-    font-family: inherit;
     outline: none;
     box-sizing: border-box;
     transition: border-color 0.2s;
@@ -142,7 +141,6 @@ const MSCSS = `
     color: #e0e0e0;
     padding: 4px 6px;
     font-size: 11px;
-    font-family: inherit;
     outline: none;
     box-sizing: border-box;
     cursor: pointer;
@@ -164,7 +162,6 @@ const MSCSS = `
     color: #e0e0e0;
     padding: 3px 8px;
     font-size: 11px;
-    font-family: inherit;
     outline: none;
     resize: vertical;
     min-height: 90px;
@@ -191,7 +188,6 @@ const MSCSS = `
     color: #e0e0e0;
     padding: 3px 8px;
     font-size: 11px;
-    font-family: inherit;
     outline: none;
     resize: none;
     min-height: 60px;
@@ -1267,20 +1263,41 @@ app.registerExtension({
                         const descLabel = document.createElement("span");
                         descLabel.className = "ref-ms-label";
                         descLabel.textContent = t("Definition");
-                        const descInput = document.createElement("textarea");
-                        descInput.className = "ref-ms-textarea";
-                        descInput.placeholder = t("Subject definition... (type @ to mention another subject)");
-                        descInput.value = subj.description || "";
-                        descInput.rows = 1;
-                        descInput.addEventListener("input", () => {
-                            subjects[idx].description = descInput.value;
+                        // 高亮 textarea（overlay：真实 ta + 底层高亮 pre），样式与 .ref-ms-textarea 一致
+                        const descInput = createHighlightedTextarea({
+                            className: "ref-ms-textarea",
+                            style: {
+                                flex: "1",
+                                minWidth: "0",
+                                minHeight: "90px",
+                                background: "#2a2a2a",
+                                color: "#e0e0e0",
+                                padding: "3px 8px",
+                                fontSize: "11px",
+                                boxSizing: "border-box",
+                                resize: "vertical",
+                                borderWidth: "1px",
+                                borderStyle: "solid",
+                                borderRadius: "4px",
+                            },
+                            value: subj.description || "",
+                            placeholder: t("Subject definition... (type @ to mention another subject)"),
+                            spellcheck: false,
+                        });
+                        const descInputEl = descInput.ta;
+                        const descInputWrap = descInput.wrap;
+                        descInputEl.rows = 1;
+                        descInputEl.addEventListener("input", () => {
+                            subjects[idx].description = descInputEl.value;
                             saveState();
                         });
-                        // textarea 手动拉伸（resize: vertical）后重算节点高度
-                        descInput.addEventListener("resize", updateNodeSize);
-                        attachMention(descInput, idx, subjects, (v) => {
+                        // wrapper 手动拉伸（resize: vertical）后重算节点高度
+                        descInputWrap.addEventListener("resize", updateNodeSize);
+                        attachMention(descInputEl, idx, subjects, (v) => {
                             subjects[idx].description = v;
                             saveState();
+                            // acceptMention 直接写 ta.value 不触发 input，需手动刷新高亮层
+                            descInput.refresh();
                         });
                         // relationship 为空（引用）时隐藏 Description 输入
                         const syncDescriptionVisibility = () => {
@@ -1288,7 +1305,7 @@ app.registerExtension({
                         };
                         syncDescriptionVisibility();
                         descRowGroup.appendChild(descLabel);
-                        descRowGroup.appendChild(descInput);
+                        descRowGroup.appendChild(descInputWrap);
                         descRow.appendChild(descRowGroup);
                         card.appendChild(descRow);
 
