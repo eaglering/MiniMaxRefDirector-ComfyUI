@@ -1,7 +1,7 @@
 # MiniMaxRefDirector-ComfyUI
 
 
-**v3.1.3** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
+**v3.1.4** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
 
 ComfyUI 自定义节点包：在时间线上编排多段镜头，用 VLM 自动撰写分镜提示词，绑定参考图 / 参考视频 / 参考音频，逐段生成视频并跨段衔接（motion context），最终按顺序合并输出。
 

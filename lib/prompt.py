@@ -633,11 +633,12 @@ def build_h3_subject_bindings(
         nonlocal s_index
         _names = _extract_h3_name_mentions([_input])
         for _name, _pattern in _names.items():
-            if _name in seen or _name in unmatched.keys():
+            if _name in seen or _name in unmatched:
                 continue
             idx = find_index(subjects_in, func=lambda x, y=_name: x.get("name") == y)
             if idx == -1:
                 unmatched.setdefault(_name, []).append(f"{_name} not found in subjects")
+                mapping[_pattern] = _name
                 continue
             _subj = subjects_in[idx]
             _dType = _subj.get("type", "") or "Subject"
@@ -645,6 +646,7 @@ def build_h3_subject_bindings(
             _relationship = _subj.get("relationship", "")
             _retention = _retention_for(_name, _subj)
             if _bind_media(_subj, _dType, _name) is None:
+                mapping[_pattern] = _name
                 continue
             _label = _next_label(_dType)
             # 是否写入 definitions / retention 取决于被引用主体的 relationship 是否有值
@@ -665,11 +667,16 @@ def build_h3_subject_bindings(
                 _extract_h3_subject_mentions(_description)
 
     for name, dat in dialogues.items():
+        for k, v in dat.items():
+            # 判断是否存在汉字
+            language = "Chinese" if any('\u4e00' <= char <= '\u9fff' for char in v) else "English"
+            mapping[k] = f"<d>[{language}]{v}</d>"
         if name in seen or name in unmatched.keys():
             continue
         idx = find_index(subjects_in, func=lambda x, y=name: x.get("name") == y)
         if idx == -1:
             unmatched.setdefault(name, []).append(f"{name} not found in subjects")
+            mapping[f"<@{name}>"] = name
             continue
         subj = subjects_in[idx]
         description = subj.get("description", "")
@@ -692,10 +699,6 @@ def build_h3_subject_bindings(
         # 递归处理描述中的 <@提及>（在 seen 之后调用，防止 <@自身> 自引用无限递归）
         if description:
             _extract_h3_subject_mentions(description)
-        for k, v in dat.items():
-            # 判断是否存在汉字
-            language = "Chinese" if any('\u4e00' <= char <= '\u9fff' for char in v) else "English"
-            mapping[k] = f"<d>[{language}]{v}</d>"
 
         # 音频关联（仅 Subject 支持）：引用 / 定义双模式。
         # 判断依据为 audioRef 指向的 Audio 主体 relationship：空 → 引用（voice-timbre 模板）；
@@ -706,11 +709,13 @@ def build_h3_subject_bindings(
             a_idx = find_index(subjects_in, func=lambda x, y=audio_ref: x.get("name") == y)
             if a_idx == -1:
                 unmatched.setdefault(name, []).append(f"{name}'s audioRef '{audio_ref}' not found")
+                mapping[f"<@{audio_ref}>"] = audio_label
                 continue
             audio_subj = subjects_in[a_idx]
             audio_file = audio_subj.get("audioFile", "")
             if not audio_file:
                 unmatched.setdefault(audio_ref, []).append(f"{audio_ref} has no audioFile")
+                mapping[f"<@{audio_ref}>"] = audio_label
                 continue
             audio_relationship = (audio_subj.get("relationship", "") or "").strip()
             audio_description = audio_subj.get("description", "")
@@ -755,12 +760,14 @@ def build_h3_subject_bindings(
         idx = find_index(subjects_in, func=lambda x, y=name: x.get("name") == y)
         if idx == -1:
             unmatched.setdefault(name, []).append(f"{name} not found in subjects")
+            mapping[pattern] = name
             continue
         subj = subjects_in[idx]
         description = subj.get("description", "")
         relationship = subj.get("relationship", "")
         d_type = subj.get("type", "") or "Subject"
         if _bind_media(subj, d_type, name) is None:
+            mapping[pattern] = name
             continue
         label = _next_label(d_type)
         if relationship:
@@ -786,12 +793,14 @@ def build_h3_subject_bindings(
         idx = find_index(subjects_in, func=lambda x, y=name: x.get("name") == y)
         if idx == -1:
             unmatched.setdefault(name, []).append(f"{name} not found in subjects")
+            mapping[f"<@{name}>"] = name
             continue
         subj = subjects_in[idx]
         description = subj.get("description", "")
         relationship = subj.get("relationship", "")
         d_type = subj.get("type", "") or "Subject"
         if _bind_media(subj, d_type, name) is None:
+            mapping[f"<@{name}>"] = name
             continue
         label = _next_label(d_type)
         if relationship:
