@@ -27,7 +27,7 @@ def parse_generated_json(generated_text: str) -> dict:
         else:
             clean_text = generated_text.strip()
 
-    return json.loads(clean_text)
+    return json.loads(clean_text, strict=False)
 
 class RefJoinString(io.ComfyNode):
     """Replace placeholders in an expression with up to 4 fixed values.
