@@ -622,7 +622,7 @@ function setMentionActive(i) {
 
 // 主体媒体展示：audio → 音频图标；video → 视频图标；image → 图片；无媒体 → "T"（文本主体）
 function mentionMedia(s, size) {
-    const t = s.type || "Subject";
+    const typev = s.type || "Subject";
     const base = {
         width: size + "px",
         height: size + "px",
@@ -637,21 +637,21 @@ function mentionMedia(s, size) {
         background: "#1e3a5f",
         color: "#38bdf8",
     };
-    if (t === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile) || (s.audioRef && t === "Subject")) {
+    if (typev === "Audio" || (s.audioFile && !s.imageFile && !s.videoFile) || (s.audioRef && typev === "Subject")) {
         const el = document.createElement("span");
         el.title = t("Audio");
         el.textContent = "♪";
         Object.assign(el.style, base);
         return el;
     }
-    if (t === "Video" || s.videoFile) {
+    if (typev === "Video" || s.videoFile) {
         const el = document.createElement("span");
         el.title = t("Video");
         el.textContent = "▶";
         Object.assign(el.style, base, { color: "#a5d6a7" });
         return el;
     }
-    if (t === "Picture" || s.imageFile || s.imageB64) {
+    if (typev === "Picture" || s.imageFile || s.imageB64) {
         const img = document.createElement("img");
         img.alt = "";
         img.src = s.imageB64 || (s.imageFile ? viewUrl(s.imageFile, "minimaxrefdirector") : "");

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import math
 
 import torch
 
@@ -401,12 +402,15 @@ def _decode_segment_audio(audio_vae, clip_audio, audio_latent):
     return latent_lib.decode_audio_latent(audio_vae, audio_latent)
 
 
-def _assemble_av_audio(audio_vae, seg_audios, raw_frames, contexts, fps=FPS):
+def _assemble_av_audio(audio_vae, seg_audios, raw_frames, contexts, fps=FPS,
+                       fade_seconds=1.0):
     """把各段音频按绝对帧边界拼成 master_audio。
 
     seg_audios: list[(waveform [1,2,L], sr) | None]，与 raw_frames 等长；
     None 段表示静音（该段无任何音频来源）。
     后续段携带完整的受保护 context 前缀，覆盖前段尾部（保留生成侧音频 feather）。
+    fade_seconds > 0 时在接缝重叠区内做等功率交叉淡化（前段 cos 淡出 + 后段
+    sin 淡入，中点 -3dB）消除硬切；<= 0 保持原覆盖写入（回归基准）。
     """
     if not seg_audios:
         return None
@@ -461,7 +465,43 @@ def _assemble_av_audio(audio_vae, seg_audios, raw_frames, contexts, fps=FPS):
             raise RuntimeError(
                 "merge_latents: segment %d audio maps outside final timeline" % i
             )
-        audio_out[..., ext_start_sample:ext_end_sample].copy_(wave[..., :expected])
+
+        # 无缝音频：重叠区末尾贴近接缝处做等功率交叉淡化。重叠区
+        # [ext_start_sample, seam_sample) 由 context 前缀提供；淡化窗口
+        # [seam-fade, seam) 内前段 cos 淡出 + 后段 sin 淡入，其余保持覆盖。
+        seam_sample = timing.sample_boundary_from_frames(cumulative_frames, audio_sr, fps)
+        overlap_samples = seam_sample - ext_start_sample
+        fade_samples = (
+            min(int(round(fade_seconds * audio_sr)), overlap_samples)
+            if fade_seconds > 0 else 0
+        )
+        if fade_samples <= 0:
+            # fade_seconds=0 或重叠区为空：原覆盖写入（回归基准）
+            audio_out[..., ext_start_sample:ext_end_sample].copy_(wave[..., :expected])
+        else:
+            fade_samples = min(fade_samples, expected)
+            fade_start = seam_sample - fade_samples
+            ov_fade_start = overlap_samples - fade_samples
+            t = torch.linspace(0.0, 1.0, fade_samples + 2, device="cpu")[1:-1]
+            gain_prev = torch.cos(math.pi / 2.0 * t)  # shape (fade_samples,)
+            gain_new = torch.sin(math.pi / 2.0 * t)   # 尾维与 [1,2,fade] 广播
+            if ov_fade_start > 0:
+                audio_out[..., ext_start_sample:fade_start].copy_(
+                    wave[..., :ov_fade_start]
+                )
+            blended = (
+                audio_out[..., fade_start:seam_sample] * gain_prev
+                + wave[..., ov_fade_start:overlap_samples] * gain_new
+            )
+            audio_out[..., fade_start:seam_sample].copy_(blended)
+            if expected > overlap_samples:
+                audio_out[..., seam_sample:ext_end_sample].copy_(
+                    wave[..., overlap_samples:expected]
+                )
+            log.info(
+                "merge_latents: seam %d crossfade %d samples (%.2fs / requested %.2fs)",
+                i, fade_samples, fade_samples / float(audio_sr), float(fade_seconds),
+            )
         cumulative_frames = ext_end_frame
         del wave
         _release_decode_memory()
@@ -472,6 +512,44 @@ def _assemble_av_audio(audio_vae, seg_audios, raw_frames, contexts, fps=FPS):
             % (cumulative_frames, final_frames)
         )
     return {"waveform": audio_out, "sample_rate": audio_sr}
+
+
+def _custom_audio_track(custom_audio, total_frames, fps=FPS):
+    """把上传的自定义音频整轨构造成 master_audio（长裁剪、短补静音）。
+
+    custom_audio: AUDIO dict {"waveform":[1,C,L] float32 CPU, "sample_rate":sr}
+    整轨无段间接缝，fade 不适用；返回 {"waveform":[1,2,total_samples], "sample_rate":sr}。
+    """
+    wave = custom_audio.get("waveform")
+    sr = int(custom_audio.get("sample_rate") or 0)
+    if wave is None or sr <= 0:
+        raise ValueError("merge_latents: invalid custom_audio dict")
+    wave = _stereo_first_batch(
+        wave.detach().to(device="cpu", dtype=torch.float32), "custom_audio"
+    )
+    total_samples = timing.sample_boundary_from_frames(int(total_frames), sr, fps)
+    have = int(wave.shape[-1])
+    if have > total_samples:
+        wave = wave[..., :total_samples]
+        log.info(
+            "merge_latents: custom audio trimmed %d -> %d samples (%.2fs -> %.2fs)",
+            have, total_samples, have / float(sr), total_samples / float(sr),
+        )
+    elif have < total_samples:
+        pad = torch.zeros(
+            (1, int(wave.shape[1]), total_samples - have), dtype=torch.float32
+        )
+        wave = torch.cat([wave, pad], dim=-1)
+        log.info(
+            "merge_latents: custom audio padded %d -> %d samples (%.2fs -> %.2fs)",
+            have, total_samples, have / float(sr), total_samples / float(sr),
+        )
+    else:
+        log.info(
+            "merge_latents: custom audio matches timeline (%d samples, %.2fs)",
+            have, have / float(sr),
+        )
+    return {"waveform": wave.contiguous(), "sample_rate": sr}
 
 
 # ── 顶层合并入口 ──────────────────────────────────────────────────────────
@@ -491,6 +569,8 @@ def merge_latents_to_video(
     extra_pnginfo=None,
     audio_vae=None,
     chunks_per_slice: int | None = None,
+    fade_seconds=1.0,
+    custom_audio=None,
 ):
     """像素域交叉淡化拼接 + 音频（clip_audio；audio_vae 兜底可选）+ 视频编码。
 
@@ -504,6 +584,9 @@ def merge_latents_to_video(
     :param lazy:        惰性帧流（True）还是全量 list（False，内存充裕时更快）
     :param chunks_per_slice: 每次 decode 的 chunk 数（>=3）。None（默认）按 latent
         分辨率自动选取，控制单次 decode 的 GPU 驻留（4K 长片防 OOM）。
+    :param fade_seconds: 接缝音频交叉淡化秒数（默认 1.0）；<=0 保持原硬拼接（回归基准）
+    :param custom_audio: AUDIO dict | None。非 None 时作为整轨音轨替代所有
+        clip_audio（长于视频裁剪、短于视频补静音），无段间接缝，fade 不适用
     :return: {"filename","subfolder","type","full_path","ui","frame_count"}
     """
     if len(videos) < 2:
@@ -517,36 +600,43 @@ def merge_latents_to_video(
     # 合并前清场：驱逐生成阶段残留的 H3 大模型，给 VAE 解码腾出整卡显存
     _release_all_models("start")
 
-    # 音频：逐段 clip_audio 优先，否则 audio_latent 解码
-    seg_audios = []
-    for i, video_latent in enumerate(videos):
-        clip_audio = clip_audios[i] if i < len(clip_audios) else None
-        _, audio_latent = latent_lib.split_joint_latent(video_latent)
-        if clip_audio is None and audio_vae is not None:
-            try:
-                wave, sr = latent_lib.decode_audio_latent(audio_vae, audio_latent)
-                seg_audios.append((_stereo_first_batch(wave, "segment %d audio" % i), sr))
-            except Exception as exc:  # noqa: BLE001
-                log.warning(
-                    "merge_latents: segment %d audio decode failed (%s); treating as silent",
-                    i, exc,
-                )
-                seg_audios.append(None)
-        elif clip_audio is not None:
-            seg_audios.append(_decode_segment_audio(audio_vae, clip_audio, audio_latent))
-        else:
-            seg_audios.append(None)
+    total_frames = int(raw_frames[0]) + sum(
+        int(raw_frames[i]) - int(contexts[i]) for i in range(1, len(raw_frames))
+    )
 
-    audio = _assemble_av_audio(audio_vae, seg_audios, raw_frames, contexts)
+    # 音频：custom_audio 整轨替代所有 clip_audio（长裁剪、短补静音）；
+    # 否则逐段 clip_audio 优先，audio_latent 兜底（audio_vae 当前入口恒为 None）。
+    if custom_audio is not None:
+        audio = _custom_audio_track(custom_audio, total_frames, float(frame_rate))
+    else:
+        seg_audios = []
+        for i, video_latent in enumerate(videos):
+            clip_audio = clip_audios[i] if i < len(clip_audios) else None
+            _, audio_latent = latent_lib.split_joint_latent(video_latent)
+            if clip_audio is None and audio_vae is not None:
+                try:
+                    wave, sr = latent_lib.decode_audio_latent(audio_vae, audio_latent)
+                    seg_audios.append((_stereo_first_batch(wave, "segment %d audio" % i), sr))
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "merge_latents: segment %d audio decode failed (%s); treating as silent",
+                        i, exc,
+                    )
+                    seg_audios.append(None)
+            elif clip_audio is not None:
+                seg_audios.append(_decode_segment_audio(audio_vae, clip_audio, audio_latent))
+            else:
+                seg_audios.append(None)
+
+        audio = _assemble_av_audio(
+            audio_vae, seg_audios, raw_frames, contexts, fade_seconds=fade_seconds
+        )
 
     # 音频已组装到 CPU，清场腾出显存给视频解码（audio_vae 当前入口恒为 None）
     _release_all_models("after audio")
 
     # 视频帧流：惰性帧流仅在 VHS 可用时启用（VHS 兼容 Sequence 探测）；
     # ffmpeg 回退路径需要完整帧张量，此时降级为全量 list 解码。
-    total_frames = int(raw_frames[0]) + sum(
-        int(raw_frames[i]) - int(contexts[i]) for i in range(1, len(raw_frames))
-    )
 
     from .video_combine import VideoCombine, encode_frames_with_vhs
 
