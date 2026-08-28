@@ -470,6 +470,26 @@ const S = {
   retFooter: { display: "flex", justifyContent: "flex-end", gap: "8px", paddingTop: "8px", flexShrink: 0 },
   retBtnCancel: { background: "transparent", color: "#aaa", border: "1px solid #555" },
   retBtnSave: { background: "#4fc3f7", color: "#0d1b24", border: "none", fontWeight: 600 },
+  // 无损合并方案选择弹窗（方案一淡化 / 方案二自定义音频）
+  mergeRow: {
+    display: "flex", alignItems: "center", gap: "10px", background: "#1e1e1e",
+    border: "1px solid #3a3a3a", borderRadius: "6px", padding: "8px 10px", flexShrink: 0,
+  },
+  mergeRowLabel: {
+    flex: "1 1 auto", minWidth: "0", display: "flex", flexDirection: "column", gap: "2px",
+  },
+  mergeRowText: { fontSize: "12px", color: "#e0e0e0", whiteSpace: "nowrap" },
+  mergeRowSub: { fontSize: "11px", color: "#888", whiteSpace: "nowrap" },
+  mergeFadeInput: {
+    width: "64px", boxSizing: "border-box", outline: "none", flexShrink: 0,
+    background: "#1e1e1e", border: "1px solid #444", borderRadius: "4px",
+    color: "#e0e0e0", fontSize: "12px", padding: "3px 6px",
+  },
+  mergeAudioName: {
+    fontSize: "11px", color: "#aaa", maxWidth: "150px", overflow: "hidden",
+    textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 1,
+  },
+  mergeBtnGo: { background: "#5c9dff", color: "#0d1b24", border: "none", fontWeight: 600, flexShrink: 0 },
   img: { width: "100%", height: "calc(100% - 14px)", objectFit: "contain", borderRadius: "4px", background: "#111" },
   label: {
     fontSize: "10px", color: "#aaa", maxWidth: "64px", overflow: "hidden",
@@ -784,6 +804,11 @@ export function TransferPanel({ director }) {
   const [dragHint, setDragHint] = useState(""); // 长按拖出操作提示（自动消失）
   const [mergeBusy, setMergeBusy] = useState(false); // 素材合并请求进行中
   const [losslessMergeBusy, setLosslessMergeBusy] = useState(false); // 无损合并请求进行中
+  const [mergeDlgOpen, setMergeDlgOpen] = useState(false); // 无损合并方案选择弹窗
+  const [fadeSeconds, setFadeSeconds] = useState("1"); // 方案一：音频淡化秒数
+  const [customAudio, setCustomAudio] = useState(null); // 方案二：已上传自定义音频 { name, path }
+  const [customAudioBusy, setCustomAudioBusy] = useState(false); // 自定义音频上传中
+  const audioInputRef = useRef(null); // 方案二自定义音频隐藏 file input
   const longPressRef = useRef(null); // 长按状态 { id, fired, x, y, timer }
   const suppressClickRef = useRef(false); // 长按松手后抑制随后的 click（避免误改选中）
   const dragHintTimerRef = useRef(null); // 提示自动消失定时器
@@ -1691,11 +1716,16 @@ export function TransferPanel({ director }) {
     }
   };
 
-  // 无损合并选中的素材：请求后端 /minimax_ref/api/h3/merge_latents，
-  // 后端按选中顺序加载 joint latent → 像素域交叉淡化拼接 → VHS 编码，
-  // 完成后 send_sync 通知，素材条自动追加合并结果（无需手动 setMaterials）。
-  // 音频：每段 clip_audio 优先，否则 audio_latent 解码，拼接为 master_audio。
-  const losslessMergeSelectedMaterials = async () => {
+  // 无损合并：点击按钮弹出方案选择窗体（方案一：fade_seconds 接缝淡化合并；
+  // 方案二：上传主音频整轨替代所有 clip_audio 合并）。
+  const openLosslessMergeDlg = () => {
+    if (selIds.size < 2 || losslessMergeBusy) return;
+    setMergeDlgOpen(true);
+  };
+
+  // 执行无损合并。opts: { fadeSeconds?: number, customAudio?: string }。
+  // 方案二（customAudio）仅要求 image_latent；方案一要求 image_latent + clip_audio。
+  const runLosslessMerge = async (opts = {}) => {
     if (selIds.size < 2 || losslessMergeBusy) return;
     // 按用户选中顺序（selOrder）取素材，保证合并拼接顺序与序号一致
     const byId = new Map(materials.map((m) => [m.id, m]));
@@ -1704,38 +1734,77 @@ export function TransferPanel({ director }) {
     for (const m of materials) {
       if (selIds.has(m.id) && !sel.some((s) => s.id === m.id)) sel.push(m);
     }
-    // 无损合并要求每段同时含 image_latent / audio_latent / clip_audio
-    //（Combine 节点在提供 clip_audio 时才保存 latent 素材并输出音频切片）
-    sel = sel.filter((m) => m.imageLatent && m.clipAudio);
+    if (opts.customAudio) {
+      // 方案二：整轨替代，只要求 image_latent
+      sel = sel.filter((m) => m.imageLatent);
+    } else {
+      // 方案一：逐段 clip_audio 拼接（Combine 节点在提供 clip_audio 时才保存素材）
+      sel = sel.filter((m) => m.imageLatent && m.clipAudio);
+    }
     if (sel.length < 2) {
-      showDragHint(t("Lossless merge requires at least 2 materials with latent and audio (Guide must output clip_audio)"));
+      showDragHint(
+        opts.customAudio
+          ? t("Lossless merge requires at least 2 materials with latent")
+          : t("Lossless merge requires at least 2 materials with latent and audio (Guide must output clip_audio)")
+      );
       return;
     }
     setLosslessMergeBusy(true);
     try {
+      const body = {
+        materials: sel.map((m) => ({
+          src: m.src,
+          imageLatent: m.imageLatent,
+          audioLatent: m.audioLatent || null,
+          clipAudio: m.clipAudio || null,
+          meta: m.meta || null,
+        })),
+        node_id: director?.node?.id,
+        context_frames: 39,
+      };
+      if (opts.customAudio) {
+        body.custom_audio = opts.customAudio;
+      } else {
+        body.fade_seconds = opts.fadeSeconds != null ? opts.fadeSeconds : 0;
+      }
       const res = await api.fetchApi("/minimax_ref/api/h3/merge_latents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          materials: sel.map((m) => ({
-            src: m.src,
-            imageLatent: m.imageLatent,
-            audioLatent: m.audioLatent || null,
-            clipAudio: m.clipAudio || null,
-            meta: m.meta || null,
-          })),
-          node_id: director?.node?.id,
-          context_frames: 39,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || t("Lossless merge failed"));
       showDragHint(t("Losslessly merged {n} segments; the result was added to the material strip", { n: sel.length }));
+      setMergeDlgOpen(false);
+      setCustomAudio(null);
     } catch (err) {
       console.error("[Transfer] 无损合并失败:", err);
       showDragHint(t("Lossless merge failed: {msg}", { msg: err.message || t("Unknown error") }));
     } finally {
       setLosslessMergeBusy(false);
+    }
+  };
+
+  // 上传自定义音频（方案二）到 input/whatdreamscost，返回相对路径
+  const uploadCustomAudio = async (file) => {
+    if (!file || customAudioBusy) return;
+    setCustomAudioBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("audio", file);
+      const res = await api.fetchApi("/minimax_ref/api/h3/upload_audio", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || t("Upload failed"));
+      setCustomAudio({ name: file.name, path: data.name });
+      showDragHint(t("Custom audio uploaded: {name}", { name: file.name }));
+    } catch (err) {
+      console.error("[Transfer] 自定义音频上传失败:", err);
+      showDragHint(t("Custom audio upload failed: {msg}", { msg: err.message || t("Unknown error") }));
+    } finally {
+      setCustomAudioBusy(false);
     }
   };
 
@@ -2085,7 +2154,7 @@ export function TransferPanel({ director }) {
                   class="mrd-pr-btn"
                   style=${S.materialsMergeBtn}
                   disabled=${losslessMergeBusy}
-                  onClick=${losslessMergeSelectedMaterials}
+                  onClick=${openLosslessMergeDlg}
                   onMouseDown=${(e) => e.preventDefault()}
                   title=${t("LosslessMergeHint")}
                 >${losslessMergeBusy ? t("Lossless merging…") : t("Lossless merge")}</button>`
@@ -2476,6 +2545,64 @@ export function TransferPanel({ director }) {
             `
             : null
         }
+      </${RefModal}>
+      <${RefModal}
+        open=${mergeDlgOpen}
+        title=${t("Lossless merge")}
+        width="640px"
+        onClose=${() => setMergeDlgOpen(false)}
+      >
+        <div style=${S.mergeRow}>
+          <div style=${S.mergeRowLabel}>
+            <span style=${S.mergeRowText}>${t("Audio fade (s)")}</span>
+            <span style=${S.mergeRowSub}>${t("Seam crossfade; 0 = hard cut")}</span>
+          </div>
+          <input
+            type="number"
+            min="0"
+            step="0.1"
+            style=${S.mergeFadeInput}
+            value=${fadeSeconds}
+            onInput=${(e) => setFadeSeconds(e.target.value)}
+          />
+          <button
+            class="mrd-pr-btn"
+            style=${S.mergeBtnGo}
+            disabled=${losslessMergeBusy}
+            onClick=${() => runLosslessMerge({ fadeSeconds: parseFloat(fadeSeconds) || 0 })}
+          >${losslessMergeBusy ? t("Lossless merging…") : t("Merge")}</button>
+        </div>
+        <div style=${S.mergeRow}>
+          <div style=${S.mergeRowLabel}>
+            <span style=${S.mergeRowText}>${t("Custom audio")}</span>
+            <span style=${S.mergeRowSub}>${t("Replace all clip_audio with one track")}</span>
+          </div>
+          <input
+            ref=${audioInputRef}
+            type="file"
+            accept="audio/*"
+            style=${{ display: "none" }}
+            onChange=${(e) => {
+              const f = e.target.files && e.target.files[0];
+              if (f) uploadCustomAudio(f);
+              e.target.value = "";
+            }}
+          />
+          <button
+            class="mrd-pr-btn"
+            style=${S.mergeBtnGo}
+            disabled=${customAudioBusy}
+            onClick=${() => audioInputRef.current && audioInputRef.current.click()}
+          >${customAudioBusy ? t("Uploading…") : t("Choose audio")}</button>
+          ${customAudio ? html`<span style=${S.mergeAudioName} title=${customAudio.name}>${customAudio.name}</span>` : null}
+          ${customAudio ? html`<button class="mrd-pr-btn" style=${{ flexShrink: 0 }} onClick=${() => setCustomAudio(null)}>${t("Clear")}</button>` : null}
+          <button
+            class="mrd-pr-btn"
+            style=${S.mergeBtnGo}
+            disabled=${losslessMergeBusy || !customAudio}
+            onClick=${() => runLosslessMerge({ customAudio: customAudio && customAudio.path })}
+          >${losslessMergeBusy ? t("Lossless merging…") : t("Merge")}</button>
+        </div>
       </${RefModal}>
     </div>
   `;

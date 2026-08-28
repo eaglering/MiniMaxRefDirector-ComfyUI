@@ -731,6 +731,51 @@ def _material_src_to_local_path(src: str) -> str | None:
     return None
 
 
+def _custom_audio_local_path(src: str) -> str | None:
+    """把前端上传的自定义音频路径解析为本地文件（限制在 input 目录内）。
+
+    接受 view URL（/view?filename=&subfolder=&type=）、绝对路径，以及上传端点
+    返回的相对路径（whatdreamscost/name.ext，相对 input 目录）。
+    """
+    if not src or not isinstance(src, str):
+        return None
+    hit = _material_src_to_local_path(src)
+    if hit is not None:
+        return hit
+    rel = src.split("?", 1)[0].strip("/").replace("\\", "/")
+    base = folder_paths.get_input_directory()
+    p = os.path.normpath(os.path.join(base, rel))
+    if not os.path.realpath(p).startswith(os.path.realpath(base)):
+        return None
+    return p if os.path.isfile(p) else None
+
+
+@_routes.post(f"{API_PREFIX}/h3/upload_audio")
+async def h3_upload_audio(request):
+    """上传自定义主音频（无损合并方案二），保存到 input/whatdreamscost。
+
+    multipart: {audio: <file>}；返回 {"name": "whatdreamscost/<filename>"}。
+    支持 wav/flac/mp3（soundfile 解码），其他格式由合并时解码报错兜底。
+    """
+    post = await request.post()
+    file = post.get("audio") or post.get("file")
+    if file is None or not getattr(file, "filename", None):
+        return web.json_response({"success": False, "error": "未收到音频文件"}, status=400)
+    upload_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
+    os.makedirs(upload_dir, exist_ok=True)
+    filename = os.path.basename(file.filename)
+    file_path = os.path.join(upload_dir, filename)
+    if not os.path.realpath(file_path).startswith(os.path.realpath(upload_dir)):
+        return web.json_response({"success": False, "error": "Invalid filename"}, status=400)
+    data = file.file.read()
+    with open(file_path, "wb") as f:
+        f.write(data)
+    print(
+        f"[MiniMaxRefDirector] Custom audio uploaded: {filename} ({len(data)} bytes)"
+    )
+    return web.json_response({"success": True, "name": f"whatdreamscost/{filename}"})
+
+
 def _extract_merged_video_path(result) -> str | None:
     """从 RefMergeVideosFromPaths.execute 的 io.NodeOutput 提取合并后视频路径。
 
@@ -848,12 +893,16 @@ async def merge_latents_api(request: web.Request) -> web.Response:
          "clipAudio": path, "meta": {...} | null}
       ],
       "node_id": str | null,        # Director 节点 id（通知定向）
-      "context_frames": int         # 兜底 context 帧数（素材 meta 优先），默认 39
+      "context_frames": int,        # 兜底 context 帧数（素材 meta 优先），默认 39
+      "fade_seconds": float | null, # 方案一：接缝音频淡化秒数（默认 1.0，<=0 硬拼）
+      "custom_audio": str | null    # 方案二：上传音频相对路径，整轨替代所有 clip_audio
     }
 
-    音频策略（用户确认）：每段必须有 clip_audio（Combine 节点在提供音频段时才
-    保存 latent 素材并输出 clip_audio）；各段按绝对帧边界拼接为 master_audio
-    随视频一起编码。
+    音频两种模式（方案一/方案二，前端弹窗选择）：
+    - 方案一（无 custom_audio）：每段必须有 clip_audio，接缝处按 fade_seconds
+      做等功率交叉淡化（fade_seconds=0 保持原硬拼接）；缺失 clip_audio 返回 400
+    - 方案二（提供 custom_audio）：上传主音频整轨替代所有 clip_audio（长于视频
+      裁剪、短于视频补静音），不要求每段 clip_audio，fade_seconds 不适用
     产物复制到 input/whatdreamscost/merge_latent_{ts}.mp4 并 send_sync 通知。
     """
     try:
@@ -868,6 +917,30 @@ async def merge_latents_api(request: web.Request) -> web.Response:
         node_id = data.get("node_id")
         default_context = int(data.get("context_frames") or 39)
 
+        # 方案一：接缝音频淡化秒数（<=0 保持原硬拼接，回归基准）
+        fade_raw = data.get("fade_seconds", 1.0)
+        if fade_raw is None:
+            fade_raw = 1.0
+        try:
+            fade_seconds = float(fade_raw)
+        except (TypeError, ValueError):
+            return web.json_response(
+                {"success": False, "error": "fade_seconds 必须是数字"}, status=400
+            )
+        if fade_seconds < 0:
+            fade_seconds = 0.0
+
+        # 方案二：自定义主音频整轨替代（上传后的相对路径）
+        custom_audio_src = data.get("custom_audio") or ""
+        custom_audio_path = (
+            _custom_audio_local_path(str(custom_audio_src))
+            if custom_audio_src else None
+        )
+        if custom_audio_src and custom_audio_path is None:
+            return web.json_response(
+                {"success": False, "error": "自定义音频文件不存在"}, status=400
+            )
+
         from .lib import latent as latent_lib
         from .lib import latent_merge as latent_merge_lib
 
@@ -881,8 +954,12 @@ async def merge_latents_api(request: web.Request) -> web.Response:
                     {"success": False, "error": f"素材 {i + 1} 缺少 image_latent 文件"},
                     status=400,
                 )
-            clip_audio = _material_src_to_local_path(str(mat.get("clipAudio") or ""))
-            if clip_audio is None:
+            # 方案二（custom_audio 整轨替代）时不要求每段 clip_audio
+            clip_audio = (
+                _material_src_to_local_path(str(mat.get("clipAudio") or ""))
+                if custom_audio_path is None else None
+            )
+            if clip_audio is None and custom_audio_path is None:
                 return web.json_response(
                     {"success": False, "error": f"素材 {i + 1} 缺少 clip_audio 音频文件"},
                     status=400,
@@ -964,6 +1041,9 @@ async def merge_latents_api(request: web.Request) -> web.Response:
                 available = frames
 
             overlap = contexts[0] if contexts else default_context
+            custom_audio = None
+            if custom_audio_path is not None:
+                custom_audio = latent_lib.load_audio_from_file(custom_audio_path)
             return latent_merge_lib.merge_latents_to_video(
                 video_vae=video_vae,
                 audio_vae=None,
@@ -975,6 +1055,8 @@ async def merge_latents_api(request: web.Request) -> web.Response:
                 filename_prefix="MiniMaxRef/merge_latent",
                 frame_rate=float(first_meta.get("fps") or 24.0),
                 lazy=True,
+                fade_seconds=fade_seconds,
+                custom_audio=custom_audio,
             )
 
         meta_out = await asyncio.to_thread(_run_merge)
