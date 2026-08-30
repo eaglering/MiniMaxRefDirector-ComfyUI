@@ -682,7 +682,7 @@ const TIME_PARAM_DEFS = {
 const OTHER_GLOBAL_DEFS = [
   { name: "frame_rate", label: "FPS", type: "number", fallback: 24, min: 1, max: 240, step: 1, digits: 0 },
   { name: "outpu_resolution", label: "Resolution", type: "select", fallback: "16:9横屏", options: RESOLUTION_OPTIONS },
-  { name: "million_pixels", label: "Million Pixels", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1, digits: 1 },
+  { name: "million_pixels", label: "Million Pixels", type: "number", fallback: 0.6, min: 0.1, max: 4, step: 0.1, digits: 2 },
 ];
 
 // ---------- 数字输入框（输入即限制精度，失焦/回车提交） ----------
@@ -1760,7 +1760,7 @@ export function TransferPanel({ director }) {
           meta: m.meta || null,
         })),
         node_id: director?.node?.id,
-        context_frames: 39,
+        context_frames: sel[0]?.meta?.context_frames ?? 39,
       };
       if (opts.customAudio) {
         body.custom_audio = opts.customAudio;

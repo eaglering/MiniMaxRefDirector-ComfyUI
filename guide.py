@@ -188,7 +188,7 @@ class MiniMaxRefGuide(io.ComfyNode):
         
         entry = timeline[idx]
         upscale = entry.get("upscale", False)
-        guide_strength = entry.get("guideStrength", 16)
+        guide_strength = entry.get("guideStrength", 22)
         # 该段 H3 context 引导帧数（guideStrength 吸附到合法 H3 run 0/5/22/39/56...），
         # 同时作为 SongMaskedAVContext 的 context_length 与输出 context_frames 的值
         ctx_len = _snap_h3_run(guide_strength)
@@ -275,7 +275,7 @@ class MiniMaxRefGuide(io.ComfyNode):
                     img_src = vhs_tuple_path(img_src)
                 img_frames = load_image_tensor(img_src)
                 if img_frames is not None and img_frames.shape[0] >= 1:
-                    _guide_strength = max(39, guide_strength)
+                    _guide_strength = max(16, guide_strength)
                     img_frames = img_frames.repeat(_guide_strength, 1, 1, 1)  # [8, H, W, C]
                     cond, trim_frames = _apply_motion_context(
                         cond, latent, video_vae, img_frames,

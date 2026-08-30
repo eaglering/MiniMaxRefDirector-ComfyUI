@@ -1155,6 +1155,74 @@ app.registerExtension({
                     publishSubjects();
                 }
 
+                // relationship 是否属于该 type 的合法选项
+                function isValidRelationship(type, rel) {
+                    const opts = REF_TYPE_RELATIONSHIPS[type || "Subject"] || REF_RELATIONSHIPS_SUBJECT;
+                    return !!rel && opts.some(o => o[0] === rel);
+                }
+
+                // 供外部（如 settings.js 导入 Excel）按名称创建/更新主体的窗口级 API。
+                // list: [{ name, relationship?, description?, retention?, type? }]
+                // 按 name（trim + 忽略大小写）匹配：存在→更新；不存在→新建（type 默认 Subject）。
+                // 节点/闭包未就绪时防御性降级：仅刷新 __refSubjects，不抛错。
+                window.__upsertRefSubjects = function (list) {
+                    try {
+                        if (!Array.isArray(list) || list.length === 0) return;
+                        let changed = false;
+                        list.forEach(item => {
+                            if (!item || typeof item.name !== "string") return;
+                            const name = item.name.trim();
+                            if (!name) return;
+                            const lower = name.toLowerCase();
+                            const existing = subjects.find(s => (s.name || "").trim().toLowerCase() === lower);
+                            if (existing) {
+                                if (typeof item.description === "string" && item.description !== (existing.description || "")) {
+                                    existing.description = item.description;
+                                    changed = true;
+                                }
+                                if (typeof item.retention === "string" && item.retention !== (existing.retention || "")) {
+                                    existing.retention = item.retention;
+                                    changed = true;
+                                }
+                                if (typeof item.relationship === "string" && item.relationship &&
+                                    isValidRelationship(existing.type || "Subject", item.relationship) &&
+                                    item.relationship !== (existing.relationship || "")) {
+                                    existing.relationship = item.relationship;
+                                    changed = true;
+                                }
+                            } else {
+                                const type = item.type && ["Subject", "Picture", "Video", "Audio"].includes(item.type)
+                                    ? item.type
+                                    : "Subject";
+                                let rel = typeof item.relationship === "string" && item.relationship ? item.relationship : "";
+                                rel = isValidRelationship(type, rel) ? rel : refDefaultRelationship(type);
+                                subjects.push({
+                                    name,
+                                    description: typeof item.description === "string" ? item.description : "",
+                                    type,
+                                    relationship: rel,
+                                    audioRef: "",
+                                    retention: typeof item.retention === "string" ? item.retention : "",
+                                    imageFile: "",
+                                    audioFile: "",
+                                    videoFile: "",
+                                });
+                                changed = true;
+                            }
+                        });
+                        if (changed) {
+                            subjectCount = subjects.length;
+                            renderSubjects();
+                            saveState();
+                            updateNodeSize();
+                        }
+                        publishSubjects();
+                    } catch (e) {
+                        console.error("[MiniMaxRefSubject] upsert subjects failed:", e);
+                        try { publishSubjects(); } catch (_) { }
+                    }
+                };
+
                 function renderSubjects() {
                     closeMention();
                     subjectList.innerHTML = "";

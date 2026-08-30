@@ -376,8 +376,8 @@ export const menus = {
       items.push(this._menuDivider());
     }
 
-    // Group 7: Latent Upscaler + Mark Selection + Delete
-    items.push(this._menuBtn(t("Latent Upscaler"), {
+    // Group 7: Flash VSR + Mark Selection + Delete
+    items.push(this._menuBtn(t("Flash VSR"), {
       onClick: () => {
         seg.upscale = !seg.upscale;
         this.commitChanges();

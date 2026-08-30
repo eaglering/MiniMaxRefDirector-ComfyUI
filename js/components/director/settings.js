@@ -3,6 +3,18 @@
 import { ICONS, api, app, hideWidget, parseInitial, showWidget } from "./shared.js";
 import { t } from "../../i18n.js";
 
+// 导入 Excel 的 loading 遮罩样式（幂等注入）
+if (!document.getElementById("mrd-pr-import-overlay-styles")) {
+  const st = document.createElement("style");
+  st.id = "mrd-pr-import-overlay-styles";
+  st.textContent = `
+.mrd-pr-import-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2147483000;backdrop-filter:blur(2px)}
+.mrd-pr-import-spinner{width:46px;height:46px;border:4px solid rgba(255,255,255,0.2);border-top-color:#5c9dff;border-radius:50%;animation:mrd-pr-import-spin 0.8s linear infinite}
+.mrd-pr-import-text{color:#e8e8e8;font-size:13px;margin-top:14px;font-family:sans-serif;letter-spacing:0.03em}
+@keyframes mrd-pr-import-spin{to{transform:rotate(360deg)}}`;
+  document.head.appendChild(st);
+}
+
 export const settings = {
   hideSettingsWidgets() {
     const isLiteGraph = !window.LiteGraph || !window.LiteGraph.vueNodesMode;
@@ -233,6 +245,8 @@ export const settings = {
         normalDurationFrames: this.timeline.normalDurationFrames,
         segments: (this.timeline.segments || []).map(s => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
+          // 确保 guideStrength 始终落盘（前端默认 22，state.js 读取时 ?? 22）
+          if (rest.guideStrength === undefined) rest.guideStrength = 22;
           return rest;
         }),
         audioSegments: (this.timeline.audioSegments || []).map(s => {
@@ -293,6 +307,500 @@ export const settings = {
         console.error("Failed to save timeline as:", e);
       }
     }
+  }
+,
+
+  async handleExportTimelineAsExcel() {
+    try {
+      // 时间轴数据（segments）
+      const payload = JSON.parse(this._getTimelineSavePayload());
+      const segments = (payload.timeline && payload.timeline.segments) || [];
+      // 主体数据：优先实时缓存 window.__refSubjects，兜底从 graph 中 Subject 节点 widget 解析
+      let subjects = [];
+      try {
+        if (Array.isArray(window.__refSubjects)) subjects = window.__refSubjects;
+      } catch (_) { }
+      if (!subjects.length) subjects = this._getSubjectsFromGraph();
+
+      const xml = this._buildSpreadsheetXml(segments, subjects);
+
+      if (window.showSaveFilePicker) {
+        const fileHandle = await window.showSaveFilePicker({
+          suggestedName: "timeline_export.xlsm",
+          types: [{ description: t("Export Excel"), accept: { "application/vnd.ms-excel": [".xlsm"] } }]
+        });
+        const writable = await fileHandle.createWritable();
+        await writable.write(xml);
+        await writable.close();
+        this.currentFileHandle = fileHandle;
+      } else {
+        // Fallback for Firefox
+        const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "timeline_export.xlsm";
+        a.click();
+        URL.revokeObjectURL(url);
+        // Can't track file handle via download fallback
+        this.currentFileHandle = null;
+      }
+      this.dismissSettingsMenu();
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        console.error("Failed to export timeline as Excel:", e);
+        alert(t("Failed to save. You may need to use Save As."));
+      }
+    }
+  }
+,
+
+  // 从 graph 中 MiniMaxRefSubject 节点的 subject_data widget 解析主体列表（兜底）
+  _getSubjectsFromGraph() {
+    try {
+      const nodes = app.graph?._nodes || [];
+      for (const n of nodes) {
+        if (n.type !== "MiniMaxRefSubject") continue;
+        for (const w of n.widgets || []) {
+          if (!w.value || typeof w.value !== "string") continue;
+          try {
+            const parsed = JSON.parse(w.value);
+            if (parsed && Array.isArray(parsed.subjects)) return parsed.subjects;
+          } catch { /* 尝试下一个 widget */ }
+        }
+      }
+    } catch (e) {
+      console.warn("[Settings] getSubjectsFromGraph failed:", e);
+    }
+    return [];
+  }
+,
+
+  // XML 转义：& < > " ' 及换行（&#10;），保证任意内容都能安全写入 Excel XML
+  _xmlEscape(s) {
+    if (s === undefined || s === null) return "";
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;")
+      .replace(/\n/g, "&#10;");
+  }
+,
+
+  // 构建 SpreadsheetML 2003 XML：Timeline（ID/开始/时长/Prompt/H3PromptJson/GuideStrength）
+  // + Subjects（名称/关联关系/主体描述/保留描述）双 sheet，关联关系列带下拉限制
+  _buildSpreadsheetXml(segments, subjects) {
+    const esc = (v) => this._xmlEscape(v);
+
+    let tRows = '<Row><Cell><Data ss:Type="String">ID</Data></Cell>'
+      + '<Cell><Data ss:Type="String">开始</Data></Cell>'
+      + '<Cell><Data ss:Type="String">时长</Data></Cell>'
+      + '<Cell><Data ss:Type="String">Prompt</Data></Cell>'
+      + '<Cell><Data ss:Type="String">H3PromptJson</Data></Cell>'
+      + '<Cell><Data ss:Type="String">GuideStrength</Data></Cell></Row>';
+    for (const seg of segments || []) {
+      const h3 = seg.h3PromptJson ? JSON.stringify(seg.h3PromptJson) : "";
+      // guideStrength 默认与前端 state.js 保持一致（22）
+      const gs = seg.guideStrength !== undefined && seg.guideStrength !== null ? seg.guideStrength : 22;
+      tRows += '<Row>'
+        + '<Cell><Data ss:Type="String">' + esc(seg.id || "") + '</Data></Cell>'
+        + '<Cell><Data ss:Type="Number">' + (Number(seg.start) || 0) + '</Data></Cell>'
+        + '<Cell><Data ss:Type="Number">' + (Number(seg.length) || 0) + '</Data></Cell>'
+        + '<Cell><Data ss:Type="String">' + esc(seg.prompt || "") + '</Data></Cell>'
+        + '<Cell><Data ss:Type="String">' + esc(h3) + '</Data></Cell>'
+        + '<Cell><Data ss:Type="Number">' + gs + '</Data></Cell></Row>';
+    }
+    const timelineSheet = '<Worksheet ss:Name="Timeline"><Table>' + tRows + '</Table></Worksheet>';
+
+    let sRows = '<Row><Cell><Data ss:Type="String">名称</Data></Cell>'
+      + '<Cell><Data ss:Type="String">关联关系</Data></Cell>'
+      + '<Cell><Data ss:Type="String">主体描述</Data></Cell>'
+      + '<Cell><Data ss:Type="String">保留描述</Data></Cell></Row>';
+    for (const s of subjects || []) {
+      sRows += '<Row>'
+        + '<Cell><Data ss:Type="String">' + esc(s.name || "") + '</Data></Cell>'
+        + '<Cell><Data ss:Type="String">' + esc(s.relationship || "none") + '</Data></Cell>'
+        + '<Cell><Data ss:Type="String">' + esc(s.description || "") + '</Data></Cell>'
+        + '<Cell><Data ss:Type="String">' + esc(s.retention || "") + '</Data></Cell></Row>';
+    }
+    // 关联关系列可选值 = Subject/Picture/Video/Audio 全部合法值去重并集（none 代表空）
+    const relOptions = [
+      "fully_preserved", "partially_preserved", "attribute_transfer", "weak_reference",
+      "fully_copy", "partially_copy", "reference", "none"
+    ];
+    const dvFormula = '"' + relOptions.join(",") + '"';
+    const subjectsSheet = '<Worksheet ss:Name="Subjects"><Table>' + sRows + '</Table>'
+      + '<x:DataValidation><x:Type>List</x:Type><x:Formula1>' + dvFormula + '</x:Formula1>'
+      + '<x:Range>R2C2:R1000C2</x:Range><x:ShowDropDown>0</x:ShowDropDown></x:DataValidation></Worksheet>';
+
+    return '<?xml version="1.0"?>\n'
+      + '<?mso-application progid="Excel.Sheet"?>\n'
+      + '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n'
+      + ' xmlns:o="urn:schemas-microsoft-com:office:office"\n'
+      + ' xmlns:x="urn:schemas-microsoft-com:office:excel"\n'
+      + ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"\n'
+      + ' xmlns:html="http://www.w3.org/TR/REC-html40">\n'
+      + ' <Styles>\n'
+      + '  <Style ss:ID="Default" ss:Name="Normal"><Alignment ss:Vertical="Top"/><Font ss:FontName="Calibri" ss:Size="11"/></Style>\n'
+      + '  <Style ss:ID="Header"><Font ss:Bold="1"/></Style>\n'
+      + ' </Styles>\n'
+      + timelineSheet + '\n'
+      + subjectsSheet + '\n'
+      + '</Workbook>';
+  }
+,
+
+  async handleImportTimelineFromExcel() {
+    try {
+      if (window.showOpenFilePicker) {
+        const [fileHandle] = await window.showOpenFilePicker({
+          types: [{ description: t("Import Excel"), accept: { "application/vnd.ms-excel": [".xlsm"] } }],
+          multiple: false
+        });
+        const file = await fileHandle.getFile();
+        const content = await file.text();
+        await this._importTimelineFromExcelXml(content, fileHandle);
+      } else {
+        // Fallback for browsers without showOpenFilePicker (e.g. Firefox)
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".xlsm";
+        input.onchange = async e => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = async evt => {
+            try {
+              await this._importTimelineFromExcelXml(evt.target.result, null);
+            } catch (err) {
+              console.error("Failed to import timeline from Excel:", err);
+              alert(t("Failed to load timeline. See console for details."));
+            }
+          };
+          reader.readAsText(file);
+        };
+        input.click();
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        console.error("Failed to import timeline from Excel:", e);
+        alert(t("Failed to load timeline. See console for details."));
+      }
+    }
+  }
+,
+
+  // 显示导入 loading 遮罩（spinner + 文案），幂等：重复调用先移除旧的
+  _showImportOverlay(text) {
+    this._hideImportOverlay();
+    const overlay = document.createElement("div");
+    overlay.className = "mrd-pr-import-overlay";
+    overlay.innerHTML = '<div class="mrd-pr-import-spinner"></div><div class="mrd-pr-import-text"></div>';
+    const txt = overlay.querySelector(".mrd-pr-import-text");
+    if (txt) txt.textContent = text || t("Importing...");
+    document.body.appendChild(overlay);
+    this._importOverlayEl = overlay;
+  }
+,
+
+  // 移除导入 loading 遮罩
+  _hideImportOverlay() {
+    if (this._importOverlayEl) {
+      this._importOverlayEl.remove();
+      this._importOverlayEl = null;
+    }
+  }
+,
+
+  // 从 SpreadsheetML 2003 XML 字符串导入：还原 segments（h3PromptJson 优先用 JSON 列，
+  // 否则以 Prompt 列调 generate_prompt_json 生成），应用时间轴，再同步主体。
+  async _importTimelineFromExcelXml(xmlStr, fileHandle) {
+    // 二进制 xlsm/xlsx 是 ZIP 压缩格式（PK 开头），不是 XML 明文，无法用 DOMParser 解析
+    if (!xmlStr || String(xmlStr).trim().slice(0, 5) !== "<?xml") {
+      alert(t("Failed to load timeline. See console for details.") + "\n" + t("Invalid timeline file.") + " " + t("Please export as XML spreadsheet."));
+      return;
+    }
+    this._showImportOverlay(t("Importing..."));
+    let subjectRows = [];
+    let segments = [];
+    try {
+      const sheets = this._parseSpreadsheetXml(xmlStr);
+      const timelineRows = sheets["Timeline"] || [];
+      subjectRows = sheets["Subjects"] || [];
+
+      // ---- 还原 segments ----
+      const frameRate = this.getFrameRate ? this.getFrameRate() : 24;
+      segments = [];
+      let genFailed = 0;
+      for (let i = 1; i < timelineRows.length; i++) {
+        const r = timelineRows[i];
+        if (!r || r.every(c => String(c || "").trim() === "")) continue;
+        const prompt = String(r[3] || "").trim();
+        const id = String(r[0] || "").trim() || ("import_" + i + "_" + Date.now().toString(36));
+        const start = parseFloat(r[1]) || 0;
+        const length = parseFloat(r[2]) || 0;
+        // 第 6 列 GuideStrength（可选，旧文件无此列）
+        let guideStrength;
+        const gsStr = String(r[5] || "").trim();
+        if (gsStr !== "" && !isNaN(parseFloat(gsStr))) guideStrength = parseFloat(gsStr);
+        const durSecs = length > 0 ? parseFloat((length / Math.max(1, frameRate)).toFixed(2)) : 0;
+
+        let h3PromptJson = null;
+        const jsonStr = String(r[4] || "").trim();
+        if (jsonStr) {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              h3PromptJson = this._normalizePromptJson(parsed);
+            }
+          } catch { /* JSON 非法 → 回退生成 */ }
+        }
+        if (!h3PromptJson && prompt) {
+          // 内容描述字符串 prompt → 调 generate_prompt_json 生成 h3PromptJson
+          try {
+            h3PromptJson = await this._generatePromptJson(prompt, durSecs);
+          } catch (err) {
+            genFailed++;
+            console.warn("[Settings] generate_prompt_json failed for segment", id, err);
+          }
+        }
+        if (!h3PromptJson) h3PromptJson = this._normalizePromptJson(null);
+
+        const seg = { id, start, length, prompt, type: "text", autoEndFrame: true, h3PromptJson };
+        if (guideStrength !== undefined) seg.guideStrength = guideStrength;
+        segments.push(seg);
+      }
+
+      // ---- 重叠检测：按 start 排序，重叠（start 落在前一段时长内）则自动延后开始时间 ----
+      let overlapAdjusted = 0;
+      if (segments.length > 1) {
+        segments.sort((a, b) => (a.start || 0) - (b.start || 0));
+        let cursor = 0;
+        for (const seg of segments) {
+          if ((seg.start || 0) < cursor) {
+            seg.start = cursor;
+            overlapAdjusted++;
+          }
+          cursor = Math.max(cursor, (seg.start || 0) + (seg.length || 0));
+        }
+      }
+
+      // ---- 应用时间轴 ----
+      const current = JSON.parse(this._getTimelineSavePayload());
+      current.timeline.segments = segments;
+      this._applyLoadedTimeline(JSON.stringify(current), fileHandle);
+
+      // 提示导入完成（含生成失败/重叠调整数）
+      if (segments.length > 0) {
+        let msg = t("Excel import completed: {n} segments", { n: segments.length });
+        if (genFailed) msg += " (" + t("Generation failed") + ": " + genFailed + ")";
+        if (overlapAdjusted) msg += " (" + t("Overlapping segments auto-adjusted: {n}", { n: overlapAdjusted }) + ")";
+        alert(msg);
+      }
+    } finally {
+      this._hideImportOverlay();
+    }
+
+    // ---- 同步主体：Subjects sheet 优先 + h3PromptJson 引用补充 ----
+    const merged = new Map();
+    for (let i = 1; i < subjectRows.length; i++) {
+      const r = subjectRows[i];
+      if (!r) continue;
+      const name = String(r[0] || "").trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (!merged.has(key)) {
+        merged.set(key, {
+          name,
+          relationship: String(r[1] || "").trim() || undefined,
+          description: String(r[2] || ""),
+          retention: String(r[3] || ""),
+        });
+      }
+    }
+    for (const ref of this._extractSubjectRefs(segments)) {
+      const key = ref.name.toLowerCase();
+      if (!merged.has(key)) merged.set(key, ref);
+    }
+    const list = Array.from(merged.values());
+    if (list.length) {
+      if (typeof window.__upsertRefSubjects === "function") {
+        try {
+          window.__upsertRefSubjects(list);
+        } catch (err) {
+          console.error("[Settings] upsertRefSubjects failed:", err);
+        }
+      } else {
+        console.warn("[Settings] window.__upsertRefSubjects not available; subjects skipped.");
+      }
+    }
+  }
+,
+
+  // 命名空间容忍解析 SpreadsheetML 2003 XML → { sheetName: [ [cellText,...], ... ] }
+  _parseSpreadsheetXml(xmlStr) {
+    const sheets = {};
+    const doc = new DOMParser().parseFromString(xmlStr, "text/xml");
+    if (doc.getElementsByTagName("parsererror").length) {
+      throw new Error("XML parse error");
+    }
+    // 取带命名空间前缀属性的值（如 ss:Name / ss:Index），兼容任意前缀与无前缀
+    const attrValue = (el, localName) => {
+      const a = el && el.attributes && Array.from(el.attributes).find(x => x.localName === localName);
+      return a ? a.value : "";
+    };
+    const worksheets = doc.getElementsByTagNameNS("*", "Worksheet");
+    for (const ws of worksheets) {
+      const name = attrValue(ws, "Name");
+      const rows = [];
+      const tables = ws.getElementsByTagNameNS("*", "Table");
+      if (!tables.length) continue;
+      const rowEls = tables[0].getElementsByTagNameNS("*", "Row");
+      for (const rowEl of rowEls) {
+        const cells = [];
+        const cellEls = rowEl.getElementsByTagNameNS("*", "Cell");
+        let idx = 0;
+        for (const cellEl of cellEls) {
+          const indexAttr = attrValue(cellEl, "Index");
+          const colIndex = indexAttr ? (parseInt(indexAttr, 10) - 1) : idx;
+          while (cells.length < colIndex) cells.push("");
+          const dataEl = cellEl.getElementsByTagNameNS("*", "Data")[0];
+          cells[colIndex] = dataEl ? (dataEl.textContent || "") : "";
+          idx = colIndex + 1;
+        }
+        rows.push(cells);
+      }
+      if (name) sheets[name] = rows;
+    }
+    return sheets;
+  }
+,
+
+  // 从 graph 中 MiniMaxRefSubject 节点读取 VLM 配置（与 transfer.js getSubjectVlmSettings 同款逻辑，
+  // 兼容主 widget 对象 / 子 widget 带前缀 / 子 widget 裸名三种形态）
+  _getSubjectVlmSettings() {
+    try {
+      const nodes = app.graph?._nodes || [];
+      for (const n of nodes) {
+        if (n.type !== "MiniMaxRefSubject") continue;
+        const widgets = n.widgets || [];
+        const findW = (name) => widgets.find((x) => x.name === name);
+        // 依次尝试多个候选 widget 名，返回第一个存在的值
+        const findAny = (...names) => {
+          for (const nm of names) {
+            const w = findW(nm);
+            if (w) return w.value;
+          }
+          return undefined;
+        };
+        const clean = (s) => (s === "None" ? "" : s || "");
+        const v = findW("vlm_mode")?.value;
+        const out = { vlm_mode: "api", gguf_name: "", mmproj_path: "", provider: "GLM", api_key: "", ollama_model: "", ollama_base_url: "" };
+        if (v && typeof v === "object" && !Array.isArray(v)) {
+          out.vlm_mode = v.vlm_mode || out.vlm_mode;
+          out.gguf_name = clean(v.gguf_name);
+          out.mmproj_path = clean(v.mmproj_path);
+          out.provider = v.provider || out.provider;
+          out.api_key = clean(v.api_key);
+          out.ollama_model = clean(v.ollama_model);
+          out.ollama_base_url = clean(v.ollama_base_url);
+        } else {
+          out.vlm_mode = v || out.vlm_mode;
+          out.gguf_name = clean(findAny("vlm_mode.gguf_name", "gguf_name"));
+          out.mmproj_path = clean(findAny("vlm_mode.mmproj_path", "mmproj_path"));
+          out.provider = findAny("vlm_mode.provider", "provider") || out.provider;
+          out.api_key = clean(findAny("vlm_mode.api_key", "api_key"));
+          out.ollama_model = clean(findAny("vlm_mode.ollama_model", "ollama_model"));
+          out.ollama_base_url = clean(findAny("vlm_mode.ollama_base_url", "ollama_base_url"));
+        }
+        // 主 widget 缺失或为空时，从子 widget 推断模式
+        if (out.vlm_mode === "api") {
+          const hasGguf =
+            findW("vlm_mode.gguf_name") || findW("gguf_name") ||
+            findW("vlm_mode.mmproj_path") || findW("mmproj_path");
+          if (hasGguf) out.vlm_mode = "llama-cpp";
+        }
+        return out;
+      }
+    } catch (e) {
+      console.warn("[Settings] getSubjectVlmSettings failed:", e);
+    }
+    return null;
+  }
+,
+
+  // 以内容描述 prompt 调用 /minimax_ref/api/llm/generate_prompt_json 生成 h3PromptJson
+  async _generatePromptJson(prompt, durationSeconds) {
+    const v = this._getSubjectVlmSettings() || {};
+    const seedWidget = this.node.widgets?.find(w => w.name === "seed");
+    const body = {
+      vlm_mode: v.vlm_mode || "api",
+      seed: seedWidget?.value ?? 42,
+      gguf_path: v.gguf_name || "",
+      mmproj_path: v.mmproj_path || "",
+      provider: v.provider || "GLM",
+      api_key: v.api_key || "",
+      ollama_model: v.ollama_model || "",
+      ollama_base_url: v.ollama_base_url || "",
+      prompt,
+      image_path: null,
+      duration_seconds: durationSeconds > 0 ? durationSeconds : 0,
+      lang: "zh",
+    };
+    const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!data || !data.success) {
+      throw new Error((data && data.error) || "Generation failed");
+    }
+    return this._normalizePromptJson(data.json_data);
+  }
+,
+
+  // h3PromptJson 统一规范化为 { summary, detailed_description, overall_soundscape, non_diegetic_music }
+  _normalizePromptJson(v) {
+    const defaults = { summary: "", detailed_description: "", overall_soundscape: "", non_diegetic_music: "" };
+    if (v && typeof v === "object" && !Array.isArray(v)) return Object.assign({}, defaults, v);
+    if (typeof v === "string" && v.trim()) {
+      try {
+        const parsed = JSON.parse(v);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return Object.assign({}, defaults, parsed);
+        }
+      } catch { /* 回退默认模板 */ }
+    }
+    return Object.assign({}, defaults);
+  }
+,
+
+  // 从 segments 的 h3PromptJson 文本中提取 <@主体名> / <#主体名:内容> 引用，
+  // 过滤纯数字（如 <@2> 是场景引用而非主体），去重返回 [{ name }]。
+  _extractSubjectRefs(segments) {
+    const seen = new Map();
+    for (const seg of segments || []) {
+      const h3 = seg && seg.h3PromptJson;
+      const text = h3 && typeof h3 === "object"
+        ? [h3.summary, h3.detailed_description, h3.overall_soundscape, h3.non_diegetic_music]
+          .filter(v => typeof v === "string").join("\n")
+        : String((seg && seg.prompt) || "");
+      if (!text) continue;
+      const patterns = [/<@([^>#\s]+)>/g, /<#([^>:]+):/g];
+      for (const re of patterns) {
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          const name = (m[1] || "").trim();
+          if (!name || /^\d+$/.test(name)) continue;
+          const key = name.toLowerCase();
+          if (!seen.has(key)) seen.set(key, { name });
+        }
+      }
+    }
+    return Array.from(seen.values());
   }
 ,
 
@@ -427,6 +935,8 @@ export const settings = {
       { text: t("Save Timeline"), onClick: () => this.handleSaveTimeline() },
       { text: t("Save Timeline As"), onClick: () => this.handleSaveTimelineAs() },
       { text: t("Load Timeline"), onClick: () => this.handleLoadTimeline() },
+      { text: t("Export Excel"), onClick: () => this.handleExportTimelineAsExcel() },
+      { text: t("Import Excel"), onClick: () => this.handleImportTimelineFromExcel() },
     ]) grid.appendChild(btn(text, onClick));
     const widgetsVisible = () => !!(this.node.widgets?.find(w => w.name === "display_mode" && !(w.options && w.options.hidden)));
     const toggleBtn = btn(widgetsVisible() ? t("Hide Widgets") : t("Show Widgets"), () => {
