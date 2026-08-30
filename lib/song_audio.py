@@ -27,7 +27,7 @@ _MASTER_AUDIO_CACHE: dict = {}
 def _snap_h3_run(n):
     """把 context_length 向下吸附到合法 H3 run（5/22/39/56...）；<5 视为 0。
 
-    与 h3_song_audio_context._largest_h3_video_run 一致。guideStrength 通常为 16，
+    与 h3_song_audio_context._largest_h3_video_run 一致。guideStrength 通常为 22，
     吸附后为 5；0/5/22/39/56 本就是合法值，原样保留。
     """
     n = int(n)

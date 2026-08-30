@@ -282,6 +282,8 @@ const ZH = {
   "Save Timeline": "保存时间轴",
   "Save Timeline As": "时间轴另存为",
   "Load Timeline": "加载时间轴",
+  "Export Excel": "导出Excel",
+  "Import Excel": "导入Excel",
   "Hide Widgets": "隐藏部件",
   "Show Widgets": "显示部件",
   "Display Mode": "显示模式",
@@ -295,6 +297,10 @@ const ZH = {
   "Failed to load timeline. See console for details.": "加载时间轴失败，详见控制台。",
   "Invalid timeline file.": "无效的时间轴文件。",
   "Failed to save. You may need to use Save As.": "保存失败，您可能需要使用“另存为”。",
+  "Excel import completed: {n} segments": "Excel 导入完成：{n} 个片段",
+  "Please export as XML spreadsheet.": "请用 Excel/WPS 打开该文件后另存为 XML 表格(*.xml)格式再导入。",
+  "Importing...": "正在导入...",
+  "Overlapping segments auto-adjusted: {n}": "重叠片段已自动调整开始时间：{n} 个",
 
   // ---------- 任务类型说明（TASK_TYPES title，key 与 transfer.js 原文精确一致） ----------
   "When to use it: An image serves as the target video's first frame, keyframe, last frame, edited keyframe, or another concrete frame anchor": "适用场景：以图片作为目标视频的首帧、关键帧、尾帧、精修关键帧或其他具体帧锚点",

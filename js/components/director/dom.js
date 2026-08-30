@@ -301,7 +301,7 @@ export const dom = {
     });
 
     const helpBtn = iconBtn(ICONS.help, t("Help / Documentation"), () => {
-      window.open("https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI", "_blank");
+      window.open("https://github.com/eaglering/MiniMaxRefDirector-ComfyUI", "_blank");
     });
 
     this.isSnapping = this.node.properties.isSnapping !== false;
@@ -743,7 +743,7 @@ export const dom = {
     this.strengthValue = document.createElement("input");
     this.strengthValue.type = "text";
     this.strengthValue.className = "mrd-pr-strength-input";
-    this.strengthValue.value = "39";
+    this.strengthValue.value = "22";
     this.strengthValue.disabled = true;
     this.strengthValue.style.cursor = "ew-resize";
 
@@ -756,7 +756,7 @@ export const dom = {
     this.strengthValue.addEventListener("mousedown", (e) => {
       if (this.strengthValue.disabled) return;
       startX = e.clientX;
-      startVal = parseInt(this.strengthValue.value) || 39;
+      startVal = parseInt(this.strengthValue.value) || 22;
       hasMoved = false;
 
       const onMouseMove = (moveEvent) => {
@@ -801,7 +801,7 @@ export const dom = {
 
     this.strengthValue.addEventListener("change", (e) => {
       let val = parseInt(e.target.value);
-      if (isNaN(val)) val = 39;
+      if (isNaN(val)) val = 22;
       val = Math.max(0, Math.min(9999, val));
       this.strengthValue.value = val;
       if (this.timeline.segments[this.selectedIndex]) {

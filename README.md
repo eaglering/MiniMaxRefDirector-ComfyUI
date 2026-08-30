@@ -1,7 +1,7 @@
 # MiniMaxRefDirector-ComfyUI
 
 
-**v3.1.5** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
+**v3.1.6** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
 
 ComfyUI 自定义节点包：在时间线上编排多段镜头，用 VLM 自动撰写分镜提示词，绑定参考图 / 参考视频 / 参考音频，逐段生成视频并跨段衔接（motion context），最终按顺序合并输出。
 
@@ -95,6 +95,11 @@ MiniMaxRefDirector-ComfyUI/
 ```
 
 ## 更新日志
+
+### v3.1.6
+
+- 时间线支持**批量导出 Excel**：一键将全部片段与主体导出为 `.xlsm` 文件（含 `Timeline` 与 `Subjects` 两个工作表，`H3PromptJson` / `GuideStrength` 等字段完整保留，片段列、主体关联关系列带下拉校验）。
+- 时间线支持**导入 Excel**：从 `.xlsm`（需为 Excel 另存的 XML 表格格式）还原全部片段与主体；片段 `H3PromptJson` 缺失时自动调用 VLM 生成；导入片段开始时间重叠时自动延后排序，并带导入进度动画。
 
 ### v3.1.3
 

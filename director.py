@@ -298,7 +298,7 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "type": seg.get("type", "text"),
                     "imageFile": seg.get("imageFile", ""),
                     "upscale": seg.get("upscale", False),
-                    "guideStrength": seg.get("guideStrength", 16),
+                    "guideStrength": seg.get("guideStrength", 22),
                 }
                 guide_timeline.append(entry)
                 segment_count += 1

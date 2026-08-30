@@ -898,7 +898,7 @@ def build_h3_prompt(
             retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
             index += 1
             images.append(prev_image_file)
-        elif int(timeline_segment.get("guideStrength", 16)) > 0 and previous_timeline_segment is not None:
+        elif int(timeline_segment.get("guideStrength", 22)) > 0 and previous_timeline_segment is not None:
             if previous_timeline_segment.get("type") == "video" and previous_timeline_segment.get("imageFile"):
                 prev_image_file = previous_timeline_segment.get("imageFile", "")
                 prev_type = "video"

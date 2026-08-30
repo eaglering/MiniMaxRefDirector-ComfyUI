@@ -188,7 +188,7 @@ class MiniMaxRefGuide(io.ComfyNode):
         
         entry = timeline[idx]
         upscale = entry.get("upscale", False)
-        guide_strength = entry.get("guideStrength", 16)
+        guide_strength = entry.get("guideStrength", 22)
         # 该段 H3 context 引导帧数（guideStrength 吸附到合法 H3 run 0/5/22/39/56...），
         # 同时作为 SongMaskedAVContext 的 context_length 与输出 context_frames 的值
         ctx_len = _snap_h3_run(guide_strength)
