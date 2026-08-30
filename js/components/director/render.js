@@ -389,7 +389,7 @@ export const render = {
           this.ctx.strokeRect(startX, RULER_HEIGHT + 1, pxWidth, this.blockHeight - 2);
         }
 
-        // Latent Upscaler 标记：segment.upscale === true 时在段右上角显示 X2
+        // Flash VSR 标记：segment.upscale === true 时在段右上角显示 X2
         if (seg.upscale && seg.type !== "ghost" && pxWidth > 44) {
           const badgeW = 22;
           const badgeX = startX + pxWidth - badgeW - 3;

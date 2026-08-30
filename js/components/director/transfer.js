@@ -1760,7 +1760,7 @@ export function TransferPanel({ director }) {
           meta: m.meta || null,
         })),
         node_id: director?.node?.id,
-        context_frames: 39,
+        context_frames: sel[0]?.meta?.context_frames ?? 39,
       };
       if (opts.customAudio) {
         body.custom_audio = opts.customAudio;

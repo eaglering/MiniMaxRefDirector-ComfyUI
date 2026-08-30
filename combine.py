@@ -44,25 +44,18 @@ def _trim_images_and_audio(images, audio, trim_frames, frame_rate):
     帧数不足时跳过帧裁剪并告警。返回 (images, audio)。
     """
     if trim_frames > 0:
-        if images is not None and int(images.shape[0]) > trim_frames:
+        if int(images.shape[0]) > trim_frames:
             images = images[trim_frames:]
-            if audio is not None:
-                wave = audio["waveform"]
-                sr = int(audio["sample_rate"])
-                n = int(round(trim_frames / float(frame_rate) * sr))
-                if wave.shape[-1] > n:
-                    audio = {"waveform": wave[..., n:], "sample_rate": sr}
-                else:
-                    log.warning(
-                        "trim_frames=%d: audio shorter than trim window "
-                        "(%d samples); skip audio trim", trim_frames, int(wave.shape[-1]),
-                    )
-        else:
-            have = 0 if images is None else int(images.shape[0])
-            log.warning(
-                "trim_frames=%d >= available frames %d; skip frame trim",
-                trim_frames, have,
-            )
+            wave = audio["waveform"]
+            sr = int(audio["sample_rate"])
+            n = int(round(trim_frames / float(frame_rate) * sr))
+            if wave.shape[-1] > n:
+                audio = {"waveform": wave[..., n:], "sample_rate": sr}
+            else:
+                log.warning(
+                    "trim_frames=%d: audio shorter than trim window "
+                    "(%d samples); skip audio trim", trim_frames, int(wave.shape[-1]),
+                )
     return images, audio
 
 
@@ -207,6 +200,7 @@ class MiniMaxRefCombine(io.ComfyNode):
 
         if clip_audio is not None and latent is not None and image_lat is not None and audio_lat is not None:
             meta_data = {
+                # frame_count=latent的token数（length=120时为37）
                 "frame_count": int(image_lat.shape[2]),
                 "context_frames": int(context_frames),
                 "trim_frames": int(trim_frames),
@@ -262,6 +256,8 @@ class MiniMaxRefCombine(io.ComfyNode):
             log.info("[MiniMaxRefCombine] audio track: waveform=%s sample_rate=%s rms=%.4f",
                      tuple(w.shape) if w is not None else None,
                      audio.get("sample_rate"), rms)
+
+        images, audio = _trim_images_and_audio(images, audio, trim_frames, frame_rate)
 
         meta = encode_frames_with_vhs(
             images=images,

@@ -254,7 +254,7 @@ const ZH = {
   "Convert to Image": "转换为图片",
   "Convert to Video": "转换为视频",
   "Unlink Media": "取消关联媒体",
-  "Latent Upscaler": "Latent 放大器",
+  "Flash VSR": "超分放大",
   "No image found in clipboard": "剪贴板中没有图片",
   "Clipboard permission denied": "剪贴板权限被拒绝",
   "No text found in clipboard": "剪贴板中没有文本",
