@@ -280,7 +280,8 @@ class MiniMaxRefDirector(io.ComfyNode):
                 next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
                 prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
                                              prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
-                                             timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio)
+                                             timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio,
+                                             frame_rate=frame_rate)
                 # 非英文（含中文，且非仅出现在对白/主体标签中）的段提示词翻译为英文
                 if _needs_translate(prompt_res["prompt"]):
                     prompt_res["prompt"] = _translate_prompt_to_en(prompt_res["prompt"], vlm_opts)
