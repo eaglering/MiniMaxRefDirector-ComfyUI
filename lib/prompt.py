@@ -849,6 +849,7 @@ def build_h3_prompt(
     timeline_segment: dict = {},
     next_timeline_segment: dict|None = None,
     seg_audio: list[dict] = [],
+    frame_rate: float = 24,
 ) -> dict:
     prompt_res = build_h3_subject_bindings(subject_data=subject_data, prompt_json=prompt_json, 
                                            timeline_segment=timeline_segment, seg_audio=seg_audio)
@@ -861,8 +862,6 @@ def build_h3_prompt(
     speaker_ids = prompt_res.get("speaker_ids", {})
     # Picture 编号 = 图片在 images 列表中的位置（<Picture N> 对应 images[N-1]）
     index = len(images) + 1
-    # 首帧图片对应的 <Picture N> 标签（视频段首帧 / 图片段图），供 detailed_description reference 分镜使用
-    first_frame_pic = ""
     # 尾帧图片对应的 <Picture N> 标签（视频段尾帧 / autoEndFrame 段），追加到详细描述末尾作为结束锚点
     last_frame_pic = ""
     prev_image_file = ""
@@ -875,13 +874,7 @@ def build_h3_prompt(
         # 视频段：获取 mp4 的首帧和尾帧图片路径（首帧位置=video_start，尾帧位置=video_start+video_duration）
         video_first_frame_path, video_last_frame_path = _extract_video_frames(video_path, video_start, video_duration)
         if video_first_frame_path:
-            label = f"<Picture {index}>"
-            first_frame_pic = label
             prev_image_file = video_first_frame_path
-            subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
-            retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
-            index += 1
-            images.append(video_first_frame_path)
         if video_last_frame_path:
             label = f"<Picture {index}>"
             last_frame_pic = label
@@ -891,36 +884,24 @@ def build_h3_prompt(
             images.append(video_last_frame_path)
     else:
         if timeline_segment.get("type", "text") == "image":
-            label = f"<Picture {index}>"
-            first_frame_pic = label
             prev_image_file = timeline_segment.get("imageFile")
-            subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
-            retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
-            index += 1
-            images.append(prev_image_file)
         elif int(timeline_segment.get("guideStrength", 22)) > 0 and previous_timeline_segment is not None:
             if previous_timeline_segment.get("type") == "video" and previous_timeline_segment.get("imageFile"):
                 prev_image_file = previous_timeline_segment.get("imageFile", "")
                 prev_type = "video"
                 video_start = previous_timeline_segment.get("trimStart", 1)
                 video_duration = previous_timeline_segment.get("length", 1)
-                # 视频段：获取 mp4 的首帧和尾帧图片路径（首帧位置=video_start，尾帧位置=video_start+video_duration）
-                video_first_frame_path, video_last_frame_path = _extract_video_frames(prev_image_file, video_start, video_duration)
-                if video_last_frame_path:
-                    label = f"<Picture {index}>"
-                    first_frame_pic = label
-                    subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
-                    retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
-                    index += 1
-                    images.append(video_last_frame_path)
+                try:
+                    from .video import cut_video_window_with_ffmpeg
+                    prev_image_file = cut_video_window_with_ffmpeg(prev_image_file, video_start, video_duration)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(f"[MiniMaxRefDirector] cut prev video window error for {prev_image_file!r}: {exc}")
+                log.warning(
+                    "[MiniMaxRefDirector] prev video window cut unavailable for "
+                    f"{prev_image_file!r} [{video_start}, {video_start}+{video_duration})."
+                )
             elif previous_timeline_segment.get("type", "text") == "image" and previous_timeline_segment.get("imageFile", ""):
                 prev_image_file = previous_timeline_segment.get("imageFile", "")
-                label = f"<Picture {index}>"
-                first_frame_pic = label
-                subject_definitions = subject_definitions + f"\n{label} is the first frame of [Shot 1]."
-                retention_analysis = retention_analysis + f"\n{label} ([Shot 1] first frame): fully_preserved."
-                index += 1
-                images.append(prev_image_file)
 
         if timeline_segment.get("autoEndFrame", False) and next_timeline_segment is not None:
             if next_timeline_segment.get("type", "text") == "video" and next_timeline_segment.get("imageFile", ""):
@@ -949,18 +930,6 @@ def build_h3_prompt(
     summary = _replace_mapping(summary, mapping)
     retention_analysis = _replace_mapping(retention_analysis, mapping)
     detailed_description = _replace_mapping(detailed_description, mapping, speaker_ids=speaker_ids)
-
-    # 首帧图作为 reference 分镜：detailed_description 已含 [Shot N] 时全部 +1，
-    # 且原 [Shot 1] 移位为 [Shot 2] 后附上动画起点时间戳 At 00:00.330；
-    # 否则直接补 [Shot 2] At 00:00.330 时间戳，再在最前插入 [Shot 1] <Picture N> is fully referenced.
-    if first_frame_pic:
-        if _SHOT_MARK_RE.search(detailed_description):
-            detailed_description = _shift_shots(detailed_description, 1)
-            detailed_description = re.sub(r"\[Shot 2\]", "[Shot 2] At 00:00.330", detailed_description, count=1)
-            prefix = f"[Shot 1] {first_frame_pic} is fully referenced.\n"
-        else:
-            prefix = f"[Shot 1] {first_frame_pic} is fully referenced.\n[Shot 2] At 00:00.330\n"
-        detailed_description = prefix + detailed_description
 
     # 尾帧作为结束锚点：追加到最后一个分镜上；详细描述不含分镜时先给内容补 [Shot 1] 开头
     if last_frame_pic:

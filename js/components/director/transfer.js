@@ -1193,11 +1193,10 @@ export function TransferPanel({ director }) {
     }
   };
 
-      const srcOf = (s) => s?.imageB64 || s?.imgObj?.src || "";
   const firstFramePath = () => {
     const segs = director?.timeline?.segments || [];
     if (segs?.[director.selectedIndex]?.type === "image")
-      return srcOf((segs?.[director.selectedIndex] || null));
+      return segs?.[director.selectedIndex]?.imageFile || null;
     return null;
   };
 

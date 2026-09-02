@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,6 +19,7 @@ from comfy.utils import ProgressBar
 from comfy_api.latest import Input, InputImpl, Types, io, UI
 
 from .audio import merge_two_audio, save_audio_to_temp_wav
+from .path import resolve_input_path
 
 logger = logging.getLogger(__name__)
 
@@ -270,11 +272,84 @@ def _parse_video_stream(stream: dict) -> "tuple[int | None, int | None, float | 
     return width, height, fps, fps_fraction, frame_count
 
 
+def _probe_media_with_ffmpeg(path: str) -> dict[str, Any]:
+    """Fallback media probe via ``ffmpeg -i`` stderr when ffprobe is unavailable.
+
+    imageio-ffmpeg（VHS 自带）只捆绑 ffmpeg.exe 而没有 ffprobe，因此系统未安装
+    ffmpeg、仅靠 VHS 的环境必须走这条路径。从 ``ffmpeg -i`` 的输出里解析
+    duration / fps（缺 fps 时取 tbr，VFR 视频）即可满足裁剪窗口换算所需，
+    键与 ffprobe_info 保持一致。解析失败返回 {}。
+    """
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if not ffmpeg or not os.path.isfile(path):
+        return {}
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", path],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return {}
+    text = (result.stderr or "") + "\n" + (result.stdout or "")
+
+    duration = None
+    match = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", text)
+    if match:
+        hours, minutes, seconds = match.groups()
+        try:
+            duration = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        except ValueError:
+            duration = None
+
+    width = height = fps = None
+    has_video = False
+    has_audio = "Audio:" in text
+    video_line = ""
+    for line in text.splitlines():
+        if "Video:" in line:
+            video_line = line
+            has_video = True
+            break
+    if video_line:
+        size_match = re.search(r"(\d{2,5})x(\d{2,5})", video_line)
+        if size_match:
+            width, height = int(size_match.group(1)), int(size_match.group(2))
+        fps_match = re.search(r"(\d+(?:\.\d+)?)\s*fps", video_line)
+        if not fps_match:
+            fps_match = re.search(r"(\d+(?:\.\d+)?)\s*tbr", video_line)
+        if fps_match:
+            fps = float(fps_match.group(1))
+
+    fps_fraction = None
+    if fps:
+        try:
+            fps_fraction = Fraction(str(fps)).limit_denominator(100000)
+        except (ValueError, ZeroDivisionError):
+            fps_fraction = None
+    frame_count = None
+    if duration is not None and fps:
+        frame_count = max(1, round(duration * fps))
+
+    return {
+        "duration": duration,
+        "has_video": has_video,
+        "has_audio": has_audio,
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "fps_fraction": fps_fraction,
+        "frame_count": frame_count,
+    }
+
+
 def ffprobe_info(path: str) -> dict[str, Any]:
     """Return basic media info (duration, has_video, has_audio, width, height, fps) via ffprobe."""
     ffprobe = get_ffmpeg_path("ffprobe")
     if not ffprobe:
-        return {}
+        # 无 ffprobe（典型：系统未装 ffmpeg，仅靠 VHS 的 imageio-ffmpeg 二进制）：
+        # 退化用 ffmpeg -i 解析 duration/fps，保证按帧窗口裁剪仍可用。
+        return _probe_media_with_ffmpeg(path)
     result = subprocess.run(
         [
             ffprobe, "-v", "error",
@@ -389,6 +464,118 @@ def trim_video_with_ffmpeg(
     raise RuntimeError(
         f"FFmpeg trim failed:\n{result2.stderr.decode(errors='replace')[-600:]}"
     )
+
+
+def cut_video_window_with_ffmpeg(
+    input_path: str,
+    start_frame: int,
+    frame_count: int,
+) -> str | None:
+    """从视频中间裁剪出 [start_frame, start_frame + frame_count) 帧窗口，另存为临时 mp4。
+
+    用于跨段衔接：把上一视频素材段“实际使用的片段”（素材内偏移 trimStart、占用
+    length，均为帧）裁剪另存，使下游 guide.py 的 prev_tail 只读到该窗口内的尾帧，
+    避免直接读整段长素材取尾帧（尾帧可能来自从未使用过的部分）。
+
+    - 入参支持绝对路径或 ComfyUI 风格相对路径（whatdreamscost/xxx.mp4、input/...），
+      内部先 resolve_input_path 解析为绝对路径后再探测/裁剪；
+    - 帧→秒换算使用源视频实际 fps（ffprobe 探测，避免按 24 硬猜）；start_frame 越界时
+      按源时长截断，剩余不足 frame_count 帧时只保留可用部分；
+    - 输出写到 ComfyUI temp/minimaxrefdirector 下，文件名含源文件名 + 起始帧 + 帧数 +
+      源文件 mtime/size；同源同窗口且源文件未变时直接复用旧文件；
+    - 仅保留视频流，重编码 h264/yuv420p（mp4 容器），输入 seek 配合解码实现帧级精确；
+    - 参数非法 / ffmpeg 不可用 / 编码失败时返回 None，由调用方自行回退。
+    """
+    if frame_count is None or int(frame_count) <= 0:
+        return None
+    start_frame = max(0, int(start_frame or 0))
+    frame_count = int(frame_count)
+
+    # 入参可能是 ComfyUI 风格相对路径（whatdreamscost/xxx.mp4、input/...）：
+    # 先解析为绝对路径，避免 os.path.isfile / ffprobe 按进程 CWD 误判文件不存在
+    # （此前正是因此裁剪失败、回退整段素材）。
+    try:
+        resolved = resolve_input_path(input_path)
+    except Exception:  # noqa: BLE001  input/ 前缀指向缺失文件时 resolve 会抛 FileNotFoundError
+        resolved = ""
+    if not resolved:
+        return None
+    input_path = resolved
+
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if not ffmpeg or not os.path.isfile(input_path):
+        return None
+
+    info = ffprobe_info(input_path)
+    fps = info.get("fps")
+    if not isinstance(fps, (int, float)) or fps <= 0:
+        return None
+
+    start_sec = start_frame / float(fps)
+    duration = frame_count / float(fps)
+    source_duration = info.get("duration")
+    if isinstance(source_duration, (int, float)) and source_duration > 0:
+        duration = min(duration, max(0.0, source_duration - start_sec))
+    if duration <= 0:
+        return None
+
+    out_dir = os.path.join(folder_paths.get_temp_directory(), "minimaxrefdirector")
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError:
+        return None
+    stem = os.path.splitext(os.path.basename(input_path))[0]
+    try:
+        stamp = f"{os.path.getmtime(input_path):.0f}_{os.path.getsize(input_path)}"
+    except OSError:
+        stamp = "0_0"
+    output_path = os.path.join(
+        out_dir, f"{stem}_cut{start_frame}f_{frame_count}f_{stamp}.mp4"
+    )
+    if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+        return output_path
+
+    # 先写随机临时名再原子替换，避免并发读取到半成品 / 覆盖中被消费
+    fd, tmp_path = tempfile.mkstemp(suffix=".mp4", dir=out_dir)
+    os.close(fd)
+    try:
+        cmd = [
+            ffmpeg, "-y",
+            "-ss", f"{start_sec:.6f}",
+            "-t", f"{duration:.6f}",
+            "-i", input_path,
+            "-map", "0:v:0",
+            "-c:v", "libx264", "-preset", "fast",
+            "-pix_fmt", "yuv420p",
+            tmp_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True)
+        if result.returncode != 0:
+            logger.warning(
+                "[cut_video_window_with_ffmpeg] ffmpeg cut failed (rc=%d): %s",
+                result.returncode,
+                result.stderr.decode(errors="replace")[-400:],
+            )
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            return None
+        if not (os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            return None
+        os.replace(tmp_path, output_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[cut_video_window_with_ffmpeg] cut failed: %s", exc)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return None
+    return output_path
 
 
 def ffmpeg_supports_xfade() -> bool:

@@ -267,7 +267,7 @@ class MiniMaxRefGuide(io.ComfyNode):
         # 图片段 + imageFile：把静态图重复成 8 帧作为 motion context pinned 帧，
         # 让本段从该图开始运动（H3 节点会按 VAE 网格把帧数吸附到合法值，如 5 帧）。
         if entry.get("type") in ["text", "image", "video"] and entry.get("prevImageFile") and not prev_is_video:
-            if entry.get("type") == "text" and guide_strength <= 0:
+            if guide_strength <= 0:
                 pass
             else:
                 img_src = entry.get("prevImageFile")
@@ -275,11 +275,10 @@ class MiniMaxRefGuide(io.ComfyNode):
                     img_src = vhs_tuple_path(img_src)
                 img_frames = load_image_tensor(img_src)
                 if img_frames is not None and img_frames.shape[0] >= 1:
-                    _guide_strength = max(16, guide_strength)
-                    img_frames = img_frames.repeat(_guide_strength, 1, 1, 1)  # [8, H, W, C]
+                    img_frames = img_frames.repeat(guide_strength, 1, 1, 1)  # [8, H, W, C]
                     cond, trim_frames = _apply_motion_context(
                         cond, latent, video_vae, img_frames,
-                        context_length=_guide_strength, audio_vae=audio_vae,
+                        context_length=guide_strength, audio_vae=audio_vae,
                     )
                     log.info(f"[MiniMaxRefGuide] guide_index={idx} image motion context "
                             f"({img_frames.shape[0]} frames from {img_src})")

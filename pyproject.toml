@@ -1,7 +1,7 @@
 [project]
 name = "MiniMaxRefDirector-ComfyUI"
 description = "MiniMax Reference Director — ComfyUI custom nodes for subject management, timeline editing, and VLM-enhanced prompt generation."
-version = "3.1.6"
+version = "3.1.7"
 license = {file = "LICENSE"}
 
 [project.urls]
