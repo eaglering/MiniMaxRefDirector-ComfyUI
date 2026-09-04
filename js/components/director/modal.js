@@ -23,6 +23,9 @@ const MODAL_CSS = `
 .ref-modal-help-tip{position:fixed;z-index:99999;background:#2d2d2d;border:1px solid #555;border-radius:6px;padding:8px 10px;min-width:240px;max-width:400px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.5);font-size:11px;color:#ccc;line-height:1.6;white-space:pre-wrap}
 .ref-modal-close{background:transparent;border:none;color:#aaa;cursor:pointer;font-size:15px;line-height:1;padding:2px 8px;border-radius:4px;flex-shrink:0;transition:all .15s}
 .ref-modal-close:hover{background:rgba(255,255,255,.12);color:#fff}
+.ref-modal-fs{background:transparent;border:none;color:#aaa;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:20px;padding:0;border-radius:4px;flex-shrink:0;transition:all .15s}
+.ref-modal-fs:hover{background:rgba(255,255,255,.12);color:#fff}
+.ref-modal-fs svg{display:block}
 .ref-modal-body{padding:10px 12px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;box-sizing:border-box;flex:1;min-height:0}
 .ref-modal-foot{padding:8px 12px;border-top:1px solid #444;display:flex;justify-content:flex-end;gap:6px;flex-shrink:0}
 .ref-modal-resize{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;touch-action:none}
@@ -60,9 +63,12 @@ function getFixedCb(el) {
 //   onClose  - 关闭回调（ESC / 点遮罩 / 点关闭按钮触发）
 //   children - 内容区（内部滚动）
 //   footer   - 可选底部栏
-export function RefModal({ open, title, width, height, onClose, children, footer, minWidth = 320, minHeight = 180, help }) {
+export function RefModal({ open, title, width, height, onClose, children, footer, minWidth = 320, minHeight = 180, help, fullscreen = false }) {
   // style: { left, top, width, height }——用户拖拽/调整后的固定定位样式（坐标相对包含块）；null 表示自动居中
   const [style, setStyle] = useState(null);
+  // 全屏：进入前把原 style 快照到 savedStyleRef（null=居中），恢复时还原；isFullscreen 为 true 时铺满包含块
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const savedStyleRef = useRef(null);
   // drag: { mode: "move" | "resize", startX, startY, baseLeft, baseTop, baseW, baseH }
   const [drag, setDrag] = useState(null);
   const boxRef = useRef(null);
@@ -115,9 +121,12 @@ export function RefModal({ open, title, width, height, onClose, children, footer
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // 每次打开重置为默认（居中 + 默认尺寸）
+  // 每次打开重置为默认（居中 + 默认尺寸），同时退出全屏态
   useEffect(() => {
-    if (open) setStyle(null);
+    if (open) {
+      setStyle(null);
+      setIsFullscreen(false);
+    }
   }, [open]);
 
   // 拖拽 / resize：window 级 pointermove/up 跟随
@@ -159,8 +168,9 @@ export function RefModal({ open, title, width, height, onClose, children, footer
   if (!open) return null;
 
   const beginDrag = (e, mode) => {
+    if (isFullscreen) return; // 全屏态下禁止拖拽/resize
     if (e.button !== 0) return;
-    if (e.target.closest && e.target.closest(".ref-modal-close")) return; // 关闭按钮不触发拖拽
+    if (e.target.closest && (e.target.closest(".ref-modal-close") || e.target.closest(".ref-modal-fs"))) return; // 头部按钮不触发拖拽
     const box = boxRef.current;
     if (!box) return;
     const rect = box.getBoundingClientRect();
@@ -193,20 +203,48 @@ export function RefModal({ open, title, width, height, onClose, children, footer
     document.body.style.cursor = mode === "move" ? "move" : "nwse-resize";
   };
 
+  // 全屏/恢复：以 overlay（offsetParent，铺满 transform 包含块）的布局尺寸铺满；恢复时还原进入前快照
+  const toggleFullscreen = () => {
+    const box = boxRef.current;
+    if (!box) return;
+    if (isFullscreen) {
+      setIsFullscreen(false);
+      setStyle(savedStyleRef.current); // 快照为 null → 回到 flex 居中
+      return;
+    }
+    savedStyleRef.current = style;
+    const cb = (box.offsetParent && box.offsetParent !== document.body) ? box.offsetParent : box.parentElement;
+    const cbRect = cb ? cb.getBoundingClientRect() : { left: 0, top: 0 };
+    const scale = cb && cb.offsetWidth > 0 && cbRect.width > 0 ? cbRect.width / cb.offsetWidth : 1;
+    setStyle({
+      left: 0,
+      top: 0,
+      width: cbRect.width / scale,
+      height: cbRect.height / scale,
+    });
+    setIsFullscreen(true);
+  };
+
   const boxStyle = style
     ? { position: "fixed", left: style.left + "px", top: style.top + "px", width: style.width + "px", height: style.height + "px" }
     : { width: width || null, height: height || null };
+  // 全屏态：CSS 的 max-width:94vw/max-height:90vh/border-radius 会限制铺满，需显式覆盖
+  const fullBoxStyle = isFullscreen ? { ...boxStyle, maxWidth: "none", maxHeight: "none", borderRadius: "0px", border: "none" } : null;
+  // 全屏/退出按钮图标（feather maximize-2 / minimize-2）
+  const fsIcon = isFullscreen
+    ? html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`
+    : html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`;
 
   return html`
     <div
       class="ref-modal-overlay"
       onMouseDown=${(e) => { if (e.target === e.currentTarget && onClose) onClose(); }}
     >
-      <div ref=${boxRef} class="ref-modal" style=${boxStyle}>
+      <div ref=${boxRef} class="ref-modal" style=${isFullscreen ? fullBoxStyle : boxStyle}>
         <div
           class="ref-modal-head"
           onPointerDown=${(e) => beginDrag(e, "move")}
-          onDblClick=${() => setStyle(null)}
+          onDblClick=${() => (isFullscreen ? toggleFullscreen() : setStyle(null))}
         >
           <div style=${{ display: "flex", alignItems: "center", gap: "6px", flex: "1 1 auto", minWidth: "0" }}>
             <span class="ref-modal-title">${title}</span>
@@ -230,11 +268,24 @@ export function RefModal({ open, title, width, height, onClose, children, footer
                 : null
             }
           </div>
-          <button class="ref-modal-close" title=${t("Close")} onClick=${(e) => { e.stopPropagation(); onClose && onClose(); }}>✕</button>
+          <div style=${{ display: "flex", alignItems: "center", gap: "2px", flexShrink: 0 }}>
+            ${
+              fullscreen
+                ? html`<button
+                    class="ref-modal-fs"
+                    title=${isFullscreen ? t("Exit fullscreen") : t("Fullscreen")}
+                    onPointerDown=${(e) => e.stopPropagation()}
+                    onDblClick=${(e) => e.stopPropagation()}
+                    onClick=${(e) => { e.stopPropagation(); toggleFullscreen(); }}
+                  >${fsIcon}</button>`
+                : null
+            }
+            <button class="ref-modal-close" title=${t("Close")} onClick=${(e) => { e.stopPropagation(); onClose && onClose(); }}>✕</button>
+          </div>
         </div>
         <div class="ref-modal-body">${children}</div>
         ${footer ? html`<div class="ref-modal-foot">${footer}</div>` : null}
-        <div class="ref-modal-resize" onPointerDown=${(e) => beginDrag(e, "resize")} title=${t("Drag to resize")}></div>
+        ${isFullscreen ? null : html`<div class="ref-modal-resize" onPointerDown=${(e) => beginDrag(e, "resize")} title=${t("Drag to resize")}></div>`}
       </div>
     </div>
   `;

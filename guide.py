@@ -131,7 +131,7 @@ class MiniMaxRefGuide(io.ComfyNode):
                 io.Conditioning.Output(display_name="positive"),
                 io.Latent.Output(display_name="latent"),
                 io.Int.Output(display_name="trim_frames"),
-                io.Float.Output(display_name="frame_rate"),
+                io.Boolean.Output(display_name="secondPass"),
                 io.Boolean.Output(display_name="upscale"),
                 io.Audio.Output(
                     display_name="clip_audio",
@@ -187,6 +187,7 @@ class MiniMaxRefGuide(io.ComfyNode):
                                  ExecutionBlocker(None))
         
         entry = timeline[idx]
+        secondPass = entry.get("secondPass", False)
         upscale = entry.get("upscale", False)
         guide_strength = entry.get("guideStrength", 22)
         # 该段 H3 context 引导帧数（guideStrength 吸附到合法 H3 run 0/5/22/39/56...），
@@ -302,5 +303,5 @@ class MiniMaxRefGuide(io.ComfyNode):
                     f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
                     f"skipped: {prev_tail} could not be decoded")
 
-        return io.NodeOutput(cond, latent, trim_frames, frame_rate, upscale, clip_audio,
+        return io.NodeOutput(cond, latent, trim_frames, secondPass, upscale, clip_audio,
                              ctx_len)

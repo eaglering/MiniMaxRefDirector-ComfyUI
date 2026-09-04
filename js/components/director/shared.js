@@ -297,7 +297,8 @@ function parseInitial(jsonStr) {
     overrideAudio: false,
     inpaint_audio: true,
     normalStartFrame: 0,
-    normalDurationFrames: 120
+    normalDurationFrames: 120,
+    defaultCameraMotions: []
   };
   try {
     if (jsonStr) {
@@ -310,9 +311,17 @@ function parseInitial(jsonStr) {
       if (p.inpaint_audio !== undefined) parsed.inpaint_audio = p.inpaint_audio;
       if (p.normalStartFrame !== undefined) parsed.normalStartFrame = p.normalStartFrame;
       if (p.normalDurationFrames !== undefined) parsed.normalDurationFrames = p.normalDurationFrames;
+      if (Array.isArray(p.defaultCameraMotions)) {
+        parsed.defaultCameraMotions = p.defaultCameraMotions.filter(k => typeof k === "string");
+      }
       if (Array.isArray(p.segments)) {
         parsed.segments = p.segments.map(s => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
+          // 迁移旧版单值运镜字段（cameraMotion）→ 多选数组（cameraMotions），并清理残留
+          if (rest.cameraMotions === undefined && typeof rest.cameraMotion === "string" && rest.cameraMotion && rest.cameraMotion !== "auto") {
+            rest.cameraMotions = [rest.cameraMotion];
+          }
+          delete rest.cameraMotion;
           return rest;
         });
       }
@@ -348,4 +357,21 @@ function parseInitial(jsonStr) {
 }
 
 
-export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl };
+// --- 运镜风格库（共享给 transfer.js / settings.js 使用） ---
+// key 与后端 lib/prompt.py _CAMERA_MOTION_PRESETS 完全一致；label/title 用作 i18n key
+// （英文原文即英文显示，中文走 ZH 翻译）。多选后随 generate_prompt_json 请求携带
+// camera_motion 数组，由 LLM 依据每个 [Shot N] 的语义自动分配到各 Shot。
+// 不设 "auto" 项：空集合（[]）即表达"运镜自由、由模型决定"。
+const CAMERA_MOTIONS = [
+  { key: "push_in", label: "Push-in", title: "Push-in / Dolly-in: the camera moves toward the subject or a point of interest, tightening the framing" },
+  { key: "pull_back", label: "Pull-back", title: "Pull-back / Dolly-out: the camera retreats to reveal the wider scene and context" },
+  { key: "push_pull", label: "Push+Pull", title: "Push + Pull: a continuous move combining a push-in with a pull-back in one shot" },
+  { key: "orbit", label: "Orbit", title: "Orbit: the camera circles around the subject on a partial or full arc" },
+  { key: "tracking", label: "Tracking", title: "Tracking / Handheld: the camera follows the subject laterally or from behind" },
+  { key: "aerial", label: "Aerial", title: "Aerial / Drone: high-angle aerial or drone shot establishing or flying over the scene" },
+  { key: "crane", label: "Crane", title: "Crane / Tilt: vertical crane move or tilt sweep that reframes the scene" },
+  { key: "pan", label: "Pan", title: "Pan: the camera sweeps horizontally from a fixed position" },
+  { key: "close_up", label: "Close-up", title: "Close-up / Macro: extreme close-up or macro framing on a face, object or detail" },
+];
+
+export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl, CAMERA_MOTIONS };

@@ -43,6 +43,7 @@ const ZH = {
   "Retention": "保留描述",
   "Unknown error": "未知错误",
   "Loading...": "加载中...",
+  "Upload": "上传",
   "Uploading...": "上传中...",
   "Decoding...": "解码中...",
   "File": "文件",
@@ -198,6 +199,11 @@ const ZH = {
   "Delete Video": "删除视频",
   "View help": "查看说明",
   "Drag to resize": "拖动调整大小",
+  "Fullscreen": "全屏",
+  "Exit fullscreen": "退出全屏",
+  "Reference Assets": "引用资源",
+  "Reference Audio": "参考音频",
+  "ReferenceAssetsHint": "需要在定义描述中申明引用资源",
 
   // ---------- apiConfigManager.js ----------
   "MiniMax API Manager": "MiniMax API 管理器",
@@ -254,7 +260,9 @@ const ZH = {
   "Convert to Image": "转换为图片",
   "Convert to Video": "转换为视频",
   "Unlink Media": "取消关联媒体",
-  "Flash VSR": "超分放大",
+  "Flash VSR": "超分放大 #2",
+  "Second Pass": "二次采样 X2",
+  "S": "超分放大",
   "No image found in clipboard": "剪贴板中没有图片",
   "Clipboard permission denied": "剪贴板权限被拒绝",
   "No text found in clipboard": "剪贴板中没有文本",
@@ -324,6 +332,37 @@ const ZH = {
   "video continuation": "视频续写",
   "audio reuse": "音频复用",
   "audio reference": "音频参考",
+
+  // ---------- 运镜选择（CAMERA_MOTIONS label/title，key 与 shared.js 原文精确一致） ----------
+  // 多选语义：空集合 = 运镜自由（模型决定）；分段缺省时继承时间线全局默认（设置菜单）。
+  "Camera Motion": "运镜",
+  "Default Camera Motion": "默认运镜",
+  "Push-in": "推近",
+  "Pull-back": "拉远",
+  "Push+Pull": "推拉结合",
+  "Orbit": "环绕",
+  "Tracking": "跟拍",
+  "Aerial": "航拍",
+  "Crane": "升降",
+  "Pan": "摇镜",
+  "Close-up": "特写",
+  "Push-in / Dolly-in: the camera moves toward the subject or a point of interest, tightening the framing": "推近/前移（Push-in/Dolly-in）：镜头向主体或兴趣点推进，逐渐收紧取景",
+  "Pull-back / Dolly-out: the camera retreats to reveal the wider scene and context": "拉远/后移（Pull-back/Dolly-out）：镜头后退，展现更广阔的场景与上下文",
+  "Push + Pull: a continuous move combining a push-in with a pull-back in one shot": "推拉结合：一个镜头内连续完成推近与拉远（或反向）的动态运镜",
+  "Orbit: the camera circles around the subject on a partial or full arc": "环绕：镜头绕主体作局部或整周弧形环绕运动",
+  "Tracking / Handheld: the camera follows the subject laterally or from behind": "跟拍/手持：镜头横向或从背后跟随主体运动（可带轻微手持晃动感）",
+  "Aerial / Drone: high-angle aerial or drone shot establishing or flying over the scene": "航拍/无人机：高空航拍或无人机镜头，用于建立场景或飞越画面",
+  "Crane / Tilt: vertical crane move or tilt sweep that reframes the scene": "升降/俯仰（Crane/Tilt）：垂直升降机运动或上下摇移重新构图",
+  "Pan: the camera sweeps horizontally from a fixed position": "摇镜/横摇（Pan）：镜头在固定机位上水平扫过场景",
+  "Close-up / Macro: extreme close-up or macro framing on a face, object or detail": "特写/微距：面部、物体或细节的极近景或微距构图",
+  // 分段行 / 设置行的继承-覆盖交互文案
+  "Follow global default": "跟随全局默认",
+  "Segment custom": "本段自定义",
+  "None (model decides freely)": "未设置（模型自由决定）",
+  "This segment has its own camera motion selection; click × to clear it and follow the global default again": "本分段已单独设置运镜；点击 × 清除自定义，重新跟随全局默认",
+  "Reset to global default camera motions": "清除本段自定义，回到全局默认",
+  "This segment follows the global default camera motions (set in the timeline Settings menu). Click any style below to give this segment its own selection; empty selection means the camera language is left to the model": "本分段未单独设置，跟随设置菜单中的全局默认运镜；点击下方任一风格即为本段单独设置，全部取消则该分段运镜语言交由模型决定",
+  "Empty default camera motions: the model freely writes the camera language for every shot": "默认运镜为空：每个镜头的运镜语言由模型自由书写",
 };
 
 function getLocale() {

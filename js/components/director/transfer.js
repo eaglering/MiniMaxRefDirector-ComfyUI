@@ -21,7 +21,7 @@
 import { h, render } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
-import { api, app, viewUrl, ICONS } from "./shared.js";
+import { api, app, viewUrl, ICONS, CAMERA_MOTIONS } from "./shared.js";
 import { RefModal } from "./modal.js";
 import { HighlightedTextarea } from "./highlight.js";
 import { getLocale, t } from "../../i18n.js";
@@ -105,13 +105,6 @@ if (!document.getElementById("ref-ms-mention-styles")) {
 .ref-ms-mention-item:hover,
 .ref-ms-mention-item.active {
     background: #333;
-}
-.ref-ms-mention-item.disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-}
-.ref-ms-mention-item.disabled:hover {
-    background: transparent;
 }
 .ref-ms-mention-item img,
 .ref-ms-mention-item video {
@@ -750,6 +743,7 @@ export function TransferPanel({ director }) {
   const [editorOpen, setEditorOpen] = useState(false); // 统一弹窗（Segment Prompt / H3 Prompt / 添加主体）
   const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
+  const [camTick, setCamTick] = useState(0); // 运镜 UI 刷新计数：数据存 seg.cameraMotions / timeline.defaultCameraMotions，修改后需显式 setState 才重渲染
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
@@ -840,11 +834,19 @@ export function TransferPanel({ director }) {
       setSubjects(getSubjectsLatest());
     };
     window.addEventListener("ref:subjects-changed", onSubjectsChanged);
+    // 监听 settings.js 修改全局默认运镜后发布的事件：刷新当前分段的继承态展示
+    const onCamMotionsChanged = () => {
+      if (!aliveRef.current) return;
+      setCamTick(n => n + 1);
+    };
+    window.addEventListener("ref:camera-motions-changed", onCamMotionsChanged);
     if (director) {
       director._transferSetLeft = setLeftText;
       director._transferSetSeg = (seg) => {
         setCurSeg(seg);
         setAutoEndOn(!!(seg && seg.autoEndFrame));
+        // 运镜无需单独恢复 state：UI 直接读取 seg.cameraMotions（无则继承
+        // timeline.defaultCameraMotions），setCurSeg 已触发该分段的重渲染
         // 切换 segment 时加载该 segment 独立的 H3 prompt JSON（右侧）。
         // 同一 segment 的 UI 刷新（如生成首帧成功后回推）不重置右侧内容。
         const segId = seg ? seg.id : null;
@@ -881,6 +883,7 @@ export function TransferPanel({ director }) {
     return () => {
       aliveRef.current = false;
       window.removeEventListener("ref:subjects-changed", onSubjectsChanged);
+      window.removeEventListener("ref:camera-motions-changed", onCamMotionsChanged);
       clearTimeout(debounceRef.current);
       if (director && director._transferSetLeft === setLeftText) {
         director._transferSetLeft = null;
@@ -1247,6 +1250,49 @@ export function TransferPanel({ director }) {
     director.commitChanges();
   }
 
+  // 时间线级全局默认运镜集合（可为空数组 = 全片运镜自由，由模型决定）
+  function globalCameras() {
+    return (director && Array.isArray(director.timeline?.defaultCameraMotions))
+      ? director.timeline.defaultCameraMotions
+      : [];
+  }
+
+  // 当前分段实际生效的运镜集合：存在显式覆盖数组（可为空 = 本段不指定）则用它，
+  // 否则继承全局默认。空集合 = 运镜自由（后端不注入指令，防回归）。
+  function effectiveCameras(seg) {
+    if (seg && Array.isArray(seg.cameraMotions)) return seg.cameraMotions;
+    return globalCameras();
+  }
+
+  // 运镜多选 toggle：继承态点击任意类别 → 以「全局集合 ± 该类别」进入本段覆盖
+  // （所见即所得）；覆盖态点击 → 增删该类别，可清空为「本段不指定」。
+  // 改动写入 seg.cameraMotions，随 timeline_data 持久化。
+  function toggleCameraMotion(key) {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    let next;
+    if (Array.isArray(seg.cameraMotions)) {
+      next = seg.cameraMotions.includes(key)
+        ? seg.cameraMotions.filter(k => k !== key)
+        : [...seg.cameraMotions, key];
+    } else {
+      const glob = globalCameras();
+      next = glob.includes(key) ? glob.filter(k => k !== key) : [...glob, key];
+    }
+    seg.cameraMotions = next;
+    setCamTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  // 清除本段自定义运镜 → 删除覆盖字段，回到继承全局默认
+  function resetCameraMotion() {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    delete seg.cameraMotions;
+    setCamTick(n => n + 1);
+    director.commitChanges();
+  }
+
   async function runGenerate(source, lang = 'en') {
     if (busy) return;
     if (!source) {
@@ -1266,6 +1312,7 @@ export function TransferPanel({ director }) {
         image_path: firstFramePath(),
         duration_seconds: durSecs > 0 ? durSecs : 0,
         lang,
+        camera_motion: effectiveCameras(targetSeg),
       });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",
@@ -1534,7 +1581,8 @@ export function TransferPanel({ director }) {
   const addedNames = Array.isArray(curSeg?.additionSubject) ? curSeg.additionSubject : [];
   // 已被绑定的主体不再作为 additionSubject 展示
   const visibleAdded = addedNames.filter((n) => !boundNames.has(n));
-  const addCandidates = subjects.filter((s) => !boundNames.has(s.name) && !addedNames.includes(s.name));
+  // 候选列表：未命名主体与 relation:none（仅引用）主体不可作为"添加主体"候选（列表中不可见）
+  const addCandidates = subjects.filter((s) => (s.name || "").trim() && (s.relationship && s.relationship !== "none") && !boundNames.has(s.name) && !addedNames.includes(s.name));
   const addSubject = (name) => {
     if (!curSeg || !director) return;
     if (!Array.isArray(curSeg.additionSubject)) curSeg.additionSubject = [];
@@ -2343,25 +2391,26 @@ export function TransferPanel({ director }) {
               </div>
               <div class="ref-ms-mention-list">
                 ${
-                  menuSubjects.length === 0
-                    ? html`<div class="ref-ms-mention-empty">${subjects.length === 0 ? t("No subjects available (add some in the subject node first)") : t("No subjects available")}</div>`
-                    : menuSubjects.map(h => {
-                        // relation:none（仅引用）的主体：左右 prompt 禁止选取；retention 段级覆盖允许（保留描述可引用任意主体）
-                        const noRel = menu.side !== "ret" && (!h.relationship || h.relationship === "none");
-                        return html`
+                  (() => {
+                    // relation:none（仅引用）的主体：左右 prompt/主体选择器中直接不可见（原置灰不可选改过滤）；
+                    // retention 段级覆盖保留展示（保留描述可引用任意主体）；未命名（含上传引用子主体）一律不展示
+                    const relFiltered = menuSubjects.filter(h => (h.name || "").trim() && (menu.side === "ret" || (h.relationship && h.relationship !== "none")));
+                    return relFiltered.length === 0
+                      ? html`<div class="ref-ms-mention-empty">${menuSubjects.length === 0 ? t("No subjects available (add some in the subject node first)") : t("No subjects available")}</div>`
+                      : relFiltered.map(h => html`
                         <div
-                          class="ref-ms-mention-item${noRel ? " disabled" : ""}"
+                          class="ref-ms-mention-item"
                           key=${h.name}
                           onMouseDown=${(e) => e.preventDefault()}
-                          onClick=${noRel ? undefined : () => pickSubject(h)}
-                          title=${noRel ? t("Relation") + ":none" : t("Insert {token}", { token: menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:${t("Dialogue")}>` })}
+                          onClick=${() => pickSubject(h)}
+                          title=${t("Insert {token}", { token: menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:${t("Dialogue")}>` })}
                         >
                           ${subjectMediaThumb(h, 22)}
                           <span class="ref-ms-mention-type">${h.type || "Subject"}</span>
                           <span>${h.name}</span>
                         </div>
-                      `;
-                      })
+                      `);
+                  })()
                 }
               </div>
             </div>
@@ -2374,12 +2423,42 @@ export function TransferPanel({ director }) {
         title=${t("Segment Prompt / H3 Prompt / Add Subjects")}
         width="1500px"
         height="720px"
+        fullscreen
         onClose=${() => { setEditorOpen(false); setMenu(null); }}
         help=${bindingsText || t("No subject definitions yet")}
       >
         <div style=${{ display: "flex", gap: "6px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
           <div class="mrd-pr-prompt-wrapper" style=${S.col}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>${t("Segment Prompt")}</div>
+            ${
+              curSeg && curSeg.type !== "audio"
+                ? (() => {
+                    // 运镜多选行：无显式覆盖时继承 timeline.defaultCameraMotions（全局默认）。
+                    // 覆盖态行首为「本段自定义(n)」带 ×（一键回到继承）；继承态为「跟随全局(n)」。
+                    // 空集合 = 该分段运镜自由（由模型决定，后端不注入指令）。
+                    const hasOverride = Array.isArray(curSeg.cameraMotions);
+                    const effCams = effectiveCameras(curSeg);
+                    const nChips = effCams.length;
+                    const modeChip = hasOverride
+                      ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#3a2f0a", border: "1px solid #8a6d2a", borderRadius: "3px", color: "#e8cf8a", fontSize: "11px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment has its own camera motion selection; click × to clear it and follow the global default again")}>
+                          ${t("Segment custom")}${nChips ? ` (${nChips})` : ""}
+                          <span title=${t("Reset to global default camera motions")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#ffb86b" }} onClick=${(e) => { e.stopPropagation(); resetCameraMotion(); }}>×</span>
+                        </span>`
+                      : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#14301f", border: "1px solid #2f6a44", borderRadius: "3px", color: "#7fd6a3", fontSize: "11px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment follows the global default camera motions (set in the timeline Settings menu). Click any style below to give this segment its own selection; empty selection means the camera language is left to the model")}>
+                          ${t("Follow global default")}${nChips ? ` (${nChips})` : ""}
+                        </span>`;
+                    return html`<div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "2px 8px 0", flex: "0 0 auto", alignItems: "center" }}>
+                      <span style=${{ color: "#888", fontSize: "11px", marginRight: "2px", flexShrink: "0" }}>${t("Camera Motion")}:</span>
+                      ${modeChip}
+                      ${CAMERA_MOTIONS.map((cm) => {
+                        const active = effCams.includes(cm.key);
+                        const bg = active ? (hasOverride ? "#3a5db0" : "#27406e") : "#2a2a2a";
+                        return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: bg, border: "1px solid " + (active ? "#6c9bff" : "#444"), borderRadius: "3px", color: active ? "#fff" : "#9bb9ff", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(cm.title)} onClick=${() => toggleCameraMotion(cm.key)}>${t(cm.label)}</span>`;
+                      })}
+                    </div>`;
+                  })()
+                : null
+            }
             <${HighlightedTextarea}
               taRef=${leftRef}
               className="mrd-pr-prompt-area"

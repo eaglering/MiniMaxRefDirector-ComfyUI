@@ -93,6 +93,180 @@ _AUDIO_RELATION_TEXT = {
     "weak_reference": "Only broad similarity in category or atmosphere from {n} is retained.",
 }
 
+# ── 运镜预设（Jojocodex MiniMax-H3 Camera Motion LoRA 的 9 大类）─────────────
+# key 与前端 transfer.js 的 CAMERA_MOTIONS 保持一致。多选（list[str]）或单值
+# （str）均可；空 / "auto" / 未知 key 一律不注入（由模型自由决定运镜）。
+# desc 描述该类运镜的镜头语言，examples 给出可直接嵌入 shot 描述的英文运镜
+# 短语示例。全部以 "camera motion" 触发词为前缀风格（LoRA 激活词），但具体
+# 落点交由 LLM 自然嵌入，不强制固定位置；速度词（slow/steady/quick 等）由
+# 模型依镜头节奏自然选择，无独立控件。
+_CAMERA_MOTION_PRESETS: dict = {
+    "push_in": {
+        "name_en": "Push-in / Dolly-in",
+        "name_zh": "推近 / 前移",
+        "desc": "The camera moves toward the subject or a point of interest, gradually tightening the framing to increase tension or intimacy.",
+        "examples": [
+            "camera motion, slow push-in on the subject",
+            "camera motion, dolly-in gradually closing the distance",
+            "camera motion, a gentle push-in that ends on an intimate close-up",
+        ],
+    },
+    "pull_back": {
+        "name_en": "Pull-back / Dolly-out",
+        "name_zh": "拉远 / 后移",
+        "desc": "The camera retreats from the subject, widening the frame to reveal the environment, scale or context.",
+        "examples": [
+            "camera motion, slow pull-back revealing the surroundings",
+            "camera motion, dolly-out widening into an establishing view",
+            "camera motion, a long pull-back that shows how small the subject is in the scene",
+        ],
+    },
+    "push_pull": {
+        "name_en": "Push + Pull",
+        "name_zh": "推拉结合",
+        "desc": "A continuous move that combines a push-in with a pull-back (or the reverse) within one shot, creating a dynamic in-and-out rhythm.",
+        "examples": [
+            "camera motion, push-in then pull-back in one flowing move",
+            "camera motion, a dolly-in that reverses into a slow dolly-out",
+            "camera motion, rhythmic push-and-pull around the subject",
+        ],
+    },
+    "orbit": {
+        "name_en": "Orbit",
+        "name_zh": "环绕",
+        "desc": "The camera circles around the subject on a partial or full arc, revealing it from continuously changing angles.",
+        "examples": [
+            "camera motion, slow 360-degree orbit around the subject",
+            "camera motion, orbiting arc from the side to the front",
+            "camera motion, a full circular flight around the character",
+        ],
+    },
+    "tracking": {
+        "name_en": "Tracking / Handheld",
+        "name_zh": "跟拍 / 手持",
+        "desc": "The camera follows the subject laterally or from behind, moving in parallel with its action (optionally with subtle handheld realism).",
+        "examples": [
+            "camera motion, tracking shot following the subject sideways",
+            "camera motion, handheld follow keeping pace with the movement",
+            "camera motion, a smooth tracking run alongside the character",
+        ],
+    },
+    "aerial": {
+        "name_en": "Aerial / Drone",
+        "name_zh": "航拍 / 无人机",
+        "desc": "A high-angle aerial or drone shot that establishes the scene, flies over it, or descends toward a point of interest.",
+        "examples": [
+            "camera motion, aerial drone shot flying over the landscape",
+            "camera motion, high-angle drone descent toward the subject",
+            "camera motion, bird's-eye flyover establishing the area",
+        ],
+    },
+    "crane": {
+        "name_en": "Crane / Tilt",
+        "name_zh": "升降 / 俯仰",
+        "desc": "Vertical camera movement: a crane shot rising or lowering, or a tilt sweeping up or down to reframe the scene.",
+        "examples": [
+            "camera motion, crane shot rising above the scene",
+            "camera motion, slow tilt from the feet up to the face",
+            "camera motion, a lowering crane that settles at eye level",
+        ],
+    },
+    "pan": {
+        "name_en": "Pan",
+        "name_zh": "摇镜",
+        "desc": "The camera sweeps horizontally from a fixed position, scanning across the scene or moving between subjects.",
+        "examples": [
+            "camera motion, slow pan across the full scene",
+            "camera motion, panning from one subject to another",
+            "camera motion, a measured left-to-right pan",
+        ],
+    },
+    "close_up": {
+        "name_en": "Close-up / Macro",
+        "name_zh": "特写 / 微距",
+        "desc": "Extreme close-up or macro framing that isolates a face, object, texture or detail, filling the frame with it.",
+        "examples": [
+            "camera motion, extreme close-up on the subject's face",
+            "camera motion, macro shot of the detail in slow movement",
+            "camera motion, tight close-up holding on the object",
+        ],
+    },
+}
+
+def _normalize_camera_motions(camera_motion) -> list:
+    """归一化运镜参数为合法 key 列表（顺序稳定、去重）。
+
+    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
+    未知 key 与重复值忽略。返回的 key 均存在于 _CAMERA_MOTION_PRESETS。
+    """
+    if camera_motion is None:
+        return []
+    if isinstance(camera_motion, str):
+        keys = [camera_motion] if camera_motion.strip() else []
+    elif isinstance(camera_motion, (list, tuple)):
+        keys = list(camera_motion)
+    else:
+        return []
+    seen = set()
+    result = []
+    for k in keys:
+        if not isinstance(k, str):
+            continue
+        key = k.strip()
+        if not key or key == "auto" or key in seen:
+            continue
+        if key in _CAMERA_MOTION_PRESETS:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def _camera_motion_note(camera_motion: str | list = "") -> str:
+    """按（多选）运镜 key 生成注入生成提示词的运镜指令块；空选择返回空串（不注入）。
+
+    多选时要求 LLM 依据每个 [Shot N] 的镜头语义（景别/动作/情绪），从所选风格
+    库中为该 Shot 挑选最契合的单一运镜并自然嵌入英文短语；不同 Shot 可自然轮换，
+    不堆叠多风格于一镜，所选风格不必全部出现。速度词由模型依镜头节奏自然选择
+    （slow/steady/quick 等），无独立控件。选中 ≤3 类时每类列 3 条示例，
+    >3 类时每类列 1 条，控制注入 token。
+    """
+    keys = _normalize_camera_motions(camera_motion)
+    if not keys:
+        return ""
+    many = len(keys) > 1
+    lines = []
+    lines.append("## Camera Motion Direction")
+    if many:
+        lines.append(
+            "The target video's shots may use any of the camera motion styles below. "
+            "For each [Shot N] description, choose the single style that best matches "
+            "that shot's framing, action and emotion, then naturally embed one of its "
+            "English camera-motion phrases into that shot. Different shots may switch "
+            "styles to fit their content; do not pile multiple styles into one shot, "
+            "and not every listed style has to be used."
+        )
+    else:
+        lines.append("The target video should use this camera motion style:")
+    examples_limit = 1 if many and len(keys) > 3 else 3
+    for key in keys:
+        preset = _CAMERA_MOTION_PRESETS[key]
+        lines.append(f'- Style: {preset["name_en"]}（{preset["name_zh"]}）')
+        lines.append(f"  - {preset['desc']}")
+        lines.append("  - Suitable phrases (pick one per shot, adapt the wording, keep the LoRA trigger):")
+        for ex in preset["examples"][:examples_limit]:
+            lines.append(f"    - {ex}")
+    lines.append(
+        "- Speed words are not fixed: choose the pace that fits each shot's emotion "
+        "and rhythm (e.g. slow / gentle, steady, quick / fast, or progressively "
+        "accelerating) and weave it into the camera-motion phrase."
+    )
+    lines.append(
+        '- The fixed trigger "camera motion" and the camera-motion keywords above are '
+        'technical LoRA vocabulary: even when the output fields are written in Chinese, '
+        'keep these phrases in English exactly as given.'
+    )
+    return "\n".join(lines) + "\n"
+
 def _load_h3_skills_template(lang: str = "en") -> str:
     """Load the custom H3 skills template (four-field output) for the given language.
 
@@ -103,7 +277,7 @@ def _load_h3_skills_template(lang: str = "en") -> str:
         return f.read()
 
 
-def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en") -> str:
+def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", camera_motion: str | list = "") -> str:
     """Build the full prompt sent to the local GGUF VLM.
 
     Includes the custom skills guide, the required JSON output format
@@ -111,6 +285,9 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
     and the <@角色名称> / <#角色名称:对话内容> placeholder rules. When a reference
     image is provided it is NOT treated as a first frame; instead its contents
     are merged into "detailed_description" together with the user's input.
+    camera_motion: 运镜 key 或 key 列表（见 _CAMERA_MOTION_PRESETS），空/"auto"/
+    未知值不注入；多选时指令 LLM 为每个 [Shot N] 依镜头语义挑最契合的一种自然
+    嵌入英文运镜短语（不同 Shot 可轮换风格），速度词由模型自然写。
     """
     image_note = ""
     if has_image:
@@ -148,6 +325,8 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
             "text/dialogue may keep their original language.\n"
         )
 
+    camera_note = _camera_motion_note(camera_motion)
+
     return f"""You are an expert video prompt writer. Follow the skills guide below.
 
 ## Skills Guide
@@ -175,7 +354,7 @@ Write one short paragraph summarizing the target video and its reference relatio
 ## Strictness
 - "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".
 - Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
-{image_note}{lang_note}## User Input Prompt
+{image_note}{lang_note}{camera_note}## User Input Prompt
 {duration_note}{prompt}
 
 Output ONLY the JSON object. Do not add any text before or after it."""
@@ -343,7 +522,7 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
         return json_data
 
 
-def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en") -> dict:
+def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en", camera_motion: str | list = "") -> dict:
     """Generate an H3 full-reference prompt JSON.
 
     options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
@@ -369,12 +548,17 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     by the model, with a language tag such as [Chinese] or [English] before the
     dialogue text. No mapping is returned. 输出语言由所选 skills 模板决定：
     lang="zh" 中文模板强制中文，其余语言英文模板强制英文。
+    camera_motion: 运镜 key 或 key 列表（见 _CAMERA_MOTION_PRESETS），空/"auto"/
+    未知值不注入，其余值向最终 prompt 追加 "## Camera Motion Direction" 指令块。
+    多选时 LLM 依据每个 [Shot N] 的镜头语义为该 Shot 挑选最契合的单一运镜并自然
+    嵌入对应英文运镜短语（中文输出时运镜短语仍保留英文，属 LoRA 技术词），不同
+    Shot 可轮换风格；速度词（slow/steady/quick 等）由模型依镜头节奏自然写出。
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
     image = load_image_tensor(image_path) if image_path else None
     skills = _load_h3_skills_template(lang)
-    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds, lang)
+    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds, lang, camera_motion=camera_motion)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
             image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),

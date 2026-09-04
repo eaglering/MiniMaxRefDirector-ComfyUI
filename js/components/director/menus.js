@@ -376,7 +376,15 @@ export const menus = {
       items.push(this._menuDivider());
     }
 
-    // Group 7: Flash VSR + Mark Selection + Delete
+    // Group 7: Second Pass + Flash VSR + Mark Selection + Delete
+    items.push(this._menuBtn(t("Second Pass"), {
+      onClick: () => {
+        seg.secondPass = !seg.secondPass;
+        this.commitChanges();
+        this.render();
+        this.dismissMenu();
+      }
+    }));
     items.push(this._menuBtn(t("Flash VSR"), {
       onClick: () => {
         seg.upscale = !seg.upscale;

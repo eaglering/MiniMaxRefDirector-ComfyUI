@@ -255,6 +255,8 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         vlm_mode = data.get("vlm_mode", "llama-cpp")
         seed = data.get("seed", 42)
         lang = data.get("lang", "en")
+        # 运镜可为 str 单值（兼容旧客户端）或 list 多选（空列表 = 不注入）；后端归一化兜底
+        camera_motion = data.get("camera_motion", "")
         try:
             duration_seconds = float(data.get("duration_seconds") or 0)
         except (TypeError, ValueError):
@@ -284,7 +286,8 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             pass
         json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed,
                                        vlm_mode=vlm_mode, options=options,
-                                       duration_seconds=duration_seconds, lang=lang)
+                                       duration_seconds=duration_seconds, lang=lang,
+                                       camera_motion=camera_motion)
         return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()
