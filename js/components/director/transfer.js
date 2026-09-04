@@ -21,13 +21,36 @@
 import { h, render } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
-import { api, app, viewUrl, ICONS, CAMERA_MOTIONS } from "./shared.js";
-import { RefModal } from "./modal.js";
+import { api, app, viewUrl, ICONS, CAMERA_MOTIONS, SHOT_SIZES, FRAMINGS, MICRO_EXPRESSIONS } from "./shared.js";
+import { BodyPortal, RefModal } from "./modal.js";
 import { HighlightedTextarea } from "./highlight.js";
 import { getLocale, t } from "../../i18n.js";
 
 const html = htm.bind(h);
 
+// Prompt&H3 弹窗工具列 / H3 四段拖拽分隔条样式（幂等注入）
+if (!document.getElementById("ref-pr-editor-ext")) {
+  const stx = document.createElement("style");
+  stx.id = "ref-pr-editor-ext";
+  stx.textContent = `
+.mrd-pr-ctl{flex:0 0 200px;min-width:0;display:flex;flex-direction:column;gap:8px;background:#1b1f28;border:1px solid #2e333e;border-radius:6px;padding:8px;box-sizing:border-box;overflow-y:auto;overflow-x:hidden}
+.mrd-pr-ctl::-webkit-scrollbar{width:6px}
+.mrd-pr-ctl::-webkit-scrollbar-thumb{background:#3c4452;border-radius:3px}
+.mrd-pr-ctl::-webkit-scrollbar-track{background:transparent}
+.mrd-pr-ctl-none{flex:1 1 auto;color:#6b7280;font-size:11px;line-height:1.6;padding:6px 8px}
+.mrd-pr-ctl-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+.mrd-pr-ctl-name{font-size:10px;font-weight:700;color:#8fa3c8;letter-spacing:.5px;text-transform:uppercase;user-select:none}
+.mrd-pr-ctl-import{flex:0 0 auto;font-size:10px;color:#b48fc4;cursor:pointer;text-decoration:underline dotted;white-space:nowrap;padding:0 2px;transition:color .12s}
+.mrd-pr-ctl-import:hover{color:#e0c3f5}
+.mrd-pr-ctl-items{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.mrd-pr-hr{border:none;border-top:1px solid #2c313b;margin:1px 2px}
+.mrd-pr-split{flex:0 0 5px;cursor:row-resize;position:relative;background:transparent;transition:background .12s}
+.mrd-pr-split:hover{background:rgba(125,208,255,.12)}
+.mrd-pr-split-knob{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:36px;height:2px;background:#4c5360;border-radius:1px;transition:background .12s}
+.mrd-pr-split:hover .mrd-pr-split-knob{background:#7fd0ff}
+`;
+  document.head.appendChild(stx);
+}
 // mention 选择器样式：与 subject.js 的 @mention 弹层保持一致（幂等注入）
 if (!document.getElementById("ref-ms-mention-styles")) {
   const st = document.createElement("style");
@@ -36,6 +59,7 @@ if (!document.getElementById("ref-ms-mention-styles")) {
 .ref-ms-mention-popup {
     position: fixed;
     z-index: 100000;
+    pointer-events: auto;
     min-width: 170px;
     max-width: 280px;
     background: #1e1e1e;
@@ -730,6 +754,63 @@ function NumInput({ def, value, onCommit }) {
   />`;
 }
 
+// --- 微表情词库：内置 + 本地导入扩充（结构同 shared.js MICRO_EXPRESSIONS 条目） ---
+// 自定义条目由用户以 <input type=file> 导入 JSON（数组或 {expressions:[...]}），
+// 持久化到 localStorage（用户级、跨弹窗会话），请求生成时以 expression_catalog
+// 携带给后端识别；与内置 key 冲突的自定义条目被忽略（内置优先）。
+const BASE_EXPR_KEYS = new Set(MICRO_EXPRESSIONS.map(m => m.key));
+// 导入弹窗展示的 JSON 格式案例：完整词条数组 / 简写映射
+const EXPR_CASE_FULL = `[
+  {
+    "key": "tear_well",
+    "label": "Tears well",
+    "title": "Tears well: the eyes film over with a fine layer of moisture",
+    "category": "eye"
+  },
+  {
+    "key": "lip_quiver",
+    "label": "Lip quiver",
+    "title": "Lip quiver: the lower lip trembles slightly as emotion builds",
+    "category": "mouth"
+  }
+]`;
+const EXPR_CASE_COMPACT = `{
+  "eye": ["tear_well"],
+  "sigh_heavy": "a slow, weighted exhale of resignation"
+}`;
+const CUSTOM_EXPRESSIONS_KEY = "mrd.customMicroExpressions";
+function loadCustomExpressions() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_EXPRESSIONS_KEY);
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        return list
+          .filter(it => it && typeof it === "object" && typeof it.key === "string" && it.key.trim() && !BASE_EXPR_KEYS.has(it.key.trim()))
+          .map(it => ({ key: it.key.trim(), label: String(it.label || it.key), title: String(it.title || it.label || it.key), category: String(it.category || "custom") }));
+      }
+    }
+  } catch (e) {
+    console.warn("[Transfer] load custom expressions failed:", e);
+  }
+  return [];
+}
+function saveCustomExpressions(list) {
+  try { localStorage.setItem(CUSTOM_EXPRESSIONS_KEY, JSON.stringify(list)); }
+  catch (e) { console.warn("[Transfer] save custom expressions failed:", e); }
+}
+// 合并内置 + 自定义（跳过与内置冲突的 key），供 chips 展示与 catalog 发送
+function buildExprCatalog(custom) {
+  const out = MICRO_EXPRESSIONS.slice();
+  const seen = new Set(out.map(m => m.key));
+  for (const it of custom || []) {
+    if (!it || typeof it.key !== "string" || seen.has(it.key)) continue;
+    seen.add(it.key);
+    out.push(it);
+  }
+  return out;
+}
+
 // ---------- Preact 组件 ----------
 
 export function TransferPanel({ director }) {
@@ -744,11 +825,17 @@ export function TransferPanel({ director }) {
   const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
   const [camTick, setCamTick] = useState(0); // 运镜 UI 刷新计数：数据存 seg.cameraMotions / timeline.defaultCameraMotions，修改后需显式 setState 才重渲染
+  const [customExpr, setCustomExpr] = useState(() => loadCustomExpressions()); // 本地导入的自定义微表情词条（不含内置）
+  const [exprTick, setExprTick] = useState(0); // 微表情 UI 刷新计数：数据存 seg.expressions / customExpr
+  const [dirTick, setDirTick] = useState(0); // 景别/构图 UI 刷新计数：数据存 seg.shotSizes / seg.framings
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
+  const [prGrow, setPrGrow] = useState([4, 12, 3, 3]); // H3 右栏四段 flex-grow 权重:summary/detail/overall/music(段间分隔条拖拽调节)
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
   const [retEdit, setRetEdit] = useState(null); // 主体 retention 编辑弹窗：{ name, value }，null 关闭
+  const [exprImportOpen, setExprImportOpen] = useState(false); // 微表情词库导入弹窗：先展示格式说明与案例再选文件
+  const [exprImportErr, setExprImportErr] = useState(""); // 导入弹窗内就地展示的解析/校验错误
   const [hoverRes, setHoverRes] = useState(null); // 当前 hover 的可编辑资源卡片 key（亮蓝高亮边框提示）
   // 视频素材条：接收后端 minimax_ref_video_progress 通知（status=add_material）。
   // 初始化时从 localStorage 恢复上次会话的素材（key 按节点 id 隔离），刷新页面后保留，
@@ -1250,6 +1337,43 @@ export function TransferPanel({ director }) {
     director.commitChanges();
   }
 
+  // H3 提示词右栏（summary / detailed_description / overall_soundscape / non_diegetic_music
+  // 四段）高度调节：按住段间分隔条上下拖动，改动一段的 flex-grow 权重到相邻段。
+  function startPrSplit(e, idx) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const col = e.currentTarget.closest(".mrd-pr-fields");
+    if (!col) return;
+    const rect = col.getBoundingClientRect();
+    const startY = e.clientY;
+    const g0 = prGrow.slice();
+    const sum = g0.reduce((a, b) => a + b, 0) || 1;
+    const move = (ev) => {
+      const dy = ev.clientY - startY;
+      if (!dy) return;
+      const pxPer = Math.max(80, rect.height - 12) / sum;
+      const delta = dy / pxPer;
+      const g = g0.slice();
+      const guard = 0.5; // 每段最低权重，避免被拖没
+      // 条向上拖（dy<0）→ 上方段压缩、下方段扩展；条向下拖 → 上方段扩展、下方段压缩
+      g[idx] = Math.max(guard, g0[idx] + delta);
+      g[idx + 1] = Math.max(guard, g0[idx + 1] - delta);
+      setPrGrow(g);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "row-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
   // 时间线级全局默认运镜集合（可为空数组 = 全片运镜自由，由模型决定）
   function globalCameras() {
     return (director && Array.isArray(director.timeline?.defaultCameraMotions))
@@ -1293,6 +1417,164 @@ export function TransferPanel({ director }) {
     director.commitChanges();
   }
 
+  // 当前分段实际生效的微表情集合：仅段级选择（无全局继承）；空集合 = 表演自然自由
+  // （后端不注入指令，防回归）。
+  function effectiveExpressions(seg) {
+    return (seg && Array.isArray(seg.expressions)) ? seg.expressions : [];
+  }
+
+  // 微表情多选 toggle：点击即在本段增删该表演提示，改动写入 seg.expressions，
+  // 随 timeline_data 持久化；可清空为「本段表演自由」。
+  function toggleExpression(key) {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    let next;
+    if (Array.isArray(seg.expressions)) {
+      next = seg.expressions.includes(key)
+        ? seg.expressions.filter(k => k !== key)
+        : [...seg.expressions, key];
+    } else {
+      next = [key];
+    }
+    seg.expressions = next;
+    setExprTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  // 清除本段微表情选择 → 删除字段，回到表演自由
+  function resetExpressions() {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    delete seg.expressions;
+    setExprTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  // 当前分段实际生效的景别集合：仅段级选择（无全局继承）；空集合 = 景别自由
+  // （后端不注入指令，防回归）。
+  function effectiveShotSizes(seg) {
+    return (seg && Array.isArray(seg.shotSizes)) ? seg.shotSizes : [];
+  }
+
+  // 景别多选 toggle：点击即在本段增删该档位，改动写入 seg.shotSizes，
+  // 随 timeline_data 持久化；可清空为「本段景别自由」。
+  function toggleShotSize(key) {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    let next;
+    if (Array.isArray(seg.shotSizes)) {
+      next = seg.shotSizes.includes(key)
+        ? seg.shotSizes.filter(k => k !== key)
+        : [...seg.shotSizes, key];
+    } else {
+      next = [key];
+    }
+    seg.shotSizes = next;
+    setDirTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  // 清除本段景别选择 → 删除字段，回到景别自由
+  function resetShotSizes() {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    delete seg.shotSizes;
+    setDirTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  // 当前分段实际生效的构图关系集合：仅段级选择（无全局继承）；空集合 = 构图自由
+  function effectiveFramings(seg) {
+    return (seg && Array.isArray(seg.framings)) ? seg.framings : [];
+  }
+
+  // 构图关系多选 toggle：点击即在本段增删该关系，改动写入 seg.framings，
+  // 随 timeline_data 持久化；可清空为「本段构图自由」。
+  function toggleFraming(key) {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    let next;
+    if (Array.isArray(seg.framings)) {
+      next = seg.framings.includes(key)
+        ? seg.framings.filter(k => k !== key)
+        : [...seg.framings, key];
+    } else {
+      next = [key];
+    }
+    seg.framings = next;
+    setDirTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  // 清除本段构图选择 → 删除字段，回到构图自由
+  function resetFramings() {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    delete seg.framings;
+    setDirTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  // 打开微表情词库导入弹窗：先展示 JSON 格式说明与案例，再引导选择本地文件导入。
+  function openExpressionImport() {
+    setExprImportErr("");
+    setExprImportOpen(true);
+  }
+
+  // 从本地 JSON 导入自定义微表情词库：支持数组 / {expressions:[...]} / 简写形态，
+  // 合并进运行时并持久化到 localStorage（与内置 key 冲突的自定义条目被忽略）。
+  function pickExpressionFile() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      try {
+        const raw = JSON.parse(await file.text());
+        let list = [];
+        if (Array.isArray(raw)) {
+          list = raw;
+        } else if (raw && Array.isArray(raw.expressions)) {
+          list = raw.expressions;
+        } else if (raw && typeof raw === "object") {
+          // { category: [key, ...] } 或 { key: "label" } 简写 → 最小条目
+          for (const [k, v] of Object.entries(raw)) {
+            if (Array.isArray(v)) {
+              for (const key of v) {
+                if (typeof key === "string" && key.trim()) {
+                  list.push({ key: key.trim(), label: key.trim(), title: `${key.trim()} (${k})`, category: k });
+                }
+              }
+            } else if (typeof v === "string") {
+              list.push({ key: k, label: v, title: v, category: "custom" });
+            }
+          }
+        }
+        list = list
+          .filter(it => it && typeof it === "object" && typeof it.key === "string" && it.key.trim() && typeof (it.label || it.key) === "string")
+          .map(it => ({ key: it.key.trim(), label: String(it.label || it.key), title: String(it.title || it.label || it.key), category: String(it.category || "custom") }))
+          .filter(it => !BASE_EXPR_KEYS.has(it.key)); // 内置 key 优先，忽略同名自定义
+        if (!list.length) {
+          setExprImportErr(t("No valid expression entries found in the imported file"));
+          return;
+        }
+        setCustomExpr(prev => {
+          const next = buildExprCatalog([...prev, ...list]).filter(it => !BASE_EXPR_KEYS.has(it.key));
+          saveCustomExpressions(next);
+          return next;
+        });
+        setExprTick(n => n + 1);
+        setExprImportOpen(false); // 成功即关闭导入弹窗，新增词条立即可见
+        console.log("[Transfer] imported expression library:", list.length, "entries");
+      } catch (err) {
+        console.error("[Transfer] import expression library failed:", err);
+        setExprImportErr(t("Failed to parse the imported expression library file"));
+      }
+    };
+    input.click();
+  }
+
   async function runGenerate(source, lang = 'en') {
     if (busy) return;
     if (!source) {
@@ -1313,6 +1595,12 @@ export function TransferPanel({ director }) {
         duration_seconds: durSecs > 0 ? durSecs : 0,
         lang,
         camera_motion: effectiveCameras(targetSeg),
+        // 微表情（表演提示）：段级多选 key 数组；自定义词条随 expression_catalog 供后端识别
+        expression: effectiveExpressions(targetSeg),
+        expression_catalog: buildExprCatalog(customExpr).filter(it => !BASE_EXPR_KEYS.has(it.key)),
+        // 景别 / 构图关系（镜头语言）：段级多选 key 数组；空集合不注入，由模型自由决定
+        shot_size: effectiveShotSizes(targetSeg),
+        framing: effectiveFramings(targetSeg),
       });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",
@@ -2378,42 +2666,44 @@ export function TransferPanel({ director }) {
       ${
         menu
           ? html`
-            <div class="ref-ms-mention-popup open" style=${{ left: menu.x + "px", top: menu.y + "px", zIndex: 100000 }}>
-              <div class="ref-ms-mention-tabs">
-                ${["all", "Subject", "Picture", "Video", "Audio"].map(tab => html`
-                  <button
-                    type="button"
-                    class="ref-ms-mention-tab${menu.tab === tab ? " active" : ""}"
-                    onMouseDown=${(e) => e.preventDefault()}
-                    onClick=${() => setMenu({ ...menu, tab })}
-                  >${tab === "all" ? t("All") : tab}</button>
-                `)}
+            <${BodyPortal} zIndex=${100010}>
+              <div class="ref-ms-mention-popup open" style=${{ left: menu.x + "px", top: menu.y + "px" }}>
+                <div class="ref-ms-mention-tabs">
+                  ${["all", "Subject", "Picture", "Video", "Audio"].map(tab => html`
+                    <button
+                      type="button"
+                      class="ref-ms-mention-tab${menu.tab === tab ? " active" : ""}"
+                      onMouseDown=${(e) => e.preventDefault()}
+                      onClick=${() => setMenu({ ...menu, tab })}
+                    >${tab === "all" ? t("All") : tab}</button>
+                  `)}
+                </div>
+                <div class="ref-ms-mention-list">
+                  ${
+                    (() => {
+                      // relation:none（仅引用）的主体：左右 prompt/主体选择器中直接不可见（原置灰不可选改过滤）；
+                      // retention 段级覆盖保留展示（保留描述可引用任意主体）；未命名（含上传引用子主体）一律不展示
+                      const relFiltered = menuSubjects.filter(h => (h.name || "").trim() && (menu.side === "ret" || (h.relationship && h.relationship !== "none")));
+                      return relFiltered.length === 0
+                        ? html`<div class="ref-ms-mention-empty">${menuSubjects.length === 0 ? t("No subjects available (add some in the subject node first)") : t("No subjects available")}</div>`
+                        : relFiltered.map(h => html`
+                          <div
+                            class="ref-ms-mention-item"
+                            key=${h.name}
+                            onMouseDown=${(e) => e.preventDefault()}
+                            onClick=${() => pickSubject(h)}
+                            title=${t("Insert {token}", { token: menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:${t("Dialogue")}>` })}
+                          >
+                            ${subjectMediaThumb(h, 22)}
+                            <span class="ref-ms-mention-type">${h.type || "Subject"}</span>
+                            <span>${h.name}</span>
+                          </div>
+                        `);
+                    })()
+                  }
+                </div>
               </div>
-              <div class="ref-ms-mention-list">
-                ${
-                  (() => {
-                    // relation:none（仅引用）的主体：左右 prompt/主体选择器中直接不可见（原置灰不可选改过滤）；
-                    // retention 段级覆盖保留展示（保留描述可引用任意主体）；未命名（含上传引用子主体）一律不展示
-                    const relFiltered = menuSubjects.filter(h => (h.name || "").trim() && (menu.side === "ret" || (h.relationship && h.relationship !== "none")));
-                    return relFiltered.length === 0
-                      ? html`<div class="ref-ms-mention-empty">${menuSubjects.length === 0 ? t("No subjects available (add some in the subject node first)") : t("No subjects available")}</div>`
-                      : relFiltered.map(h => html`
-                        <div
-                          class="ref-ms-mention-item"
-                          key=${h.name}
-                          onMouseDown=${(e) => e.preventDefault()}
-                          onClick=${() => pickSubject(h)}
-                          title=${t("Insert {token}", { token: menu.trigger === "@" ? `<@${h.name}>` : `<#${h.name}:${t("Dialogue")}>` })}
-                        >
-                          ${subjectMediaThumb(h, 22)}
-                          <span class="ref-ms-mention-type">${h.type || "Subject"}</span>
-                          <span>${h.name}</span>
-                        </div>
-                      `);
-                  })()
-                }
-              </div>
-            </div>
+            </${BodyPortal}>
           `
           : null
       }
@@ -2421,44 +2711,104 @@ export function TransferPanel({ director }) {
       <${RefModal}
         open=${editorOpen}
         title=${t("Segment Prompt / H3 Prompt / Add Subjects")}
-        width="1500px"
-        height="720px"
+        width="60vw"
+        height="68vh"
         fullscreen
         onClose=${() => { setEditorOpen(false); setMenu(null); }}
         help=${bindingsText || t("No subject definitions yet")}
       >
-        <div style=${{ display: "flex", gap: "6px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
+        <div style=${{ display: "flex", gap: "8px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
+          ${
+            /* 第一列：功能。运镜 / 微表情（及其它导演向控件）放在同一容器内，用 <hr> 分隔两组；
+               后续新增功能（转场、节奏、表演参考等）直接在该列追加分组，不挤占右侧两列提示词编辑区。 */
+            curSeg && curSeg.type !== "audio"
+              ? (() => {
+                  const hasOverride = Array.isArray(curSeg.cameraMotions);
+                  const effCams = effectiveCameras(curSeg);
+                  const nChips = effCams.length;
+                  const effExpr = effectiveExpressions(curSeg);
+                  const exprAll = buildExprCatalog(customExpr);
+                  const camModeChip = hasOverride
+                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#3a2f0a", border: "1px solid #8a6d2a", borderRadius: "3px", color: "#e8cf8a", fontSize: "10px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment has its own camera motion selection; click × to clear it and follow the global default again")}>
+                        ${t("Segment custom")}${nChips ? ` (${nChips})` : ""}
+                        <span title=${t("Reset to global default camera motions")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#ffb86b" }} onClick=${(e) => { e.stopPropagation(); resetCameraMotion(); }}>×</span>
+                      </span>`
+                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#14301f", border: "1px solid #2f6a44", borderRadius: "3px", color: "#7fd6a3", fontSize: "10px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment follows the global default camera motions (set in the timeline Settings menu). Click any style below to give this segment its own selection; empty selection means the camera language is left to the model")}>
+                        ${t("Follow global default")}${nChips ? ` (${nChips})` : ""}
+                      </span>`;
+                  const exprModeChip = effExpr.length === 0
+                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#241a2a", border: "1px solid #5a3a66", borderRadius: "3px", color: "#b48fc4", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("No micro-expression selected; the model freely writes natural acting for every shot")}>${t("None (model decides freely)")}</span>`
+                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#3a2450", border: "1px solid #7c4d96", borderRadius: "3px", color: "#d3b3e8", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("This segment has its own micro-expression selection; click × to clear it and leave the acting to the model")}>${t("Segment custom")} (${effExpr.length})<span title=${t("Reset to natural acting")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#e0b3ff" }} onClick=${(e) => { e.stopPropagation(); resetExpressions(); }}>×</span></span>`;
+                  const effShot = effectiveShotSizes(curSeg);
+                  const effFram = effectiveFramings(curSeg);
+                  const shotModeChip = effShot.length === 0
+                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#12312c", border: "1px solid #2f6a5e", borderRadius: "3px", color: "#7fd6c3", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("No shot size selected; the model freely writes the shot scale for every shot")}>${t("None (model decides freely)")}</span>`
+                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#1b463e", border: "1px solid #3f9c8a", borderRadius: "3px", color: "#8fe0d0", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("This segment has its own shot-size selection; click × to clear it and leave the framing to the model")}>${t("Segment custom")} (${effShot.length})<span title=${t("Reset shot-size selection")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#8fe0d0" }} onClick=${(e) => { e.stopPropagation(); resetShotSizes(); }}>×</span></span>`;
+                  const framModeChip = effFram.length === 0
+                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#33290f", border: "1px solid #6e5a20", borderRadius: "3px", color: "#d9c27f", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("No framing selected; the model freely writes the composition for every shot")}>${t("None (model decides freely)")}</span>`
+                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#4a3c14", border: "1px solid #a8893f", borderRadius: "3px", color: "#ecd9a0", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("This segment has its own framing selection; click × to clear it and leave the composition to the model")}>${t("Segment custom")} (${effFram.length})<span title=${t("Reset framing selection")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#ecd9a0" }} onClick=${(e) => { e.stopPropagation(); resetFramings(); }}>×</span></span>`;
+                  return html`
+                    <div class="mrd-pr-ctl">
+                      <div class="mrd-pr-ctl-group">
+                        <div class="mrd-pr-ctl-head">
+                          <div class="mrd-pr-ctl-name">${t("Camera Motion")}</div>
+                        </div>
+                        <div class="mrd-pr-ctl-items">
+                          ${camModeChip}
+                          ${CAMERA_MOTIONS.map((cm) => {
+                            const active = effCams.includes(cm.key);
+                            const bg = active ? (hasOverride ? "#3a5db0" : "#27406e") : "#23262e";
+                            return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: bg, border: "1px solid " + (active ? "#6c9bff" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#9bb9ff", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(cm.title)} onClick=${() => toggleCameraMotion(cm.key)}>${t(cm.label)}</span>`;
+                          })}
+                        </div>
+                      </div>
+                      <hr class="mrd-pr-hr" />
+                      <div class="mrd-pr-ctl-group">
+                        <div class="mrd-pr-ctl-head">
+                          <div class="mrd-pr-ctl-name">${t("Micro-expression")}</div>
+                          <span class="mrd-pr-ctl-import" title=${t("Import a JSON expression library from a local file to extend the built-in micro-expression cues")} onClick=${openExpressionImport}>${t("Import")}</span>
+                        </div>
+                        <div class="mrd-pr-ctl-items">
+                          ${exprModeChip}
+                          ${exprAll.map((me) => {
+                            const active = effExpr.includes(me.key);
+                            return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: active ? "#5a2d8f" : "#23262e", border: "1px solid " + (active ? "#a06bd8" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#c9a6e8", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${me.title} onClick=${() => toggleExpression(me.key)}>${t(me.label)}</span>`;
+                          })}
+                        </div>
+                      </div>
+                      <hr class="mrd-pr-hr" />
+                      <div class="mrd-pr-ctl-group">
+                        <div class="mrd-pr-ctl-head">
+                          <div class="mrd-pr-ctl-name">${t("Shot Size")}</div>
+                        </div>
+                        <div class="mrd-pr-ctl-items">
+                          ${shotModeChip}
+                          ${SHOT_SIZES.map((ss) => {
+                            const active = effShot.includes(ss.key);
+                            return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: active ? "#1f5a4e" : "#23262e", border: "1px solid " + (active ? "#4fb0a0" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#8fd6c8", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(ss.title)} onClick=${() => toggleShotSize(ss.key)}>${t(ss.label)}</span>`;
+                          })}
+                        </div>
+                      </div>
+                      <hr class="mrd-pr-hr" />
+                      <div class="mrd-pr-ctl-group">
+                        <div class="mrd-pr-ctl-head">
+                          <div class="mrd-pr-ctl-name">${t("Framing")}</div>
+                        </div>
+                        <div class="mrd-pr-ctl-items">
+                          ${framModeChip}
+                          ${FRAMINGS.map((fr) => {
+                            const active = effFram.includes(fr.key);
+                            return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: active ? "#6b5a1c" : "#23262e", border: "1px solid " + (active ? "#c2a24c" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#e6d29a", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(fr.title)} onClick=${() => toggleFraming(fr.key)}>${t(fr.label)}</span>`;
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                })()
+              : html`<div class="mrd-pr-ctl mrd-pr-ctl-none">${t("Audio segments need no camera motion or acting direction")}</div>`
+          }
           <div class="mrd-pr-prompt-wrapper" style=${S.col}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>${t("Segment Prompt")}</div>
-            ${
-              curSeg && curSeg.type !== "audio"
-                ? (() => {
-                    // 运镜多选行：无显式覆盖时继承 timeline.defaultCameraMotions（全局默认）。
-                    // 覆盖态行首为「本段自定义(n)」带 ×（一键回到继承）；继承态为「跟随全局(n)」。
-                    // 空集合 = 该分段运镜自由（由模型决定，后端不注入指令）。
-                    const hasOverride = Array.isArray(curSeg.cameraMotions);
-                    const effCams = effectiveCameras(curSeg);
-                    const nChips = effCams.length;
-                    const modeChip = hasOverride
-                      ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#3a2f0a", border: "1px solid #8a6d2a", borderRadius: "3px", color: "#e8cf8a", fontSize: "11px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment has its own camera motion selection; click × to clear it and follow the global default again")}>
-                          ${t("Segment custom")}${nChips ? ` (${nChips})` : ""}
-                          <span title=${t("Reset to global default camera motions")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#ffb86b" }} onClick=${(e) => { e.stopPropagation(); resetCameraMotion(); }}>×</span>
-                        </span>`
-                      : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#14301f", border: "1px solid #2f6a44", borderRadius: "3px", color: "#7fd6a3", fontSize: "11px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment follows the global default camera motions (set in the timeline Settings menu). Click any style below to give this segment its own selection; empty selection means the camera language is left to the model")}>
-                          ${t("Follow global default")}${nChips ? ` (${nChips})` : ""}
-                        </span>`;
-                    return html`<div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "2px 8px 0", flex: "0 0 auto", alignItems: "center" }}>
-                      <span style=${{ color: "#888", fontSize: "11px", marginRight: "2px", flexShrink: "0" }}>${t("Camera Motion")}:</span>
-                      ${modeChip}
-                      ${CAMERA_MOTIONS.map((cm) => {
-                        const active = effCams.includes(cm.key);
-                        const bg = active ? (hasOverride ? "#3a5db0" : "#27406e") : "#2a2a2a";
-                        return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: bg, border: "1px solid " + (active ? "#6c9bff" : "#444"), borderRadius: "3px", color: active ? "#fff" : "#9bb9ff", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(cm.title)} onClick=${() => toggleCameraMotion(cm.key)}>${t(cm.label)}</span>`;
-                      })}
-                    </div>`;
-                  })()
-                : null
-            }
             <${HighlightedTextarea}
               taRef=${leftRef}
               className="mrd-pr-prompt-area"
@@ -2485,60 +2835,64 @@ export function TransferPanel({ director }) {
               onClick=${() => runGenerate(leftText, 'zh')}
             >${t("ShortChinese")}→</button>
           </div>
-          <div class="mrd-pr-prompt-wrapper" style=${{ ...S.col, gap: "8px" }}>
+          <div class="mrd-pr-prompt-wrapper" style=${{ ...S.col, gap: "6px" }}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>
               ${t("Minimax H3 Prompt")}
             </div>
-            <div style=${{ display: "flex", flexDirection: "column", gap: "8px", flex: "1 1 0", minHeight: "0" }}>
+            <div class="mrd-pr-fields" style=${{ display: "flex", flexDirection: "column", gap: "2px", flex: "1 1 0", minHeight: "0" }}>
               ${(() => {
                 const pObj = rightText;
-                const fieldStyle = (label) => ({ display: "flex", flexDirection: "column", minHeight: "0", ...label });
+                // 四段高度通过段间分隔条拖拽调节（prGrow 权重），textarea 各占其 field 剩余高度
+                const fieldStyle = (growIdx) => ({ display: "flex", flexDirection: "column", minHeight: "0", overflow: "hidden", flex: `${prGrow[growIdx]} 1 0` });
                 return html`
-                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                  <div class="mrd-pr-field" style=${fieldStyle(0)}>
                     <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("summary")}</div>
                     <${HighlightedTextarea}
                       taRef=${rightSummaryRef}
                       className="mrd-pr-prompt-area"
-                      style=${{ ...S.refTextarea, flex: "0 0 66px", height: "66px" }}
+                      style=${{ ...S.refTextarea }}
                       value=${pObj.summary}
                       placeholder=${t("SummaryPlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "summary", e.target.value)); handleInput(e, "right", "summary"); }}
                     />
-                    <div class="mrd-pr-tags" style=${{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "4px 8px 0" }}>
+                    <div class="mrd-pr-tags" style=${{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "2px 8px 0", flex: "0 0 auto" }}>
                       ${TASK_TYPES.map((task) => html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#2a2a2a", border: "1px solid #444", borderRadius: "3px", color: "#9bb9ff", fontSize: "11px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(task.title)} onClick=${() => insertTaskTag(task.label)}>${task.label}</span>`)}
                     </div>
                   </div>
-                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "1 1 0" })}>
+                  <div class="mrd-pr-split" title=${t("Drag to resize")} onPointerDown=${(e) => startPrSplit(e, 0)}><div class="mrd-pr-split-knob"></div></div>
+                  <div class="mrd-pr-field" style=${fieldStyle(1)}>
                     <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("detailed_description")}</div>
                     <${HighlightedTextarea}
                       taRef=${rightDetailRef}
                       className="mrd-pr-prompt-area"
-                      style=${{ ...S.refTextarea, flex: "1 1 0" }}
+                      style=${{ ...S.refTextarea }}
                       value=${pObj.detailed_description}
                       placeholder=${t("DetailPlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "detailed_description", e.target.value)); handleInput(e, "right", "detail"); }}
                     />
                   </div>
-                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                  <div class="mrd-pr-split" title=${t("Drag to resize")} onPointerDown=${(e) => startPrSplit(e, 1)}><div class="mrd-pr-split-knob"></div></div>
+                  <div class="mrd-pr-field" style=${fieldStyle(2)}>
                     <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("overall_soundscape")}</div>
                     <${HighlightedTextarea}
                       taRef=${rightOverallRef}
                       className="mrd-pr-prompt-area"
-                      style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
+                      style=${{ ...S.refTextarea }}
                       value=${pObj.overall_soundscape === "N/A" ? "" : pObj.overall_soundscape}
                       placeholder=${t("SoundscapePlaceholder")}
                       spellcheck=${false}
                       onInput=${(e) => { setRightText(updateShotField(rightText, "overall_soundscape", e.target.value)); handleInput(e, "right", "overall"); }}
                     />
                   </div>
-                  <div class="mrd-pr-field" style=${fieldStyle({ flex: "0 0 auto" })}>
+                  <div class="mrd-pr-split" title=${t("Drag to resize")} onPointerDown=${(e) => startPrSplit(e, 2)}><div class="mrd-pr-split-knob"></div></div>
+                  <div class="mrd-pr-field" style=${fieldStyle(3)}>
                     <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("non_diegetic_music")}</div>
                     <${HighlightedTextarea}
                       taRef=${rightMusicRef}
                       className="mrd-pr-prompt-area"
-                      style=${{ ...S.refTextarea, flex: "0 0 68px", height: "68px" }}
+                      style=${{ ...S.refTextarea }}
                       value=${pObj.non_diegetic_music === "N/A" ? "" : pObj.non_diegetic_music}
                       placeholder=${t("MusicPlaceholder")}
                       spellcheck=${false}
@@ -2680,6 +3034,30 @@ export function TransferPanel({ director }) {
             disabled=${losslessMergeBusy || !customAudio}
             onClick=${() => runLosslessMerge({ customAudio: customAudio && customAudio.path })}
           >${losslessMergeBusy ? t("Lossless merging…") : t("Merge")}</button>
+        </div>
+      </${RefModal}>
+      <${RefModal}
+        open=${exprImportOpen}
+        title=${t("Import expression library (JSON)")}
+        width="560px"
+        height="500px"
+        onClose=${() => { setExprImportOpen(false); setExprImportErr(""); }}
+      >
+        <div style=${{ display: "flex", flexDirection: "column", gap: "10px", flex: "1 1 0", minHeight: "0", overflowY: "auto", padding: "2px" }}>
+          <div style=${{ fontSize: "12px", color: "#9aa3b2", lineHeight: 1.6 }}>${t("ImportExpressionDesc")}</div>
+          <div>
+            <div style=${{ fontSize: "11px", fontWeight: 600, color: "#b48fc4", margin: "0 0 4px 0" }}>${t("FormatRecommendedTitle")}</div>
+            <pre style=${{ margin: 0, background: "#11141b", border: "1px solid #2c313b", borderRadius: "4px", padding: "8px", fontSize: "11px", lineHeight: 1.5, color: "#c9a6e8", overflowX: "auto" }}>${EXPR_CASE_FULL}</pre>
+          </div>
+          <div>
+            <div style=${{ fontSize: "11px", fontWeight: 600, color: "#b48fc4", margin: "0 0 4px 0" }}>${t("FormatCompactTitle")}</div>
+            <pre style=${{ margin: 0, background: "#11141b", border: "1px solid #2c313b", borderRadius: "4px", padding: "8px", fontSize: "11px", lineHeight: 1.5, color: "#9bb9ff", overflowX: "auto" }}>${EXPR_CASE_COMPACT}</pre>
+          </div>
+          ${exprImportErr ? html`<div style=${{ color: "#ef5350", fontSize: "12px", padding: "2px 0" }}>${exprImportErr}</div>` : null}
+          <div style=${{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "2px", flex: "0 0 auto" }}>
+            <button class="mrd-pr-btn" onClick=${() => { setExprImportOpen(false); setExprImportErr(""); }}>${t("Cancel")}</button>
+            <button class="mrd-pr-btn" style=${{ background: "#5a2d8f", borderColor: "#7c4d96", color: "#fff" }} onClick=${pickExpressionFile}>${t("Choose File & Import")}</button>
+          </div>
         </div>
       </${RefModal}>
     </div>

@@ -257,6 +257,13 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         lang = data.get("lang", "en")
         # 运镜可为 str 单值（兼容旧客户端）或 list 多选（空列表 = 不注入）；后端归一化兜底
         camera_motion = data.get("camera_motion", "")
+        # 微表情（表演提示）多选：list[str]（空 = 不注入）；expression_catalog 携带前端
+        # 本地导入的自定义词条（{key,label,title}），供后端识别自定义 key 并注入描述
+        expression = data.get("expression", "")
+        expression_catalog = data.get("expression_catalog", []) or []
+        # 景别 / 构图关系多选：list[str]（空 = 不注入，由模型自由决定）；后端归一化兜底
+        shot_size = data.get("shot_size", "")
+        framing = data.get("framing", "")
         try:
             duration_seconds = float(data.get("duration_seconds") or 0)
         except (TypeError, ValueError):
@@ -287,7 +294,9 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed,
                                        vlm_mode=vlm_mode, options=options,
                                        duration_seconds=duration_seconds, lang=lang,
-                                       camera_motion=camera_motion)
+                                       camera_motion=camera_motion, expression=expression,
+                                       expression_catalog=expression_catalog,
+                                       shot_size=shot_size, framing=framing)
         return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()
