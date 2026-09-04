@@ -830,6 +830,7 @@ export function TransferPanel({ director }) {
   const [dirTick, setDirTick] = useState(0); // 景别/构图 UI 刷新计数：数据存 seg.shotSizes / seg.framings
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
+  const [copiedH3, setCopiedH3] = useState(false); // H3 提示词预览“复制”按钮的已复制反馈
   const [prGrow, setPrGrow] = useState([4, 12, 3, 3]); // H3 右栏四段 flex-grow 权重:summary/detail/overall/music(段间分隔条拖拽调节)
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
@@ -2321,6 +2322,31 @@ export function TransferPanel({ director }) {
     })
     .join("\n\n");
 
+  // 复制完整 H3 提示词文本（含主体定义 / 保留分析 / 摘要 / 细节 / 音效 / 音乐）到剪贴板
+  const copyH3Prompt = async () => {
+    const text = h3PreviewText;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // 非 secure context（如 http 非 localhost）降级：临时 textarea + execCommand
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopiedH3(true);
+      setTimeout(() => { if (aliveRef.current) setCopiedH3(false); }, 1200);
+    } catch (err) {
+      console.error("[MiniMaxRefDirector] Copy H3 prompt failed:", err);
+    }
+  };
+
   return html`
     <div class="tr-panel" style=${S.panel}>
       <div style=${S.buttons}>
@@ -2430,12 +2456,20 @@ export function TransferPanel({ director }) {
             <div style=${S.h3PreviewLabel}>${t("Minimax H3 Prompt")}</div>
             <div
               class="tr-defs"
-              style=${S.defsWrap}
+              style=${Object.assign({}, S.defsWrap, {
+                cursor: "pointer",
+                padding: "1px 5px",
+                borderRadius: "3px",
+                background: copiedH3 ? "rgba(62,183,95,.18)" : "rgba(92,157,255,.13)",
+              })}
+              title=${copiedH3 ? t("Copied to clipboard") : t("Copy H3 prompt text")}
+              onClick=${(e) => { e.stopPropagation(); setDefsOpen(false); copyH3Prompt(); }}
+              onMouseDown=${(e) => e.stopPropagation()}
               onMouseEnter=${openDefsTip}
               onMouseMove=${openDefsTip}
               onMouseLeave=${delayCloseDefs}
             >
-              <span style=${S.defsIcon}>ℹ</span>
+              <span style=${Object.assign({}, S.defsIcon, { color: copiedH3 ? "#7fd6a3" : "#5c9dff" })}>${copiedH3 ? "✓" : "⧉"}</span>
               ${
                 defsOpen && defsPos
                   ? html`<div

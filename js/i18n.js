@@ -101,6 +101,8 @@ const ZH = {
   "Toggle Auto End Frame for the selected segment": "切换选中片段的自动结束帧",
   "Auto End Frame": "自动结束帧",
   "Minimax H3 Prompt": "Minimax H3 提示词",
+  "Copy H3 prompt text": "复制 H3 提示词",
+  "Copied to clipboard": "已复制到剪贴板",
   "Segment Prompt": "片段提示词",
   "Enter prompt for selected segment...": "为选中的片段输入提示词...",
   "SummaryPlaceholder": "本节用一段简短文字概括目标视频及其引用关系，以方括号任务类型前缀开头：\n\n[video editing + reference generation + audio reuse] The target video shows <@Anni> eating a cookie in <@Caff>. <@Tony> enters with <@May>, which lunges toward the cookie. The three-shot exchange uses <@Anni voice> as the voice-timbre reference for <@Anni> and ends with a canned audience laugh.",

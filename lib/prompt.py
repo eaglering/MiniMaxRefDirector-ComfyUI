@@ -978,13 +978,15 @@ def _shot_size_note(shot_size: str | list = "", lang: str = "en") -> str:
         lines.append("## 景别方向（Shot Size Direction）")
         if many:
             lines.append(
-                "对每个 [Shot N] 的描述，依主体与环境的远近关系及该镜头的叙事重点，"
-                "从下列档位中挑选最合适的一种景别，用中文自然写进该镜头"
-                "（如“近景/中景/远景”）；不同镜头可沿档位自由切换（如由远及近推进），"
-                "同一镜头不要混用多个景别，所列档位不要求全部出现。"
+                "对每个 [Shot N] 的描述，必须从下列候选档位中为该镜头选定一种景别，"
+                "并紧接其后用中文自然写明（如“牛仔镜头”“大特写”）。禁止使用候选以外"
+                "的任何景别词（中景、中近景、近景、远景、特写、全景、全身、半身等一律"
+                "不得出现）。同一镜头只保留一种景别；不同镜头轮换使用候选档位，尽量让"
+                "全部候选至少出现一次。若用户输入中出现了与候选不符的景别/取景描述，"
+                "一律按下列档位改写，不得照抄。"
             )
         else:
-            lines.append("目标视频的镜头应采用以下这种景别：")
+            lines.append("目标视频的每个镜头都必须采用下列这一种景别：若用户输入中出现其他景别词，一律改写为它。")
         limit = 1 if many and len(keys) > 3 else 3
         for key in keys:
             preset = _SHOT_SIZE_PRESETS[key]
@@ -1007,15 +1009,17 @@ def _shot_size_note(shot_size: str | list = "", lang: str = "en") -> str:
         lines.append("## Shot Size Direction")
         if many:
             lines.append(
-                "For each [Shot N] description, choose the single shot size below that best "
-                "fits the subject's distance and that shot's narrative focus, and state it "
-                "naturally in the shot (e.g. \"close-up\", \"medium shot\", \"wide shot\"). "
-                "Different shots may travel along the scale (e.g. a wide shot pushing in to "
-                "close-ups); do not mix multiple sizes inside one shot, and not every listed "
-                "size has to be used."
+                "For each [Shot N] description, choose exactly ONE of the shot sizes listed "
+                "below and name it explicitly in that shot. FORBIDDEN: any unlisted "
+                "shot-size word (wide shot, medium shot, medium close-up, close-up, "
+                "extreme close-up, full shot, etc.) — never reuse shot-size words from the "
+                "user's input if they are not listed. Use only one size per shot, rotate "
+                "through the listed sizes across shots, and aim to cover every listed size "
+                "at least once. If the user input mentions a different shot size, rewrite "
+                "that mention to one of the listed sizes."
             )
         else:
-            lines.append("The target video's shots should use this shot size:")
+            lines.append("Every shot of the target video MUST use the single shot size below, stated explicitly in that shot. If the user input mentions any other shot size, rewrite it to this one:")
         limit = 1 if many and len(keys) > 3 else 3
         for key in keys:
             preset = _SHOT_SIZE_PRESETS[key]
@@ -1329,9 +1333,9 @@ Write one short paragraph summarizing the target video and its reference relatio
 ## Strictness
 - "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".
 - Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
-{image_note}{lang_note}{camera_note}{expression_note}{shot_note}{framing_note}## User Input Prompt
+{image_note}{lang_note}{camera_note}{expression_note}## User Input Prompt
 {duration_note}{prompt}
-
+{shot_note}{framing_note}
 Output ONLY the JSON object. Do not add any text before or after it."""
 
 
@@ -1381,12 +1385,58 @@ def _unmask_protected(text: str, placeholders: dict[str, str]) -> str:
     return text
 
 
+# Camera-motion 保真规则（中→英翻译指令共用）：下游若挂载 Camera Motion LoRA，必须把
+# 源文中的摄影机运动改写为 "camera motion, ..." 触发短语（技术词，不得意译成普通动词）。
+# 本常量文本镜像同步到 prompt/prompt_translate_to_en.txt 的 "## Camera motion fidelity" 小节，
+# 修改时请保持两处一致。
+_TRANSLATE_CAMERA_MOTION_RULES = (
+    "- Camera motion fidelity: when the source text describes camera movement "
+    "(Chinese cues such as 推近/拉近/前移/推上, 拉远/后移/拉开, 推拉结合/先推后拉, "
+    "环绕/绕行/盘旋, 跟拍/跟随/手持, 航拍/无人机/俯拍/高空镜头, 升降/升起/仰起/俯仰/落下, "
+    "摇镜/扫过/横摇, 特写/微距), do NOT flatten it into plain English verbs. Rewrite it "
+    "as a \"camera motion, ...\" trigger phrase from the table below - this exact "
+    "vocabulary is consumed by a downstream Camera Motion LoRA and must survive verbatim.\n"
+    "-  推近/拉近/前移 (push-in / dolly-in): \"camera motion, slow push-in on the subject\" "
+    "(or \"camera motion, dolly-in gradually closing the distance\").\n"
+    "-  拉远/后移 (pull-back / dolly-out): \"camera motion, slow pull-back revealing the "
+    "surroundings\" (or \"camera motion, dolly-out widening the frame\").\n"
+    "-  推拉结合/先推后拉 (push + pull): \"camera motion, push-in then pull-back in one "
+    "flowing move\".\n"
+    "-  环绕/绕行/盘旋 (orbit): \"camera motion, slow 360-degree orbit around the subject\" "
+    "(or \"camera motion, orbiting arc from the side to the front\").\n"
+    "-  跟拍/跟随/手持 (tracking / handheld): \"camera motion, tracking shot following the "
+    "subject\" (or \"camera motion, handheld follow keeping pace with the movement\").\n"
+    "-  航拍/无人机/俯拍/高空镜头 (aerial / drone): \"camera motion, aerial drone shot flying "
+    "over the scene\" (or \"camera motion, high-angle drone descent toward the subject\").\n"
+    "-  升降/升起/仰起/落下/俯仰 (crane / tilt): \"camera motion, slow tilt from the feet up "
+    "to the face\" (or \"camera motion, crane shot rising above the scene\").\n"
+    "-  摇镜/扫过/横摇 (pan): \"camera motion, slow pan across the full scene\".\n"
+    "-  特写/微距 (close-up / macro, when the move ends on it): \"camera motion, extreme "
+    "close-up on the subject's face\".\n"
+    "- Keep the framing target in the phrase when the source names one: "
+    "拉近至中景 -> \"camera motion, push-in to a medium shot\"; "
+    "镜头缓缓下降 -> \"camera motion, slow descent toward the subject\".\n"
+    "- Carry over the source's speed words naturally (缓慢/缓缓/慢慢 -> slow or gentle; "
+    "快速/迅速/猛地 -> quick or fast; 平稳/匀速 -> steady).\n"
+    "- Global style statements such as 全程采用航拍镜头风格 / 以航拍贯穿 must also surface "
+    "the technical token, e.g. \"shot entirely with camera motion, aerial drone shots\" "
+    "(or \"..., slow push-in style throughout\").\n"
+    "- If a \"camera motion, ...\" English phrase is already present in the source text, "
+    "keep it exactly as-is and do not duplicate it.\n"
+    "- Only rewrite where the source actually describes camera movement or a global camera "
+    "style; translate all other content normally and never invent motion where the source "
+    "has none.\n"
+)
+
+
 def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) -> str:
     """将整段视频提示词文本翻译为英文。
 
     调用方负责将禁止改写的片段（主体名/对白）掩码为占位符（如 MASKED_0），
     翻译后还原；本函数在指令中提示模型原样保留占位符 token。翻译失败回退原文，
     不抛出异常、不中断流程。
+    指令中追加 _TRANSLATE_CAMERA_MOTION_RULES：中文源文里的运镜描写会被改写为
+    "camera motion, ..." 触发短语，保证下游 Camera Motion LoRA 的触发词不被翻译丢失。
     """
     try:
         full_prompt = (
@@ -1397,7 +1447,8 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) ->
             "<@...>, <#...>, <d>...</d>.\n"
             "- Keep every placeholder token such as MASKED_0 exactly as-is, at the "
             "same position and in the same order. Never translate, delete, or reorder them.\n"
-            "- Output only the translated text, with no extra commentary.\n\n"
+            + _TRANSLATE_CAMERA_MOTION_RULES
+            + "- Output only the translated text, with no extra commentary.\n\n"
             "## Text to translate\n\n"
             + text
         )
@@ -1537,6 +1588,10 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
                                    camera_motion=camera_motion, expression=expression,
                                    expression_catalog=expression_catalog,
                                    shot_size=shot_size, framing=framing)
+    _dbg_note = (_shot_size_note(shot_size, lang=lang) or "").strip() or (_framing_note(framing, lang=lang) or "").strip()
+    if _dbg_note:
+        _head = "\n".join(_dbg_note.splitlines()[:4])
+        print(f"[MiniMaxRefDirector debug] shot/framing note INJECTED ({len(_dbg_note)} chars):\n{_head}", flush=True)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
             image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
