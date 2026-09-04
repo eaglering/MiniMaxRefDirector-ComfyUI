@@ -30,6 +30,7 @@ The main body of the prompt. Describe visuals, actions, camera movement, sound, 
 
 - The text MUST begin with `[Shot 1]` — no title, intro, or other text may appear before it. If the user's input does not contain an explicit shot marker, open with `[Shot 1]` followed by the scene description.
 - `[Shot 1]` marks the opening shot and has no timestamp. Later shots use `[Shot 2] At MM:SS.mmm, ..., [Shot N] At MM:SS.mmm, ...` to mark cut times.
+- If a total duration is provided, plan the cut timestamps against it: timestamps must be strictly increasing and lie within the total duration, the shots must jointly cover the full duration, and every shot should get a reasonable, non-trivial share (avoid extremely short shots such as a 2-second shot inside an 8-second video, and avoid one shot dominating almost the whole duration unless the action truly requires it).
 - For each shot, clearly establish the current composition, subject appearance and position, environment and lighting, actions and state changes, camera movement, and current sound.
 - Write camera movement in English within the current shot, including movement type, amplitude, and speed when they need to be expressed.
 - Keep dialogue in its original language.

@@ -227,8 +227,16 @@ class MiniMaxRefDirector(io.ComfyNode):
                                              frame_rate=frame_rate)
                 # 非英文（含中文，且非仅出现在对白/主体标签中）的段提示词翻译为英文
                 if _needs_translate(prompt_res["prompt"]):
+                    log.info(
+                        "[MiniMaxRefDirector] segment %d pre-translate prompt head: %s",
+                        i, repr(prompt_res["prompt"][:160]),
+                    )
                     prompt_res["prompt"] = _translate_prompt_to_en(prompt_res["prompt"], vlm_opts)
                     translated_any = True
+                    log.info(
+                        "[MiniMaxRefDirector] segment %d post-translate prompt head: %s",
+                        i, repr(prompt_res["prompt"][:160]),
+                    )
                 entry = {
                     "prompt": prompt_res["prompt"],
                     "subjects": prompt_res["subjects"],

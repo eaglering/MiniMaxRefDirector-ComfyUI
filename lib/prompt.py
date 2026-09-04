@@ -1277,7 +1277,13 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
     duration_note = ""
     if duration_seconds and duration_seconds > 0:
         duration_note = (
-            "The target video's total duration is %.2f seconds. "
+            "The target video's total duration is %.2f seconds. Plan the shot cut "
+            "timestamps against this total: the cut timestamps must be strictly "
+            "increasing, each one must lie inside the total duration, and the shots "
+            "must jointly cover the full duration with every shot getting a "
+            "reasonable, non-trivial share (avoid extremely short shots such as a "
+            "2-second shot inside an 8-second video, and avoid one shot dominating "
+            "almost the whole duration unless the action truly requires it). "
         ) % (float(duration_seconds))
 
     # 输出语言指令放在 prompt 末尾（模型注意力最强的位置），
@@ -1390,42 +1396,63 @@ def _unmask_protected(text: str, placeholders: dict[str, str]) -> str:
 # 本常量文本镜像同步到 prompt/prompt_translate_to_en.txt 的 "## Camera motion fidelity" 小节，
 # 修改时请保持两处一致。
 _TRANSLATE_CAMERA_MOTION_RULES = (
-    "- Camera motion fidelity: when the source text describes camera movement "
-    "(Chinese cues such as 推近/拉近/前移/推上, 拉远/后移/拉开, 推拉结合/先推后拉, "
-    "环绕/绕行/盘旋, 跟拍/跟随/手持, 航拍/无人机/俯拍/高空镜头, 升降/升起/仰起/俯仰/落下, "
-    "摇镜/扫过/横摇, 特写/微距), do NOT flatten it into plain English verbs. Rewrite it "
-    "as a \"camera motion, ...\" trigger phrase from the table below - this exact "
-    "vocabulary is consumed by a downstream Camera Motion LoRA and must survive verbatim.\n"
-    "-  推近/拉近/前移 (push-in / dolly-in): \"camera motion, slow push-in on the subject\" "
-    "(or \"camera motion, dolly-in gradually closing the distance\").\n"
-    "-  拉远/后移 (pull-back / dolly-out): \"camera motion, slow pull-back revealing the "
-    "surroundings\" (or \"camera motion, dolly-out widening the frame\").\n"
-    "-  推拉结合/先推后拉 (push + pull): \"camera motion, push-in then pull-back in one "
-    "flowing move\".\n"
-    "-  环绕/绕行/盘旋 (orbit): \"camera motion, slow 360-degree orbit around the subject\" "
-    "(or \"camera motion, orbiting arc from the side to the front\").\n"
-    "-  跟拍/跟随/手持 (tracking / handheld): \"camera motion, tracking shot following the "
-    "subject\" (or \"camera motion, handheld follow keeping pace with the movement\").\n"
-    "-  航拍/无人机/俯拍/高空镜头 (aerial / drone): \"camera motion, aerial drone shot flying "
-    "over the scene\" (or \"camera motion, high-angle drone descent toward the subject\").\n"
-    "-  升降/升起/仰起/落下/俯仰 (crane / tilt): \"camera motion, slow tilt from the feet up "
-    "to the face\" (or \"camera motion, crane shot rising above the scene\").\n"
-    "-  摇镜/扫过/横摇 (pan): \"camera motion, slow pan across the full scene\".\n"
-    "-  特写/微距 (close-up / macro, when the move ends on it): \"camera motion, extreme "
-    "close-up on the subject's face\".\n"
-    "- Keep the framing target in the phrase when the source names one: "
-    "拉近至中景 -> \"camera motion, push-in to a medium shot\"; "
-    "镜头缓缓下降 -> \"camera motion, slow descent toward the subject\".\n"
-    "- Carry over the source's speed words naturally (缓慢/缓缓/慢慢 -> slow or gentle; "
-    "快速/迅速/猛地 -> quick or fast; 平稳/匀速 -> steady).\n"
-    "- Global style statements such as 全程采用航拍镜头风格 / 以航拍贯穿 must also surface "
-    "the technical token, e.g. \"shot entirely with camera motion, aerial drone shots\" "
-    "(or \"..., slow push-in style throughout\").\n"
-    "- If a \"camera motion, ...\" English phrase is already present in the source text, "
-    "keep it exactly as-is and do not duplicate it.\n"
-    "- Only rewrite where the source actually describes camera movement or a global camera "
-    "style; translate all other content normally and never invent motion where the source "
-    "has none.\n"
+    "\n\n## Camera motion fidelity (MANDATORY)\n"
+    "The translated prompt is consumed by a downstream Camera Motion LoRA that "
+    "activates ONLY on the literal English token sequence \"camera motion, ...\". "
+    "Whenever the source text describes camera movement or a global camera style, "
+    "you MUST rewrite it as the matching \"camera motion, ...\" trigger phrase "
+    "listed below, never as plain verbs (\"aerial drone shot\", \"the camera slowly "
+    "descends\" or \"dolly in\" alone do NOT activate the LoRA).\n"
+    "Chinese cue -> required trigger phrase:\n"
+    "- 推近/拉近/前移 -> \"camera motion, slow push-in on the subject\".\n"
+    "- 拉远/后移 -> \"camera motion, slow pull-back revealing the surroundings\".\n"
+    "- 推拉结合/先推后拉 -> \"camera motion, push-in then pull-back in one flowing move\".\n"
+    "- 环绕/绕行/盘旋 -> \"camera motion, slow 360-degree orbit around the subject\".\n"
+    "- 跟拍/跟随/手持 -> \"camera motion, tracking shot following the subject\".\n"
+    "- 航拍/无人机/俯拍/高空 -> \"camera motion, aerial drone shot flying over the scene\".\n"
+    "- 升降/升起/仰起/落下/俯仰 -> \"camera motion, slow tilt from the feet up to the face\".\n"
+    "- 摇镜/扫过/横摇 -> \"camera motion, slow pan across the full scene\".\n"
+    "- 特写/微距 -> \"camera motion, extreme close-up on the subject's face\".\n"
+    "- Keep the framing target and speed in the phrase when the source names them "
+    "(拉近至中景 -> \"camera motion, push-in to a medium shot\"; 缓缓/缓慢 -> slow, "
+    "快速 -> quick, 平稳 -> steady).\n"
+    "- Global style statements (e.g. 全程采用航拍镜头风格 / 运镜风格为航拍/无人机) "
+    "must ALSO become a trigger phrase, e.g. \"camera motion, aerial drone shots "
+    "throughout\".\n"
+    "- Worked example: source \"无人机航拍，飞掠过整片海滩，镜头缓缓下降\" -> output "
+    "\"camera motion, aerial drone shot flying over the beach, slowly descending\".\n"
+    "- If a \"camera motion, ...\" phrase is already present in the source, keep it "
+    "exactly and never duplicate it. Only apply these rules where the source actually "
+    "describes camera movement; translate everything else normally and never invent "
+    "motion where the source has none.\n"
+)
+
+
+# 运镜 cue 检测（中英）：命中任一 cue 才注入 Camera motion fidelity 规则。
+# 中文 cue 均为运镜/镜头动词；英文 cue 用单词边界匹配。漏判代价大（运镜被意译），
+# 误判代价小（仅多注入一段规则，规则本身禁止无中生有），故宁可放宽。
+_CAMERA_CUE_RE = re.compile(
+    r"推近|拉近|前移|推上|推镜|推进|拉远|后移|拉开|拉镜|推拉|先推后拉|环绕|绕行|盘旋|环拍|"
+    r"跟拍|跟随|手持|航拍|无人机|俯拍|高空|升降|升起|仰起|落下|俯仰|摇镜|摇向|横摇|横移|平移|"
+    r"特写|微距|运镜|镜头缓缓|镜头缓慢|镜头拉近|镜头推近|镜头下降|镜头摇|"
+    r"缓慢(?:推|拉|环绕|移动|下降|上升|摇)|缓缓(?:推|拉|环绕|移动|下降|上升|摇)"
+    r"|push(?:es|ed|ing)?[- ]?in|pull(?:s|ed|ing)?[- ]?back|dolly(?:ing|es|ed)?|"
+    r"orbit(?:s|ing|ed)?|tracking(?: shot)?|handheld|aerial|drone|crane(?:s|ing|ed)? shot|"
+    r"\btilt(?:s|ing|ed)?\b|\bpan(?:s|ning|ned)?\b|close[- ]?up|\bmacro\b|zoom(?:s|ing|ed)?|"
+    r"camera motion|camera moves",
+    re.IGNORECASE,
+)
+
+
+def _has_camera_cue(text: str) -> bool:
+    """源文本是否含运镜描写 cue（中英文）。决定是否注入 Camera motion fidelity 规则。"""
+    return bool(text) and bool(_CAMERA_CUE_RE.search(text))
+
+
+# prompt_translate_to_en.txt 中 "## Camera motion fidelity" 小节
+# （介于标题与 "## Input JSON" 之间），源文无运镜 cue 时整体移除
+_CAMERA_FIDELITY_SECTION_RE = re.compile(
+    r"\n\n## Camera motion fidelity\n.*?\n\n## Input JSON", re.DOTALL
 )
 
 
@@ -1439,18 +1466,26 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) ->
     "camera motion, ..." 触发短语，保证下游 Camera Motion LoRA 的触发词不被翻译丢失。
     """
     try:
+        # 源文含运镜描写时才注入 camera fidelity 规则，其余翻译不带这段指令
+        rules_block = _TRANSLATE_CAMERA_MOTION_RULES if _has_camera_cue(text) else ""
         full_prompt = (
             "You are a professional video prompt translator. Translate the following "
             "video prompt text into fluent, natural English.\n\n"
             "Rules:\n"
             "- Keep fixed structural markers unchanged: [Shot N], At MM:SS.mmm, "
             "<@...>, <#...>, <d>...</d>.\n"
+            "- Keep every section label line and its section exactly as-is: "
+            "subject_definitions:, summary:, retention_analysis:, detailed_description:, "
+            "overall_soundscape:, non_diegetic_music:. Never drop, merge, reorder, "
+            "or rephrase any section heading or section.\n"
             "- Keep every placeholder token such as MASKED_0 exactly as-is, at the "
             "same position and in the same order. Never translate, delete, or reorder them.\n"
-            + _TRANSLATE_CAMERA_MOTION_RULES
-            + "- Output only the translated text, with no extra commentary.\n\n"
+            "- Output only the translated text, with no extra commentary.\n\n"
             "## Text to translate\n\n"
             + text
+            # camera fidelity 规则置于待译文本之后、模型开始输出之前（末尾注意力最强），
+            # 命中运镜 cue 时才追加；无 cue 时为空串
+            + rules_block
         )
         if vlm_mode == "api":
             generated = generate_prompt_with_api(
@@ -1509,6 +1544,9 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
         with open(_TRANSLATE_TO_EN_TEMPLATE_PATH, "r", encoding="utf-8") as f:
             skill = f.read()
         full_prompt = skill.replace("{{INPUT_JSON}}", input_json)
+        # 四字段源文均无运镜描写：移除 Camera motion fidelity 小节，避免多余 token
+        if not _has_camera_cue(" ".join(str(v) for v in masked.values() if isinstance(v, str))):
+            full_prompt = _CAMERA_FIDELITY_SECTION_RE.sub("\n\n## Input JSON", full_prompt)
         if vlm_mode == "api":
             generate_text = generate_prompt_with_api(
                 image=None, prompt=full_prompt, provider=options.get("provider", "GLM"),

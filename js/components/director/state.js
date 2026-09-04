@@ -396,29 +396,33 @@ export const state = {
     let delta = frames - oldLen;
 
     // 长度变化后顺移后续段的起始位置，避免变长时覆盖下一个 segment。
-    // 顺移不能把后续段挤出总时长：后端会把超出范围段 clamp 成 0 帧直接跳过
-    // （director.py dur<=0 continue），即下一段 duration_frames 变成 0，不允许。
-    // 因此变长时按“每段至少保留 MIN_SEGMENT_LENGTH 帧”约束截断顺移量，
-    // 空间不足则当前段按最大可顺移量应用（与拖拽右边框 clamp 语义一致）。
+    // 输入多少秒就是多少秒：变长不受总时长（End）钳制，后续段全部顺移；若顺移后
+    // 任一段超出当前总时长，自动扩展总时长（growTimelineIfNeeded，与 gap 补段 /
+    // 添加素材行为一致）。commitChanges 会按总时长裁剪段——若不扩展，输入的超长
+    // 部分会在落盘时被静默截断，因此这里扩展总时长而非钳制输入值。
     const idx = trackArr.findIndex((s) => s.id === seg.id);
     if (idx >= 0) {
-      if (delta > 0) {
-        const totalDur = this.getDurationFrames() || 0;
-        if (totalDur > 0) {
-          let maxDelta = delta;
-          for (let j = idx + 1; j < trackArr.length; j++) {
-            const s = trackArr[j];
-            // 顺移后该段 start 最多到 totalDur - MIN_SEGMENT_LENGTH（保留最小帧）
-            const room = totalDur - MIN_SEGMENT_LENGTH - s.start;
-            if (room < maxDelta) maxDelta = Math.max(0, room);
-          }
-          delta = Math.min(delta, maxDelta);
-        }
-      }
       for (let j = idx + 1; j < trackArr.length; j++) {
         trackArr[j].start += delta;
       }
       frames = oldLen + delta;
+
+      if (delta > 0) {
+        let maxEnd = 0;
+        for (const s of this.timeline.segments) {
+          maxEnd = Math.max(maxEnd, s.start + s.length);
+        }
+        for (const s of this.timeline.audioSegments) {
+          maxEnd = Math.max(maxEnd, s.start + s.length);
+        }
+        // preview/ghost 场景下 trackArr 是临时预览数组，顺移后的临时段也需计入
+        if (trackArr !== this.timeline.segments && trackArr !== this.timeline.audioSegments) {
+          for (const s of trackArr) {
+            maxEnd = Math.max(maxEnd, s.start + s.length);
+          }
+        }
+        this.growTimelineIfNeeded(maxEnd);
+      }
     }
 
     seg.length = frames;
