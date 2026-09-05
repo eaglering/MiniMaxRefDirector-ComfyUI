@@ -48,6 +48,12 @@ if (!document.getElementById("ref-pr-editor-ext")) {
 .mrd-pr-split:hover{background:rgba(125,208,255,.12)}
 .mrd-pr-split-knob{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:36px;height:2px;background:#4c5360;border-radius:1px;transition:background .12s}
 .mrd-pr-split:hover .mrd-pr-split-knob{background:#7fd0ff}
+.mrd-pr-panes-split{display:flex;flex-direction:column;align-items:center;flex:0 0 auto;cursor:col-resize;user-select:none;-webkit-user-select:none;touch-action:none;padding:4px 2px 8px;gap:8px;min-height:0}
+.mrd-pr-panes-split-grip{display:inline-flex;align-items:center;justify-content:center;width:22px;height:20px;border-radius:4px;color:#5c6470;opacity:0;transform:scale(.8);pointer-events:none;transition:opacity .13s ease,transform .13s ease,color .13s ease,background .13s ease}
+.mrd-pr-panes-split-grip svg{display:block}
+.mrd-pr-panes-split:hover .mrd-pr-panes-split-grip,.mrd-pr-panes-split.dragging .mrd-pr-panes-split-grip{opacity:1;transform:scale(1)}
+.mrd-pr-panes-split:hover .mrd-pr-panes-split-grip{color:#7fd0ff}
+.mrd-pr-panes-split.dragging .mrd-pr-panes-split-grip{color:#fff;background:rgba(63,131,248,.3)}
 `;
   document.head.appendChild(stx);
 }
@@ -832,6 +838,9 @@ export function TransferPanel({ director }) {
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [copiedH3, setCopiedH3] = useState(false); // H3 提示词预览“复制”按钮的已复制反馈
   const [prGrow, setPrGrow] = useState([4, 12, 3, 3]); // H3 右栏四段 flex-grow 权重:summary/detail/overall/music(段间分隔条拖拽调节)
+  const [paneW, setPaneW] = useState(null); // 左右 prompt 栏: 左栏固定宽(px), null = 均分(flex:1)
+  const [paneDragging, setPaneDragging] = useState(false); // 中间列拖拽中(高亮 grip 图标)
+  const wasPaneDragRef = useRef(false); // 拖动超过阈值后抑制随之而来的按钮 click(防拖动松手误触“生成 H3”)
   const [bindData, setBindData] = useState(null); // 后端 build_h3_subject_bindings 结果
   const [addVersion, setAddVersion] = useState(0); // additionSubject 变更计数（驱动资源条 / 绑定刷新）
   const [retEdit, setRetEdit] = useState(null); // 主体 retention 编辑弹窗：{ name, value }，null 关闭
@@ -1373,6 +1382,51 @@ export function TransferPanel({ director }) {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
+  }
+
+  // 左右 prompt 栏宽度：把中间“英→/中→”按钮列整体当作水平拖拽手柄（无可见分割线，
+  // hover 时浮现左右箭头图标）。按住左右拖动 → 左栏固定为 px 宽，右栏 flex:1 填满剩余。
+  function startPaneSplit(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const bar = e.currentTarget;
+    const host = bar.parentElement;
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const startX = e.clientX;
+    const startW = bar.previousElementSibling ? bar.previousElementSibling.offsetWidth : Math.round(rect.width / 2);
+    const barW = bar.offsetWidth;
+    const MINL = 150, MINR = 400;
+    setPaneDragging(true);
+    const move = (ev) => {
+      const dx = ev.clientX - startX;
+      if (!dx) return;
+      wasPaneDragRef.current = wasPaneDragRef.current || Math.abs(dx) > 4;
+      let w = startW + dx;
+      const maxW = Math.max(MINL, rect.width - barW - MINR);
+      setPaneW(Math.round(Math.max(MINL, Math.min(maxW, w))));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      setPaneDragging(false);
+    };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+  // 拖动结束后浏览器仍会把 pointerup 落在按钮上派发 click，这里在捕获阶段拦截，
+  // 避免拖动一松手就误触发“生成 H3”（仅当确实发生过拖动）。
+  function onPaneClickCapture(e) {
+    if (wasPaneDragRef.current) {
+      wasPaneDragRef.current = false;
+      e.stopPropagation();
+    }
   }
 
   // 时间线级全局默认运镜集合（可为空数组 = 全片运镜自由，由模型决定）
@@ -2746,7 +2800,7 @@ export function TransferPanel({ director }) {
         open=${editorOpen}
         title=${t("Segment Prompt / H3 Prompt / Add Subjects")}
         width="60vw"
-        height="68vh"
+        height="90vh"
         fullscreen
         onClose=${() => { setEditorOpen(false); setMenu(null); }}
         help=${bindingsText || t("No subject definitions yet")}
@@ -2841,7 +2895,7 @@ export function TransferPanel({ director }) {
                 })()
               : html`<div class="mrd-pr-ctl mrd-pr-ctl-none">${t("Audio segments need no camera motion or acting direction")}</div>`
           }
-          <div class="mrd-pr-prompt-wrapper" style=${S.col}>
+          <div class="mrd-pr-prompt-wrapper" style=${paneW ? { ...S.col, flex: "0 0 auto", width: paneW + "px" } : S.col}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>${t("Segment Prompt")}</div>
             <${HighlightedTextarea}
               taRef=${leftRef}
@@ -2853,7 +2907,13 @@ export function TransferPanel({ director }) {
               onInput=${(e) => { setLeftText(e.target.value); handleInput(e, "left"); }}
             />
           </div>
-          <div style=${{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: "22px", flex: "0 0 auto" }}>
+          <div
+            class="mrd-pr-panes-split${paneDragging ? " dragging" : ""}"
+            title=${t("Drag to resize")}
+            onPointerDown=${startPaneSplit}
+            onClickCapture=${onPaneClickCapture}
+          >
+            <span class="mrd-pr-panes-split-grip" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path><path d="M9 18l6-6-6-6"></path></svg></span>
             <button
               class="mrd-pr-btn"
               style="padding:0"
@@ -2863,7 +2923,7 @@ export function TransferPanel({ director }) {
             >${t("ShortEnglish")}→</button>
             <button
               class="mrd-pr-btn"
-              style="margin-top: 8px;padding: 0"
+              style="padding:0"
               title=${t("Generate Chinese H3 Prompt from the left side; the result is shown on the right")}
               disabled=${busy}
               onClick=${() => runGenerate(leftText, 'zh')}
@@ -2945,7 +3005,7 @@ export function TransferPanel({ director }) {
               ? html`<div style=${S.error}>${error}</div>`
               : html`<div style=${S.status}></div>`
         }
-        <div style=${{ borderTop: "1px solid #333", marginTop: "8px", paddingTop: "6px", display: "flex", flexDirection: "column", gap: "4px" }}>
+        <div style=${{ borderTop: "1px solid #333", display: "flex", flexDirection: "column", gap: "4px" }}>
           <div style=${{ fontSize: "10px", fontWeight: "bold", color: "#888", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 2px 2px" }}>${t("Add subject (additionSubject)")}</div>
           <div style=${{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
             ${

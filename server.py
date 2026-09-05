@@ -20,6 +20,19 @@ from .api_config import api_config_manager
 
 API_PREFIX = "/minimax_ref/api"
 
+
+async def _await_llm_work(fn, *args, **kwargs):
+    """把同步 LLM 工作丢到默认线程池执行并等待结果。
+
+    LLM 生成（本地 llama-cpp 推理 / 云 API / Ollama 的同步 HTTP 阻塞，最长可达
+    数分钟）若直接在 aiohttp handler 里调用会冻结整个事件循环：前端轮询、
+    /interrupt、取消、ws 进度推送全部停摆。挪到线程后事件循环保持响应；
+    同时刻多个请求只放一个进线程（lib.llm._LLM_INFER_LOCK 排队），其余在
+    线程池等待，不再并发抢共享 llama 模型与显存。
+    """
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
 # --- 惰性路由注册 ---
 # `PromptServer.instance` 要到 ComfyUI 真正构造 PromptServer() 后才被赋值。
 # 本模块可能在 instance 就绪之前被导入（例如被其他自定义节点提前 import），
@@ -187,7 +200,8 @@ async def unload_llama_models_api(request: web.Request) -> web.Response:
     try:
         from .lib.llm import unload_llama_models as _unload
 
-        _unload()
+        # 卸载走线程池（close()/gc/empty_cache 在锁内执行，排队等待进行中的推理）
+        await asyncio.to_thread(_unload)
         return web.json_response({"success": True, "unloaded": True})
     except Exception as e:
         traceback.print_exc()
@@ -216,25 +230,31 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
             if not gguf_path:
                 return web.json_response({"success": False, "error": "gguf_path is required (no GGUF found under models/llm)"}, status=400)
             mmproj_path = _resolve_llm_file(mmproj_path)
-            prompt_data = image_analysis(gguf_path, mmproj_path, prompt, image_path, seed)
+            work = lambda: image_analysis(gguf_path, mmproj_path, prompt, image_path, seed)
         elif vlm_mode == "ollama":
-            image = load_image_tensor(image_path) if image_path else None
-            text = generate_prompt_with_ollama(
-                image=image, prompt=prompt,
-                model=data.get("ollama_model", ""),
-                base_url=data.get("ollama_base_url", ""),
-                api_key=data.get("api_key", ""),
-                seed=seed,
-            )
-            prompt_data = {"detailed_description": text}
+            model = data.get("ollama_model", "")
+            base_url = data.get("ollama_base_url", "")
+            api_key = data.get("api_key", "")
+
+            def work():
+                image = load_image_tensor(image_path) if image_path else None
+                text = generate_prompt_with_ollama(
+                    image=image, prompt=prompt, model=model,
+                    base_url=base_url, api_key=api_key, seed=seed,
+                )
+                return {"detailed_description": text}
         else:
             provider = data.get("provider", "GLM")
             api_key = data.get("api_key", "")
-            image = load_image_tensor(image_path) if image_path else None
-            text = generate_prompt_with_api(
-                image=image, prompt=prompt, provider=provider, api_key=api_key, seed=seed
-            )
-            prompt_data = {"detailed_description": text}
+
+            def work():
+                image = load_image_tensor(image_path) if image_path else None
+                text = generate_prompt_with_api(
+                    image=image, prompt=prompt, provider=provider,
+                    api_key=api_key, seed=seed,
+                )
+                return {"detailed_description": text}
+        prompt_data = await _await_llm_work(work)
         return web.json_response({"success": True, "prompt_data": prompt_data})
     except Exception as e:
         traceback.print_exc()
@@ -291,12 +311,15 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             # model / base_url 允许为空：generate_prompt_with_ollama 会回落
             # API 管理器 ollama 服务配置 / 内置默认值（http://localhost:11434）
             pass
-        json_data = generate_h3_prompt(prompt=prompt, image_path=image_path, seed=seed,
-                                       vlm_mode=vlm_mode, options=options,
-                                       duration_seconds=duration_seconds, lang=lang,
-                                       camera_motion=camera_motion, expression=expression,
-                                       expression_catalog=expression_catalog,
-                                       shot_size=shot_size, framing=framing)
+        work = lambda: generate_h3_prompt(
+            prompt=prompt, image_path=image_path, seed=seed,
+            vlm_mode=vlm_mode, options=options,
+            duration_seconds=duration_seconds, lang=lang,
+            camera_motion=camera_motion, expression=expression,
+            expression_catalog=expression_catalog,
+            shot_size=shot_size, framing=framing,
+        )
+        json_data = await _await_llm_work(work)
         return web.json_response({"success": True, "json_data": json_data})
     except Exception as e:
         traceback.print_exc()
