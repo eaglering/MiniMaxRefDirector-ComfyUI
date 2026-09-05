@@ -1147,11 +1147,11 @@ def _expression_note(expression: str | list = "", expression_catalog: list | Non
 
     lang="zh" 时输出整段中文指令与中文例句，配合中文输出语言；lang 其他值维持
     英文原版。与 _camera_motion_note 不同：微表情是表演描写而非 LoRA 触发词，允许
-    并鼓励按输出语言自然意译。多选时要求 LLM 依据每个 [Shot N] 的人物状态与情绪
-    挑选最契合的 Cue 织入该镜头表演描述，镜头可自然组合 1-2 个克制细节，不必全部
-    使用，禁止夸张哑剧化。选中 ≤3 类时每类列 2 条示例，>3 类时每类列 1 条，控制
-    注入 token。自定义词条（expression_catalog 中非内置 key）无固定例句，指示模型
-    按 label/title 自然展开。
+    并鼓励按输出语言自然意译。多选时为强约束：LLM 依据每个 [Shot N] 的人物状态与
+    情绪把所选 Cue 分配织入对应镜头表演描述，单镜头最多自然组合 1-2 个克制细节，
+    每个选中的 Cue 在 detailed_description 全文中必须至少出现一次，禁止夸张哑剧化。
+    选中 ≤3 类时每类列 2 条示例，>3 类时每类列 1 条，控制注入 token。自定义词条
+    （expression_catalog 中非内置 key）无固定例句，指示模型按 label/title 自然展开。
     """
     keys = _normalize_expressions(expression, expression_catalog)
     if not keys:
@@ -1172,8 +1172,10 @@ def _expression_note(expression: str | list = "", expression_catalog: list | Non
         )
         if many:
             lines.append(
-                "按各镜头的情绪与节奏挑选使用：单镜头最多自然组合两个细微细节"
-                "（例如“别开视线”时“嘴角轻微绷紧”），所列细节不必全部出现。"
+                "按各镜头的情绪与节奏分配使用：单镜头最多自然组合两个细微细节"
+                "（例如“别开视线”时“嘴角轻微绷紧”）。"
+                "硬性底线：每个选中的 Cue 至少在一个出现该人物近景/中景的镜头中"
+                "自然体现一次（放在情绪最契合的镜头即可），遗漏任一选中 Cue 视为不合格。"
             )
         limit = 1 if many and len(keys) > 3 else 2
         for key in keys:
@@ -1199,8 +1201,10 @@ def _expression_note(expression: str | list = "", expression_catalog: list | Non
                     .format(desc)
                 )
         lines.append(
-            "不要把所列细节强塞进每一个镜头或每一处近景：整体表演保持自然，"
+            "不要把任一 Cue 强塞进每一个镜头或每一处近景，整体表演保持自然，"
             "也不要把 Cue 写成技术标签或指令性的句子。"
+            "唯一下限：所有选中的 Cue 必须各自在 detailed_description 全文中出现至少一次；"
+            "若写完发现某 Cue 无处安放，回到情绪最契合的镜头补一处克制描写，不得省略。"
         )
     else:
         lines.append("## Micro-expression & Acting Direction")
@@ -1212,9 +1216,11 @@ def _expression_note(expression: str | list = "", expression_catalog: list | Non
         )
         if many:
             lines.append(
-                "Choose whichever cues fit each shot's emotion and rhythm. A shot may combine "
-                "at most two subtle cues when the beat calls for it (e.g. a glance away with "
-                "a faint lip tighten); not every listed cue has to appear."
+                "Distribute the cues across shots by each shot's emotion and rhythm. A shot may "
+                "combine at most two subtle cues when the beat calls for it (e.g. a glance away "
+                "with a faint lip tighten), but EVERY selected cue MUST appear at least once in "
+                "a shot showing the character in a close or medium shot - place it in the shot "
+                "where it fits best; omitting any selected cue is an unacceptable output."
             )
         limit = 1 if many and len(keys) > 3 else 2
         for key in keys:
@@ -1237,8 +1243,12 @@ def _expression_note(expression: str | list = "", expression_catalog: list | Non
                     "language (e.g. {}) keeping the acting subtle and brief.".format(desc)
                 )
         lines.append(
-            "Do not force these cues into every shot or every close-up; leave the overall "
-            "performance natural, and never write the cue as a technical tag or instruction."
+            "Do not force any cue into every shot or every close-up; keep the overall "
+            "performance natural, and never write the cue as a technical tag or instruction. "
+            "One hard requirement: every selected cue must appear at least once somewhere in "
+            "the detailed_description (each in the shot where it fits best). If you finish and "
+            "a cue has no home, add one restrained mention to the most fitting shot rather than "
+            "dropping it."
         )
     return "\n".join(lines) + "\n"
 
