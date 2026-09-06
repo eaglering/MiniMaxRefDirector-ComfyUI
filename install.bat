@@ -101,10 +101,8 @@ call :install_dep ComfyUI-VideoHelperSuite https://github.com/Kosinkadink/ComfyU
 call :install_dep rgthree-comfy https://github.com/rgthree/rgthree-comfy
 call :install_dep ComfyUI-Easy-Use https://github.com/yolain/ComfyUI-Easy-Use
 call :install_dep ComfyUI-KJNodes https://github.com/kijai/ComfyUI-KJNodes
-call :install_dep TE-Speed-MiniMaxH3 https://github.com/tl2012tl/TE-Speed-MiniMaxH3
 call :install_dep ComfyUI-H3-Motion-Context-MultiRef https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef
-call :install_dep ComfyUI-H3-Latent-Upscaler-Mamad8 https://github.com/mamad8c/ComfyUI-H3-Latent-Upscaler-Mamad8
-call :install_dep ComfyUI-MiniMaxH3_LatentUpscaler https://github.com/Tr1dae/ComfyUI-MiniMaxH3_LatentUpscaler
+call :install_dep Comfyui_Minimax_h3_latent_Upscaler https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 
 :: ---------- 5. 安装本插件自身依赖 ----------
 :install_self

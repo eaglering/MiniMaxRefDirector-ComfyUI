@@ -2,7 +2,7 @@
   "id": "d89352c1-c074-4146-b204-cbcd02dd2ef3",
   "revision": 0,
   "last_node_id": 302,
-  "last_link_id": 939,
+  "last_link_id": 940,
   "nodes": [
     {
       "id": 149,
@@ -16,7 +16,7 @@
         82
       ],
       "flags": {},
-      "order": 36,
+      "order": 35,
       "mode": 0,
       "inputs": [
         {
@@ -49,32 +49,6 @@
       "bgcolor": "#000"
     },
     {
-      "id": 145,
-      "type": "MarkdownNote",
-      "pos": [
-        3076.8171772263872,
-        2945.284426364854
-      ],
-      "size": [
-        517.927579548314,
-        378.87032134392757
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "# MiniMaxRefDirector-ComfyUI 插件\n## 🔗 插件下载地址\n## **https://github.com/eaglering/MiniMaxRefDirector-ComfyUI**\n\n## 版本信息\n### v3.1.5\n\n### ComfyUI版本 0.34.0\n\nMiniMax 导演台参考图生视频工作流。\n更新功能：\n- 主体绑定器优化\n- 支持生成mv\n- 增加放大器\n- 全局参数输入的错误优化\n\n## 作者\nTenz-8"
-      ],
-      "widgets_values_named": {
-        "text": "# MiniMaxRefDirector-ComfyUI 插件\n## 🔗 插件下载地址\n## **https://github.com/eaglering/MiniMaxRefDirector-ComfyUI**\n\n## 版本信息\n### v3.1.5\n\n### ComfyUI版本 0.34.0\n\nMiniMax 导演台参考图生视频工作流。\n更新功能：\n- 主体绑定器优化\n- 支持生成mv\n- 增加放大器\n- 全局参数输入的错误优化\n\n## 作者\nTenz-8"
-      },
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
       "id": 19,
       "type": "VAELoader",
       "pos": [
@@ -86,7 +60,7 @@
         58
       ],
       "flags": {},
-      "order": 1,
+      "order": 0,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -133,7 +107,7 @@
         46
       ],
       "flags": {},
-      "order": 31,
+      "order": 30,
       "mode": 0,
       "inputs": [
         {
@@ -177,7 +151,7 @@
         130
       ],
       "flags": {},
-      "order": 2,
+      "order": 1,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -275,7 +249,7 @@
         46
       ],
       "flags": {},
-      "order": 27,
+      "order": 26,
       "mode": 0,
       "inputs": [
         {
@@ -318,7 +292,7 @@
         391.3113474614802
       ],
       "flags": {},
-      "order": 3,
+      "order": 2,
       "mode": 0,
       "inputs": [],
       "outputs": [],
@@ -345,7 +319,7 @@
         128.85854264355157
       ],
       "flags": {},
-      "order": 28,
+      "order": 27,
       "mode": 0,
       "inputs": [
         {
@@ -402,7 +376,7 @@
       "id": 178,
       "type": "ComfySwitchNode",
       "pos": [
-        5953.1398281210995,
+        5949.918808121099,
         3968.350363863792
       ],
       "size": [
@@ -412,8 +386,8 @@
       "flags": {
         "collapsed": true
       },
-      "order": 33,
-      "mode": 4,
+      "order": 32,
+      "mode": 0,
       "inputs": [
         {
           "name": "on_false",
@@ -469,8 +443,8 @@
         154
       ],
       "flags": {},
-      "order": 4,
-      "mode": 4,
+      "order": 3,
+      "mode": 0,
       "inputs": [],
       "outputs": [
         {
@@ -507,7 +481,7 @@
       "id": 214,
       "type": "TEFlashVSRModelLoader",
       "pos": [
-        5948.925987136816,
+        5945.704967136815,
         4012.8453013338985
       ],
       "size": [
@@ -515,8 +489,8 @@
         130
       ],
       "flags": {},
-      "order": 5,
-      "mode": 4,
+      "order": 4,
+      "mode": 0,
       "inputs": [],
       "outputs": [
         {
@@ -551,7 +525,7 @@
       "id": 216,
       "type": "TEFlashVSRRestore",
       "pos": [
-        5946.6760635626815,
+        5943.455043562681,
         4188.395640050861
       ],
       "size": [
@@ -559,8 +533,8 @@
         170
       ],
       "flags": {},
-      "order": 32,
-      "mode": 4,
+      "order": 31,
+      "mode": 0,
       "inputs": [
         {
           "name": "model",
@@ -596,13 +570,13 @@
       "widgets_values": [
         2,
         true,
-        894919132338004,
+        548030836189229,
         "randomize"
       ],
       "widgets_values_named": {
         "scale": 2,
         "color_fix": true,
-        "seed": 894919132338004,
+        "seed": 548030836189229,
         "control_after_generate": "randomize"
       },
       "color": "#222",
@@ -612,7 +586,7 @@
       "id": 215,
       "type": "TEFlashVSRTuning",
       "pos": [
-        6231.060755382938,
+        6227.839735382937,
         3968.921177198893
       ],
       "size": [
@@ -620,8 +594,8 @@
         298
       ],
       "flags": {},
-      "order": 6,
-      "mode": 4,
+      "order": 5,
+      "mode": 0,
       "inputs": [],
       "outputs": [
         {
@@ -680,8 +654,8 @@
       "flags": {
         "collapsed": true
       },
-      "order": 30,
-      "mode": 4,
+      "order": 29,
+      "mode": 0,
       "inputs": [
         {
           "name": "on_false",
@@ -730,7 +704,7 @@
       "id": 235,
       "type": "MarkdownNote",
       "pos": [
-        6230.236683332486,
+        6227.015663332485,
         4304.111692114902
       ],
       "size": [
@@ -738,8 +712,8 @@
         102.64100000000053
       ],
       "flags": {},
-      "order": 7,
-      "mode": 4,
+      "order": 6,
+      "mode": 0,
       "inputs": [],
       "outputs": [],
       "properties": {},
@@ -764,7 +738,7 @@
         427.88777497979527
       ],
       "flags": {},
-      "order": 34,
+      "order": 33,
       "mode": 0,
       "inputs": [
         {
@@ -873,7 +847,7 @@
         158
       ],
       "flags": {},
-      "order": 17,
+      "order": 18,
       "mode": 0,
       "inputs": [
         {
@@ -964,7 +938,7 @@
         106
       ],
       "flags": {},
-      "order": 35,
+      "order": 34,
       "mode": 0,
       "inputs": [
         {
@@ -1029,7 +1003,7 @@
         106
       ],
       "flags": {},
-      "order": 8,
+      "order": 7,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -1078,7 +1052,7 @@
         250
       ],
       "flags": {},
-      "order": 25,
+      "order": 24,
       "mode": 0,
       "inputs": [
         {
@@ -1222,8 +1196,8 @@
         266
       ],
       "flags": {},
-      "order": 29,
-      "mode": 4,
+      "order": 28,
+      "mode": 0,
       "inputs": [
         {
           "name": "model",
@@ -1313,7 +1287,7 @@
         106
       ],
       "flags": {},
-      "order": 24,
+      "order": 23,
       "mode": 0,
       "inputs": [
         {
@@ -1361,8 +1335,8 @@
         106
       ],
       "flags": {},
-      "order": 26,
-      "mode": 4,
+      "order": 25,
+      "mode": 0,
       "inputs": [
         {
           "name": "model",
@@ -1409,7 +1383,7 @@
         480
       ],
       "flags": {},
-      "order": 23,
+      "order": 22,
       "mode": 0,
       "inputs": [
         {
@@ -1475,7 +1449,7 @@
         58
       ],
       "flags": {},
-      "order": 9,
+      "order": 8,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -1510,54 +1484,6 @@
       "bgcolor": "#000"
     },
     {
-      "id": 240,
-      "type": "MiniMaxRefSubject",
-      "pos": [
-        3034.9836684814554,
-        3408.957179799844
-      ],
-      "size": [
-        539.0176128285452,
-        748
-      ],
-      "flags": {},
-      "order": 10,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "config",
-          "type": "SUBJECT_CONFIG",
-          "links": [
-            744
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "MiniMaxRefDirector-ComfyUI",
-        "ver": "873c6dc4d8af3c5bc71a41e521a00819db62a9a1",
-        "Node name for S&R": "MiniMaxRefSubject"
-      },
-      "widgets_values": [
-        "llama-cpp",
-        "Qwen3-VL-8B-Instruct-Q5_K_M.gguf",
-        "mmproj-BF16.gguf",
-        "{\"subjects\":[{\"name\":\"虞姬\",\"description\":\"参考<@图片1>中的角色，东亚冷艳魅惑美人，半束高髻，散落部分黑发，红金镶嵌曲裾，猩红薄纱披帛，玉珠步摇；眼尾上挑，绛红唇，肩胛骨轮廓自然平滑。\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"半束高髻，红金镶嵌曲裾，猩红薄纱披帛。\",\"videoFile\":\"\",\"uid\":\"14232aeb-eaa2-4875-bf3c-440534200084\",\"ownerUid\":\"\"},{\"name\":\"美女脸部\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/face.png\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"ffd391c0-d5b8-4836-ab7a-20db13f2b743\",\"ownerUid\":\"\"},{\"name\":\"美女身体\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/body.png\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"72deceec-27d4-4350-b8fc-c31b99e15aad\",\"ownerUid\":\"\"},{\"name\":\"\",\"description\":\"\",\"type\":\"Audio\",\"relationship\":\"fully_copy\",\"imageFile\":\"\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"5082bef3-b658-4107-8739-5f5caa853237\",\"ownerUid\":\"\"},{\"name\":\"\",\"description\":\"\",\"type\":\"Video\",\"relationship\":\"fully_preserved\",\"imageFile\":\"\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"58cd61f2-ba60-457e-948f-fe63b4be2ebe\",\"ownerUid\":\"\"},{\"name\":\"图片1\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"\",\"imageFile\":\"minimaxrefdirector/ComfyUI_temp_ttypn_00007_.png\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"8b033ad4-efd2-4757-8da3-e69354ee1c2a\",\"ownerUid\":\"14232aeb-eaa2-4875-bf3c-440534200084\"}]}",
-        5,
-        "真人实拍，电影 MV，真实人脸皮肤纹理，高级古典魅惑，楚汉垓下，狼烟薄雾",
-        ""
-      ],
-      "widgets_values_named": {
-        "vlm_mode": "llama-cpp",
-        "vlm_mode.gguf_name": "Qwen3-VL-8B-Instruct-Q5_K_M.gguf",
-        "vlm_mode.mmproj_path": "mmproj-BF16.gguf",
-        "subject_data": "{\"subjects\":[{\"name\":\"虞姬\",\"description\":\"参考<@图片1>中的角色，东亚冷艳魅惑美人，半束高髻，散落部分黑发，红金镶嵌曲裾，猩红薄纱披帛，玉珠步摇；眼尾上挑，绛红唇，肩胛骨轮廓自然平滑。\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"半束高髻，红金镶嵌曲裾，猩红薄纱披帛。\",\"videoFile\":\"\",\"uid\":\"14232aeb-eaa2-4875-bf3c-440534200084\",\"ownerUid\":\"\"},{\"name\":\"美女脸部\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/face.png\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"ffd391c0-d5b8-4836-ab7a-20db13f2b743\",\"ownerUid\":\"\"},{\"name\":\"美女身体\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"fully_preserved\",\"imageFile\":\"minimaxrefdirector/body.png\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"72deceec-27d4-4350-b8fc-c31b99e15aad\",\"ownerUid\":\"\"},{\"name\":\"\",\"description\":\"\",\"type\":\"Audio\",\"relationship\":\"fully_copy\",\"imageFile\":\"\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"5082bef3-b658-4107-8739-5f5caa853237\",\"ownerUid\":\"\"},{\"name\":\"\",\"description\":\"\",\"type\":\"Video\",\"relationship\":\"fully_preserved\",\"imageFile\":\"\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"58cd61f2-ba60-457e-948f-fe63b4be2ebe\",\"ownerUid\":\"\"},{\"name\":\"图片1\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"\",\"imageFile\":\"minimaxrefdirector/ComfyUI_temp_ttypn_00007_.png\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"8b033ad4-efd2-4757-8da3-e69354ee1c2a\",\"ownerUid\":\"14232aeb-eaa2-4875-bf3c-440534200084\"}]}",
-        "subject_count": 5,
-        "global_prompt": "真人实拍，电影 MV，真实人脸皮肤纹理，高级古典魅惑，楚汉垓下，狼烟薄雾",
-        "minimax_subject_ui": ""
-      }
-    },
-    {
       "id": 113,
       "type": "KSamplerSelect",
       "pos": [
@@ -1569,7 +1495,7 @@
         58
       ],
       "flags": {},
-      "order": 11,
+      "order": 9,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -1608,7 +1534,7 @@
         82
       ],
       "flags": {},
-      "order": 12,
+      "order": 10,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -1637,84 +1563,6 @@
       "bgcolor": "#000"
     },
     {
-      "id": 301,
-      "type": "MarkdownNote",
-      "pos": [
-        4971.286479321174,
-        3721.9301605603687
-      ],
-      "size": [
-        347.3848303660943,
-        132.33976166996945
-      ],
-      "flags": {},
-      "order": 13,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "```\n如果内存不足可以开启MiniMax H3 Low VRAM Attention(不可以和MiniMax H3 Chunk FeedForward一起使用)\n```\n```\n测试建议加上te-speed和4/8步lora\n```\n```\n打斗场景下开启H3_Combat_V2和Motion_Repair两个lora\n```\n```\n跑步等快速运动场景可单独开启Motion_Repair\n```"
-      ],
-      "widgets_values_named": {
-        "text": "```\n如果内存不足可以开启MiniMax H3 Low VRAM Attention(不可以和MiniMax H3 Chunk FeedForward一起使用)\n```\n```\n测试建议加上te-speed和4/8步lora\n```\n```\n打斗场景下开启H3_Combat_V2和Motion_Repair两个lora\n```\n```\n跑步等快速运动场景可单独开启Motion_Repair\n```"
-      },
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
-      "id": 302,
-      "type": "TESpeedMiniMaxH3",
-      "pos": [
-        4581.675455910483,
-        3894.74822973549
-      ],
-      "size": [
-        346.640625,
-        178
-      ],
-      "flags": {},
-      "order": 18,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 938
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            939
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "TESpeedMiniMaxH3"
-      },
-      "widgets_values": [
-        0.08,
-        0.1,
-        0.9,
-        2,
-        "auto",
-        "standard"
-      ],
-      "widgets_values_named": {
-        "processing_control_value": 0.08,
-        "processing_percent_1": 0.1,
-        "processing_percent_2": 0.9,
-        "mcs": 2,
-        "device": "auto",
-        "mode": "standard"
-      },
-      "color": "#222",
-      "bgcolor": "#000"
-    },
-    {
       "id": 286,
       "type": "MiniMaxLowVRAMAttention",
       "pos": [
@@ -1727,7 +1575,7 @@
       ],
       "flags": {},
       "order": 19,
-      "mode": 4,
+      "mode": 0,
       "inputs": [
         {
           "name": "model",
@@ -1784,7 +1632,7 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            931
+            940
           ]
         }
       ],
@@ -1800,21 +1648,21 @@
       "id": 300,
       "type": "MiniMaxChunkFeedForward",
       "pos": [
-        4583.466774946173,
-        4372.298560560354
+        4582.256774946173,
+        4285.178560560352
       ],
       "size": [
         348.5906687500004,
         83.61051000000043
       ],
       "flags": {},
-      "order": 22,
+      "order": 21,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 937
+          "link": 940
         }
       ],
       "outputs": [
@@ -1843,24 +1691,24 @@
       "bgcolor": "#000"
     },
     {
-      "id": 295,
-      "type": "MiniMaxH3FusedModulation",
+      "id": 302,
+      "type": "TESpeedMiniMaxH3",
       "pos": [
-        4583.162175245542,
-        4273.015054831113
+        4581.675455910483,
+        3894.74822973549
       ],
       "size": [
-        348.9047531250002,
-        58
+        346.640625,
+        178
       ],
       "flags": {},
-      "order": 21,
-      "mode": 0,
+      "order": 17,
+      "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 931
+          "link": 938
         }
       ],
       "outputs": [
@@ -1868,140 +1716,131 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            937
+            939
           ]
         }
       ],
       "properties": {
-        "aux_id": "Saganaki22/ComfyUI-sol-attn",
-        "ver": "930a4d6e432ff8b8ed5e30ff2f72519b92d69bdf",
-        "Node name for S&R": "MiniMaxH3FusedModulation"
+        "Node name for S&R": "TESpeedMiniMaxH3"
       },
       "widgets_values": [
-        true
+        0.12,
+        0.1,
+        0.9,
+        2,
+        "auto",
+        "standard"
       ],
       "widgets_values_named": {
-        "enabled": true
+        "processing_control_value": 0.12,
+        "processing_percent_1": 0.1,
+        "processing_percent_2": 0.9,
+        "mcs": 2,
+        "device": "auto",
+        "mode": "standard"
       },
       "color": "#222",
       "bgcolor": "#000"
     },
     {
-      "id": 241,
-      "type": "MiniMaxRefDirector",
+      "id": 301,
+      "type": "MarkdownNote",
       "pos": [
-        3592.4110312628454,
-        3400.6000245634536
+        4971.286479321174,
+        3721.9301605603687
       ],
       "size": [
-        946.2371181548369,
-        1191
+        347.3848303660943,
+        132.33976166996945
       ],
-      "flags": {
-        "pinned": true
-      },
-      "order": 15,
+      "flags": {},
+      "order": 11,
       "mode": 0,
-      "inputs": [
-        {
-          "name": "config",
-          "shape": 7,
-          "type": "SUBJECT_CONFIG",
-          "link": 744
-        }
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "```\n如果内存不足可以开启MiniMax H3 Low VRAM Attention(不可以和MiniMax H3 Chunk FeedForward一起使用)\n```\n```\n测试建议加上te-speed和4/8步lora\n```\n```\n打斗场景下开启H3_Combat_V2和Motion_Repair两个lora\n```\n```\n跑步等快速运动场景可单独开启Motion_Repair\n```"
       ],
+      "widgets_values_named": {
+        "text": "```\n如果内存不足可以开启MiniMax H3 Low VRAM Attention(不可以和MiniMax H3 Chunk FeedForward一起使用)\n```\n```\n测试建议加上te-speed和4/8步lora\n```\n```\n打斗场景下开启H3_Combat_V2和Motion_Repair两个lora\n```\n```\n跑步等快速运动场景可单独开启Motion_Repair\n```"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 240,
+      "type": "MiniMaxRefSubject",
+      "pos": [
+        3034.9836684814554,
+        3408.957179799844
+      ],
+      "size": [
+        539.0176128285452,
+        740
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [],
       "outputs": [
         {
-          "name": "guide_data",
-          "type": "GUIDE_DATA",
+          "name": "config",
+          "type": "SUBJECT_CONFIG",
           "links": [
-            745
-          ]
-        },
-        {
-          "name": "segment_count",
-          "type": "INT",
-          "links": [
-            746
-          ]
-        },
-        {
-          "name": "frame_rate",
-          "type": "FLOAT",
-          "links": [
-            747
+            744
           ]
         }
       ],
       "properties": {
         "cnr_id": "MiniMaxRefDirector-ComfyUI",
         "ver": "873c6dc4d8af3c5bc71a41e521a00819db62a9a1",
-        "Node name for S&R": "MiniMaxRefDirector",
-        "mainTrackEnabled": true,
-        "audioTrackEnabled": true,
-        "audioTrackWasEnabledBeforeOverride": false,
-        "inpaint_audio": false,
-        "override_audio": false,
-        "overrideAudio": false,
-        "showFilenames": true,
-        "use_custom_audio": false,
-        "frame_rate": 24,
-        "display_mode": "seconds",
-        "custom_width": 0,
-        "custom_height": 0,
-        "resize_method": "maintain aspect ratio",
-        "divisible_by": 32,
-        "img_compression": 18,
-        "guide_strength": "",
-        "local_prompts": "虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点 | 虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮 | 虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影 | 室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏",
-        "segment_lengths": "315.7298903209605,343.0814613559403,240,208.1886483230992",
-        "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":610,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":1440,\"normalDurationFrames\":1107,\"defaultCameraMotions\":[],\"segments\":[{\"id\":\"17883539158307l8\",\"start\":0,\"length\":264,\"prompt\":\"垓下残破楚军军帐夜景，破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾，虞姬正对镜头站立，红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起，帐外投射乌骓战马黑色剪影，冷月光从帐门照入，电影质感，浅景深，慢镜头，悲壮破碎氛围感\\n虞姬对口型演绎男声叙事段落，嘴唇开合克制轻柔，无夸张舞台动作，眼底藏淡淡哀意。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下残破楚军军帐内的夜景中，身着红金曲裾汉服，手持短剑，对镜头对口型演绎男声叙事段落，背景有烛火摇曳、狼烟薄雾与乌骓战马剪影，整体氛围悲壮破碎，风格为电影质感浅景深慢镜头。\",\"detailed_description\":\"[Shot 1] At 00:00.000，镜头缓缓向<@虞姬>推近（camera motion, slow push-in on the subject），她正对镜头站立于残破楚军军帐内，身着红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起。帐内破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾弥漫，帐外投射乌骓战马黑色剪影，冷月光从帐门斜照入，浅景深构图，慢镜头节奏，氛围悲壮破碎。[Shot 2] At 00:05.000，镜头继续平稳前推，聚焦于<@虞姬>面部特写，她嘴唇开合克制轻柔，对口型演绎男声叙事段落，眼底藏淡淡哀意，无夸张舞台动作，背景烛火与月光持续摇曳，氛围维持悲壮破碎。[Shot 3] At 00:11.000，镜头在近景处稳定，<@虞姬>保持持剑姿态，对口型动作收束，画面定格于她凝视镜头的哀婉神情，背景军帐与战马剪影在慢镜头中渐隐，电影质感持续。\",\"overall_soundscape\":\"帐内烛火噼啪轻响，帐外狼烟微弱呼啸，冷月光透过帐门投下细微沙沙声，整体环境静谧压抑，无明显脚步或兵器碰撞声。\",\"non_diegetic_music\":\"N/A\"},\"upscale\":false,\"guideStrength\":5,\"secondPass\":false,\"expressions\":[],\"shotSizes\":[],\"framings\":[],\"cameraMotions\":[\"push_in\"]},{\"id\":\"1788570957030tr177\",\"start\":264,\"length\":243.79305931567262,\"prompt\":\"虞姬半侧脸近景，大半张脸隐于军帐阴影，绛红唇，凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒面部轮廓，眼神望向帐外虚空，眼底藏哀\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>的半侧脸特写，其面部隐于军帐阴影中，绛红唇与凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒轮廓，眼神望向帐外虚空，眼底藏哀。\",\"detailed_description\":\"[Shot 1] 镜头缓缓向<@虞姬>的半侧脸推近，肩部以上构图，面部占据画面主导，烛火在帐内摇曳，勾勒出她绛红的唇与凤眼眼尾微挑的弧度，玉珠步摇在微光中轻颤，眼神望向帐外虚空，眼底藏哀。镜头保持稳定，无明显移动，仅以推近强化情绪张力（camera motion, slow push-in on the subject）。\",\"overall_soundscape\":\"军帐内低沉的布帛摩擦声与烛火微弱的噼啪声交织，环境安静而压抑。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"push_in\"],\"expressions\":[\"turn_away\"],\"shotSizes\":[\"close_up\"]},{\"id\":\"1788352810045yqkw5\",\"start\":507.7930593156726,\"length\":220.40191188631286,\"prompt\":\"虞姬站军帐之内，红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，唱到： “当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，烛火柔光，背景虚化残破帷幔，高级古典魅惑\",\"type\":\"text\",\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐内以中近景呈现，身着红金曲裾与猩红披帛，手指轻拂衣袍，唱出“当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，背景为虚化的残破帷幔与烛火柔光。\",\"detailed_description\":\"[Shot 1] 中近景，镜头偏向<@虞姬>的脸庞，她身着红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，烛火柔光映照其面庞，背景虚化残破帷幔。镜头先推近至面部特写，再缓缓拉回至胸部以上构图，带出往复的呼吸感（camera motion, slow push-in and pull-out on the subject）。<@虞姬>眼尾泛红含泪，神情凄艳决绝，开口唱出：<#虞姬:当乱世漂泊，江边应你，一生唤我虞姬>。镜头保持稳定，无明显晃动，仅以推拉节奏配合情绪起伏。\",\"overall_soundscape\":\"烛火轻响与低沉的室内底噪交织，背景隐约有风穿过残破帷幔的窸窣声。\",\"non_diegetic_music\":\"克制的古筝独奏，速度缓慢，旋律哀婉，无明显渐强或渐弱起伏。\"},\"guideStrength\":22,\"autoEndFrame\":true,\"cameraMotions\":[\"push_pull\"],\"shotSizes\":[\"medium_close_up\"],\"expressions\":[\"turn_away\"]},{\"id\":\"1788571115153jyr9v\",\"start\":728.1949712019855,\"length\":216.19721474017535,\"prompt\":\"转场至乌江江畔月夜，寒月高悬夜空，地面散落残破战甲，虞姬伫立江边，江风肆意吹动长发与猩红披帛，身姿孤冷\\n垓下乌江江畔寒夜，一轮冷月高悬，地面散落破碎战甲，虞姬站在江边，红金长裙被江风狂吹，银色月光铺满江面，神情悠远怅惘，远处隐约军营烽火微光\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>伫立于乌江江畔月夜，寒月高悬，地面散落破碎战甲，江风狂吹其红金长裙与披帛，神情怅惘悠远，远处隐约军营烽火微光。\",\"detailed_description\":\"[Shot 1] 大特写落在<@虞姬>骤然睁大的眼睛上，瞳孔映着冷月余光，睫毛微颤，唇角无言，银色月光在眼底流淌，江风掠过发梢，猩红披帛如血痕般飘动。镜头徐徐拉远，露出四周残破战甲散落的江岸，<@虞姬>孤身伫立，红金长裙被狂风撕扯成舞动的旗帜。At 00:03.000，镜头继续后移成全景，衬出人物在浩渺江天中的渺小，江面银光铺展，远处军营烽火微光如鬼火闪烁，<@虞姬>凝望远方，神情悠远怅惘，长发与披帛在风中狂舞如泣如诉。\",\"overall_soundscape\":\"江风呼啸掠过残甲与披帛，远处军营篝火噼啪低响，月光下水波轻拍江岸，寒夜寂静中透出肃杀底噪。\",\"non_diegetic_music\":\"N/A\"},\"shotSizes\":[\"extreme_close_up\"],\"cameraMotions\":[\"pull_back\"]},{\"id\":\"17885713235945vzj6\",\"start\":944.3921859421608,\"length\":266.05603649715385,\"prompt\":\"垓下乌江江畔寒夜，冷月悬空，江面波光映月，虞姬伫立风中，长发披帛飞扬，唱到：“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，淡淡狼烟弥漫，电影质感慢镜头\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下乌江江畔寒夜的中近景，冷月悬空，江面波光映月，她长发披帛飞扬，唱出“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，背景有淡淡狼烟弥漫，整体为电影质感慢镜头。\",\"detailed_description\":\"[Shot 1] 中近景，镜头水平缓摇，扫过<@虞姬>伫立风中的侧影，长发披帛随风飞扬，背景是寒夜乌江，冷月悬空，江面波光映月，淡淡狼烟弥漫。镜头聚焦于<@虞姬>的面部与肩部，捕捉其决绝刚烈的神情。画面以电影质感慢镜头呈现，氛围肃杀而悲壮。At 00:03.000, 镜头稳定，<@虞姬>开口唱出：<#虞姬:若楚歌四起，无路退已，我也绝无悔意>。At 00:08.000, 镜头继续缓摇，带出她身后更广阔的江面与狼烟，但始终维持中近景构图，聚焦其面部表情与歌声的张力。\",\"overall_soundscape\":\"寒夜江畔的风声低回，远处隐约有楚歌余韵，江面波光轻响，狼烟飘散时带出细微的燃烧气息。\",\"non_diegetic_music\":\"\"},\"shotSizes\":[\"medium_close_up\"],\"cameraMotions\":[\"pan\"]},{\"id\":\"1788615722184315vu\",\"start\":1210.4482224393146,\"length\":229.11907263746866,\"prompt\":\"切回残破军帐，虞姬持短剑缓缓起舞，红金曲裾舒展旋转，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动.\\n虞姬在残破军帐持剑起舞，红金曲裾旋转飞扬，猩红披帛漫天飞舞，短剑流转冷光，烛火明暗闪烁，狼烟弥漫，唱到：“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮\",\"type\":\"video\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐中持短剑缓缓起舞，红金曲裾旋转飞扬，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动，唱到“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮。\",\"detailed_description\":\"[Shot 1] At 00:00.000，<@虞姬>立于残破军帐中央，身着红金曲裾与猩红披帛，手持短剑，烛火在帐角明灭，狼烟从帐外淡淡浮动。镜头从侧面缓缓环绕一周（camera motion, slow orbit around the subject），展现其衣袂翻飞与剑光流转。无对话。[Shot 2] At 00:03.000，<@虞姬>开始旋转，曲裾如火焰般舒展，披帛在空中划出大弧度轨迹，短剑冷光闪烁，烛火随动作明暗摇曳。镜头持续环绕，速度平稳，保持中景构图。[Shot 3] At 00:06.000，<@虞姬>舞至高潮，披帛如血色绸缎漫天飞舞，剑光与烛火交织，狼烟渐浓。镜头环绕加速，从正前方转至侧后方，捕捉其眼神魅惑悲壮。[Shot 4] At 00:09.000，<@虞姬>停转，剑尖轻点地面，披帛缓缓收拢，烛火微弱，狼烟淡去。镜头环绕减速，定格于其凝视远方的侧脸。唱词：<#虞姬:亲爱的霸王该散了啊，准臣妾举剑为你一舞啊>。\",\"overall_soundscape\":\"军帐内烛火噼啪轻响，风穿过破洞帐布的低啸，远处隐约有狼烟燃烧的微弱噼啪声。\",\"non_diegetic_music\":\"\"},\"cameraMotions\":[\"orbit\"],\"trimStart\":0,\"videoDurationFrames\":221,\"imageFile\":\"whatdreamscost/prompt_00193.mp4\",\"fileName\":\"prompt_00193.mp4\",\"fileSize\":3332689,\"imageB64\":\"/api/view?filename=prompt_00193.mp4&type=input&subfolder=whatdreamscost\"},{\"id\":\"1788571965423vn82q\",\"start\":1439.5672950767832,\"length\":316.1625952441773,\"prompt\":\"虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐中舞剑至高潮，抬手斩断一缕长发，发丝飘落，眼底泪光闪烁，画面具破碎感，伴随歌词“最后再断一缕我的长发，不让你有牵挂”，烛火摇曳，胶片颗粒，慢镜头卡点。\",\"detailed_description\":\"[Shot 1] 中景镜头，<@虞姬>立于军帐中央，红纱飞扬，烛火在背景摇曳，胶片颗粒感明显，手持跟拍，与人物步伐同步移动，镜头平稳跟随其舞剑动作。[Shot 2] At 00:04.500，中近景，镜头聚焦<@虞姬>面部，眼底泪光闪烁，神情凄美决绝，手持跟拍，轻微晃动模拟真实手持感，同步其抬手断发动作。[Shot 3] At 00:08.200，中景镜头，<@虞姬>挥剑断发，发丝在空中缓缓飘落，红纱随风扬起，烛火摇曳，手持跟拍，镜头缓慢推近，捕捉发丝飘落与泪珠滑落的慢镜头卡点。[Shot 4] At 00:12.000，中近景，<@虞姬>凝视断发，唇角微颤，唱出<#虞姬:最后再断一缕我的长发，不让你有牵挂>，镜头轻微晃动，胶片颗粒持续，手持跟拍保持与人物同步。\",\"overall_soundscape\":\"军帐内烛火轻响与布料摩擦声，伴随缓慢的呼吸声与剑刃轻颤声，整体环境安静而压抑。\",\"non_diegetic_music\":\"缓慢的弦乐铺底，配以低沉的打击乐节奏，情绪渐强，无明显起伏变化。\"},\"shotSizes\":[\"medium\",\"medium_close_up\"],\"cameraMotions\":[\"tracking\"]},{\"id\":\"1788615765936ggg\",\"start\":1755.7298903209605,\"length\":343.0814613559403,\"prompt\":\"虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐内继续剑舞，身段灵动凌厉，短剑寒光流转，发丝飞扬，狼烟弥漫，光影明暗交错，尽显乱世诀别悲壮。\",\"detailed_description\":\"[Shot 1] <@虞姬>立于残破军帐中央，身着战袍，手持短剑，剑尖寒光闪烁，发丝随风飞扬，帐内狼烟缭绕，光影明暗交错，背景布满破损帷幔与残兵遗物。镜头缓缓环绕<@虞姬>一周（camera motion, slow orbit around the subject），从侧面逐渐转至正前方，突出其凌厉柔美的身姿与悲壮眼神。[Shot 2] At 00:07.150，<@虞姬>剑势骤变，短剑划出凌厉弧光，发丝随剑势飞扬，帐内狼烟更浓，光影明暗交替加剧，背景残破更显凄凉。镜头继续环绕<@虞姬>半圈（camera motion, steady orbit），保持中景，突出剑光与眼神的苍凉悲壮。[Shot 3] At 00:14.300，<@虞姬>剑舞收势，短剑轻点地面，发丝垂落，眼神凝望远方，帐内狼烟渐散，光影柔和，氛围悲怆而决绝。镜头环绕至正后方，缓慢拉远（camera motion, slow pull-out），展现其孤身立于残破之中的悲壮身影。\",\"overall_soundscape\":\"帐内持续低沉的风声与狼烟燃烧的噼啪声，伴随短剑挥舞的金属轻响与布帛摩擦的窸窣声。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788572339106iml9l\",\"start\":2098.811351676901,\"length\":240,\"prompt\":\"虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围安静凄美。\",\"detailed_description\":\"[Shot 1] <@虞姬>身着红金汉服，头戴玉珠发饰，独坐于军帐案几前，面前立一青铜古镜，烛火自镜旁燃起，暖光在镜面投下朦胧叠影，映出她垂首静默的侧影。她双手横握短剑，指尖轻触剑刃，缓缓摩挲，动作缓慢而克制。背景为暗红帷幔，光线昏暗，仅烛火提供暖色光源，营造出虚实交织的凄美氛围。镜头固定，无移动，聚焦于人物中景，画面静谧无声。\",\"overall_soundscape\":\"整个视频仅有烛火微弱的噼啪声与轻微的空气流动声，环境安静，无其他物理声响。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"expressions\":[]},{\"id\":\"1788572572105kc2az\",\"start\":2338.811351676901,\"length\":208.6459223437064,\"prompt\":\"室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在室内烛火熄灭后自缢的场景，一束顶光从上方打下，剑柄移动瞬间血溅帐布，画面渐淡至全黑。\",\"detailed_description\":\"[Shot 1] 室内烛火骤然熄灭，光线骤减，画面陷入短暂黑暗，随后一束顶光从画面上方投射而下，照亮<@虞姬>举剑架于颈前的瞬间。镜头徐徐拉远，衬出人物在幽暗空间中的孤寂与决绝。[Shot 2] At 00:03.000，<@虞姬>的剑柄轻微移动，剑尖离颈一寸，她脸上浮起一个若有若无的浅笑，转瞬即逝，随即剑锋下压，颈间一寸血迹迸溅，染红帐布。镜头保持稳定，聚焦血迹飞溅的慢动作细节。[Shot 3] At 00:06.000，画面开始渐淡，光线随血迹扩散而减弱，最终完全黑屏，持续至视频结束。\",\"overall_soundscape\":\"整个视频仅保留烛火熄灭的轻微爆裂声与帐布被血渍浸透的细微撕裂声，无其他环境音。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"cameraMotions\":[\"pull_back\"],\"expressions\":[\"micro_smile\"]}],\"audioSegments\":[{\"id\":\"17885725956594sk5e\",\"type\":\"audio\",\"start\":0,\"length\":2547,\"trimStart\":194,\"audioDurationFrames\":5542,\"audioFile\":\"whatdreamscost/output.mp3\",\"fileName\":\"output.mp3\",\"waveformPeaks\":[0.00005679247988155112,0.000041974311898229644,0.30521538853645325,0.09662327915430069,0.08930108696222305,0.15318572521209717,0.3768981099128723,0.12570518255233765,0.19516882300376892,0.18190720677375793,0.377087265253067,0.17899605631828308,0.2620439827442169,0.5677979588508606,0.5125153064727783,0.29568344354629517,0.2731074094772339,0.44221416115760803,0.5375176072120667,0.47481101751327515,0.47532686591148376,0.2184172421693802,0.48713430762290955,0.3814827799797058,0.40066608786582947,0.37372276186943054,0.574090838432312,0.4990490674972534,0.4765162169933319,0.30677399039268494,0.4039900302886963,0.3793623447418213,0.27992069721221924,0.45843055844306946,0.4996296465396881,0.40584638714790344,0.4772692620754242,0.3557541072368622,0.4739164710044861,0.4109916090965271,0.39173537492752075,0.552890419960022,0.9211859703063965,0.6108586192131042,0.42901378870010376,0.5558953881263733,0.5147951245307922,0.417502760887146,0.3357221782207489,0.7685890197753906,0.7305847406387329,0.959312915802002,0.9466202259063721,0.7141651511192322,0.5808138251304626,0.7743545174598694,0.674588143825531,0.5905373692512512,0.521045446395874,0.7313892841339111,0.5733826160430908,0.679533064365387,0.4906621277332306,0.7209604978561401,0.6509173512458801,0.8790873885154724,0.8087895512580872,0.9676097631454468,0.9405258893966675,0.7915844917297363,0.7324215769767761,0.9142007231712341,0.8564584255218506,0.7931846380233765,0.6168761253356934,0.9178673028945923,0.5581566095352173,0.7446004152297974,0.5844618678092957,0.734371542930603,0.7712691426277161,0.6202580332756042,0.5978195667266846,0.9598470330238342,0.9468387961387634,0.8520397543907166,0.8647002577781677,0.8883702158927917,0.9139000773429871,0.7344744205474854,0.6635681390762329,0.8975549340248108,0.8639687299728394,0.8990455865859985,0.9520750045776367,0.8213480710983276,0.7593441605567932,0.7680613398551941,0.7739264965057373,0.9833949208259583,0.974017322063446,0.9480533599853516,0.8821832537651062,0.9253187775611877,0.9556866884231567,0.9233717322349548,0.9325433969497681,0.9614730477333069,0.9619655609130859,0.9747107028961182,0.9511860013008118,0.9460687637329102,0.964142918586731,0.969709575176239,1.080556035041809,1.0663827657699585,1.099945068359375,0.9890326857566833,1.061505675315857,1.0430761575698853,1.0524457693099976,1.0008474588394165,1.0051467418670654,1.0060069561004639,1.014053463935852,1.0332756042480469,1.0450031757354736,1.031327724456787,1.0353343486785889,1.0556583404541016,1.011139154434204,1.0362528562545776,1.0062540769577026,1.0703188180923462,1.0160784721374512,1.0517939329147339,1.0374677181243896,1.013624906539917,1.0026087760925293,1.1020841598510742,1.0534831285476685,1.0034328699111938,1.011326789855957,1.048912763595581,1.0085538625717163,1.1145703792572021,1.037919521331787,1.0477505922317505,1.0595916509628296,1.0008703470230103,1.0496978759765625,1.147497534751892,1.018002986907959,1.0256727933883667,1.0617053508758545,1.102467656135559,1.0101325511932373,1.00529944896698,1.0476634502410889,1.100989818572998,1.1175580024719238,1.0050896406173706,1.0065464973449707,0.9662586450576782,0.8715899586677551,0.849946916103363,0.8002071976661682,0.6191284656524658,0.5728309154510498,0.23111502826213837,0.3684249520301819,0.3087276220321655,0.4731530547142029,0.33014678955078125,0.8283791542053223,0.6626974940299988,0.5321311950683594,0.464481920003891,0.585652768611908,0.7144399881362915,0.528510570526123,0.5405933260917664,0.8553063273429871,0.8023408055305481,0.5513374209403992,0.5093967914581299,0.6677082180976868,0.5821061730384827,0.5852075815200806,0.3156611919403076,0.5926612615585327,0.5386204719543457,0.28506505489349365,0.3976900577545166,0.4446149170398712,0.3596062958240509,0.13994243741035461,0.02958129346370697,0.008316143415868282,0.0019033063435927033],\"h3PromptJson\":{\"summary\":\"\",\"detailed_description\":\"\",\"overall_soundscape\":\"\",\"non_diegetic_music\":\"\"}}]}",
-        "epsilon": 0.001,
-        "start_second": 60,
-        "end_second": 106.13,
-        "duration_seconds": 46.13,
-        "start_frame": 1440,
-        "end_frame": 2547,
-        "duration_frames": 1107,
-        "outpu_resolution": "16:9横屏",
-        "million_pixels": 1,
-        "timeline_ui": "",
-        "has_serialized_properties": true,
-        "propHeight": 610,
-        "isSnapping": true
+        "Node name for S&R": "MiniMaxRefSubject"
       },
       "widgets_values": [
-        60,
-        106.13,
-        46.13,
-        1440,
-        2547,
-        1107,
-        "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":610,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":1440,\"normalDurationFrames\":1107,\"defaultCameraMotions\":[],\"segments\":[{\"id\":\"17883539158307l8\",\"start\":0,\"length\":264,\"prompt\":\"垓下残破楚军军帐夜景，破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾，虞姬正对镜头站立，红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起，帐外投射乌骓战马黑色剪影，冷月光从帐门照入，电影质感，浅景深，慢镜头，悲壮破碎氛围感\\n虞姬对口型演绎男声叙事段落，嘴唇开合克制轻柔，无夸张舞台动作，眼底藏淡淡哀意。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下残破楚军军帐内的夜景中，身着红金曲裾汉服，手持短剑，对镜头对口型演绎男声叙事段落，背景有烛火摇曳、狼烟薄雾与乌骓战马剪影，整体氛围悲壮破碎，风格为电影质感浅景深慢镜头。\",\"detailed_description\":\"[Shot 1] At 00:00.000，镜头缓缓向<@虞姬>推近（camera motion, slow push-in on the subject），她正对镜头站立于残破楚军军帐内，身着红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起。帐内破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾弥漫，帐外投射乌骓战马黑色剪影，冷月光从帐门斜照入，浅景深构图，慢镜头节奏，氛围悲壮破碎。[Shot 2] At 00:05.000，镜头继续平稳前推，聚焦于<@虞姬>面部特写，她嘴唇开合克制轻柔，对口型演绎男声叙事段落，眼底藏淡淡哀意，无夸张舞台动作，背景烛火与月光持续摇曳，氛围维持悲壮破碎。[Shot 3] At 00:11.000，镜头在近景处稳定，<@虞姬>保持持剑姿态，对口型动作收束，画面定格于她凝视镜头的哀婉神情，背景军帐与战马剪影在慢镜头中渐隐，电影质感持续。\",\"overall_soundscape\":\"帐内烛火噼啪轻响，帐外狼烟微弱呼啸，冷月光透过帐门投下细微沙沙声，整体环境静谧压抑，无明显脚步或兵器碰撞声。\",\"non_diegetic_music\":\"N/A\"},\"upscale\":false,\"guideStrength\":5,\"secondPass\":false,\"expressions\":[],\"shotSizes\":[],\"framings\":[],\"cameraMotions\":[\"push_in\"]},{\"id\":\"1788570957030tr177\",\"start\":264,\"length\":243.79305931567262,\"prompt\":\"虞姬半侧脸近景，大半张脸隐于军帐阴影，绛红唇，凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒面部轮廓，眼神望向帐外虚空，眼底藏哀\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>的半侧脸特写，其面部隐于军帐阴影中，绛红唇与凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒轮廓，眼神望向帐外虚空，眼底藏哀。\",\"detailed_description\":\"[Shot 1] 镜头缓缓向<@虞姬>的半侧脸推近，肩部以上构图，面部占据画面主导，烛火在帐内摇曳，勾勒出她绛红的唇与凤眼眼尾微挑的弧度，玉珠步摇在微光中轻颤，眼神望向帐外虚空，眼底藏哀。镜头保持稳定，无明显移动，仅以推近强化情绪张力（camera motion, slow push-in on the subject）。\",\"overall_soundscape\":\"军帐内低沉的布帛摩擦声与烛火微弱的噼啪声交织，环境安静而压抑。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"push_in\"],\"expressions\":[\"turn_away\"],\"shotSizes\":[\"close_up\"]},{\"id\":\"1788352810045yqkw5\",\"start\":507.7930593156726,\"length\":220.40191188631286,\"prompt\":\"虞姬站军帐之内，红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，唱到： “当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，烛火柔光，背景虚化残破帷幔，高级古典魅惑\",\"type\":\"text\",\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐内以中近景呈现，身着红金曲裾与猩红披帛，手指轻拂衣袍，唱出“当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，背景为虚化的残破帷幔与烛火柔光。\",\"detailed_description\":\"[Shot 1] 中近景，镜头偏向<@虞姬>的脸庞，她身着红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，烛火柔光映照其面庞，背景虚化残破帷幔。镜头先推近至面部特写，再缓缓拉回至胸部以上构图，带出往复的呼吸感（camera motion, slow push-in and pull-out on the subject）。<@虞姬>眼尾泛红含泪，神情凄艳决绝，开口唱出：<#虞姬:当乱世漂泊，江边应你，一生唤我虞姬>。镜头保持稳定，无明显晃动，仅以推拉节奏配合情绪起伏。\",\"overall_soundscape\":\"烛火轻响与低沉的室内底噪交织，背景隐约有风穿过残破帷幔的窸窣声。\",\"non_diegetic_music\":\"克制的古筝独奏，速度缓慢，旋律哀婉，无明显渐强或渐弱起伏。\"},\"guideStrength\":22,\"autoEndFrame\":true,\"cameraMotions\":[\"push_pull\"],\"shotSizes\":[\"medium_close_up\"],\"expressions\":[\"turn_away\"]},{\"id\":\"1788571115153jyr9v\",\"start\":728.1949712019855,\"length\":216.19721474017535,\"prompt\":\"转场至乌江江畔月夜，寒月高悬夜空，地面散落残破战甲，虞姬伫立江边，江风肆意吹动长发与猩红披帛，身姿孤冷\\n垓下乌江江畔寒夜，一轮冷月高悬，地面散落破碎战甲，虞姬站在江边，红金长裙被江风狂吹，银色月光铺满江面，神情悠远怅惘，远处隐约军营烽火微光\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>伫立于乌江江畔月夜，寒月高悬，地面散落破碎战甲，江风狂吹其红金长裙与披帛，神情怅惘悠远，远处隐约军营烽火微光。\",\"detailed_description\":\"[Shot 1] 大特写落在<@虞姬>骤然睁大的眼睛上，瞳孔映着冷月余光，睫毛微颤，唇角无言，银色月光在眼底流淌，江风掠过发梢，猩红披帛如血痕般飘动。镜头徐徐拉远，露出四周残破战甲散落的江岸，<@虞姬>孤身伫立，红金长裙被狂风撕扯成舞动的旗帜。At 00:03.000，镜头继续后移成全景，衬出人物在浩渺江天中的渺小，江面银光铺展，远处军营烽火微光如鬼火闪烁，<@虞姬>凝望远方，神情悠远怅惘，长发与披帛在风中狂舞如泣如诉。\",\"overall_soundscape\":\"江风呼啸掠过残甲与披帛，远处军营篝火噼啪低响，月光下水波轻拍江岸，寒夜寂静中透出肃杀底噪。\",\"non_diegetic_music\":\"N/A\"},\"shotSizes\":[\"extreme_close_up\"],\"cameraMotions\":[\"pull_back\"]},{\"id\":\"17885713235945vzj6\",\"start\":944.3921859421608,\"length\":266.05603649715385,\"prompt\":\"垓下乌江江畔寒夜，冷月悬空，江面波光映月，虞姬伫立风中，长发披帛飞扬，唱到：“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，淡淡狼烟弥漫，电影质感慢镜头\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下乌江江畔寒夜的中近景，冷月悬空，江面波光映月，她长发披帛飞扬，唱出“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，背景有淡淡狼烟弥漫，整体为电影质感慢镜头。\",\"detailed_description\":\"[Shot 1] 中近景，镜头水平缓摇，扫过<@虞姬>伫立风中的侧影，长发披帛随风飞扬，背景是寒夜乌江，冷月悬空，江面波光映月，淡淡狼烟弥漫。镜头聚焦于<@虞姬>的面部与肩部，捕捉其决绝刚烈的神情。画面以电影质感慢镜头呈现，氛围肃杀而悲壮。At 00:03.000, 镜头稳定，<@虞姬>开口唱出：<#虞姬:若楚歌四起，无路退已，我也绝无悔意>。At 00:08.000, 镜头继续缓摇，带出她身后更广阔的江面与狼烟，但始终维持中近景构图，聚焦其面部表情与歌声的张力。\",\"overall_soundscape\":\"寒夜江畔的风声低回，远处隐约有楚歌余韵，江面波光轻响，狼烟飘散时带出细微的燃烧气息。\",\"non_diegetic_music\":\"\"},\"shotSizes\":[\"medium_close_up\"],\"cameraMotions\":[\"pan\"]},{\"id\":\"1788615722184315vu\",\"start\":1210.4482224393146,\"length\":229.11907263746866,\"prompt\":\"切回残破军帐，虞姬持短剑缓缓起舞，红金曲裾舒展旋转，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动.\\n虞姬在残破军帐持剑起舞，红金曲裾旋转飞扬，猩红披帛漫天飞舞，短剑流转冷光，烛火明暗闪烁，狼烟弥漫，唱到：“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮\",\"type\":\"video\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐中持短剑缓缓起舞，红金曲裾旋转飞扬，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动，唱到“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮。\",\"detailed_description\":\"[Shot 1] At 00:00.000，<@虞姬>立于残破军帐中央，身着红金曲裾与猩红披帛，手持短剑，烛火在帐角明灭，狼烟从帐外淡淡浮动。镜头从侧面缓缓环绕一周（camera motion, slow orbit around the subject），展现其衣袂翻飞与剑光流转。无对话。[Shot 2] At 00:03.000，<@虞姬>开始旋转，曲裾如火焰般舒展，披帛在空中划出大弧度轨迹，短剑冷光闪烁，烛火随动作明暗摇曳。镜头持续环绕，速度平稳，保持中景构图。[Shot 3] At 00:06.000，<@虞姬>舞至高潮，披帛如血色绸缎漫天飞舞，剑光与烛火交织，狼烟渐浓。镜头环绕加速，从正前方转至侧后方，捕捉其眼神魅惑悲壮。[Shot 4] At 00:09.000，<@虞姬>停转，剑尖轻点地面，披帛缓缓收拢，烛火微弱，狼烟淡去。镜头环绕减速，定格于其凝视远方的侧脸。唱词：<#虞姬:亲爱的霸王该散了啊，准臣妾举剑为你一舞啊>。\",\"overall_soundscape\":\"军帐内烛火噼啪轻响，风穿过破洞帐布的低啸，远处隐约有狼烟燃烧的微弱噼啪声。\",\"non_diegetic_music\":\"\"},\"cameraMotions\":[\"orbit\"],\"trimStart\":0,\"videoDurationFrames\":221,\"imageFile\":\"whatdreamscost/prompt_00193.mp4\",\"fileName\":\"prompt_00193.mp4\",\"fileSize\":3332689,\"imageB64\":\"/api/view?filename=prompt_00193.mp4&type=input&subfolder=whatdreamscost\"},{\"id\":\"1788571965423vn82q\",\"start\":1439.5672950767832,\"length\":316.1625952441773,\"prompt\":\"虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐中舞剑至高潮，抬手斩断一缕长发，发丝飘落，眼底泪光闪烁，画面具破碎感，伴随歌词“最后再断一缕我的长发，不让你有牵挂”，烛火摇曳，胶片颗粒，慢镜头卡点。\",\"detailed_description\":\"[Shot 1] 中景镜头，<@虞姬>立于军帐中央，红纱飞扬，烛火在背景摇曳，胶片颗粒感明显，手持跟拍，与人物步伐同步移动，镜头平稳跟随其舞剑动作。[Shot 2] At 00:04.500，中近景，镜头聚焦<@虞姬>面部，眼底泪光闪烁，神情凄美决绝，手持跟拍，轻微晃动模拟真实手持感，同步其抬手断发动作。[Shot 3] At 00:08.200，中景镜头，<@虞姬>挥剑断发，发丝在空中缓缓飘落，红纱随风扬起，烛火摇曳，手持跟拍，镜头缓慢推近，捕捉发丝飘落与泪珠滑落的慢镜头卡点。[Shot 4] At 00:12.000，中近景，<@虞姬>凝视断发，唇角微颤，唱出<#虞姬:最后再断一缕我的长发，不让你有牵挂>，镜头轻微晃动，胶片颗粒持续，手持跟拍保持与人物同步。\",\"overall_soundscape\":\"军帐内烛火轻响与布料摩擦声，伴随缓慢的呼吸声与剑刃轻颤声，整体环境安静而压抑。\",\"non_diegetic_music\":\"缓慢的弦乐铺底，配以低沉的打击乐节奏，情绪渐强，无明显起伏变化。\"},\"shotSizes\":[\"medium\",\"medium_close_up\"],\"cameraMotions\":[\"tracking\"]},{\"id\":\"1788615765936ggg\",\"start\":1755.7298903209605,\"length\":343.0814613559403,\"prompt\":\"虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐内继续剑舞，身段灵动凌厉，短剑寒光流转，发丝飞扬，狼烟弥漫，光影明暗交错，尽显乱世诀别悲壮。\",\"detailed_description\":\"[Shot 1] <@虞姬>立于残破军帐中央，身着战袍，手持短剑，剑尖寒光闪烁，发丝随风飞扬，帐内狼烟缭绕，光影明暗交错，背景布满破损帷幔与残兵遗物。镜头缓缓环绕<@虞姬>一周（camera motion, slow orbit around the subject），从侧面逐渐转至正前方，突出其凌厉柔美的身姿与悲壮眼神。[Shot 2] At 00:07.150，<@虞姬>剑势骤变，短剑划出凌厉弧光，发丝随剑势飞扬，帐内狼烟更浓，光影明暗交替加剧，背景残破更显凄凉。镜头继续环绕<@虞姬>半圈（camera motion, steady orbit），保持中景，突出剑光与眼神的苍凉悲壮。[Shot 3] At 00:14.300，<@虞姬>剑舞收势，短剑轻点地面，发丝垂落，眼神凝望远方，帐内狼烟渐散，光影柔和，氛围悲怆而决绝。镜头环绕至正后方，缓慢拉远（camera motion, slow pull-out），展现其孤身立于残破之中的悲壮身影。\",\"overall_soundscape\":\"帐内持续低沉的风声与狼烟燃烧的噼啪声，伴随短剑挥舞的金属轻响与布帛摩擦的窸窣声。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788572339106iml9l\",\"start\":2098.811351676901,\"length\":240,\"prompt\":\"虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围安静凄美。\",\"detailed_description\":\"[Shot 1] <@虞姬>身着红金汉服，头戴玉珠发饰，独坐于军帐案几前，面前立一青铜古镜，烛火自镜旁燃起，暖光在镜面投下朦胧叠影，映出她垂首静默的侧影。她双手横握短剑，指尖轻触剑刃，缓缓摩挲，动作缓慢而克制。背景为暗红帷幔，光线昏暗，仅烛火提供暖色光源，营造出虚实交织的凄美氛围。镜头固定，无移动，聚焦于人物中景，画面静谧无声。\",\"overall_soundscape\":\"整个视频仅有烛火微弱的噼啪声与轻微的空气流动声，环境安静，无其他物理声响。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"expressions\":[]},{\"id\":\"1788572572105kc2az\",\"start\":2338.811351676901,\"length\":208.6459223437064,\"prompt\":\"室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在室内烛火熄灭后自缢的场景，一束顶光从上方打下，剑柄移动瞬间血溅帐布，画面渐淡至全黑。\",\"detailed_description\":\"[Shot 1] 室内烛火骤然熄灭，光线骤减，画面陷入短暂黑暗，随后一束顶光从画面上方投射而下，照亮<@虞姬>举剑架于颈前的瞬间。镜头徐徐拉远，衬出人物在幽暗空间中的孤寂与决绝。[Shot 2] At 00:03.000，<@虞姬>的剑柄轻微移动，剑尖离颈一寸，她脸上浮起一个若有若无的浅笑，转瞬即逝，随即剑锋下压，颈间一寸血迹迸溅，染红帐布。镜头保持稳定，聚焦血迹飞溅的慢动作细节。[Shot 3] At 00:06.000，画面开始渐淡，光线随血迹扩散而减弱，最终完全黑屏，持续至视频结束。\",\"overall_soundscape\":\"整个视频仅保留烛火熄灭的轻微爆裂声与帐布被血渍浸透的细微撕裂声，无其他环境音。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"cameraMotions\":[\"pull_back\"],\"expressions\":[\"micro_smile\"]}],\"audioSegments\":[{\"id\":\"17885725956594sk5e\",\"type\":\"audio\",\"start\":0,\"length\":2547,\"trimStart\":194,\"audioDurationFrames\":5542,\"audioFile\":\"whatdreamscost/output.mp3\",\"fileName\":\"output.mp3\",\"waveformPeaks\":[0.00005679247988155112,0.000041974311898229644,0.30521538853645325,0.09662327915430069,0.08930108696222305,0.15318572521209717,0.3768981099128723,0.12570518255233765,0.19516882300376892,0.18190720677375793,0.377087265253067,0.17899605631828308,0.2620439827442169,0.5677979588508606,0.5125153064727783,0.29568344354629517,0.2731074094772339,0.44221416115760803,0.5375176072120667,0.47481101751327515,0.47532686591148376,0.2184172421693802,0.48713430762290955,0.3814827799797058,0.40066608786582947,0.37372276186943054,0.574090838432312,0.4990490674972534,0.4765162169933319,0.30677399039268494,0.4039900302886963,0.3793623447418213,0.27992069721221924,0.45843055844306946,0.4996296465396881,0.40584638714790344,0.4772692620754242,0.3557541072368622,0.4739164710044861,0.4109916090965271,0.39173537492752075,0.552890419960022,0.9211859703063965,0.6108586192131042,0.42901378870010376,0.5558953881263733,0.5147951245307922,0.417502760887146,0.3357221782207489,0.7685890197753906,0.7305847406387329,0.959312915802002,0.9466202259063721,0.7141651511192322,0.5808138251304626,0.7743545174598694,0.674588143825531,0.5905373692512512,0.521045446395874,0.7313892841339111,0.5733826160430908,0.679533064365387,0.4906621277332306,0.7209604978561401,0.6509173512458801,0.8790873885154724,0.8087895512580872,0.9676097631454468,0.9405258893966675,0.7915844917297363,0.7324215769767761,0.9142007231712341,0.8564584255218506,0.7931846380233765,0.6168761253356934,0.9178673028945923,0.5581566095352173,0.7446004152297974,0.5844618678092957,0.734371542930603,0.7712691426277161,0.6202580332756042,0.5978195667266846,0.9598470330238342,0.9468387961387634,0.8520397543907166,0.8647002577781677,0.8883702158927917,0.9139000773429871,0.7344744205474854,0.6635681390762329,0.8975549340248108,0.8639687299728394,0.8990455865859985,0.9520750045776367,0.8213480710983276,0.7593441605567932,0.7680613398551941,0.7739264965057373,0.9833949208259583,0.974017322063446,0.9480533599853516,0.8821832537651062,0.9253187775611877,0.9556866884231567,0.9233717322349548,0.9325433969497681,0.9614730477333069,0.9619655609130859,0.9747107028961182,0.9511860013008118,0.9460687637329102,0.964142918586731,0.969709575176239,1.080556035041809,1.0663827657699585,1.099945068359375,0.9890326857566833,1.061505675315857,1.0430761575698853,1.0524457693099976,1.0008474588394165,1.0051467418670654,1.0060069561004639,1.014053463935852,1.0332756042480469,1.0450031757354736,1.031327724456787,1.0353343486785889,1.0556583404541016,1.011139154434204,1.0362528562545776,1.0062540769577026,1.0703188180923462,1.0160784721374512,1.0517939329147339,1.0374677181243896,1.013624906539917,1.0026087760925293,1.1020841598510742,1.0534831285476685,1.0034328699111938,1.011326789855957,1.048912763595581,1.0085538625717163,1.1145703792572021,1.037919521331787,1.0477505922317505,1.0595916509628296,1.0008703470230103,1.0496978759765625,1.147497534751892,1.018002986907959,1.0256727933883667,1.0617053508758545,1.102467656135559,1.0101325511932373,1.00529944896698,1.0476634502410889,1.100989818572998,1.1175580024719238,1.0050896406173706,1.0065464973449707,0.9662586450576782,0.8715899586677551,0.849946916103363,0.8002071976661682,0.6191284656524658,0.5728309154510498,0.23111502826213837,0.3684249520301819,0.3087276220321655,0.4731530547142029,0.33014678955078125,0.8283791542053223,0.6626974940299988,0.5321311950683594,0.464481920003891,0.585652768611908,0.7144399881362915,0.528510570526123,0.5405933260917664,0.8553063273429871,0.8023408055305481,0.5513374209403992,0.5093967914581299,0.6677082180976868,0.5821061730384827,0.5852075815200806,0.3156611919403076,0.5926612615585327,0.5386204719543457,0.28506505489349365,0.3976900577545166,0.4446149170398712,0.3596062958240509,0.13994243741035461,0.02958129346370697,0.008316143415868282,0.0019033063435927033],\"h3PromptJson\":{\"summary\":\"\",\"detailed_description\":\"\",\"overall_soundscape\":\"\",\"non_diegetic_music\":\"\"}}]}",
-        "虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点 | 虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮 | 虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影 | 室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏",
-        "315.7298903209605,343.0814613559403,240,208.1886483230992",
-        24,
-        "seconds",
-        "16:9横屏",
+        "llama-cpp",
+        "Qwen3-VL-8B-Instruct-Q5_K_M.gguf",
+        "mmproj-BF16.gguf",
+        "{\"subjects\":[{\"name\":\"虞姬\",\"description\":\"参考<@图片1>中的角色，东亚冷艳魅惑美人，半束高髻，散落部分黑发，红金镶嵌曲裾，猩红薄纱披帛，玉珠步摇；眼尾上挑，绛红唇，肩胛骨轮廓自然平滑。\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"半束高髻，红金镶嵌曲裾，猩红薄纱披帛。\",\"videoFile\":\"\",\"uid\":\"14232aeb-eaa2-4875-bf3c-440534200084\",\"ownerUid\":\"\"},{\"name\":\"图片1\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"\",\"imageFile\":\"minimaxrefdirector/ComfyUI_temp_ttypn_00007_.png\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"8b033ad4-efd2-4757-8da3-e69354ee1c2a\",\"ownerUid\":\"14232aeb-eaa2-4875-bf3c-440534200084\"}]}",
         1,
+        "真人实拍，电影 MV，真实人脸皮肤纹理，高级古典魅惑，楚汉垓下，狼烟薄雾",
         ""
       ],
       "widgets_values_named": {
-        "start_second": 60,
-        "end_second": 106.13,
-        "duration_seconds": 46.13,
-        "start_frame": 1440,
-        "end_frame": 2547,
-        "duration_frames": 1107,
-        "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":610,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":1440,\"normalDurationFrames\":1107,\"defaultCameraMotions\":[],\"segments\":[{\"id\":\"17883539158307l8\",\"start\":0,\"length\":264,\"prompt\":\"垓下残破楚军军帐夜景，破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾，虞姬正对镜头站立，红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起，帐外投射乌骓战马黑色剪影，冷月光从帐门照入，电影质感，浅景深，慢镜头，悲壮破碎氛围感\\n虞姬对口型演绎男声叙事段落，嘴唇开合克制轻柔，无夸张舞台动作，眼底藏淡淡哀意。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下残破楚军军帐内的夜景中，身着红金曲裾汉服，手持短剑，对镜头对口型演绎男声叙事段落，背景有烛火摇曳、狼烟薄雾与乌骓战马剪影，整体氛围悲壮破碎，风格为电影质感浅景深慢镜头。\",\"detailed_description\":\"[Shot 1] At 00:00.000，镜头缓缓向<@虞姬>推近（camera motion, slow push-in on the subject），她正对镜头站立于残破楚军军帐内，身着红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起。帐内破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾弥漫，帐外投射乌骓战马黑色剪影，冷月光从帐门斜照入，浅景深构图，慢镜头节奏，氛围悲壮破碎。[Shot 2] At 00:05.000，镜头继续平稳前推，聚焦于<@虞姬>面部特写，她嘴唇开合克制轻柔，对口型演绎男声叙事段落，眼底藏淡淡哀意，无夸张舞台动作，背景烛火与月光持续摇曳，氛围维持悲壮破碎。[Shot 3] At 00:11.000，镜头在近景处稳定，<@虞姬>保持持剑姿态，对口型动作收束，画面定格于她凝视镜头的哀婉神情，背景军帐与战马剪影在慢镜头中渐隐，电影质感持续。\",\"overall_soundscape\":\"帐内烛火噼啪轻响，帐外狼烟微弱呼啸，冷月光透过帐门投下细微沙沙声，整体环境静谧压抑，无明显脚步或兵器碰撞声。\",\"non_diegetic_music\":\"N/A\"},\"upscale\":false,\"guideStrength\":5,\"secondPass\":false,\"expressions\":[],\"shotSizes\":[],\"framings\":[],\"cameraMotions\":[\"push_in\"]},{\"id\":\"1788570957030tr177\",\"start\":264,\"length\":243.79305931567262,\"prompt\":\"虞姬半侧脸近景，大半张脸隐于军帐阴影，绛红唇，凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒面部轮廓，眼神望向帐外虚空，眼底藏哀\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>的半侧脸特写，其面部隐于军帐阴影中，绛红唇与凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒轮廓，眼神望向帐外虚空，眼底藏哀。\",\"detailed_description\":\"[Shot 1] 镜头缓缓向<@虞姬>的半侧脸推近，肩部以上构图，面部占据画面主导，烛火在帐内摇曳，勾勒出她绛红的唇与凤眼眼尾微挑的弧度，玉珠步摇在微光中轻颤，眼神望向帐外虚空，眼底藏哀。镜头保持稳定，无明显移动，仅以推近强化情绪张力（camera motion, slow push-in on the subject）。\",\"overall_soundscape\":\"军帐内低沉的布帛摩擦声与烛火微弱的噼啪声交织，环境安静而压抑。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"push_in\"],\"expressions\":[\"turn_away\"],\"shotSizes\":[\"close_up\"]},{\"id\":\"1788352810045yqkw5\",\"start\":507.7930593156726,\"length\":220.40191188631286,\"prompt\":\"虞姬站军帐之内，红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，唱到： “当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，烛火柔光，背景虚化残破帷幔，高级古典魅惑\",\"type\":\"text\",\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐内以中近景呈现，身着红金曲裾与猩红披帛，手指轻拂衣袍，唱出“当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，背景为虚化的残破帷幔与烛火柔光。\",\"detailed_description\":\"[Shot 1] 中近景，镜头偏向<@虞姬>的脸庞，她身着红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，烛火柔光映照其面庞，背景虚化残破帷幔。镜头先推近至面部特写，再缓缓拉回至胸部以上构图，带出往复的呼吸感（camera motion, slow push-in and pull-out on the subject）。<@虞姬>眼尾泛红含泪，神情凄艳决绝，开口唱出：<#虞姬:当乱世漂泊，江边应你，一生唤我虞姬>。镜头保持稳定，无明显晃动，仅以推拉节奏配合情绪起伏。\",\"overall_soundscape\":\"烛火轻响与低沉的室内底噪交织，背景隐约有风穿过残破帷幔的窸窣声。\",\"non_diegetic_music\":\"克制的古筝独奏，速度缓慢，旋律哀婉，无明显渐强或渐弱起伏。\"},\"guideStrength\":22,\"autoEndFrame\":true,\"cameraMotions\":[\"push_pull\"],\"shotSizes\":[\"medium_close_up\"],\"expressions\":[\"turn_away\"]},{\"id\":\"1788571115153jyr9v\",\"start\":728.1949712019855,\"length\":216.19721474017535,\"prompt\":\"转场至乌江江畔月夜，寒月高悬夜空，地面散落残破战甲，虞姬伫立江边，江风肆意吹动长发与猩红披帛，身姿孤冷\\n垓下乌江江畔寒夜，一轮冷月高悬，地面散落破碎战甲，虞姬站在江边，红金长裙被江风狂吹，银色月光铺满江面，神情悠远怅惘，远处隐约军营烽火微光\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>伫立于乌江江畔月夜，寒月高悬，地面散落破碎战甲，江风狂吹其红金长裙与披帛，神情怅惘悠远，远处隐约军营烽火微光。\",\"detailed_description\":\"[Shot 1] 大特写落在<@虞姬>骤然睁大的眼睛上，瞳孔映着冷月余光，睫毛微颤，唇角无言，银色月光在眼底流淌，江风掠过发梢，猩红披帛如血痕般飘动。镜头徐徐拉远，露出四周残破战甲散落的江岸，<@虞姬>孤身伫立，红金长裙被狂风撕扯成舞动的旗帜。At 00:03.000，镜头继续后移成全景，衬出人物在浩渺江天中的渺小，江面银光铺展，远处军营烽火微光如鬼火闪烁，<@虞姬>凝望远方，神情悠远怅惘，长发与披帛在风中狂舞如泣如诉。\",\"overall_soundscape\":\"江风呼啸掠过残甲与披帛，远处军营篝火噼啪低响，月光下水波轻拍江岸，寒夜寂静中透出肃杀底噪。\",\"non_diegetic_music\":\"N/A\"},\"shotSizes\":[\"extreme_close_up\"],\"cameraMotions\":[\"pull_back\"]},{\"id\":\"17885713235945vzj6\",\"start\":944.3921859421608,\"length\":266.05603649715385,\"prompt\":\"垓下乌江江畔寒夜，冷月悬空，江面波光映月，虞姬伫立风中，长发披帛飞扬，唱到：“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，淡淡狼烟弥漫，电影质感慢镜头\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下乌江江畔寒夜的中近景，冷月悬空，江面波光映月，她长发披帛飞扬，唱出“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，背景有淡淡狼烟弥漫，整体为电影质感慢镜头。\",\"detailed_description\":\"[Shot 1] 中近景，镜头水平缓摇，扫过<@虞姬>伫立风中的侧影，长发披帛随风飞扬，背景是寒夜乌江，冷月悬空，江面波光映月，淡淡狼烟弥漫。镜头聚焦于<@虞姬>的面部与肩部，捕捉其决绝刚烈的神情。画面以电影质感慢镜头呈现，氛围肃杀而悲壮。At 00:03.000, 镜头稳定，<@虞姬>开口唱出：<#虞姬:若楚歌四起，无路退已，我也绝无悔意>。At 00:08.000, 镜头继续缓摇，带出她身后更广阔的江面与狼烟，但始终维持中近景构图，聚焦其面部表情与歌声的张力。\",\"overall_soundscape\":\"寒夜江畔的风声低回，远处隐约有楚歌余韵，江面波光轻响，狼烟飘散时带出细微的燃烧气息。\",\"non_diegetic_music\":\"\"},\"shotSizes\":[\"medium_close_up\"],\"cameraMotions\":[\"pan\"]},{\"id\":\"1788615722184315vu\",\"start\":1210.4482224393146,\"length\":229.11907263746866,\"prompt\":\"切回残破军帐，虞姬持短剑缓缓起舞，红金曲裾舒展旋转，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动.\\n虞姬在残破军帐持剑起舞，红金曲裾旋转飞扬，猩红披帛漫天飞舞，短剑流转冷光，烛火明暗闪烁，狼烟弥漫，唱到：“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮\",\"type\":\"video\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐中持短剑缓缓起舞，红金曲裾旋转飞扬，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动，唱到“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮。\",\"detailed_description\":\"[Shot 1] At 00:00.000，<@虞姬>立于残破军帐中央，身着红金曲裾与猩红披帛，手持短剑，烛火在帐角明灭，狼烟从帐外淡淡浮动。镜头从侧面缓缓环绕一周（camera motion, slow orbit around the subject），展现其衣袂翻飞与剑光流转。无对话。[Shot 2] At 00:03.000，<@虞姬>开始旋转，曲裾如火焰般舒展，披帛在空中划出大弧度轨迹，短剑冷光闪烁，烛火随动作明暗摇曳。镜头持续环绕，速度平稳，保持中景构图。[Shot 3] At 00:06.000，<@虞姬>舞至高潮，披帛如血色绸缎漫天飞舞，剑光与烛火交织，狼烟渐浓。镜头环绕加速，从正前方转至侧后方，捕捉其眼神魅惑悲壮。[Shot 4] At 00:09.000，<@虞姬>停转，剑尖轻点地面，披帛缓缓收拢，烛火微弱，狼烟淡去。镜头环绕减速，定格于其凝视远方的侧脸。唱词：<#虞姬:亲爱的霸王该散了啊，准臣妾举剑为你一舞啊>。\",\"overall_soundscape\":\"军帐内烛火噼啪轻响，风穿过破洞帐布的低啸，远处隐约有狼烟燃烧的微弱噼啪声。\",\"non_diegetic_music\":\"\"},\"cameraMotions\":[\"orbit\"],\"trimStart\":0,\"videoDurationFrames\":221,\"imageFile\":\"whatdreamscost/prompt_00193.mp4\",\"fileName\":\"prompt_00193.mp4\",\"fileSize\":3332689,\"imageB64\":\"/api/view?filename=prompt_00193.mp4&type=input&subfolder=whatdreamscost\"},{\"id\":\"1788571965423vn82q\",\"start\":1439.5672950767832,\"length\":316.1625952441773,\"prompt\":\"虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐中舞剑至高潮，抬手斩断一缕长发，发丝飘落，眼底泪光闪烁，画面具破碎感，伴随歌词“最后再断一缕我的长发，不让你有牵挂”，烛火摇曳，胶片颗粒，慢镜头卡点。\",\"detailed_description\":\"[Shot 1] 中景镜头，<@虞姬>立于军帐中央，红纱飞扬，烛火在背景摇曳，胶片颗粒感明显，手持跟拍，与人物步伐同步移动，镜头平稳跟随其舞剑动作。[Shot 2] At 00:04.500，中近景，镜头聚焦<@虞姬>面部，眼底泪光闪烁，神情凄美决绝，手持跟拍，轻微晃动模拟真实手持感，同步其抬手断发动作。[Shot 3] At 00:08.200，中景镜头，<@虞姬>挥剑断发，发丝在空中缓缓飘落，红纱随风扬起，烛火摇曳，手持跟拍，镜头缓慢推近，捕捉发丝飘落与泪珠滑落的慢镜头卡点。[Shot 4] At 00:12.000，中近景，<@虞姬>凝视断发，唇角微颤，唱出<#虞姬:最后再断一缕我的长发，不让你有牵挂>，镜头轻微晃动，胶片颗粒持续，手持跟拍保持与人物同步。\",\"overall_soundscape\":\"军帐内烛火轻响与布料摩擦声，伴随缓慢的呼吸声与剑刃轻颤声，整体环境安静而压抑。\",\"non_diegetic_music\":\"缓慢的弦乐铺底，配以低沉的打击乐节奏，情绪渐强，无明显起伏变化。\"},\"shotSizes\":[\"medium\",\"medium_close_up\"],\"cameraMotions\":[\"tracking\"]},{\"id\":\"1788615765936ggg\",\"start\":1755.7298903209605,\"length\":343.0814613559403,\"prompt\":\"虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐内继续剑舞，身段灵动凌厉，短剑寒光流转，发丝飞扬，狼烟弥漫，光影明暗交错，尽显乱世诀别悲壮。\",\"detailed_description\":\"[Shot 1] <@虞姬>立于残破军帐中央，身着战袍，手持短剑，剑尖寒光闪烁，发丝随风飞扬，帐内狼烟缭绕，光影明暗交错，背景布满破损帷幔与残兵遗物。镜头缓缓环绕<@虞姬>一周（camera motion, slow orbit around the subject），从侧面逐渐转至正前方，突出其凌厉柔美的身姿与悲壮眼神。[Shot 2] At 00:07.150，<@虞姬>剑势骤变，短剑划出凌厉弧光，发丝随剑势飞扬，帐内狼烟更浓，光影明暗交替加剧，背景残破更显凄凉。镜头继续环绕<@虞姬>半圈（camera motion, steady orbit），保持中景，突出剑光与眼神的苍凉悲壮。[Shot 3] At 00:14.300，<@虞姬>剑舞收势，短剑轻点地面，发丝垂落，眼神凝望远方，帐内狼烟渐散，光影柔和，氛围悲怆而决绝。镜头环绕至正后方，缓慢拉远（camera motion, slow pull-out），展现其孤身立于残破之中的悲壮身影。\",\"overall_soundscape\":\"帐内持续低沉的风声与狼烟燃烧的噼啪声，伴随短剑挥舞的金属轻响与布帛摩擦的窸窣声。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788572339106iml9l\",\"start\":2098.811351676901,\"length\":240,\"prompt\":\"虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围安静凄美。\",\"detailed_description\":\"[Shot 1] <@虞姬>身着红金汉服，头戴玉珠发饰，独坐于军帐案几前，面前立一青铜古镜，烛火自镜旁燃起，暖光在镜面投下朦胧叠影，映出她垂首静默的侧影。她双手横握短剑，指尖轻触剑刃，缓缓摩挲，动作缓慢而克制。背景为暗红帷幔，光线昏暗，仅烛火提供暖色光源，营造出虚实交织的凄美氛围。镜头固定，无移动，聚焦于人物中景，画面静谧无声。\",\"overall_soundscape\":\"整个视频仅有烛火微弱的噼啪声与轻微的空气流动声，环境安静，无其他物理声响。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"expressions\":[]},{\"id\":\"1788572572105kc2az\",\"start\":2338.811351676901,\"length\":208.6459223437064,\"prompt\":\"室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在室内烛火熄灭后自缢的场景，一束顶光从上方打下，剑柄移动瞬间血溅帐布，画面渐淡至全黑。\",\"detailed_description\":\"[Shot 1] 室内烛火骤然熄灭，光线骤减，画面陷入短暂黑暗，随后一束顶光从画面上方投射而下，照亮<@虞姬>举剑架于颈前的瞬间。镜头徐徐拉远，衬出人物在幽暗空间中的孤寂与决绝。[Shot 2] At 00:03.000，<@虞姬>的剑柄轻微移动，剑尖离颈一寸，她脸上浮起一个若有若无的浅笑，转瞬即逝，随即剑锋下压，颈间一寸血迹迸溅，染红帐布。镜头保持稳定，聚焦血迹飞溅的慢动作细节。[Shot 3] At 00:06.000，画面开始渐淡，光线随血迹扩散而减弱，最终完全黑屏，持续至视频结束。\",\"overall_soundscape\":\"整个视频仅保留烛火熄灭的轻微爆裂声与帐布被血渍浸透的细微撕裂声，无其他环境音。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"cameraMotions\":[\"pull_back\"],\"expressions\":[\"micro_smile\"]}],\"audioSegments\":[{\"id\":\"17885725956594sk5e\",\"type\":\"audio\",\"start\":0,\"length\":2547,\"trimStart\":194,\"audioDurationFrames\":5542,\"audioFile\":\"whatdreamscost/output.mp3\",\"fileName\":\"output.mp3\",\"waveformPeaks\":[0.00005679247988155112,0.000041974311898229644,0.30521538853645325,0.09662327915430069,0.08930108696222305,0.15318572521209717,0.3768981099128723,0.12570518255233765,0.19516882300376892,0.18190720677375793,0.377087265253067,0.17899605631828308,0.2620439827442169,0.5677979588508606,0.5125153064727783,0.29568344354629517,0.2731074094772339,0.44221416115760803,0.5375176072120667,0.47481101751327515,0.47532686591148376,0.2184172421693802,0.48713430762290955,0.3814827799797058,0.40066608786582947,0.37372276186943054,0.574090838432312,0.4990490674972534,0.4765162169933319,0.30677399039268494,0.4039900302886963,0.3793623447418213,0.27992069721221924,0.45843055844306946,0.4996296465396881,0.40584638714790344,0.4772692620754242,0.3557541072368622,0.4739164710044861,0.4109916090965271,0.39173537492752075,0.552890419960022,0.9211859703063965,0.6108586192131042,0.42901378870010376,0.5558953881263733,0.5147951245307922,0.417502760887146,0.3357221782207489,0.7685890197753906,0.7305847406387329,0.959312915802002,0.9466202259063721,0.7141651511192322,0.5808138251304626,0.7743545174598694,0.674588143825531,0.5905373692512512,0.521045446395874,0.7313892841339111,0.5733826160430908,0.679533064365387,0.4906621277332306,0.7209604978561401,0.6509173512458801,0.8790873885154724,0.8087895512580872,0.9676097631454468,0.9405258893966675,0.7915844917297363,0.7324215769767761,0.9142007231712341,0.8564584255218506,0.7931846380233765,0.6168761253356934,0.9178673028945923,0.5581566095352173,0.7446004152297974,0.5844618678092957,0.734371542930603,0.7712691426277161,0.6202580332756042,0.5978195667266846,0.9598470330238342,0.9468387961387634,0.8520397543907166,0.8647002577781677,0.8883702158927917,0.9139000773429871,0.7344744205474854,0.6635681390762329,0.8975549340248108,0.8639687299728394,0.8990455865859985,0.9520750045776367,0.8213480710983276,0.7593441605567932,0.7680613398551941,0.7739264965057373,0.9833949208259583,0.974017322063446,0.9480533599853516,0.8821832537651062,0.9253187775611877,0.9556866884231567,0.9233717322349548,0.9325433969497681,0.9614730477333069,0.9619655609130859,0.9747107028961182,0.9511860013008118,0.9460687637329102,0.964142918586731,0.969709575176239,1.080556035041809,1.0663827657699585,1.099945068359375,0.9890326857566833,1.061505675315857,1.0430761575698853,1.0524457693099976,1.0008474588394165,1.0051467418670654,1.0060069561004639,1.014053463935852,1.0332756042480469,1.0450031757354736,1.031327724456787,1.0353343486785889,1.0556583404541016,1.011139154434204,1.0362528562545776,1.0062540769577026,1.0703188180923462,1.0160784721374512,1.0517939329147339,1.0374677181243896,1.013624906539917,1.0026087760925293,1.1020841598510742,1.0534831285476685,1.0034328699111938,1.011326789855957,1.048912763595581,1.0085538625717163,1.1145703792572021,1.037919521331787,1.0477505922317505,1.0595916509628296,1.0008703470230103,1.0496978759765625,1.147497534751892,1.018002986907959,1.0256727933883667,1.0617053508758545,1.102467656135559,1.0101325511932373,1.00529944896698,1.0476634502410889,1.100989818572998,1.1175580024719238,1.0050896406173706,1.0065464973449707,0.9662586450576782,0.8715899586677551,0.849946916103363,0.8002071976661682,0.6191284656524658,0.5728309154510498,0.23111502826213837,0.3684249520301819,0.3087276220321655,0.4731530547142029,0.33014678955078125,0.8283791542053223,0.6626974940299988,0.5321311950683594,0.464481920003891,0.585652768611908,0.7144399881362915,0.528510570526123,0.5405933260917664,0.8553063273429871,0.8023408055305481,0.5513374209403992,0.5093967914581299,0.6677082180976868,0.5821061730384827,0.5852075815200806,0.3156611919403076,0.5926612615585327,0.5386204719543457,0.28506505489349365,0.3976900577545166,0.4446149170398712,0.3596062958240509,0.13994243741035461,0.02958129346370697,0.008316143415868282,0.0019033063435927033],\"h3PromptJson\":{\"summary\":\"\",\"detailed_description\":\"\",\"overall_soundscape\":\"\",\"non_diegetic_music\":\"\"}}]}",
-        "local_prompts": "虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点 | 虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮 | 虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影 | 室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏",
-        "segment_lengths": "315.7298903209605,343.0814613559403,240,208.1886483230992",
-        "frame_rate": 24,
-        "display_mode": "seconds",
-        "outpu_resolution": "16:9横屏",
-        "million_pixels": 1,
-        "timeline_ui": ""
+        "vlm_mode": "llama-cpp",
+        "vlm_mode.gguf_name": "Qwen3-VL-8B-Instruct-Q5_K_M.gguf",
+        "vlm_mode.mmproj_path": "mmproj-BF16.gguf",
+        "subject_data": "{\"subjects\":[{\"name\":\"虞姬\",\"description\":\"参考<@图片1>中的角色，东亚冷艳魅惑美人，半束高髻，散落部分黑发，红金镶嵌曲裾，猩红薄纱披帛，玉珠步摇；眼尾上挑，绛红唇，肩胛骨轮廓自然平滑。\",\"type\":\"Subject\",\"relationship\":\"fully_preserved\",\"imageFile\":\"\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"半束高髻，红金镶嵌曲裾，猩红薄纱披帛。\",\"videoFile\":\"\",\"uid\":\"14232aeb-eaa2-4875-bf3c-440534200084\",\"ownerUid\":\"\"},{\"name\":\"图片1\",\"description\":\"\",\"type\":\"Picture\",\"relationship\":\"\",\"imageFile\":\"minimaxrefdirector/ComfyUI_temp_ttypn_00007_.png\",\"audioFile\":\"\",\"audioRef\":\"\",\"retention\":\"\",\"videoFile\":\"\",\"uid\":\"8b033ad4-efd2-4757-8da3-e69354ee1c2a\",\"ownerUid\":\"14232aeb-eaa2-4875-bf3c-440534200084\"}]}",
+        "subject_count": 1,
+        "global_prompt": "真人实拍，电影 MV，真实人脸皮肤纹理，高级古典魅惑，楚汉垓下，狼烟薄雾",
+        "minimax_subject_ui": ""
       }
+    },
+    {
+      "id": 145,
+      "type": "MarkdownNote",
+      "pos": [
+        2678.581977226384,
+        3844.241826364856
+      ],
+      "size": [
+        348.09197954831416,
+        421.3292213439272
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "# 最佳导演台V3\n\n## 🔗 插件下载地址\n```\nhttps://github.com/eaglering/MiniMaxRefDirector-ComfyUI\n```\n\n### 插件版本 v3.1.8， ComfyUI版本 0.34.0\n\n### 安装脚本：\n```\n1. 执行 ./install.bat 安装依赖插件\n2. 需要安装ffmpeg，下载地址：https://ffmpeg.org/download.html\n3. 工作流中的音频和图片资源需要替换 （网盘:教程/assets）\n```\n\n### 所有插件以及模型下载地址：\n```\n链接：https://pan.quark.cn/s/6ac3c14ee18f?pwd=kDTt\n提取码：kDTt\n```\n\n### 作者 Tenz-8，交流Q群:1105577209\n\n\n#### !!!!!重要提醒：AUDIO 轨道的音频会替代所有音频，如果不是制作mv，请点击小喇叭禁用音频轨道"
+      ],
+      "widgets_values_named": {
+        "text": "# 最佳导演台V3\n\n## 🔗 插件下载地址\n```\nhttps://github.com/eaglering/MiniMaxRefDirector-ComfyUI\n```\n\n### 插件版本 v3.1.8， ComfyUI版本 0.34.0\n\n### 安装脚本：\n```\n1. 执行 ./install.bat 安装依赖插件\n2. 需要安装ffmpeg，下载地址：https://ffmpeg.org/download.html\n3. 工作流中的音频和图片资源需要替换 （网盘:教程/assets）\n```\n\n### 所有插件以及模型下载地址：\n```\n链接：https://pan.quark.cn/s/6ac3c14ee18f?pwd=kDTt\n提取码：kDTt\n```\n\n### 作者 Tenz-8，交流Q群:1105577209\n\n\n#### !!!!!重要提醒：AUDIO 轨道的音频会替代所有音频，如果不是制作mv，请点击小喇叭禁用音频轨道"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
     },
     {
       "id": 273,
@@ -2015,7 +1854,7 @@
         214
       ],
       "flags": {},
-      "order": 16,
+      "order": 15,
       "mode": 0,
       "inputs": [
         {
@@ -2081,7 +1920,7 @@
           "strengthTwo": null
         },
         {
-          "on": false,
+          "on": true,
           "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
           "strength": 1,
           "strengthTwo": null
@@ -2113,7 +1952,7 @@
           "strengthTwo": null
         },
         "lora_4": {
-          "on": false,
+          "on": true,
           "lora": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
           "strength": 1,
           "strengthTwo": null
@@ -2122,6 +1961,123 @@
       },
       "color": "#222",
       "bgcolor": "#000"
+    },
+    {
+      "id": 241,
+      "type": "MiniMaxRefDirector",
+      "pos": [
+        3592.4110312628454,
+        3400.6000245634536
+      ],
+      "size": [
+        946.2371181548369,
+        1191
+      ],
+      "flags": {
+        "pinned": true
+      },
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "config",
+          "shape": 7,
+          "type": "SUBJECT_CONFIG",
+          "link": 744
+        }
+      ],
+      "outputs": [
+        {
+          "name": "guide_data",
+          "type": "GUIDE_DATA",
+          "links": [
+            745
+          ]
+        },
+        {
+          "name": "segment_count",
+          "type": "INT",
+          "links": [
+            746
+          ]
+        },
+        {
+          "name": "frame_rate",
+          "type": "FLOAT",
+          "links": [
+            747
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "MiniMaxRefDirector-ComfyUI",
+        "ver": "873c6dc4d8af3c5bc71a41e521a00819db62a9a1",
+        "Node name for S&R": "MiniMaxRefDirector",
+        "mainTrackEnabled": true,
+        "audioTrackEnabled": true,
+        "audioTrackWasEnabledBeforeOverride": false,
+        "inpaint_audio": false,
+        "override_audio": false,
+        "overrideAudio": false,
+        "showFilenames": true,
+        "use_custom_audio": false,
+        "frame_rate": 24,
+        "display_mode": "seconds",
+        "custom_width": 0,
+        "custom_height": 0,
+        "resize_method": "maintain aspect ratio",
+        "divisible_by": 32,
+        "img_compression": 18,
+        "guide_strength": "",
+        "local_prompts": "室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏 | 月色笼罩下的夜晚，破败的营帐外面数百匹战马袭来，擂鼓声阵阵，呐喊声不断，到处火光盈盈。 | 画面从营帐外的战马嘶吼，火光盈盈，瞬间转场到营帐之中，<@虞姬>对着镜头许久，最后说出：“王，永别了”。背景是战马的嘶吼声与擂鼓的震颤声。",
+        "segment_lengths": "0.45727402060720124,240,239.5427259793928",
+        "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":610,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":2547,\"normalDurationFrames\":480,\"defaultCameraMotions\":[],\"segments\":[{\"id\":\"17883539158307l8\",\"start\":0,\"length\":264,\"prompt\":\"垓下残破楚军军帐夜景，破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾，虞姬正对镜头站立，红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起，帐外投射乌骓战马黑色剪影，冷月光从帐门照入，电影质感，浅景深，慢镜头，悲壮破碎氛围感\\n虞姬对口型演绎男声叙事段落，嘴唇开合克制轻柔，无夸张舞台动作，眼底藏淡淡哀意。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下残破楚军军帐内的夜景中，身着红金曲裾汉服，手持短剑，对镜头对口型演绎男声叙事段落，背景有烛火摇曳、狼烟薄雾与乌骓战马剪影，整体氛围悲壮破碎，风格为电影质感浅景深慢镜头。\",\"detailed_description\":\"[Shot 1] At 00:00.000，镜头缓缓向<@虞姬>推近（camera motion, slow push-in on the subject），她正对镜头站立于残破楚军军帐内，身着红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起。帐内破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾弥漫，帐外投射乌骓战马黑色剪影，冷月光从帐门斜照入，浅景深构图，慢镜头节奏，氛围悲壮破碎。[Shot 2] At 00:05.000，镜头继续平稳前推，聚焦于<@虞姬>面部特写，她嘴唇开合克制轻柔，对口型演绎男声叙事段落，眼底藏淡淡哀意，无夸张舞台动作，背景烛火与月光持续摇曳，氛围维持悲壮破碎。[Shot 3] At 00:11.000，镜头在近景处稳定，<@虞姬>保持持剑姿态，对口型动作收束，画面定格于她凝视镜头的哀婉神情，背景军帐与战马剪影在慢镜头中渐隐，电影质感持续。\",\"overall_soundscape\":\"帐内烛火噼啪轻响，帐外狼烟微弱呼啸，冷月光透过帐门投下细微沙沙声，整体环境静谧压抑，无明显脚步或兵器碰撞声。\",\"non_diegetic_music\":\"N/A\"},\"upscale\":false,\"guideStrength\":5,\"secondPass\":false,\"expressions\":[],\"shotSizes\":[],\"framings\":[],\"cameraMotions\":[\"push_in\"]},{\"id\":\"1788570957030tr177\",\"start\":264,\"length\":243.79305931567262,\"prompt\":\"虞姬半侧脸近景，大半张脸隐于军帐阴影，绛红唇，凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒面部轮廓，眼神望向帐外虚空，眼底藏哀\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>的半侧脸特写，其面部隐于军帐阴影中，绛红唇与凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒轮廓，眼神望向帐外虚空，眼底藏哀。\",\"detailed_description\":\"[Shot 1] 镜头缓缓向<@虞姬>的半侧脸推近，肩部以上构图，面部占据画面主导，烛火在帐内摇曳，勾勒出她绛红的唇与凤眼眼尾微挑的弧度，玉珠步摇在微光中轻颤，眼神望向帐外虚空，眼底藏哀。镜头保持稳定，无明显移动，仅以推近强化情绪张力（camera motion, slow push-in on the subject）。\",\"overall_soundscape\":\"军帐内低沉的布帛摩擦声与烛火微弱的噼啪声交织，环境安静而压抑。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"push_in\"],\"expressions\":[\"turn_away\"],\"shotSizes\":[\"close_up\"]},{\"id\":\"1788352810045yqkw5\",\"start\":507.7930593156726,\"length\":220.40191188631286,\"prompt\":\"虞姬站军帐之内，红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，唱到： “当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，烛火柔光，背景虚化残破帷幔，高级古典魅惑\",\"type\":\"text\",\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐内以中近景呈现，身着红金曲裾与猩红披帛，手指轻拂衣袍，唱出“当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，背景为虚化的残破帷幔与烛火柔光。\",\"detailed_description\":\"[Shot 1] 中近景，镜头偏向<@虞姬>的脸庞，她身着红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，烛火柔光映照其面庞，背景虚化残破帷幔。镜头先推近至面部特写，再缓缓拉回至胸部以上构图，带出往复的呼吸感（camera motion, slow push-in and pull-out on the subject）。<@虞姬>眼尾泛红含泪，神情凄艳决绝，开口唱出：<#虞姬:当乱世漂泊，江边应你，一生唤我虞姬>。镜头保持稳定，无明显晃动，仅以推拉节奏配合情绪起伏。\",\"overall_soundscape\":\"烛火轻响与低沉的室内底噪交织，背景隐约有风穿过残破帷幔的窸窣声。\",\"non_diegetic_music\":\"克制的古筝独奏，速度缓慢，旋律哀婉，无明显渐强或渐弱起伏。\"},\"guideStrength\":22,\"autoEndFrame\":true,\"cameraMotions\":[\"push_pull\"],\"shotSizes\":[\"medium_close_up\"],\"expressions\":[\"turn_away\"]},{\"id\":\"1788571115153jyr9v\",\"start\":728.1949712019855,\"length\":216.19721474017535,\"prompt\":\"转场至乌江江畔月夜，寒月高悬夜空，地面散落残破战甲，虞姬伫立江边，江风肆意吹动长发与猩红披帛，身姿孤冷\\n垓下乌江江畔寒夜，一轮冷月高悬，地面散落破碎战甲，虞姬站在江边，红金长裙被江风狂吹，银色月光铺满江面，神情悠远怅惘，远处隐约军营烽火微光\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>伫立于乌江江畔月夜，寒月高悬，地面散落破碎战甲，江风狂吹其红金长裙与披帛，神情怅惘悠远，远处隐约军营烽火微光。\",\"detailed_description\":\"[Shot 1] 大特写落在<@虞姬>骤然睁大的眼睛上，瞳孔映着冷月余光，睫毛微颤，唇角无言，银色月光在眼底流淌，江风掠过发梢，猩红披帛如血痕般飘动。镜头徐徐拉远，露出四周残破战甲散落的江岸，<@虞姬>孤身伫立，红金长裙被狂风撕扯成舞动的旗帜。At 00:03.000，镜头继续后移成全景，衬出人物在浩渺江天中的渺小，江面银光铺展，远处军营烽火微光如鬼火闪烁，<@虞姬>凝望远方，神情悠远怅惘，长发与披帛在风中狂舞如泣如诉。\",\"overall_soundscape\":\"江风呼啸掠过残甲与披帛，远处军营篝火噼啪低响，月光下水波轻拍江岸，寒夜寂静中透出肃杀底噪。\",\"non_diegetic_music\":\"N/A\"},\"shotSizes\":[\"extreme_close_up\"],\"cameraMotions\":[\"pull_back\"]},{\"id\":\"17885713235945vzj6\",\"start\":944.3921859421608,\"length\":266.05603649715385,\"prompt\":\"垓下乌江江畔寒夜，冷月悬空，江面波光映月，虞姬伫立风中，长发披帛飞扬，唱到：“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，淡淡狼烟弥漫，电影质感慢镜头\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下乌江江畔寒夜的中近景，冷月悬空，江面波光映月，她长发披帛飞扬，唱出“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，背景有淡淡狼烟弥漫，整体为电影质感慢镜头。\",\"detailed_description\":\"[Shot 1] 中近景，镜头水平缓摇，扫过<@虞姬>伫立风中的侧影，长发披帛随风飞扬，背景是寒夜乌江，冷月悬空，江面波光映月，淡淡狼烟弥漫。镜头聚焦于<@虞姬>的面部与肩部，捕捉其决绝刚烈的神情。画面以电影质感慢镜头呈现，氛围肃杀而悲壮。At 00:03.000, 镜头稳定，<@虞姬>开口唱出：<#虞姬:若楚歌四起，无路退已，我也绝无悔意>。At 00:08.000, 镜头继续缓摇，带出她身后更广阔的江面与狼烟，但始终维持中近景构图，聚焦其面部表情与歌声的张力。\",\"overall_soundscape\":\"寒夜江畔的风声低回，远处隐约有楚歌余韵，江面波光轻响，狼烟飘散时带出细微的燃烧气息。\",\"non_diegetic_music\":\"\"},\"shotSizes\":[\"medium_close_up\"],\"cameraMotions\":[\"pan\"]},{\"id\":\"1788615722184315\",\"start\":1210.4482224393146,\"length\":229.11907263746866,\"prompt\":\"切回残破军帐，虞姬持短剑缓缓起舞，红金曲裾舒展旋转，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动.\\n虞姬在残破军帐持剑起舞，红金曲裾旋转飞扬，猩红披帛漫天飞舞，短剑流转冷光，烛火明暗闪烁，狼烟弥漫，唱到：“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐中持短剑缓缓起舞，红金曲裾旋转飞扬，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动，唱到“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮。\",\"detailed_description\":\"[Shot 1] At 00:00.000，<@虞姬>立于残破军帐中央，身着红金曲裾与猩红披帛，手持短剑，烛火在帐角明灭，狼烟从帐外淡淡浮动。镜头从侧面缓缓环绕一周（camera motion, slow orbit around the subject），展现其衣袂翻飞与剑光流转。无对话。[Shot 2] At 00:03.000，<@虞姬>开始旋转，曲裾如火焰般舒展，披帛在空中划出大弧度轨迹，短剑冷光闪烁，烛火随动作明暗摇曳。镜头持续环绕，速度平稳，保持中景构图。[Shot 3] At 00:06.000，<@虞姬>舞至高潮，披帛如血色绸缎漫天飞舞，剑光与烛火交织，狼烟渐浓。镜头环绕加速，从正前方转至侧后方，捕捉其眼神魅惑悲壮。[Shot 4] At 00:09.000，<@虞姬>停转，剑尖轻点地面，披帛缓缓收拢，烛火微弱，狼烟淡去。镜头环绕减速，定格于其凝视远方的侧脸。唱词：<#虞姬:亲爱的霸王该散了啊，准臣妾举剑为你一舞啊>。\",\"overall_soundscape\":\"军帐内烛火噼啪轻响，风穿过破洞帐布的低啸，远处隐约有狼烟燃烧的微弱噼啪声。\",\"non_diegetic_music\":\"\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788571965423vn82q\",\"start\":1439.5672950767832,\"length\":316.1625952441773,\"prompt\":\"虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐中舞剑至高潮，抬手斩断一缕长发，发丝飘落，眼底泪光闪烁，画面具破碎感，伴随歌词“最后再断一缕我的长发，不让你有牵挂”，烛火摇曳，胶片颗粒，慢镜头卡点。\",\"detailed_description\":\"[Shot 1] 中景镜头，<@虞姬>立于军帐中央，红纱飞扬，烛火在背景摇曳，胶片颗粒感明显，手持跟拍，与人物步伐同步移动，镜头平稳跟随其舞剑动作。[Shot 2] At 00:04.500，中近景，镜头聚焦<@虞姬>面部，眼底泪光闪烁，神情凄美决绝，手持跟拍，轻微晃动模拟真实手持感，同步其抬手断发动作。[Shot 3] At 00:08.200，中景镜头，<@虞姬>挥剑断发，发丝在空中缓缓飘落，红纱随风扬起，烛火摇曳，手持跟拍，镜头缓慢推近，捕捉发丝飘落与泪珠滑落的慢镜头卡点。[Shot 4] At 00:12.000，中近景，<@虞姬>凝视断发，唇角微颤，唱出<#虞姬:最后再断一缕我的长发，不让你有牵挂>，镜头轻微晃动，胶片颗粒持续，手持跟拍保持与人物同步。\",\"overall_soundscape\":\"军帐内烛火轻响与布料摩擦声，伴随缓慢的呼吸声与剑刃轻颤声，整体环境安静而压抑。\",\"non_diegetic_music\":\"缓慢的弦乐铺底，配以低沉的打击乐节奏，情绪渐强，无明显起伏变化。\"},\"shotSizes\":[\"medium\",\"medium_close_up\"],\"cameraMotions\":[\"tracking\"]},{\"id\":\"1788615765936ggg\",\"start\":1755.7298903209605,\"length\":343.0814613559403,\"prompt\":\"虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐内继续剑舞，身段灵动凌厉，短剑寒光流转，发丝飞扬，狼烟弥漫，光影明暗交错，尽显乱世诀别悲壮。\",\"detailed_description\":\"[Shot 1] <@虞姬>立于残破军帐中央，身着战袍，手持短剑，剑尖寒光闪烁，发丝随风飞扬，帐内狼烟缭绕，光影明暗交错，背景布满破损帷幔与残兵遗物。镜头缓缓环绕<@虞姬>一周（camera motion, slow orbit around the subject），从侧面逐渐转至正前方，突出其凌厉柔美的身姿与悲壮眼神。[Shot 2] At 00:07.150，<@虞姬>剑势骤变，短剑划出凌厉弧光，发丝随剑势飞扬，帐内狼烟更浓，光影明暗交替加剧，背景残破更显凄凉。镜头继续环绕<@虞姬>半圈（camera motion, steady orbit），保持中景，突出剑光与眼神的苍凉悲壮。[Shot 3] At 00:14.300，<@虞姬>剑舞收势，短剑轻点地面，发丝垂落，眼神凝望远方，帐内狼烟渐散，光影柔和，氛围悲怆而决绝。镜头环绕至正后方，缓慢拉远（camera motion, slow pull-out），展现其孤身立于残破之中的悲壮身影。\",\"overall_soundscape\":\"帐内持续低沉的风声与狼烟燃烧的噼啪声，伴随短剑挥舞的金属轻响与布帛摩擦的窸窣声。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788572339106iml9l\",\"start\":2098.811351676901,\"length\":240,\"prompt\":\"虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围安静凄美。\",\"detailed_description\":\"[Shot 1] <@虞姬>身着红金汉服，头戴玉珠发饰，独坐于军帐案几前，面前立一青铜古镜，烛火自镜旁燃起，暖光在镜面投下朦胧叠影，映出她垂首静默的侧影。她双手横握短剑，指尖轻触剑刃，缓缓摩挲，动作缓慢而克制。背景为暗红帷幔，光线昏暗，仅烛火提供暖色光源，营造出虚实交织的凄美氛围。镜头固定，无移动，聚焦于人物中景，画面静谧无声。\",\"overall_soundscape\":\"整个视频仅有烛火微弱的噼啪声与轻微的空气流动声，环境安静，无其他物理声响。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"expressions\":[]},{\"id\":\"1788572572105kc2az\",\"start\":2338.811351676901,\"length\":208.6459223437064,\"prompt\":\"室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在室内烛火熄灭后自缢的场景，一束顶光从上方打下，剑柄移动瞬间血溅帐布，画面渐淡至全黑。\",\"detailed_description\":\"[Shot 1] 室内烛火骤然熄灭，光线骤减，画面陷入短暂黑暗，随后一束顶光从画面上方投射而下，照亮<@虞姬>举剑架于颈前的瞬间。镜头徐徐拉远，衬出人物在幽暗空间中的孤寂与决绝。[Shot 2] At 00:03.000，<@虞姬>的剑柄轻微移动，剑尖离颈一寸，她脸上浮起一个若有若无的浅笑，转瞬即逝，随即剑锋下压，颈间一寸血迹迸溅，染红帐布。镜头保持稳定，聚焦血迹飞溅的慢动作细节。[Shot 3] At 00:06.000，画面开始渐淡，光线随血迹扩散而减弱，最终完全黑屏，持续至视频结束。\",\"overall_soundscape\":\"整个视频仅保留烛火熄灭的轻微爆裂声与帐布被血渍浸透的细微撕裂声，无其他环境音。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"cameraMotions\":[\"pull_back\"],\"expressions\":[\"micro_smile\"]},{\"id\":\"1788706161761jjmbp\",\"start\":2547.457274020607,\"length\":240,\"prompt\":\"月色笼罩下的夜晚，破败的营帐外面数百匹战马袭来，擂鼓声阵阵，呐喊声不断，到处火光盈盈。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@战马>在月色笼罩下的破败营帐外集结，伴随擂鼓声与呐喊声，火光四起，镜头以大远景呈现战场氛围。\",\"detailed_description\":\"[Shot 1] 无人机航拍，镜头以极大的远景俯瞰整片战场，破败营帐在画面中央偏下，周围数百匹战马如潮水般涌动，月光洒在荒野上，火光在远处零星闪烁，镜头缓慢向战场中心推进（camera motion, slow push-in on the battlefield）。[Shot 2] At 00:05.000，镜头继续以大远景跟随战马群移动，战马嘶鸣声与远处擂鼓声交织，火光随风摇曳，画面中人物渺小如尘，仅以剪影形式出现，镜头平稳移动，保持远景构图。[Shot 3] At 00:10.000，镜头在火光与烟雾中缓缓拉高，俯拍视角展现整个战场的规模，战马群如黑色洪流奔腾，鼓声震天，呐喊声此起彼伏，画面边缘可见营帐残骸，镜头逐渐拉远，以大远景收束全貌。\",\"overall_soundscape\":\"整个视频持续着战马嘶鸣、密集擂鼓声、士兵呐喊声与火光爆裂声，环境音充满紧张与混乱。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"aerial\"],\"shotSizes\":[\"extreme_wide\"]},{\"id\":\"1788703994018q42e6\",\"start\":2787.457274020607,\"length\":240,\"prompt\":\"画面从营帐外的战马嘶吼，火光盈盈，瞬间转场到营帐之中，<@虞姬>对着镜头许久，最后说出：“王，永别了”。背景是战马的嘶吼声与擂鼓的震颤声。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[video continuation + reference generation] 目标视频从营帐外战马嘶吼、火光盈盈的场景瞬间转场至营帐内，<@虞姬>面对镜头凝视良久，最终说出“王，永别了”，背景音为战马嘶吼与擂鼓震颤。\",\"detailed_description\":\"[Shot 1] 镜头以微距特写捕捉营帐外一匹战马的鬃毛与鼻息，火光在背景中跳跃，战马嘶吼声震耳欲聋，镜头缓慢推进至马匹面部，突出其眼中未干的泪光与紧绷的肌肉（camera motion, slow push-in on the subject）。[Shot 2] At 00:03.000，画面骤然切至营帐内部，<@虞姬>身着战袍，背对火光，面向镜头，镜头以极近特写聚焦其面部，她眼神空洞，嘴角微启，似有千言万语却未出口，呼吸骤然一滞，目光短暂滑开又落回镜头，随后缓缓低下头，目光垂向地面，双唇微启，似欲言又止。[Shot 3] At 00:07.000，镜头保持固定，<@虞姬>抬眼直视镜头，眼中含泪，嘴角绷紧，一丝淡笑掠过嘴角转瞬即逝，她轻叹一声，长长地、轻轻地呼出一口气，像是卸下什么，随后开口：<#虞姬:王，永别了>。[Shot 4] At 00:10.000，镜头拉远至中景，<@虞姬>转身背对镜头，战马嘶吼与擂鼓声在背景中持续回响，画面定格于她背影与营帐门帘的微动。\",\"overall_soundscape\":\"战马嘶吼声与擂鼓震颤声贯穿全视频，背景音持续增强，尤其在<@虞姬>开口前达到顶峰，随后在她说话时与背景音交织，形成情绪张力。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"close_up\"],\"expressions\":[\"breath_catch\",\"exhale_sigh\",\"head_drop\",\"gaze_shift\",\"lip_tighten\",\"micro_smile\",\"lips_part\"]}],\"audioSegments\":[{\"id\":\"17885725956594sk5e\",\"type\":\"audio\",\"start\":0,\"length\":2547,\"trimStart\":194,\"audioDurationFrames\":5542,\"audioFile\":\"whatdreamscost/output.mp3\",\"fileName\":\"output.mp3\",\"waveformPeaks\":[0.00005679247988155112,0.000041974311898229644,0.30521538853645325,0.09662327915430069,0.08930108696222305,0.15318572521209717,0.3768981099128723,0.12570518255233765,0.19516882300376892,0.18190720677375793,0.377087265253067,0.17899605631828308,0.2620439827442169,0.5677979588508606,0.5125153064727783,0.29568344354629517,0.2731074094772339,0.44221416115760803,0.5375176072120667,0.47481101751327515,0.47532686591148376,0.2184172421693802,0.48713430762290955,0.3814827799797058,0.40066608786582947,0.37372276186943054,0.574090838432312,0.4990490674972534,0.4765162169933319,0.30677399039268494,0.4039900302886963,0.3793623447418213,0.27992069721221924,0.45843055844306946,0.4996296465396881,0.40584638714790344,0.4772692620754242,0.3557541072368622,0.4739164710044861,0.4109916090965271,0.39173537492752075,0.552890419960022,0.9211859703063965,0.6108586192131042,0.42901378870010376,0.5558953881263733,0.5147951245307922,0.417502760887146,0.3357221782207489,0.7685890197753906,0.7305847406387329,0.959312915802002,0.9466202259063721,0.7141651511192322,0.5808138251304626,0.7743545174598694,0.674588143825531,0.5905373692512512,0.521045446395874,0.7313892841339111,0.5733826160430908,0.679533064365387,0.4906621277332306,0.7209604978561401,0.6509173512458801,0.8790873885154724,0.8087895512580872,0.9676097631454468,0.9405258893966675,0.7915844917297363,0.7324215769767761,0.9142007231712341,0.8564584255218506,0.7931846380233765,0.6168761253356934,0.9178673028945923,0.5581566095352173,0.7446004152297974,0.5844618678092957,0.734371542930603,0.7712691426277161,0.6202580332756042,0.5978195667266846,0.9598470330238342,0.9468387961387634,0.8520397543907166,0.8647002577781677,0.8883702158927917,0.9139000773429871,0.7344744205474854,0.6635681390762329,0.8975549340248108,0.8639687299728394,0.8990455865859985,0.9520750045776367,0.8213480710983276,0.7593441605567932,0.7680613398551941,0.7739264965057373,0.9833949208259583,0.974017322063446,0.9480533599853516,0.8821832537651062,0.9253187775611877,0.9556866884231567,0.9233717322349548,0.9325433969497681,0.9614730477333069,0.9619655609130859,0.9747107028961182,0.9511860013008118,0.9460687637329102,0.964142918586731,0.969709575176239,1.080556035041809,1.0663827657699585,1.099945068359375,0.9890326857566833,1.061505675315857,1.0430761575698853,1.0524457693099976,1.0008474588394165,1.0051467418670654,1.0060069561004639,1.014053463935852,1.0332756042480469,1.0450031757354736,1.031327724456787,1.0353343486785889,1.0556583404541016,1.011139154434204,1.0362528562545776,1.0062540769577026,1.0703188180923462,1.0160784721374512,1.0517939329147339,1.0374677181243896,1.013624906539917,1.0026087760925293,1.1020841598510742,1.0534831285476685,1.0034328699111938,1.011326789855957,1.048912763595581,1.0085538625717163,1.1145703792572021,1.037919521331787,1.0477505922317505,1.0595916509628296,1.0008703470230103,1.0496978759765625,1.147497534751892,1.018002986907959,1.0256727933883667,1.0617053508758545,1.102467656135559,1.0101325511932373,1.00529944896698,1.0476634502410889,1.100989818572998,1.1175580024719238,1.0050896406173706,1.0065464973449707,0.9662586450576782,0.8715899586677551,0.849946916103363,0.8002071976661682,0.6191284656524658,0.5728309154510498,0.23111502826213837,0.3684249520301819,0.3087276220321655,0.4731530547142029,0.33014678955078125,0.8283791542053223,0.6626974940299988,0.5321311950683594,0.464481920003891,0.585652768611908,0.7144399881362915,0.528510570526123,0.5405933260917664,0.8553063273429871,0.8023408055305481,0.5513374209403992,0.5093967914581299,0.6677082180976868,0.5821061730384827,0.5852075815200806,0.3156611919403076,0.5926612615585327,0.5386204719543457,0.28506505489349365,0.3976900577545166,0.4446149170398712,0.3596062958240509,0.13994243741035461,0.02958129346370697,0.008316143415868282,0.0019033063435927033],\"h3PromptJson\":{\"summary\":\"\",\"detailed_description\":\"\",\"overall_soundscape\":\"\",\"non_diegetic_music\":\"\"}}]}",
+        "epsilon": 0.001,
+        "start_second": 106.13,
+        "end_second": 126.13,
+        "duration_seconds": 20,
+        "start_frame": 2547,
+        "end_frame": 3027,
+        "duration_frames": 480,
+        "outpu_resolution": "16:9横屏",
+        "million_pixels": 1,
+        "timeline_ui": "",
+        "has_serialized_properties": true,
+        "propHeight": 610,
+        "isSnapping": true
+      },
+      "widgets_values": [
+        106.13,
+        126.13,
+        20,
+        2547,
+        3027,
+        480,
+        "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":610,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":2547,\"normalDurationFrames\":480,\"defaultCameraMotions\":[],\"segments\":[{\"id\":\"17883539158307l8\",\"start\":0,\"length\":264,\"prompt\":\"垓下残破楚军军帐夜景，破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾，虞姬正对镜头站立，红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起，帐外投射乌骓战马黑色剪影，冷月光从帐门照入，电影质感，浅景深，慢镜头，悲壮破碎氛围感\\n虞姬对口型演绎男声叙事段落，嘴唇开合克制轻柔，无夸张舞台动作，眼底藏淡淡哀意。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下残破楚军军帐内的夜景中，身着红金曲裾汉服，手持短剑，对镜头对口型演绎男声叙事段落，背景有烛火摇曳、狼烟薄雾与乌骓战马剪影，整体氛围悲壮破碎，风格为电影质感浅景深慢镜头。\",\"detailed_description\":\"[Shot 1] At 00:00.000，镜头缓缓向<@虞姬>推近（camera motion, slow push-in on the subject），她正对镜头站立于残破楚军军帐内，身着红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起。帐内破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾弥漫，帐外投射乌骓战马黑色剪影，冷月光从帐门斜照入，浅景深构图，慢镜头节奏，氛围悲壮破碎。[Shot 2] At 00:05.000，镜头继续平稳前推，聚焦于<@虞姬>面部特写，她嘴唇开合克制轻柔，对口型演绎男声叙事段落，眼底藏淡淡哀意，无夸张舞台动作，背景烛火与月光持续摇曳，氛围维持悲壮破碎。[Shot 3] At 00:11.000，镜头在近景处稳定，<@虞姬>保持持剑姿态，对口型动作收束，画面定格于她凝视镜头的哀婉神情，背景军帐与战马剪影在慢镜头中渐隐，电影质感持续。\",\"overall_soundscape\":\"帐内烛火噼啪轻响，帐外狼烟微弱呼啸，冷月光透过帐门投下细微沙沙声，整体环境静谧压抑，无明显脚步或兵器碰撞声。\",\"non_diegetic_music\":\"N/A\"},\"upscale\":false,\"guideStrength\":5,\"secondPass\":false,\"expressions\":[],\"shotSizes\":[],\"framings\":[],\"cameraMotions\":[\"push_in\"]},{\"id\":\"1788570957030tr177\",\"start\":264,\"length\":243.79305931567262,\"prompt\":\"虞姬半侧脸近景，大半张脸隐于军帐阴影，绛红唇，凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒面部轮廓，眼神望向帐外虚空，眼底藏哀\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>的半侧脸特写，其面部隐于军帐阴影中，绛红唇与凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒轮廓，眼神望向帐外虚空，眼底藏哀。\",\"detailed_description\":\"[Shot 1] 镜头缓缓向<@虞姬>的半侧脸推近，肩部以上构图，面部占据画面主导，烛火在帐内摇曳，勾勒出她绛红的唇与凤眼眼尾微挑的弧度，玉珠步摇在微光中轻颤，眼神望向帐外虚空，眼底藏哀。镜头保持稳定，无明显移动，仅以推近强化情绪张力（camera motion, slow push-in on the subject）。\",\"overall_soundscape\":\"军帐内低沉的布帛摩擦声与烛火微弱的噼啪声交织，环境安静而压抑。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"push_in\"],\"expressions\":[\"turn_away\"],\"shotSizes\":[\"close_up\"]},{\"id\":\"1788352810045yqkw5\",\"start\":507.7930593156726,\"length\":220.40191188631286,\"prompt\":\"虞姬站军帐之内，红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，唱到： “当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，烛火柔光，背景虚化残破帷幔，高级古典魅惑\",\"type\":\"text\",\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐内以中近景呈现，身着红金曲裾与猩红披帛，手指轻拂衣袍，唱出“当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，背景为虚化的残破帷幔与烛火柔光。\",\"detailed_description\":\"[Shot 1] 中近景，镜头偏向<@虞姬>的脸庞，她身着红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，烛火柔光映照其面庞，背景虚化残破帷幔。镜头先推近至面部特写，再缓缓拉回至胸部以上构图，带出往复的呼吸感（camera motion, slow push-in and pull-out on the subject）。<@虞姬>眼尾泛红含泪，神情凄艳决绝，开口唱出：<#虞姬:当乱世漂泊，江边应你，一生唤我虞姬>。镜头保持稳定，无明显晃动，仅以推拉节奏配合情绪起伏。\",\"overall_soundscape\":\"烛火轻响与低沉的室内底噪交织，背景隐约有风穿过残破帷幔的窸窣声。\",\"non_diegetic_music\":\"克制的古筝独奏，速度缓慢，旋律哀婉，无明显渐强或渐弱起伏。\"},\"guideStrength\":22,\"autoEndFrame\":true,\"cameraMotions\":[\"push_pull\"],\"shotSizes\":[\"medium_close_up\"],\"expressions\":[\"turn_away\"]},{\"id\":\"1788571115153jyr9v\",\"start\":728.1949712019855,\"length\":216.19721474017535,\"prompt\":\"转场至乌江江畔月夜，寒月高悬夜空，地面散落残破战甲，虞姬伫立江边，江风肆意吹动长发与猩红披帛，身姿孤冷\\n垓下乌江江畔寒夜，一轮冷月高悬，地面散落破碎战甲，虞姬站在江边，红金长裙被江风狂吹，银色月光铺满江面，神情悠远怅惘，远处隐约军营烽火微光\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>伫立于乌江江畔月夜，寒月高悬，地面散落破碎战甲，江风狂吹其红金长裙与披帛，神情怅惘悠远，远处隐约军营烽火微光。\",\"detailed_description\":\"[Shot 1] 大特写落在<@虞姬>骤然睁大的眼睛上，瞳孔映着冷月余光，睫毛微颤，唇角无言，银色月光在眼底流淌，江风掠过发梢，猩红披帛如血痕般飘动。镜头徐徐拉远，露出四周残破战甲散落的江岸，<@虞姬>孤身伫立，红金长裙被狂风撕扯成舞动的旗帜。At 00:03.000，镜头继续后移成全景，衬出人物在浩渺江天中的渺小，江面银光铺展，远处军营烽火微光如鬼火闪烁，<@虞姬>凝望远方，神情悠远怅惘，长发与披帛在风中狂舞如泣如诉。\",\"overall_soundscape\":\"江风呼啸掠过残甲与披帛，远处军营篝火噼啪低响，月光下水波轻拍江岸，寒夜寂静中透出肃杀底噪。\",\"non_diegetic_music\":\"N/A\"},\"shotSizes\":[\"extreme_close_up\"],\"cameraMotions\":[\"pull_back\"]},{\"id\":\"17885713235945vzj6\",\"start\":944.3921859421608,\"length\":266.05603649715385,\"prompt\":\"垓下乌江江畔寒夜，冷月悬空，江面波光映月，虞姬伫立风中，长发披帛飞扬，唱到：“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，淡淡狼烟弥漫，电影质感慢镜头\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下乌江江畔寒夜的中近景，冷月悬空，江面波光映月，她长发披帛飞扬，唱出“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，背景有淡淡狼烟弥漫，整体为电影质感慢镜头。\",\"detailed_description\":\"[Shot 1] 中近景，镜头水平缓摇，扫过<@虞姬>伫立风中的侧影，长发披帛随风飞扬，背景是寒夜乌江，冷月悬空，江面波光映月，淡淡狼烟弥漫。镜头聚焦于<@虞姬>的面部与肩部，捕捉其决绝刚烈的神情。画面以电影质感慢镜头呈现，氛围肃杀而悲壮。At 00:03.000, 镜头稳定，<@虞姬>开口唱出：<#虞姬:若楚歌四起，无路退已，我也绝无悔意>。At 00:08.000, 镜头继续缓摇，带出她身后更广阔的江面与狼烟，但始终维持中近景构图，聚焦其面部表情与歌声的张力。\",\"overall_soundscape\":\"寒夜江畔的风声低回，远处隐约有楚歌余韵，江面波光轻响，狼烟飘散时带出细微的燃烧气息。\",\"non_diegetic_music\":\"\"},\"shotSizes\":[\"medium_close_up\"],\"cameraMotions\":[\"pan\"]},{\"id\":\"1788615722184315\",\"start\":1210.4482224393146,\"length\":229.11907263746866,\"prompt\":\"切回残破军帐，虞姬持短剑缓缓起舞，红金曲裾舒展旋转，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动.\\n虞姬在残破军帐持剑起舞，红金曲裾旋转飞扬，猩红披帛漫天飞舞，短剑流转冷光，烛火明暗闪烁，狼烟弥漫，唱到：“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐中持短剑缓缓起舞，红金曲裾旋转飞扬，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动，唱到“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮。\",\"detailed_description\":\"[Shot 1] At 00:00.000，<@虞姬>立于残破军帐中央，身着红金曲裾与猩红披帛，手持短剑，烛火在帐角明灭，狼烟从帐外淡淡浮动。镜头从侧面缓缓环绕一周（camera motion, slow orbit around the subject），展现其衣袂翻飞与剑光流转。无对话。[Shot 2] At 00:03.000，<@虞姬>开始旋转，曲裾如火焰般舒展，披帛在空中划出大弧度轨迹，短剑冷光闪烁，烛火随动作明暗摇曳。镜头持续环绕，速度平稳，保持中景构图。[Shot 3] At 00:06.000，<@虞姬>舞至高潮，披帛如血色绸缎漫天飞舞，剑光与烛火交织，狼烟渐浓。镜头环绕加速，从正前方转至侧后方，捕捉其眼神魅惑悲壮。[Shot 4] At 00:09.000，<@虞姬>停转，剑尖轻点地面，披帛缓缓收拢，烛火微弱，狼烟淡去。镜头环绕减速，定格于其凝视远方的侧脸。唱词：<#虞姬:亲爱的霸王该散了啊，准臣妾举剑为你一舞啊>。\",\"overall_soundscape\":\"军帐内烛火噼啪轻响，风穿过破洞帐布的低啸，远处隐约有狼烟燃烧的微弱噼啪声。\",\"non_diegetic_music\":\"\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788571965423vn82q\",\"start\":1439.5672950767832,\"length\":316.1625952441773,\"prompt\":\"虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐中舞剑至高潮，抬手斩断一缕长发，发丝飘落，眼底泪光闪烁，画面具破碎感，伴随歌词“最后再断一缕我的长发，不让你有牵挂”，烛火摇曳，胶片颗粒，慢镜头卡点。\",\"detailed_description\":\"[Shot 1] 中景镜头，<@虞姬>立于军帐中央，红纱飞扬，烛火在背景摇曳，胶片颗粒感明显，手持跟拍，与人物步伐同步移动，镜头平稳跟随其舞剑动作。[Shot 2] At 00:04.500，中近景，镜头聚焦<@虞姬>面部，眼底泪光闪烁，神情凄美决绝，手持跟拍，轻微晃动模拟真实手持感，同步其抬手断发动作。[Shot 3] At 00:08.200，中景镜头，<@虞姬>挥剑断发，发丝在空中缓缓飘落，红纱随风扬起，烛火摇曳，手持跟拍，镜头缓慢推近，捕捉发丝飘落与泪珠滑落的慢镜头卡点。[Shot 4] At 00:12.000，中近景，<@虞姬>凝视断发，唇角微颤，唱出<#虞姬:最后再断一缕我的长发，不让你有牵挂>，镜头轻微晃动，胶片颗粒持续，手持跟拍保持与人物同步。\",\"overall_soundscape\":\"军帐内烛火轻响与布料摩擦声，伴随缓慢的呼吸声与剑刃轻颤声，整体环境安静而压抑。\",\"non_diegetic_music\":\"缓慢的弦乐铺底，配以低沉的打击乐节奏，情绪渐强，无明显起伏变化。\"},\"shotSizes\":[\"medium\",\"medium_close_up\"],\"cameraMotions\":[\"tracking\"]},{\"id\":\"1788615765936ggg\",\"start\":1755.7298903209605,\"length\":343.0814613559403,\"prompt\":\"虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐内继续剑舞，身段灵动凌厉，短剑寒光流转，发丝飞扬，狼烟弥漫，光影明暗交错，尽显乱世诀别悲壮。\",\"detailed_description\":\"[Shot 1] <@虞姬>立于残破军帐中央，身着战袍，手持短剑，剑尖寒光闪烁，发丝随风飞扬，帐内狼烟缭绕，光影明暗交错，背景布满破损帷幔与残兵遗物。镜头缓缓环绕<@虞姬>一周（camera motion, slow orbit around the subject），从侧面逐渐转至正前方，突出其凌厉柔美的身姿与悲壮眼神。[Shot 2] At 00:07.150，<@虞姬>剑势骤变，短剑划出凌厉弧光，发丝随剑势飞扬，帐内狼烟更浓，光影明暗交替加剧，背景残破更显凄凉。镜头继续环绕<@虞姬>半圈（camera motion, steady orbit），保持中景，突出剑光与眼神的苍凉悲壮。[Shot 3] At 00:14.300，<@虞姬>剑舞收势，短剑轻点地面，发丝垂落，眼神凝望远方，帐内狼烟渐散，光影柔和，氛围悲怆而决绝。镜头环绕至正后方，缓慢拉远（camera motion, slow pull-out），展现其孤身立于残破之中的悲壮身影。\",\"overall_soundscape\":\"帐内持续低沉的风声与狼烟燃烧的噼啪声，伴随短剑挥舞的金属轻响与布帛摩擦的窸窣声。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788572339106iml9l\",\"start\":2098.811351676901,\"length\":240,\"prompt\":\"虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围安静凄美。\",\"detailed_description\":\"[Shot 1] <@虞姬>身着红金汉服，头戴玉珠发饰，独坐于军帐案几前，面前立一青铜古镜，烛火自镜旁燃起，暖光在镜面投下朦胧叠影，映出她垂首静默的侧影。她双手横握短剑，指尖轻触剑刃，缓缓摩挲，动作缓慢而克制。背景为暗红帷幔，光线昏暗，仅烛火提供暖色光源，营造出虚实交织的凄美氛围。镜头固定，无移动，聚焦于人物中景，画面静谧无声。\",\"overall_soundscape\":\"整个视频仅有烛火微弱的噼啪声与轻微的空气流动声，环境安静，无其他物理声响。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"expressions\":[]},{\"id\":\"1788572572105kc2az\",\"start\":2338.811351676901,\"length\":208.6459223437064,\"prompt\":\"室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在室内烛火熄灭后自缢的场景，一束顶光从上方打下，剑柄移动瞬间血溅帐布，画面渐淡至全黑。\",\"detailed_description\":\"[Shot 1] 室内烛火骤然熄灭，光线骤减，画面陷入短暂黑暗，随后一束顶光从画面上方投射而下，照亮<@虞姬>举剑架于颈前的瞬间。镜头徐徐拉远，衬出人物在幽暗空间中的孤寂与决绝。[Shot 2] At 00:03.000，<@虞姬>的剑柄轻微移动，剑尖离颈一寸，她脸上浮起一个若有若无的浅笑，转瞬即逝，随即剑锋下压，颈间一寸血迹迸溅，染红帐布。镜头保持稳定，聚焦血迹飞溅的慢动作细节。[Shot 3] At 00:06.000，画面开始渐淡，光线随血迹扩散而减弱，最终完全黑屏，持续至视频结束。\",\"overall_soundscape\":\"整个视频仅保留烛火熄灭的轻微爆裂声与帐布被血渍浸透的细微撕裂声，无其他环境音。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"cameraMotions\":[\"pull_back\"],\"expressions\":[\"micro_smile\"]},{\"id\":\"1788706161761jjmbp\",\"start\":2547.457274020607,\"length\":240,\"prompt\":\"月色笼罩下的夜晚，破败的营帐外面数百匹战马袭来，擂鼓声阵阵，呐喊声不断，到处火光盈盈。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@战马>在月色笼罩下的破败营帐外集结，伴随擂鼓声与呐喊声，火光四起，镜头以大远景呈现战场氛围。\",\"detailed_description\":\"[Shot 1] 无人机航拍，镜头以极大的远景俯瞰整片战场，破败营帐在画面中央偏下，周围数百匹战马如潮水般涌动，月光洒在荒野上，火光在远处零星闪烁，镜头缓慢向战场中心推进（camera motion, slow push-in on the battlefield）。[Shot 2] At 00:05.000，镜头继续以大远景跟随战马群移动，战马嘶鸣声与远处擂鼓声交织，火光随风摇曳，画面中人物渺小如尘，仅以剪影形式出现，镜头平稳移动，保持远景构图。[Shot 3] At 00:10.000，镜头在火光与烟雾中缓缓拉高，俯拍视角展现整个战场的规模，战马群如黑色洪流奔腾，鼓声震天，呐喊声此起彼伏，画面边缘可见营帐残骸，镜头逐渐拉远，以大远景收束全貌。\",\"overall_soundscape\":\"整个视频持续着战马嘶鸣、密集擂鼓声、士兵呐喊声与火光爆裂声，环境音充满紧张与混乱。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"aerial\"],\"shotSizes\":[\"extreme_wide\"]},{\"id\":\"1788703994018q42e6\",\"start\":2787.457274020607,\"length\":240,\"prompt\":\"画面从营帐外的战马嘶吼，火光盈盈，瞬间转场到营帐之中，<@虞姬>对着镜头许久，最后说出：“王，永别了”。背景是战马的嘶吼声与擂鼓的震颤声。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[video continuation + reference generation] 目标视频从营帐外战马嘶吼、火光盈盈的场景瞬间转场至营帐内，<@虞姬>面对镜头凝视良久，最终说出“王，永别了”，背景音为战马嘶吼与擂鼓震颤。\",\"detailed_description\":\"[Shot 1] 镜头以微距特写捕捉营帐外一匹战马的鬃毛与鼻息，火光在背景中跳跃，战马嘶吼声震耳欲聋，镜头缓慢推进至马匹面部，突出其眼中未干的泪光与紧绷的肌肉（camera motion, slow push-in on the subject）。[Shot 2] At 00:03.000，画面骤然切至营帐内部，<@虞姬>身着战袍，背对火光，面向镜头，镜头以极近特写聚焦其面部，她眼神空洞，嘴角微启，似有千言万语却未出口，呼吸骤然一滞，目光短暂滑开又落回镜头，随后缓缓低下头，目光垂向地面，双唇微启，似欲言又止。[Shot 3] At 00:07.000，镜头保持固定，<@虞姬>抬眼直视镜头，眼中含泪，嘴角绷紧，一丝淡笑掠过嘴角转瞬即逝，她轻叹一声，长长地、轻轻地呼出一口气，像是卸下什么，随后开口：<#虞姬:王，永别了>。[Shot 4] At 00:10.000，镜头拉远至中景，<@虞姬>转身背对镜头，战马嘶吼与擂鼓声在背景中持续回响，画面定格于她背影与营帐门帘的微动。\",\"overall_soundscape\":\"战马嘶吼声与擂鼓震颤声贯穿全视频，背景音持续增强，尤其在<@虞姬>开口前达到顶峰，随后在她说话时与背景音交织，形成情绪张力。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"close_up\"],\"expressions\":[\"breath_catch\",\"exhale_sigh\",\"head_drop\",\"gaze_shift\",\"lip_tighten\",\"micro_smile\",\"lips_part\"]}],\"audioSegments\":[{\"id\":\"17885725956594sk5e\",\"type\":\"audio\",\"start\":0,\"length\":2547,\"trimStart\":194,\"audioDurationFrames\":5542,\"audioFile\":\"whatdreamscost/output.mp3\",\"fileName\":\"output.mp3\",\"waveformPeaks\":[0.00005679247988155112,0.000041974311898229644,0.30521538853645325,0.09662327915430069,0.08930108696222305,0.15318572521209717,0.3768981099128723,0.12570518255233765,0.19516882300376892,0.18190720677375793,0.377087265253067,0.17899605631828308,0.2620439827442169,0.5677979588508606,0.5125153064727783,0.29568344354629517,0.2731074094772339,0.44221416115760803,0.5375176072120667,0.47481101751327515,0.47532686591148376,0.2184172421693802,0.48713430762290955,0.3814827799797058,0.40066608786582947,0.37372276186943054,0.574090838432312,0.4990490674972534,0.4765162169933319,0.30677399039268494,0.4039900302886963,0.3793623447418213,0.27992069721221924,0.45843055844306946,0.4996296465396881,0.40584638714790344,0.4772692620754242,0.3557541072368622,0.4739164710044861,0.4109916090965271,0.39173537492752075,0.552890419960022,0.9211859703063965,0.6108586192131042,0.42901378870010376,0.5558953881263733,0.5147951245307922,0.417502760887146,0.3357221782207489,0.7685890197753906,0.7305847406387329,0.959312915802002,0.9466202259063721,0.7141651511192322,0.5808138251304626,0.7743545174598694,0.674588143825531,0.5905373692512512,0.521045446395874,0.7313892841339111,0.5733826160430908,0.679533064365387,0.4906621277332306,0.7209604978561401,0.6509173512458801,0.8790873885154724,0.8087895512580872,0.9676097631454468,0.9405258893966675,0.7915844917297363,0.7324215769767761,0.9142007231712341,0.8564584255218506,0.7931846380233765,0.6168761253356934,0.9178673028945923,0.5581566095352173,0.7446004152297974,0.5844618678092957,0.734371542930603,0.7712691426277161,0.6202580332756042,0.5978195667266846,0.9598470330238342,0.9468387961387634,0.8520397543907166,0.8647002577781677,0.8883702158927917,0.9139000773429871,0.7344744205474854,0.6635681390762329,0.8975549340248108,0.8639687299728394,0.8990455865859985,0.9520750045776367,0.8213480710983276,0.7593441605567932,0.7680613398551941,0.7739264965057373,0.9833949208259583,0.974017322063446,0.9480533599853516,0.8821832537651062,0.9253187775611877,0.9556866884231567,0.9233717322349548,0.9325433969497681,0.9614730477333069,0.9619655609130859,0.9747107028961182,0.9511860013008118,0.9460687637329102,0.964142918586731,0.969709575176239,1.080556035041809,1.0663827657699585,1.099945068359375,0.9890326857566833,1.061505675315857,1.0430761575698853,1.0524457693099976,1.0008474588394165,1.0051467418670654,1.0060069561004639,1.014053463935852,1.0332756042480469,1.0450031757354736,1.031327724456787,1.0353343486785889,1.0556583404541016,1.011139154434204,1.0362528562545776,1.0062540769577026,1.0703188180923462,1.0160784721374512,1.0517939329147339,1.0374677181243896,1.013624906539917,1.0026087760925293,1.1020841598510742,1.0534831285476685,1.0034328699111938,1.011326789855957,1.048912763595581,1.0085538625717163,1.1145703792572021,1.037919521331787,1.0477505922317505,1.0595916509628296,1.0008703470230103,1.0496978759765625,1.147497534751892,1.018002986907959,1.0256727933883667,1.0617053508758545,1.102467656135559,1.0101325511932373,1.00529944896698,1.0476634502410889,1.100989818572998,1.1175580024719238,1.0050896406173706,1.0065464973449707,0.9662586450576782,0.8715899586677551,0.849946916103363,0.8002071976661682,0.6191284656524658,0.5728309154510498,0.23111502826213837,0.3684249520301819,0.3087276220321655,0.4731530547142029,0.33014678955078125,0.8283791542053223,0.6626974940299988,0.5321311950683594,0.464481920003891,0.585652768611908,0.7144399881362915,0.528510570526123,0.5405933260917664,0.8553063273429871,0.8023408055305481,0.5513374209403992,0.5093967914581299,0.6677082180976868,0.5821061730384827,0.5852075815200806,0.3156611919403076,0.5926612615585327,0.5386204719543457,0.28506505489349365,0.3976900577545166,0.4446149170398712,0.3596062958240509,0.13994243741035461,0.02958129346370697,0.008316143415868282,0.0019033063435927033],\"h3PromptJson\":{\"summary\":\"\",\"detailed_description\":\"\",\"overall_soundscape\":\"\",\"non_diegetic_music\":\"\"}}]}",
+        "室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏 | 月色笼罩下的夜晚，破败的营帐外面数百匹战马袭来，擂鼓声阵阵，呐喊声不断，到处火光盈盈。 | 画面从营帐外的战马嘶吼，火光盈盈，瞬间转场到营帐之中，<@虞姬>对着镜头许久，最后说出：“王，永别了”。背景是战马的嘶吼声与擂鼓的震颤声。",
+        "0.45727402060720124,240,239.5427259793928",
+        24,
+        "seconds",
+        "16:9横屏",
+        1,
+        ""
+      ],
+      "widgets_values_named": {
+        "start_second": 106.13,
+        "end_second": 126.13,
+        "duration_seconds": 20,
+        "start_frame": 2547,
+        "end_frame": 3027,
+        "duration_frames": 480,
+        "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":true,\"propHeight\":610,\"showFilenames\":true,\"overrideAudio\":false,\"inpaint_audio\":false,\"normalStartFrame\":2547,\"normalDurationFrames\":480,\"defaultCameraMotions\":[],\"segments\":[{\"id\":\"17883539158307l8\",\"start\":0,\"length\":264,\"prompt\":\"垓下残破楚军军帐夜景，破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾，虞姬正对镜头站立，红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起，帐外投射乌骓战马黑色剪影，冷月光从帐门照入，电影质感，浅景深，慢镜头，悲壮破碎氛围感\\n虞姬对口型演绎男声叙事段落，嘴唇开合克制轻柔，无夸张舞台动作，眼底藏淡淡哀意。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下残破楚军军帐内的夜景中，身着红金曲裾汉服，手持短剑，对镜头对口型演绎男声叙事段落，背景有烛火摇曳、狼烟薄雾与乌骓战马剪影，整体氛围悲壮破碎，风格为电影质感浅景深慢镜头。\",\"detailed_description\":\"[Shot 1] At 00:00.000，镜头缓缓向<@虞姬>推近（camera motion, slow push-in on the subject），她正对镜头站立于残破楚军军帐内，身着红金曲裾汉服，玉珠步摇高髻，手中紧握短剑，红色纱披帛被夜风扬起。帐内破损暗红帷幔，烛火摇曳，淡淡狼烟薄雾弥漫，帐外投射乌骓战马黑色剪影，冷月光从帐门斜照入，浅景深构图，慢镜头节奏，氛围悲壮破碎。[Shot 2] At 00:05.000，镜头继续平稳前推，聚焦于<@虞姬>面部特写，她嘴唇开合克制轻柔，对口型演绎男声叙事段落，眼底藏淡淡哀意，无夸张舞台动作，背景烛火与月光持续摇曳，氛围维持悲壮破碎。[Shot 3] At 00:11.000，镜头在近景处稳定，<@虞姬>保持持剑姿态，对口型动作收束，画面定格于她凝视镜头的哀婉神情，背景军帐与战马剪影在慢镜头中渐隐，电影质感持续。\",\"overall_soundscape\":\"帐内烛火噼啪轻响，帐外狼烟微弱呼啸，冷月光透过帐门投下细微沙沙声，整体环境静谧压抑，无明显脚步或兵器碰撞声。\",\"non_diegetic_music\":\"N/A\"},\"upscale\":false,\"guideStrength\":5,\"secondPass\":false,\"expressions\":[],\"shotSizes\":[],\"framings\":[],\"cameraMotions\":[\"push_in\"]},{\"id\":\"1788570957030tr177\",\"start\":264,\"length\":243.79305931567262,\"prompt\":\"虞姬半侧脸近景，大半张脸隐于军帐阴影，绛红唇，凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒面部轮廓，眼神望向帐外虚空，眼底藏哀\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>的半侧脸特写，其面部隐于军帐阴影中，绛红唇与凤眼眼尾微挑，玉珠步摇轻颤，烛火勾勒轮廓，眼神望向帐外虚空，眼底藏哀。\",\"detailed_description\":\"[Shot 1] 镜头缓缓向<@虞姬>的半侧脸推近，肩部以上构图，面部占据画面主导，烛火在帐内摇曳，勾勒出她绛红的唇与凤眼眼尾微挑的弧度，玉珠步摇在微光中轻颤，眼神望向帐外虚空，眼底藏哀。镜头保持稳定，无明显移动，仅以推近强化情绪张力（camera motion, slow push-in on the subject）。\",\"overall_soundscape\":\"军帐内低沉的布帛摩擦声与烛火微弱的噼啪声交织，环境安静而压抑。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"push_in\"],\"expressions\":[\"turn_away\"],\"shotSizes\":[\"close_up\"]},{\"id\":\"1788352810045yqkw5\",\"start\":507.7930593156726,\"length\":220.40191188631286,\"prompt\":\"虞姬站军帐之内，红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，唱到： “当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，烛火柔光，背景虚化残破帷幔，高级古典魅惑\",\"type\":\"text\",\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐内以中近景呈现，身着红金曲裾与猩红披帛，手指轻拂衣袍，唱出“当乱世漂泊，江边应你，一生唤我虞姬”，眼尾泛红含泪，神情凄艳决绝，背景为虚化的残破帷幔与烛火柔光。\",\"detailed_description\":\"[Shot 1] 中近景，镜头偏向<@虞姬>的脸庞，她身着红金曲裾，猩红披帛垂落肩头，手指轻拂衣袍，烛火柔光映照其面庞，背景虚化残破帷幔。镜头先推近至面部特写，再缓缓拉回至胸部以上构图，带出往复的呼吸感（camera motion, slow push-in and pull-out on the subject）。<@虞姬>眼尾泛红含泪，神情凄艳决绝，开口唱出：<#虞姬:当乱世漂泊，江边应你，一生唤我虞姬>。镜头保持稳定，无明显晃动，仅以推拉节奏配合情绪起伏。\",\"overall_soundscape\":\"烛火轻响与低沉的室内底噪交织，背景隐约有风穿过残破帷幔的窸窣声。\",\"non_diegetic_music\":\"克制的古筝独奏，速度缓慢，旋律哀婉，无明显渐强或渐弱起伏。\"},\"guideStrength\":22,\"autoEndFrame\":true,\"cameraMotions\":[\"push_pull\"],\"shotSizes\":[\"medium_close_up\"],\"expressions\":[\"turn_away\"]},{\"id\":\"1788571115153jyr9v\",\"start\":728.1949712019855,\"length\":216.19721474017535,\"prompt\":\"转场至乌江江畔月夜，寒月高悬夜空，地面散落残破战甲，虞姬伫立江边，江风肆意吹动长发与猩红披帛，身姿孤冷\\n垓下乌江江畔寒夜，一轮冷月高悬，地面散落破碎战甲，虞姬站在江边，红金长裙被江风狂吹，银色月光铺满江面，神情悠远怅惘，远处隐约军营烽火微光\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>伫立于乌江江畔月夜，寒月高悬，地面散落破碎战甲，江风狂吹其红金长裙与披帛，神情怅惘悠远，远处隐约军营烽火微光。\",\"detailed_description\":\"[Shot 1] 大特写落在<@虞姬>骤然睁大的眼睛上，瞳孔映着冷月余光，睫毛微颤，唇角无言，银色月光在眼底流淌，江风掠过发梢，猩红披帛如血痕般飘动。镜头徐徐拉远，露出四周残破战甲散落的江岸，<@虞姬>孤身伫立，红金长裙被狂风撕扯成舞动的旗帜。At 00:03.000，镜头继续后移成全景，衬出人物在浩渺江天中的渺小，江面银光铺展，远处军营烽火微光如鬼火闪烁，<@虞姬>凝望远方，神情悠远怅惘，长发与披帛在风中狂舞如泣如诉。\",\"overall_soundscape\":\"江风呼啸掠过残甲与披帛，远处军营篝火噼啪低响，月光下水波轻拍江岸，寒夜寂静中透出肃杀底噪。\",\"non_diegetic_music\":\"N/A\"},\"shotSizes\":[\"extreme_close_up\"],\"cameraMotions\":[\"pull_back\"]},{\"id\":\"17885713235945vzj6\",\"start\":944.3921859421608,\"length\":266.05603649715385,\"prompt\":\"垓下乌江江畔寒夜，冷月悬空，江面波光映月，虞姬伫立风中，长发披帛飞扬，唱到：“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，淡淡狼烟弥漫，电影质感慢镜头\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在垓下乌江江畔寒夜的中近景，冷月悬空，江面波光映月，她长发披帛飞扬，唱出“若楚歌四起，无路退已，我也绝无悔意”，神情决绝刚烈，背景有淡淡狼烟弥漫，整体为电影质感慢镜头。\",\"detailed_description\":\"[Shot 1] 中近景，镜头水平缓摇，扫过<@虞姬>伫立风中的侧影，长发披帛随风飞扬，背景是寒夜乌江，冷月悬空，江面波光映月，淡淡狼烟弥漫。镜头聚焦于<@虞姬>的面部与肩部，捕捉其决绝刚烈的神情。画面以电影质感慢镜头呈现，氛围肃杀而悲壮。At 00:03.000, 镜头稳定，<@虞姬>开口唱出：<#虞姬:若楚歌四起，无路退已，我也绝无悔意>。At 00:08.000, 镜头继续缓摇，带出她身后更广阔的江面与狼烟，但始终维持中近景构图，聚焦其面部表情与歌声的张力。\",\"overall_soundscape\":\"寒夜江畔的风声低回，远处隐约有楚歌余韵，江面波光轻响，狼烟飘散时带出细微的燃烧气息。\",\"non_diegetic_music\":\"\"},\"shotSizes\":[\"medium_close_up\"],\"cameraMotions\":[\"pan\"]},{\"id\":\"1788615722184315\",\"start\":1210.4482224393146,\"length\":229.11907263746866,\"prompt\":\"切回残破军帐，虞姬持短剑缓缓起舞，红金曲裾舒展旋转，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动.\\n虞姬在残破军帐持剑起舞，红金曲裾旋转飞扬，猩红披帛漫天飞舞，短剑流转冷光，烛火明暗闪烁，狼烟弥漫，唱到：“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐中持短剑缓缓起舞，红金曲裾旋转飞扬，猩红披帛大弧度翻飞，烛火明暗摇曳，狼烟淡淡浮动，唱到“亲爱的霸王该散了啊，准臣妾举剑为你一舞啊”，眼神魅惑悲壮。\",\"detailed_description\":\"[Shot 1] At 00:00.000，<@虞姬>立于残破军帐中央，身着红金曲裾与猩红披帛，手持短剑，烛火在帐角明灭，狼烟从帐外淡淡浮动。镜头从侧面缓缓环绕一周（camera motion, slow orbit around the subject），展现其衣袂翻飞与剑光流转。无对话。[Shot 2] At 00:03.000，<@虞姬>开始旋转，曲裾如火焰般舒展，披帛在空中划出大弧度轨迹，短剑冷光闪烁，烛火随动作明暗摇曳。镜头持续环绕，速度平稳，保持中景构图。[Shot 3] At 00:06.000，<@虞姬>舞至高潮，披帛如血色绸缎漫天飞舞，剑光与烛火交织，狼烟渐浓。镜头环绕加速，从正前方转至侧后方，捕捉其眼神魅惑悲壮。[Shot 4] At 00:09.000，<@虞姬>停转，剑尖轻点地面，披帛缓缓收拢，烛火微弱，狼烟淡去。镜头环绕减速，定格于其凝视远方的侧脸。唱词：<#虞姬:亲爱的霸王该散了啊，准臣妾举剑为你一舞啊>。\",\"overall_soundscape\":\"军帐内烛火噼啪轻响，风穿过破洞帐布的低啸，远处隐约有狼烟燃烧的微弱噼啪声。\",\"non_diegetic_music\":\"\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788571965423vn82q\",\"start\":1439.5672950767832,\"length\":316.1625952441773,\"prompt\":\"虞姬舞至高潮，抬手斩断一缕长发，发丝在空中缓缓飘落，舞姿决绝，眼底泪光闪烁，画面破碎感拉满。虞姬军帐舞剑断发，长发发丝缓缓飘落，红纱飞扬，眼角滑落泪珠，虞姬唱到 ：“最后再断一缕我的长发，不让你有牵挂”，神情凄美决绝，烛火摇曳，胶片颗粒，慢镜头卡点\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在军帐中舞剑至高潮，抬手斩断一缕长发，发丝飘落，眼底泪光闪烁，画面具破碎感，伴随歌词“最后再断一缕我的长发，不让你有牵挂”，烛火摇曳，胶片颗粒，慢镜头卡点。\",\"detailed_description\":\"[Shot 1] 中景镜头，<@虞姬>立于军帐中央，红纱飞扬，烛火在背景摇曳，胶片颗粒感明显，手持跟拍，与人物步伐同步移动，镜头平稳跟随其舞剑动作。[Shot 2] At 00:04.500，中近景，镜头聚焦<@虞姬>面部，眼底泪光闪烁，神情凄美决绝，手持跟拍，轻微晃动模拟真实手持感，同步其抬手断发动作。[Shot 3] At 00:08.200，中景镜头，<@虞姬>挥剑断发，发丝在空中缓缓飘落，红纱随风扬起，烛火摇曳，手持跟拍，镜头缓慢推近，捕捉发丝飘落与泪珠滑落的慢镜头卡点。[Shot 4] At 00:12.000，中近景，<@虞姬>凝视断发，唇角微颤，唱出<#虞姬:最后再断一缕我的长发，不让你有牵挂>，镜头轻微晃动，胶片颗粒持续，手持跟拍保持与人物同步。\",\"overall_soundscape\":\"军帐内烛火轻响与布料摩擦声，伴随缓慢的呼吸声与剑刃轻颤声，整体环境安静而压抑。\",\"non_diegetic_music\":\"缓慢的弦乐铺底，配以低沉的打击乐节奏，情绪渐强，无明显起伏变化。\"},\"shotSizes\":[\"medium\",\"medium_close_up\"],\"cameraMotions\":[\"tracking\"]},{\"id\":\"1788615765936ggg\",\"start\":1755.7298903209605,\"length\":343.0814613559403,\"prompt\":\"虞姬继续剑舞，身段灵动凌厉，短剑寒光流转，发丝肆意飞扬，帐内狼烟浮动，光影明暗交错，尽显乱世诀别悲壮。\\n虞姬残破军帐舞剑，身姿凌厉柔美，短剑寒光流转，发丝飞扬，狼烟弥漫，明暗光影交错，眼神苍凉悲壮\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在残破军帐内继续剑舞，身段灵动凌厉，短剑寒光流转，发丝飞扬，狼烟弥漫，光影明暗交错，尽显乱世诀别悲壮。\",\"detailed_description\":\"[Shot 1] <@虞姬>立于残破军帐中央，身着战袍，手持短剑，剑尖寒光闪烁，发丝随风飞扬，帐内狼烟缭绕，光影明暗交错，背景布满破损帷幔与残兵遗物。镜头缓缓环绕<@虞姬>一周（camera motion, slow orbit around the subject），从侧面逐渐转至正前方，突出其凌厉柔美的身姿与悲壮眼神。[Shot 2] At 00:07.150，<@虞姬>剑势骤变，短剑划出凌厉弧光，发丝随剑势飞扬，帐内狼烟更浓，光影明暗交替加剧，背景残破更显凄凉。镜头继续环绕<@虞姬>半圈（camera motion, steady orbit），保持中景，突出剑光与眼神的苍凉悲壮。[Shot 3] At 00:14.300，<@虞姬>剑舞收势，短剑轻点地面，发丝垂落，眼神凝望远方，帐内狼烟渐散，光影柔和，氛围悲怆而决绝。镜头环绕至正后方，缓慢拉远（camera motion, slow pull-out），展现其孤身立于残破之中的悲壮身影。\",\"overall_soundscape\":\"帐内持续低沉的风声与狼烟燃烧的噼啪声，伴随短剑挥舞的金属轻响与布帛摩擦的窸窣声。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"orbit\"]},{\"id\":\"1788572339106iml9l\",\"start\":2098.811351676901,\"length\":240,\"prompt\":\"虞姬独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围感安静凄美。\\n真人古装室内镜头，虞姬独坐军帐案几，青铜古镜，烛火映照镜面形成人物叠影，红金汉服，玉珠发饰，双手横握短剑指尖轻触剑刃，神情落寞，暗红帷幔背景，暖烛暗光，虚实叠影\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>独坐军帐青铜铜镜前，烛火映照镜面形成人物朦胧叠影，双手横握短剑，指尖轻轻摩挲剑刃，垂眸静默，氛围安静凄美。\",\"detailed_description\":\"[Shot 1] <@虞姬>身着红金汉服，头戴玉珠发饰，独坐于军帐案几前，面前立一青铜古镜，烛火自镜旁燃起，暖光在镜面投下朦胧叠影，映出她垂首静默的侧影。她双手横握短剑，指尖轻触剑刃，缓缓摩挲，动作缓慢而克制。背景为暗红帷幔，光线昏暗，仅烛火提供暖色光源，营造出虚实交织的凄美氛围。镜头固定，无移动，聚焦于人物中景，画面静谧无声。\",\"overall_soundscape\":\"整个视频仅有烛火微弱的噼啪声与轻微的空气流动声，环境安静，无其他物理声响。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"expressions\":[]},{\"id\":\"1788572572105kc2az\",\"start\":2338.811351676901,\"length\":208.6459223437064,\"prompt\":\"室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@虞姬>在室内烛火熄灭后自缢的场景，一束顶光从上方打下，剑柄移动瞬间血溅帐布，画面渐淡至全黑。\",\"detailed_description\":\"[Shot 1] 室内烛火骤然熄灭，光线骤减，画面陷入短暂黑暗，随后一束顶光从画面上方投射而下，照亮<@虞姬>举剑架于颈前的瞬间。镜头徐徐拉远，衬出人物在幽暗空间中的孤寂与决绝。[Shot 2] At 00:03.000，<@虞姬>的剑柄轻微移动，剑尖离颈一寸，她脸上浮起一个若有若无的浅笑，转瞬即逝，随即剑锋下压，颈间一寸血迹迸溅，染红帐布。镜头保持稳定，聚焦血迹飞溅的慢动作细节。[Shot 3] At 00:06.000，画面开始渐淡，光线随血迹扩散而减弱，最终完全黑屏，持续至视频结束。\",\"overall_soundscape\":\"整个视频仅保留烛火熄灭的轻微爆裂声与帐布被血渍浸透的细微撕裂声，无其他环境音。\",\"non_diegetic_music\":\"N/A\"},\"framings\":[],\"cameraMotions\":[\"pull_back\"],\"expressions\":[\"micro_smile\"]},{\"id\":\"1788706161761jjmbp\",\"start\":2547.457274020607,\"length\":240,\"prompt\":\"月色笼罩下的夜晚，破败的营帐外面数百匹战马袭来，擂鼓声阵阵，呐喊声不断，到处火光盈盈。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[reference generation] 目标视频展示<@战马>在月色笼罩下的破败营帐外集结，伴随擂鼓声与呐喊声，火光四起，镜头以大远景呈现战场氛围。\",\"detailed_description\":\"[Shot 1] 无人机航拍，镜头以极大的远景俯瞰整片战场，破败营帐在画面中央偏下，周围数百匹战马如潮水般涌动，月光洒在荒野上，火光在远处零星闪烁，镜头缓慢向战场中心推进（camera motion, slow push-in on the battlefield）。[Shot 2] At 00:05.000，镜头继续以大远景跟随战马群移动，战马嘶鸣声与远处擂鼓声交织，火光随风摇曳，画面中人物渺小如尘，仅以剪影形式出现，镜头平稳移动，保持远景构图。[Shot 3] At 00:10.000，镜头在火光与烟雾中缓缓拉高，俯拍视角展现整个战场的规模，战马群如黑色洪流奔腾，鼓声震天，呐喊声此起彼伏，画面边缘可见营帐残骸，镜头逐渐拉远，以大远景收束全貌。\",\"overall_soundscape\":\"整个视频持续着战马嘶鸣、密集擂鼓声、士兵呐喊声与火光爆裂声，环境音充满紧张与混乱。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"aerial\"],\"shotSizes\":[\"extreme_wide\"]},{\"id\":\"1788703994018q42e6\",\"start\":2787.457274020607,\"length\":240,\"prompt\":\"画面从营帐外的战马嘶吼，火光盈盈，瞬间转场到营帐之中，<@虞姬>对着镜头许久，最后说出：“王，永别了”。背景是战马的嘶吼声与擂鼓的震颤声。\",\"type\":\"text\",\"autoEndFrame\":true,\"h3PromptJson\":{\"summary\":\"[video continuation + reference generation] 目标视频从营帐外战马嘶吼、火光盈盈的场景瞬间转场至营帐内，<@虞姬>面对镜头凝视良久，最终说出“王，永别了”，背景音为战马嘶吼与擂鼓震颤。\",\"detailed_description\":\"[Shot 1] 镜头以微距特写捕捉营帐外一匹战马的鬃毛与鼻息，火光在背景中跳跃，战马嘶吼声震耳欲聋，镜头缓慢推进至马匹面部，突出其眼中未干的泪光与紧绷的肌肉（camera motion, slow push-in on the subject）。[Shot 2] At 00:03.000，画面骤然切至营帐内部，<@虞姬>身着战袍，背对火光，面向镜头，镜头以极近特写聚焦其面部，她眼神空洞，嘴角微启，似有千言万语却未出口，呼吸骤然一滞，目光短暂滑开又落回镜头，随后缓缓低下头，目光垂向地面，双唇微启，似欲言又止。[Shot 3] At 00:07.000，镜头保持固定，<@虞姬>抬眼直视镜头，眼中含泪，嘴角绷紧，一丝淡笑掠过嘴角转瞬即逝，她轻叹一声，长长地、轻轻地呼出一口气，像是卸下什么，随后开口：<#虞姬:王，永别了>。[Shot 4] At 00:10.000，镜头拉远至中景，<@虞姬>转身背对镜头，战马嘶吼与擂鼓声在背景中持续回响，画面定格于她背影与营帐门帘的微动。\",\"overall_soundscape\":\"战马嘶吼声与擂鼓震颤声贯穿全视频，背景音持续增强，尤其在<@虞姬>开口前达到顶峰，随后在她说话时与背景音交织，形成情绪张力。\",\"non_diegetic_music\":\"N/A\"},\"cameraMotions\":[\"close_up\"],\"expressions\":[\"breath_catch\",\"exhale_sigh\",\"head_drop\",\"gaze_shift\",\"lip_tighten\",\"micro_smile\",\"lips_part\"]}],\"audioSegments\":[{\"id\":\"17885725956594sk5e\",\"type\":\"audio\",\"start\":0,\"length\":2547,\"trimStart\":194,\"audioDurationFrames\":5542,\"audioFile\":\"whatdreamscost/output.mp3\",\"fileName\":\"output.mp3\",\"waveformPeaks\":[0.00005679247988155112,0.000041974311898229644,0.30521538853645325,0.09662327915430069,0.08930108696222305,0.15318572521209717,0.3768981099128723,0.12570518255233765,0.19516882300376892,0.18190720677375793,0.377087265253067,0.17899605631828308,0.2620439827442169,0.5677979588508606,0.5125153064727783,0.29568344354629517,0.2731074094772339,0.44221416115760803,0.5375176072120667,0.47481101751327515,0.47532686591148376,0.2184172421693802,0.48713430762290955,0.3814827799797058,0.40066608786582947,0.37372276186943054,0.574090838432312,0.4990490674972534,0.4765162169933319,0.30677399039268494,0.4039900302886963,0.3793623447418213,0.27992069721221924,0.45843055844306946,0.4996296465396881,0.40584638714790344,0.4772692620754242,0.3557541072368622,0.4739164710044861,0.4109916090965271,0.39173537492752075,0.552890419960022,0.9211859703063965,0.6108586192131042,0.42901378870010376,0.5558953881263733,0.5147951245307922,0.417502760887146,0.3357221782207489,0.7685890197753906,0.7305847406387329,0.959312915802002,0.9466202259063721,0.7141651511192322,0.5808138251304626,0.7743545174598694,0.674588143825531,0.5905373692512512,0.521045446395874,0.7313892841339111,0.5733826160430908,0.679533064365387,0.4906621277332306,0.7209604978561401,0.6509173512458801,0.8790873885154724,0.8087895512580872,0.9676097631454468,0.9405258893966675,0.7915844917297363,0.7324215769767761,0.9142007231712341,0.8564584255218506,0.7931846380233765,0.6168761253356934,0.9178673028945923,0.5581566095352173,0.7446004152297974,0.5844618678092957,0.734371542930603,0.7712691426277161,0.6202580332756042,0.5978195667266846,0.9598470330238342,0.9468387961387634,0.8520397543907166,0.8647002577781677,0.8883702158927917,0.9139000773429871,0.7344744205474854,0.6635681390762329,0.8975549340248108,0.8639687299728394,0.8990455865859985,0.9520750045776367,0.8213480710983276,0.7593441605567932,0.7680613398551941,0.7739264965057373,0.9833949208259583,0.974017322063446,0.9480533599853516,0.8821832537651062,0.9253187775611877,0.9556866884231567,0.9233717322349548,0.9325433969497681,0.9614730477333069,0.9619655609130859,0.9747107028961182,0.9511860013008118,0.9460687637329102,0.964142918586731,0.969709575176239,1.080556035041809,1.0663827657699585,1.099945068359375,0.9890326857566833,1.061505675315857,1.0430761575698853,1.0524457693099976,1.0008474588394165,1.0051467418670654,1.0060069561004639,1.014053463935852,1.0332756042480469,1.0450031757354736,1.031327724456787,1.0353343486785889,1.0556583404541016,1.011139154434204,1.0362528562545776,1.0062540769577026,1.0703188180923462,1.0160784721374512,1.0517939329147339,1.0374677181243896,1.013624906539917,1.0026087760925293,1.1020841598510742,1.0534831285476685,1.0034328699111938,1.011326789855957,1.048912763595581,1.0085538625717163,1.1145703792572021,1.037919521331787,1.0477505922317505,1.0595916509628296,1.0008703470230103,1.0496978759765625,1.147497534751892,1.018002986907959,1.0256727933883667,1.0617053508758545,1.102467656135559,1.0101325511932373,1.00529944896698,1.0476634502410889,1.100989818572998,1.1175580024719238,1.0050896406173706,1.0065464973449707,0.9662586450576782,0.8715899586677551,0.849946916103363,0.8002071976661682,0.6191284656524658,0.5728309154510498,0.23111502826213837,0.3684249520301819,0.3087276220321655,0.4731530547142029,0.33014678955078125,0.8283791542053223,0.6626974940299988,0.5321311950683594,0.464481920003891,0.585652768611908,0.7144399881362915,0.528510570526123,0.5405933260917664,0.8553063273429871,0.8023408055305481,0.5513374209403992,0.5093967914581299,0.6677082180976868,0.5821061730384827,0.5852075815200806,0.3156611919403076,0.5926612615585327,0.5386204719543457,0.28506505489349365,0.3976900577545166,0.4446149170398712,0.3596062958240509,0.13994243741035461,0.02958129346370697,0.008316143415868282,0.0019033063435927033],\"h3PromptJson\":{\"summary\":\"\",\"detailed_description\":\"\",\"overall_soundscape\":\"\",\"non_diegetic_music\":\"\"}}]}",
+        "local_prompts": "室内镜头，烛火熄灭，室内忽然变黑，一束光线从画面顶部打下，清晰的看到虞姬举剑架在脖子上，忽然剑柄移动，虞姬自缢，血饮飞溅染红了帐布。画面渐渐淡出，直至完全黑屏 | 月色笼罩下的夜晚，破败的营帐外面数百匹战马袭来，擂鼓声阵阵，呐喊声不断，到处火光盈盈。 | 画面从营帐外的战马嘶吼，火光盈盈，瞬间转场到营帐之中，<@虞姬>对着镜头许久，最后说出：“王，永别了”。背景是战马的嘶吼声与擂鼓的震颤声。",
+        "segment_lengths": "0.45727402060720124,240,239.5427259793928",
+        "frame_rate": 24,
+        "display_mode": "seconds",
+        "outpu_resolution": "16:9横屏",
+        "million_pixels": 1,
+        "timeline_ui": ""
+      }
     }
   ],
   "links": [
@@ -2574,26 +2530,10 @@
       "SIGMAS"
     ],
     [
-      931,
-      285,
-      0,
-      295,
-      0,
-      "MODEL"
-    ],
-    [
       936,
       300,
       0,
       127,
-      0,
-      "MODEL"
-    ],
-    [
-      937,
-      295,
-      0,
-      300,
       0,
       "MODEL"
     ],
@@ -2610,6 +2550,14 @@
       302,
       0,
       286,
+      0,
+      "MODEL"
+    ],
+    [
+      940,
+      285,
+      0,
+      300,
       0,
       "MODEL"
     ]
@@ -2633,8 +2581,8 @@
       "bounding": [
         4559.577696488099,
         3362.8541838804217,
-        385.9265416841363,
-        1110.6448939953166
+        388.34654168413635,
+        1029.574893995316
       ],
       "color": "#3f789e",
       "flags": {}
@@ -2655,7 +2603,7 @@
       "id": 7,
       "title": "X2 FlashVSR 超分放大",
       "bounding": [
-        5929.9980662012,
+        5926.7770462011995,
         3900.830937460545,
         589.7461590136609,
         496.81768669819576
@@ -2691,10 +2639,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.620921323059155,
+      "scale": 0.6830134553650711,
       "offset": [
-        -3386.5950484104815,
-        -3198.039409735486
+        -3023.5563330125265,
+        -3172.0725075487853
       ]
     },
     "frontendVersion": "1.49.6",
