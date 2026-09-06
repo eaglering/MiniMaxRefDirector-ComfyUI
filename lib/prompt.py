@@ -93,6 +93,1166 @@ _AUDIO_RELATION_TEXT = {
     "weak_reference": "Only broad similarity in category or atmosphere from {n} is retained.",
 }
 
+# ── 运镜预设（Jojocodex MiniMax-H3 Camera Motion LoRA 的 9 大类）─────────────
+# key 与前端 transfer.js 的 CAMERA_MOTIONS 保持一致。多选（list[str]）或单值
+# （str）均可；空 / "auto" / 未知 key 一律不注入（由模型自由决定运镜）。
+# desc 描述该类运镜的镜头语言，examples 给出可直接嵌入 shot 描述的英文运镜
+# 短语示例。全部以 "camera motion" 触发词为前缀风格（LoRA 激活词），但具体
+# 落点交由 LLM 自然嵌入，不强制固定位置；速度词（slow/steady/quick 等）由
+# 模型依镜头节奏自然选择，无独立控件。
+_CAMERA_MOTION_PRESETS: dict = {
+    "push_in": {
+        "name_en": "Push-in / Dolly-in",
+        "name_zh": "推近 / 前移",
+        "desc": "The camera moves toward the subject or a point of interest, gradually tightening the framing to increase tension or intimacy.",
+        "examples": [
+            "camera motion, slow push-in on the subject",
+            "camera motion, dolly-in gradually closing the distance",
+            "camera motion, a gentle push-in that ends on an intimate close-up",
+        ],
+    },
+    "pull_back": {
+        "name_en": "Pull-back / Dolly-out",
+        "name_zh": "拉远 / 后移",
+        "desc": "The camera retreats from the subject, widening the frame to reveal the environment, scale or context.",
+        "examples": [
+            "camera motion, slow pull-back revealing the surroundings",
+            "camera motion, dolly-out widening into an establishing view",
+            "camera motion, a long pull-back that shows how small the subject is in the scene",
+        ],
+    },
+    "push_pull": {
+        "name_en": "Push + Pull",
+        "name_zh": "推拉结合",
+        "desc": "A continuous move that combines a push-in with a pull-back (or the reverse) within one shot, creating a dynamic in-and-out rhythm.",
+        "examples": [
+            "camera motion, push-in then pull-back in one flowing move",
+            "camera motion, a dolly-in that reverses into a slow dolly-out",
+            "camera motion, rhythmic push-and-pull around the subject",
+        ],
+    },
+    "orbit": {
+        "name_en": "Orbit",
+        "name_zh": "环绕",
+        "desc": "The camera circles around the subject on a partial or full arc, revealing it from continuously changing angles.",
+        "examples": [
+            "camera motion, slow 360-degree orbit around the subject",
+            "camera motion, orbiting arc from the side to the front",
+            "camera motion, a full circular flight around the character",
+        ],
+    },
+    "tracking": {
+        "name_en": "Tracking / Handheld",
+        "name_zh": "跟拍 / 手持",
+        "desc": "The camera follows the subject laterally or from behind, moving in parallel with its action (optionally with subtle handheld realism).",
+        "examples": [
+            "camera motion, tracking shot following the subject sideways",
+            "camera motion, handheld follow keeping pace with the movement",
+            "camera motion, a smooth tracking run alongside the character",
+        ],
+    },
+    "aerial": {
+        "name_en": "Aerial / Drone",
+        "name_zh": "航拍 / 无人机",
+        "desc": "A high-angle aerial or drone shot that establishes the scene, flies over it, or descends toward a point of interest.",
+        "examples": [
+            "camera motion, aerial drone shot flying over the landscape",
+            "camera motion, high-angle drone descent toward the subject",
+            "camera motion, bird's-eye flyover establishing the area",
+        ],
+    },
+    "crane": {
+        "name_en": "Crane / Tilt",
+        "name_zh": "升降 / 俯仰",
+        "desc": "Vertical camera movement: a crane shot rising or lowering, or a tilt sweeping up or down to reframe the scene.",
+        "examples": [
+            "camera motion, crane shot rising above the scene",
+            "camera motion, slow tilt from the feet up to the face",
+            "camera motion, a lowering crane that settles at eye level",
+        ],
+    },
+    "pan": {
+        "name_en": "Pan",
+        "name_zh": "摇镜",
+        "desc": "The camera sweeps horizontally from a fixed position, scanning across the scene or moving between subjects.",
+        "examples": [
+            "camera motion, slow pan across the full scene",
+            "camera motion, panning from one subject to another",
+            "camera motion, a measured left-to-right pan",
+        ],
+    },
+    "close_up": {
+        "name_en": "Close-up / Macro",
+        "name_zh": "特写 / 微距",
+        "desc": "Extreme close-up or macro framing that isolates a face, object, texture or detail, filling the frame with it.",
+        "examples": [
+            "camera motion, extreme close-up on the subject's face",
+            "camera motion, macro shot of the detail in slow movement",
+            "camera motion, tight close-up holding on the object",
+        ],
+    },
+}
+
+# ── 微表情 / 表演细节预设（细分表演提示词库，参考"AI 演员表情导演"思路）─────────
+# key 与前端 transfer.js 的 MICRO_EXPRESSIONS 保持一致。多选（list[str]）或单值
+# （str）均可；空 / "auto" / 未知 key 一律不注入（表演完全自然）。与运镜不同，
+# 微表情不是 LoRA 技术触发词，而是可自然意译进输出语言的表演描写：LLM 依据每个
+# [Shot N] 的人物状态从所选 Cue 中挑选最契合者，织入该镜头的表演/表情描述，保持
+# 真实克制的电影表演质感。前端本地导入的自定义词库通过 expression_catalog 携带
+# （{key,label,title}），未知 key 若在 catalog 中同样合法。
+_MICRO_EXPRESSION_PRESETS: dict = {
+    "gaze_shift": {
+        "name_en": "Gaze shift",
+        "name_zh": "视线游移",
+        "examples": [
+            "the eyes slide away for a moment before returning",
+            "a brief sideways wandering of the gaze, then it settles back",
+            "the look shifts off the other person, then comes back",
+        ],
+    },
+    "glance_away": {
+        "name_en": "Glance away",
+        "name_zh": "别开视线",
+        "examples": [
+            "briefly drops the gaze, unable to hold the other's eyes",
+            "the eyes escape downward for a heartbeat",
+            "looks away quickly at the end of the sentence",
+        ],
+    },
+    "stare_hard": {
+        "name_en": "Fixed stare",
+        "name_zh": "凝望",
+        "examples": [
+            "the eyes fix ahead, unblinking and still",
+            "a steady, unwavering stare that does not move",
+            "the gaze locks on and holds perfectly still",
+        ],
+    },
+    "blink_slow": {
+        "name_en": "Slow blink",
+        "name_zh": "缓眨",
+        "examples": [
+            "the eyes close and reopen slowly, deliberately",
+            "a single long, heavy blink, as if processing",
+            "blinks slowly while taking it in",
+        ],
+    },
+    "brow_raise": {
+        "name_en": "Brow raise",
+        "name_zh": "挑眉",
+        "examples": [
+            "one eyebrow lifts briefly in doubt",
+            "the brows rise a fraction, questioning",
+            "a quick raise of the brows in surprise",
+        ],
+    },
+    "brow_furrow": {
+        "name_en": "Brow furrow",
+        "name_zh": "蹙眉",
+        "examples": [
+            "the brows draw together in a faint frown",
+            "a small crease forms between the brows",
+            "the brows knit slightly, uncertain",
+        ],
+    },
+    "one_brow_rise": {
+        "name_en": "One brow",
+        "name_zh": "单眉微挑",
+        "examples": [
+            "the left brow arches alone, skeptical",
+            "a single eyebrow climbs, amused and wary",
+            "only one brow lifts, questioning the words",
+        ],
+    },
+    "lip_press": {
+        "name_en": "Lip press",
+        "name_zh": "抿唇",
+        "examples": [
+            "the lips press together into a thin line",
+            "a firm, tight press of the lips",
+            "the mouth sets in a hard, held line",
+        ],
+    },
+    "lip_tighten": {
+        "name_en": "Lip tighten",
+        "name_zh": "嘴角绷紧",
+        "examples": [
+            "the corners of the mouth tighten almost imperceptibly",
+            "a subtle clench at the corner of the mouth",
+            "the jaw beside the lips hardens for an instant",
+        ],
+    },
+    "micro_smile": {
+        "name_en": "Fleeting smile",
+        "name_zh": "转瞬微笑",
+        "examples": [
+            "a faint smile flickers across the lips and is gone",
+            "the mouth curves into a barely-there smile for an instant",
+            "a ghost of a smile passes over the face",
+        ],
+    },
+    "lips_part": {
+        "name_en": "Lips part",
+        "name_zh": "双唇微启",
+        "examples": [
+            "the lips part slightly as if to speak, then close",
+            "the mouth falls open a little in surprise",
+            "lips part a fraction, searching for words",
+        ],
+    },
+    "lip_corner_twitch": {
+        "name_en": "Lip-corner twitch",
+        "name_zh": "嘴角微抽",
+        "examples": [
+            "the corner of the mouth twitches once, almost a tic",
+            "an involuntary twitch pulls at one side of the mouth",
+            "one corner of the lips jerks, betraying the calm",
+        ],
+    },
+    "breath_catch": {
+        "name_en": "Catch breath",
+        "name_zh": "屏息",
+        "examples": [
+            "the breath catches for an instant",
+            "a small inward gasp, held still",
+            "breathing stops for a beat before it continues",
+        ],
+    },
+    "exhale_sigh": {
+        "name_en": "Soft sigh",
+        "name_zh": "轻叹",
+        "examples": [
+            "a long, quiet exhale releases the tension",
+            "lets out a soft, audible sigh",
+            "the shoulders fall with a slow breath out",
+        ],
+    },
+    "swallow": {
+        "name_en": "Swallow",
+        "name_zh": "吞咽",
+        "examples": [
+            "an audible swallow moves down the throat",
+            "the throat works in a nervous swallow",
+            "swallows hard before speaking",
+        ],
+    },
+    "head_tilt": {
+        "name_en": "Head tilt",
+        "name_zh": "头微倾",
+        "examples": [
+            "the head tilts a few degrees, considering",
+            "a slight cant of the head as doubt creeps in",
+            "the head inclines toward the other person",
+        ],
+    },
+    "head_drop": {
+        "name_en": "Head drop",
+        "name_zh": "低头",
+        "examples": [
+            "the chin dips, the eyes falling to the ground",
+            "the head lowers slowly, conceding",
+            "a small drop of the head in quiet defeat",
+        ],
+    },
+    "turn_away": {
+        "name_en": "Turn away",
+        "name_zh": "侧首回避",
+        "examples": [
+            "the face turns away by a fraction",
+            "half-turns the head, avoiding the confrontation",
+            "the gaze slides off to the side, away from the other",
+        ],
+    },
+    "shoulder_tense": {
+        "name_en": "Shoulders tense",
+        "name_zh": "肩颈绷紧",
+        "examples": [
+            "the shoulders stiffen almost unnoticeably",
+            "a visible tightening of the neck and shoulders",
+            "the shoulders draw up a little, guarded",
+        ],
+    },
+    "hand_still": {
+        "name_en": "Hand control",
+        "name_zh": "手部强抑",
+        "examples": [
+            "the hand freezes mid-gesture",
+            "fingers press together to keep from trembling",
+            "the hands stay rigidly still, held in check",
+        ],
+    },
+}
+
+
+# ── 景别预设（Shot Size）────────────────────────────────────────────────────
+# key 与前端 shared.js 的 SHOT_SIZES 保持一致。多选（list[str]）或单值（str）均可；
+# 空 / "auto" / 未知 key 一律不注入（景别自由，由模型按叙事自行决定）。与运镜
+# （LoRA 触发词）不同，景别是非技术性的通用镜头语汇：LLM 把所选档位按输出语言
+# 自然意译进各 [Shot N] 的镜头描述（中文输出即写"近景/中景/远景"等镜头词），
+# 无需保留英文。同一镜头只用一种景别，不同镜头可沿档位自由切换（如远→近推进），
+# 所列档位不必全部出现。
+_SHOT_SIZE_PRESETS: dict = {
+    "extreme_wide": {
+        "name_en": "Extreme wide / Extreme long",
+        "name_zh": "大远景",
+        "desc": "A very distant framing: the subject is tiny or part of the environment, which dominates the frame.",
+        "examples": [
+            "an extreme wide shot dwarfing the subject in the vast landscape",
+            "a wide establishing vista with the figure barely visible",
+            "extreme wide framing letting the environment swallow the character",
+        ],
+    },
+    "wide": {
+        "name_en": "Wide / Long",
+        "name_zh": "远景",
+        "desc": "Full-length view with generous surroundings, placing the subject in its context.",
+        "examples": [
+            "a wide shot of the figure crossing the square",
+            "a long shot showing the character against the full scenery",
+            "wide framing that keeps the whole body and its surroundings in view",
+        ],
+    },
+    "full": {
+        "name_en": "Full shot",
+        "name_zh": "全景",
+        "desc": "The whole subject fills the frame from head to toe; posture, costume and action are fully visible.",
+        "examples": [
+            "a full shot of the character standing in the doorway",
+            "head-to-toe framing as they step forward",
+            "a full body shot capturing the entire gesture",
+        ],
+    },
+    "medium_long": {
+        "name_en": "Medium long",
+        "name_zh": "中远景",
+        "desc": "Framed from around the knees upward, keeping both the action and a sense of the environment.",
+        "examples": [
+            "a medium long shot from the knees up",
+            "knee-level framing as the character moves",
+            "a medium long composition that keeps the setting readable",
+        ],
+    },
+    "cowboy": {
+        "name_en": "Cowboy shot",
+        "name_zh": "牛仔镜头",
+        "desc": "Framed from mid-thigh up, a western-era medium framing that keeps the waist and hands visible.",
+        "examples": [
+            "a cowboy shot framing the character from mid-thigh up",
+            "the classic cowboy shot as the two face each other",
+            "waist-up framing with the hands clearly in frame",
+        ],
+    },
+    "medium": {
+        "name_en": "Medium",
+        "name_zh": "中景",
+        "desc": "Framed from the waist up, balancing the subject with its setting.",
+        "examples": [
+            "a medium shot from the waist up",
+            "medium framing during the exchange",
+            "waist-up composition as the character gestures",
+        ],
+    },
+    "medium_close_up": {
+        "name_en": "Medium close-up",
+        "name_zh": "中近景",
+        "desc": "Framed from the chest up, favouring the face and shoulders while keeping a hint of the background.",
+        "examples": [
+            "a medium close-up favouring the face",
+            "chest-up framing for the dialogue beat",
+            "medium close-up catching the slight change of expression",
+        ],
+    },
+    "close_up": {
+        "name_en": "Close-up",
+        "name_zh": "特写",
+        "desc": "Framed from the shoulders up with the face dominant, isolating emotion and intention.",
+        "examples": [
+            "a close-up on the character's face",
+            "shoulders-up framing holding the reaction",
+            "a tight close-up as the realization dawns",
+        ],
+    },
+    "extreme_close_up": {
+        "name_en": "Extreme close-up",
+        "name_zh": "大特写",
+        "desc": "A single feature - an eye, a mouth, a hand - or a detail fills the frame.",
+        "examples": [
+            "an extreme close-up of the eye widening",
+            "a macro detail of the trembling fingers",
+            "extreme close-up on the mouth as it speaks",
+        ],
+    },
+}
+
+
+# ── 构图与镜头关系预设（Framing）────────────────────────────────────────────
+# key 与前端 shared.js 的 FRAMINGS 保持一致。非景别档位，而是按"画面里有什么 /
+# 机位与人物关系 / 镜头功能"划分的构图惯例：over-the-shoulder / two-shot（关系
+# 构图）、insert（细节切出）、establishing（开场定位）。仅当镜头内容适用时使用，
+# 切勿强套到用不上的镜头。多选（list[str]）或单值（str），空 / "auto" / 未知 key
+# 一律不注入（构图自由）。同样非 LoRA 触发词，按输出语言意译织入对应镜头描述。
+_FRAMING_PRESETS: dict = {
+    "over_the_shoulder": {
+        "name_en": "Over-the-shoulder",
+        "name_zh": "过肩",
+        "desc": "Shot from behind one person's shoulder toward the other, tying two characters together in a conversation.",
+        "examples": [
+            "over-the-shoulder framing past the listener toward the speaker",
+            "an over-the-shoulder shot linking the two in dialogue",
+            "looking past the shoulder at the other person's reaction",
+        ],
+    },
+    "two_shot": {
+        "name_en": "Two-shot",
+        "name_zh": "双人同框",
+        "desc": "Both characters share the frame, showing the relationship and interaction between them.",
+        "examples": [
+            "a two-shot of the pair facing each other",
+            "both characters in a single frame as they talk",
+            "a two-shot framing their closeness in one composition",
+        ],
+    },
+    "insert": {
+        "name_en": "Insert",
+        "name_zh": "插入镜头",
+        "desc": "An isolated cutaway detail - a hand, an object, a letter - that fills the frame and carries meaning.",
+        "examples": [
+            "an insert of the hand tightening on the letter",
+            "a cutaway insert showing the watch face",
+            "an insert detail of the photo slipping into the pocket",
+        ],
+    },
+    "establishing": {
+        "name_en": "Establishing",
+        "name_zh": "建立镜头",
+        "desc": "An opening wide view that orients the audience to the location before the action begins.",
+        "examples": [
+            "an establishing shot of the street at dusk",
+            "a wide establishing view of the house before entering",
+            "open on an establishing wide that sets the place",
+        ],
+    },
+}
+
+
+# ── 中文本地化文案（双语输出支持）────────────────────────────────────────────
+# key 与 _CAMERA_MOTION_PRESETS / _MICRO_EXPRESSION_PRESETS 一一对应。当输出语言为
+# 中文（lang="zh"）时，运镜/微表情指令块改用本表的中文描述与例句，避免注入的指令
+# 把最终 detailed_description 等字段带偏成英文。
+# 运镜例句为可直接织入中文镜头描述的中文句子；若工作流挂载了 camera motion LoRA，
+# note 的引导语会提示模型按需在句尾保留英文触发词（见 _camera_motion_note）。
+# 微表情例句为克制的中文表演描写（可自然意译，无技术触发词）。
+_CAMERA_MOTION_ZH: dict = {
+    "push_in": {
+        "desc_zh": "机位向主体或兴趣点前移，画面逐渐收紧，增强张力或亲密感。",
+        "examples_zh": [
+            "镜头缓缓向人物推近，拉近彼此距离",
+            "机位轻柔前推，收在一个亲密的近景上",
+        ],
+    },
+    "pull_back": {
+        "desc_zh": "机位自主体后退，视野逐渐张开，交代环境、比例与情境。",
+        "examples_zh": [
+            "镜头徐徐拉远，露出四周的环境",
+            "机位后移成全景，衬出人物在场景中的渺小",
+        ],
+    },
+    "push_pull": {
+        "desc_zh": "同一镜头内先推后拉（或反之）的连贯运动，形成推拉相间的节奏。",
+        "examples_zh": [
+            "镜头先推近又拉远，一气呵成",
+            "以推近开头，再缓缓拉回，带出往复的呼吸感",
+        ],
+    },
+    "orbit": {
+        "desc_zh": "机位沿人物作弧线环绕（半圈或整圈），不断变换观察角度。",
+        "examples_zh": [
+            "镜头绕着人物缓缓环绕一周",
+            "从侧面绕到正前方的半环绕运镜",
+        ],
+    },
+    "tracking": {
+        "desc_zh": "机位与人物平行或跟随其后移动，同步其行进（可带轻微手持的真实感）。",
+        "examples_zh": [
+            "镜头横向跟拍，与人物并肩移动",
+            "手持跟拍，始终跟上人物的步伐",
+        ],
+    },
+    "aerial": {
+        "desc_zh": "俯拍、航拍或无人机镜头，用于建立场景、飞掠而过或向兴趣点下降。",
+        "examples_zh": [
+            "无人机航拍，飞掠过整片场景",
+            "高空镜头缓缓向目标人物下降",
+        ],
+    },
+    "crane": {
+        "desc_zh": "垂直方向的镜头运动：升降臂起落或俯仰扫动，用以重新构图画面。",
+        "examples_zh": [
+            "镜头从人物脚部缓缓仰起至面部",
+            "升降臂升起，越过众人俯瞰全场",
+        ],
+    },
+    "pan": {
+        "desc_zh": "机位不动，镜头水平扫动，掠过场景或在主体之间移动。",
+        "examples_zh": [
+            "镜头水平缓摇，扫过整个场景",
+            "从一个人物摇向另一个人物，带出两者的关联",
+        ],
+    },
+    "close_up": {
+        "desc_zh": "大特写或微距构图，将面孔、物体、质感或细节充满画面。",
+        "examples_zh": [
+            "镜头落在人物脸上，给出极近的特写",
+            "以微距缓缓扫过物件的细节纹理",
+        ],
+    },
+}
+_MICRO_EXPRESSION_ZH: dict = {
+    "gaze_shift": [
+        "目光短暂滑开，旋即又落回原处",
+        "视线游移了一瞬，再重新对上对方",
+    ],
+    "glance_away": [
+        "微微垂下眼帘，不敢直视对方",
+        "话出口的瞬间，目光逃向别处",
+    ],
+    "stare_hard": [
+        "目光定定地望着前方，一眨不眨",
+        "直直地凝视着那个方向，纹丝不动",
+    ],
+    "blink_slow": [
+        "眼睛缓缓闭上又睁开，似在消化什么",
+        "缓慢而郑重地眨了一下眼",
+    ],
+    "brow_raise": [
+        "眉毛微微一挑，带出几分怀疑",
+        "双眉短暂上扬，难掩意外",
+    ],
+    "brow_furrow": [
+        "眉头轻轻蹙起，隐有不安",
+        "眉心聚起一丝褶皱，似有犹疑",
+    ],
+    "one_brow_rise": [
+        "只挑起一侧眉毛，半信半疑",
+        "单边眉毛轻轻一扬，似笑非笑",
+    ],
+    "lip_press": [
+        "双唇抿成一条细线，强压着情绪",
+        "嘴唇紧紧抿起，不发一言",
+    ],
+    "lip_tighten": [
+        "嘴角不自觉地绷紧了一下",
+        "唇角的线条几乎不可察觉地收紧了",
+    ],
+    "micro_smile": [
+        "一丝淡笑掠过嘴角，转瞬即逝",
+        "脸上浮起一个若有若无的浅笑，很快又淡去",
+    ],
+    "lips_part": [
+        "嘴唇微微张开，似要说些什么又止住",
+        "双唇轻轻分开，难掩惊愕",
+    ],
+    "lip_corner_twitch": [
+        "一侧嘴角不自主地抽动了一下",
+        "唇角的肌肉微微跳动，泄露了内心的波动",
+    ],
+    "breath_catch": [
+        "呼吸骤然一滞",
+        "轻轻吸了一口气，屏住了片刻",
+    ],
+    "exhale_sigh": [
+        "长长地、轻轻地呼出一口气，像是卸下什么",
+        "一声几不可闻的叹息轻轻落下",
+    ],
+    "swallow": [
+        "喉结紧张地滚动，咽了一下口水",
+        "开口前，喉头先紧张地吞咽了一下",
+    ],
+    "head_tilt": [
+        "头微微一侧，似在斟酌对方的话",
+        "头轻轻歪向一侧，带着几分探究",
+    ],
+    "head_drop": [
+        "头缓缓低下，目光落向地面",
+        "低下头，像是默认了什么",
+    ],
+    "turn_away": [
+        "脸微微别开，回避这场对视",
+        "侧过头去，避开了视线",
+    ],
+    "shoulder_tense": [
+        "肩颈不自觉地绷紧了一瞬",
+        "肩膀微微耸起，带着防备",
+    ],
+    "hand_still": [
+        "伸出的手在半空顿住",
+        "手指暗暗收紧，强压住颤抖",
+    ],
+}
+
+# ── 景别 / 构图 中文文案（lang="zh" 时注入用；key 与上两组 PRESETS 一一对应）──
+# 同运镜/微表情：输出语言为中文时用中文描述与例句，避免注入内容把最终字段带偏。
+_SHOT_SIZE_ZH: dict = {
+    "extreme_wide": {
+        "desc_zh": "极远取景：主体极小或融于广阔环境，画面以辽阔场景为主导。",
+        "examples_zh": [
+            "以极大的远景，让渺小的人物立在辽阔的风景中",
+            "镜头拉成壮阔的大远景，人物几乎只是景中的一个点",
+        ],
+    },
+    "wide": {
+        "desc_zh": "远景：全身入画且四周环境开阔，交代主体所处的情境。",
+        "examples_zh": [
+            "以远景呈现人物走过空旷广场的全貌",
+            "远景镜头让整片场景与其中的人物同框",
+        ],
+    },
+    "full": {
+        "desc_zh": "全景：人物自头至脚恰好充满画面，动作与服饰完整可见。",
+        "examples_zh": [
+            "全景镜头，人物立在门口，全身入画",
+            "镜头给出全身，完整捕捉他迈步的动作",
+        ],
+    },
+    "medium_long": {
+        "desc_zh": "中远景：自膝盖（或小腿）以上构图，兼顾动作与周遭环境。",
+        "examples_zh": [
+            "中远景，人物自膝盖以上入画",
+            "镜头落在膝部以上，让人物与场景同框",
+        ],
+    },
+    "cowboy": {
+        "desc_zh": "牛仔镜头：自大腿中部以上构图，源自西部片的半身取景，腰带与手部动作清晰可见。",
+        "examples_zh": [
+            "以牛仔镜头取景，人物自大腿以上入画",
+            "两人对峙时，镜头用经典的牛仔镜头半身构图",
+        ],
+    },
+    "medium": {
+        "desc_zh": "中景：自腰部以上构图，人物与环境并重。",
+        "examples_zh": [
+            "中景镜头，人物腰部以上清晰入画",
+            "用中景拍两人的交谈，兼顾表情与动作",
+        ],
+    },
+    "medium_close_up": {
+        "desc_zh": "中近景：自胸部以上构图，以面部与肩部为主，仍带一点背景气息。",
+        "examples_zh": [
+            "中近景，镜头偏向人物的脸庞",
+            "胸部以上的取景，恰好接住表情的细微变化",
+        ],
+    },
+    "close_up": {
+        "desc_zh": "特写：自肩部以上构图，面部占据画面主导，刻画情绪与意图。",
+        "examples_zh": [
+            "镜头推近，给人物面部一个特写",
+            "肩部以上的构图，静静停在人物的神情上",
+        ],
+    },
+    "extreme_close_up": {
+        "desc_zh": "大特写：以眼睛、嘴唇、手等单一局部或细节充满画面。",
+        "examples_zh": [
+            "大特写落在人物骤然睁大的眼睛上",
+            "以极近的镜头扫过微微发抖的指尖",
+        ],
+    },
+}
+
+_FRAMING_ZH: dict = {
+    "over_the_shoulder": {
+        "desc_zh": "过肩：越过一人的肩头拍向另一人，将对话双方连入同一画面。",
+        "examples_zh": [
+            "镜头越过对方的肩膀，望向说话的人",
+            "过肩取景，把两人的对话拉进同一画面",
+        ],
+    },
+    "two_shot": {
+        "desc_zh": "双人同框：两位人物同处一画，呈现彼此的关系与互动。",
+        "examples_zh": [
+            "双人同框，两人面对面站定",
+            "把两人一起收进画面，显出彼此的距离",
+        ],
+    },
+    "insert": {
+        "desc_zh": "插入镜头：以手、物件、信件等孤立细节充满画面作切出，承载潜台词。",
+        "examples_zh": [
+            "插入镜头：手在信纸上慢慢收紧",
+            "切出一只手，悄悄把照片按回口袋",
+        ],
+    },
+    "establishing": {
+        "desc_zh": "建立镜头：开场以开阔视野交代地点，让人先明白身处何处再进入剧情。",
+        "examples_zh": [
+            "开场先给黄昏街道的建立镜头",
+            "以开阔的建立镜头交代这栋老宅，再进入室内",
+        ],
+    },
+}
+
+
+def _normalize_camera_motions(camera_motion) -> list:
+    """归一化运镜参数为合法 key 列表（顺序稳定、去重）。
+
+    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
+    未知 key 与重复值忽略。返回的 key 均存在于 _CAMERA_MOTION_PRESETS。
+    """
+    if camera_motion is None:
+        return []
+    if isinstance(camera_motion, str):
+        keys = [camera_motion] if camera_motion.strip() else []
+    elif isinstance(camera_motion, (list, tuple)):
+        keys = list(camera_motion)
+    else:
+        return []
+    seen = set()
+    result = []
+    for k in keys:
+        if not isinstance(k, str):
+            continue
+        key = k.strip()
+        if not key or key == "auto" or key in seen:
+            continue
+        if key in _CAMERA_MOTION_PRESETS:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def _camera_motion_note(camera_motion: str | list = "", lang: str = "en") -> str:
+    """按（多选）运镜 key 生成注入生成提示词的运镜指令块；空选择返回空串（不注入）。
+
+    lang="zh" 时输出整段中文指令（标题、引导语、描述与例句均为中文），配合中文
+    输出语言，避免注入内容把最终字段带偏成英文；lang 其他值维持英文原版。
+    多选时要求 LLM 依据每个 [Shot N] 的镜头语义（景别/动作/情绪），从所选风格
+    库中为该 Shot 挑选最契合的单一运镜并自然嵌入；不同 Shot 可自然轮换，不堆叠
+    多风格于一镜，所选风格不必全部出现。速度词由模型依镜头节奏自然选择
+    （slow/steady/quick 等），无独立控件。选中 ≤3 类时每类列 3 条示例，
+    >3 类时每类列 1 条，控制注入 token。
+    """
+    keys = _normalize_camera_motions(camera_motion)
+    if not keys:
+        return ""
+    many = len(keys) > 1
+    zh = lang == "zh"
+    lines = []
+    if zh:
+        lines.append("## 运镜方向（Camera Motion Direction）")
+        if many:
+            lines.append(
+                "目标视频的各镜头可选用以下任意运镜风格。对每个 [Shot N] 的描述，"
+                "依据该镜头的景别、动作与情绪，挑选最契合的一种风格，用中文自然写进"
+                "该镜头；不同镜头可轮换风格以贴合内容，同一镜头不要堆叠多种风格，"
+                "所列风格不要求全部出现。"
+            )
+        else:
+            lines.append("目标视频应采用以下这种运镜风格：")
+        examples_limit = 1 if many and len(keys) > 3 else 2
+        for key in keys:
+            preset = _CAMERA_MOTION_PRESETS[key]
+            zh_text = _CAMERA_MOTION_ZH.get(key)
+            name_line = f"- 风格：{preset['name_zh']}（{preset['name_en']}）"
+            lines.append(name_line)
+            if zh_text:
+                lines.append(f"  - {zh_text['desc_zh']}")
+                lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
+                for ex in zh_text["examples_zh"][:examples_limit]:
+                    lines.append(f"    - {ex}")
+            else:
+                lines.append(f"  - {preset['desc']}")
+                for ex in preset["examples"][:1]:
+                    lines.append(f"    - {ex}")
+        lines.append(
+            "- 速度词不固定：依镜头情绪与节奏自然选择（缓慢/平稳/迅捷/逐渐加速等）。"
+        )
+        lines.append(
+            "- 若当前视频生成工作流挂载了 camera motion LoRA，触发词 \"camera motion\" "
+            "必须以英文保留：可将对应英文短语附于运镜句尾，例如“…（camera motion, "
+            "slow push-in on the subject）”；若未挂载 LoRA，仅用中文描写运镜即可。"
+        )
+    else:
+        lines.append("## Camera Motion Direction")
+        if many:
+            lines.append(
+                "The target video's shots may use any of the camera motion styles below. "
+                "For each [Shot N] description, choose the single style that best matches "
+                "that shot's framing, action and emotion, then naturally embed one of its "
+                "English camera-motion phrases into that shot. Different shots may switch "
+                "styles to fit their content; do not pile multiple styles into one shot, "
+                "and not every listed style has to be used."
+            )
+        else:
+            lines.append("The target video should use this camera motion style:")
+        examples_limit = 1 if many and len(keys) > 3 else 3
+        for key in keys:
+            preset = _CAMERA_MOTION_PRESETS[key]
+            lines.append(f'- Style: {preset["name_en"]}（{preset["name_zh"]}）')
+            lines.append(f"  - {preset['desc']}")
+            lines.append("  - Suitable phrases (pick one per shot, adapt the wording, keep the LoRA trigger):")
+            for ex in preset["examples"][:examples_limit]:
+                lines.append(f"    - {ex}")
+        lines.append(
+            "- Speed words are not fixed: choose the pace that fits each shot's emotion "
+            "and rhythm (e.g. slow / gentle, steady, quick / fast, or progressively "
+            "accelerating) and weave it into the camera-motion phrase."
+        )
+        lines.append(
+            '- The fixed trigger "camera motion" and the camera-motion keywords above are '
+            'technical LoRA vocabulary: even when the output fields are written in Chinese, '
+            'keep these phrases in English exactly as given.'
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _normalize_shot_sizes(shot_size) -> list:
+    """归一化景别参数为合法 key 列表（顺序稳定、去重）。
+
+    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
+    未知 key 与重复值忽略。返回的 key 均存在于 _SHOT_SIZE_PRESETS。
+    """
+    if shot_size is None:
+        return []
+    if isinstance(shot_size, str):
+        keys = [shot_size] if shot_size.strip() else []
+    elif isinstance(shot_size, (list, tuple)):
+        keys = list(shot_size)
+    else:
+        return []
+    seen = set()
+    result = []
+    for k in keys:
+        if not isinstance(k, str):
+            continue
+        key = k.strip()
+        if not key or key == "auto" or key in seen:
+            continue
+        if key in _SHOT_SIZE_PRESETS:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def _normalize_framings(framing) -> list:
+    """归一化构图/镜头关系参数为合法 key 列表（顺序稳定、去重）。
+
+    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
+    未知 key 与重复值忽略。返回的 key 均存在于 _FRAMING_PRESETS。
+    """
+    if framing is None:
+        return []
+    if isinstance(framing, str):
+        keys = [framing] if framing.strip() else []
+    elif isinstance(framing, (list, tuple)):
+        keys = list(framing)
+    else:
+        return []
+    seen = set()
+    result = []
+    for k in keys:
+        if not isinstance(k, str):
+            continue
+        key = k.strip()
+        if not key or key == "auto" or key in seen:
+            continue
+        if key in _FRAMING_PRESETS:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def _shot_size_note(shot_size: str | list = "", lang: str = "en") -> str:
+    """按（多选）景别 key 生成注入生成提示词的景别指令块；空选择返回空串（不注入）。
+
+    lang="zh" 时输出整段中文指令与中文例句；lang 其他值维持英文原版。与运镜
+    （LoRA 触发词）不同，景别是通用镜头语汇而非技术触发词：LLM 依据每个 [Shot N]
+    的叙事需求把所选档位按输出语言自然意译（中文即写"近景/中景/远景"等镜头词），
+    同一镜头只用一种景别，不同镜头可沿档位切换（如由远及近推进），不必全部出现。
+    选中 ≤3 类时每类列 3 条示例，>3 类时每类列 1 条，控制注入 token。
+    """
+    keys = _normalize_shot_sizes(shot_size)
+    if not keys:
+        return ""
+    many = len(keys) > 1
+    zh = lang == "zh"
+    lines = []
+    if zh:
+        lines.append("## 景别方向（Shot Size Direction）")
+        if many:
+            lines.append(
+                "对每个 [Shot N] 的描述，必须从下列候选档位中为该镜头选定一种景别，"
+                "并紧接其后用中文自然写明（如“牛仔镜头”“大特写”）。禁止使用候选以外"
+                "的任何景别词（中景、中近景、近景、远景、特写、全景、全身、半身等一律"
+                "不得出现）。同一镜头只保留一种景别；不同镜头轮换使用候选档位，尽量让"
+                "全部候选至少出现一次。若用户输入中出现了与候选不符的景别/取景描述，"
+                "一律按下列档位改写，不得照抄。"
+            )
+        else:
+            lines.append("目标视频的每个镜头都必须采用下列这一种景别：若用户输入中出现其他景别词，一律改写为它。")
+        limit = 1 if many and len(keys) > 3 else 3
+        for key in keys:
+            preset = _SHOT_SIZE_PRESETS[key]
+            zh_text = _SHOT_SIZE_ZH.get(key)
+            lines.append(f"- 档位：{preset['name_zh']}（{preset['name_en']}）")
+            if zh_text:
+                lines.append(f"  - {zh_text['desc_zh']}")
+                lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
+                for ex in zh_text["examples_zh"][:limit]:
+                    lines.append(f"    - {ex}")
+            else:
+                lines.append(f"  - {preset['desc']}")
+                for ex in preset["examples"][:1]:
+                    lines.append(f"    - {ex}")
+        lines.append(
+            "- 景别词不是技术标签：请写成自然的镜头语言（如“镜头给到人物的近景”），"
+            "不要写成指令句或光秃秃的列表项。"
+        )
+    else:
+        lines.append("## Shot Size Direction")
+        if many:
+            lines.append(
+                "For each [Shot N] description, choose exactly ONE of the shot sizes listed "
+                "below and name it explicitly in that shot. FORBIDDEN: any unlisted "
+                "shot-size word (wide shot, medium shot, medium close-up, close-up, "
+                "extreme close-up, full shot, etc.) — never reuse shot-size words from the "
+                "user's input if they are not listed. Use only one size per shot, rotate "
+                "through the listed sizes across shots, and aim to cover every listed size "
+                "at least once. If the user input mentions a different shot size, rewrite "
+                "that mention to one of the listed sizes."
+            )
+        else:
+            lines.append("Every shot of the target video MUST use the single shot size below, stated explicitly in that shot. If the user input mentions any other shot size, rewrite it to this one:")
+        limit = 1 if many and len(keys) > 3 else 3
+        for key in keys:
+            preset = _SHOT_SIZE_PRESETS[key]
+            lines.append(f"- Size: {preset['name_en']}（{preset['name_zh']}）")
+            lines.append(f"  - {preset['desc']}")
+            lines.append("  - Suitable phrasings (pick one per shot, paraphrase naturally):")
+            for ex in preset["examples"][:limit]:
+                lines.append(f"    - {ex}")
+        lines.append(
+            "- Shot-size words are descriptive, not technical tags: weave them into the "
+            "shot language naturally (e.g. \"the camera settles on a close-up of her\"), "
+            "never as an instruction or a bare list item."
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _framing_note(framing: str | list = "", lang: str = "en") -> str:
+    """按（多选）构图/镜头关系 key 生成注入生成提示词的构图指令块；空选择返回空串。
+
+    lang="zh" 时输出整段中文指令与中文例句；lang 其他值维持英文原版。与景别同为
+    通用镜头语汇（非 LoRA 触发词），仅当镜头内容适用时使用（对话/细节/开场定位），
+    按输出语言意译织入对应镜头描述，切勿强套到用不上的镜头；不必全部出现。
+    """
+    keys = _normalize_framings(framing)
+    if not keys:
+        return ""
+    many = len(keys) > 1
+    zh = lang == "zh"
+    lines = []
+    if zh:
+        lines.append("## 构图与镜头关系方向（Framing Direction）")
+        lines.append(
+            "仅当镜头内容适用时使用下列构图/关系镜头，把它们自然织入该镜头的描述"
+            "（可意译成中文镜头语）：过肩与双人同框用于对话或二人互动的场景，插入"
+            "镜头用于交代承载含义的关键细节，建立镜头用于开场交代地点。"
+        )
+        if many:
+            lines.append(
+                "不同镜头按需轮换，切勿把某个关系强套到用不上的镜头；"
+                "所列关系不要求全部出现。"
+            )
+        limit = 1 if many and len(keys) > 3 else 3
+        for key in keys:
+            preset = _FRAMING_PRESETS[key]
+            zh_text = _FRAMING_ZH.get(key)
+            lines.append(f"- 关系：{preset['name_zh']}（{preset['name_en']}）")
+            if zh_text:
+                lines.append(f"  - {zh_text['desc_zh']}")
+                lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
+                for ex in zh_text["examples_zh"][:limit]:
+                    lines.append(f"    - {ex}")
+            else:
+                lines.append(f"  - {preset['desc']}")
+                for ex in preset["examples"][:1]:
+                    lines.append(f"    - {ex}")
+        lines.append(
+            "- 关系镜头服务于内容：没有对白或二人互动就不要硬用过肩/双人同框，"
+            "插入与建立镜头同样只在必要时出现。"
+        )
+    else:
+        lines.append("## Framing & Shot-Relationship Direction")
+        lines.append(
+            "Use the relationship framings below only when a shot's content calls for them, "
+            "weaving the chosen one naturally into that shot's description: over-the-shoulder "
+            "and two-shot for dialogue or two-person interaction, an insert for a meaningful "
+            "detail, an establishing view to open a location."
+        )
+        if many:
+            lines.append(
+                "Different shots may switch as needed; never force one onto a shot that does "
+                "not need it, and not every listed option has to appear."
+            )
+        limit = 1 if many and len(keys) > 3 else 3
+        for key in keys:
+            preset = _FRAMING_PRESETS[key]
+            lines.append(f"- Framing: {preset['name_en']}（{preset['name_zh']}）")
+            lines.append(f"  - {preset['desc']}")
+            lines.append("  - Suitable phrasings (pick one per shot, paraphrase naturally):")
+            for ex in preset["examples"][:limit]:
+                lines.append(f"    - {ex}")
+        lines.append(
+            "- Framing serves the content: without dialogue or a two-person beat do not force "
+            "an over-the-shoulder or two-shot, and reserve inserts and establishing views for "
+            "moments that truly need them."
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _normalize_expressions(expression, expression_catalog: list | None = None) -> list:
+    """归一化微表情参数为合法 key 列表（顺序稳定、去重）。
+
+    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
+    未知 key 与重复值忽略。合法 key = 内置 _MICRO_EXPRESSION_PRESETS 或前端本地
+    导入并经 expression_catalog 携带的自定义词条（{key,label,title}）。
+    """
+    if expression is None:
+        return []
+    if isinstance(expression, str):
+        keys = [expression] if expression.strip() else []
+    elif isinstance(expression, (list, tuple)):
+        keys = list(expression)
+    else:
+        return []
+    extra_keys: set = set()
+    if expression_catalog:
+        for it in expression_catalog:
+            if isinstance(it, dict) and isinstance(it.get("key"), str) and it["key"].strip():
+                extra_keys.add(it["key"].strip())
+    seen: set = set()
+    result = []
+    for k in keys:
+        if not isinstance(k, str):
+            continue
+        key = k.strip()
+        if not key or key == "auto" or key in seen:
+            continue
+        if key in _MICRO_EXPRESSION_PRESETS or key in extra_keys:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def _expression_note(expression: str | list = "", expression_catalog: list | None = None, lang: str = "en") -> str:
+    """按（多选）微表情 key 生成注入生成提示词的表演指令块；空选择返回空串（不注入）。
+
+    lang="zh" 时输出整段中文指令与中文例句，配合中文输出语言；lang 其他值维持
+    英文原版。与 _camera_motion_note 不同：微表情是表演描写而非 LoRA 触发词，允许
+    并鼓励按输出语言自然意译。多选时为强约束：LLM 依据每个 [Shot N] 的人物状态与
+    情绪把所选 Cue 分配织入对应镜头表演描述，单镜头最多自然组合 1-2 个克制细节，
+    每个选中的 Cue 在 detailed_description 全文中必须至少出现一次，禁止夸张哑剧化。
+    选中 ≤3 类时每类列 2 条示例，>3 类时每类列 1 条，控制注入 token。自定义词条
+    （expression_catalog 中非内置 key）无固定例句，指示模型按 label/title 自然展开。
+    """
+    keys = _normalize_expressions(expression, expression_catalog)
+    if not keys:
+        return ""
+    many = len(keys) > 1
+    zh = lang == "zh"
+    extra: dict = {}
+    if expression_catalog:
+        for it in expression_catalog:
+            if isinstance(it, dict) and isinstance(it.get("key"), str) and it["key"].strip():
+                extra[it["key"].strip()] = it
+    lines = []
+    if zh:
+        lines.append("## 微表情与表演方向（Micro-expression & Acting Direction）")
+        lines.append(
+            "对每个出现人物近景或中景的 [Shot N]，把下列所选微表情/肢体细节自然地织入"
+            "该人物的表演描述——克制而写实，像真正的电影表演，而非夸张的哑剧。"
+        )
+        if many:
+            lines.append(
+                "按各镜头的情绪与节奏分配使用：单镜头最多自然组合两个细微细节"
+                "（例如“别开视线”时“嘴角轻微绷紧”）。"
+                "硬性底线：每个选中的 Cue 至少在一个出现该人物近景/中景的镜头中"
+                "自然体现一次（放在情绪最契合的镜头即可），遗漏任一选中 Cue 视为不合格。"
+            )
+        limit = 1 if many and len(keys) > 3 else 2
+        for key in keys:
+            if key in _MICRO_EXPRESSION_PRESETS:
+                preset = _MICRO_EXPRESSION_PRESETS[key]
+                lines.append(f"- Cue：{preset['name_zh']}（{preset['name_en']}）")
+                zh_examples = _MICRO_EXPRESSION_ZH.get(key)
+                if zh_examples:
+                    lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
+                    for ex in zh_examples[:limit]:
+                        lines.append(f"    - {ex}")
+                else:
+                    lines.append("  - 请按该 Cue 的含义自然展开成中文表演描写，保持克制简练。")
+                    for ex in preset["examples"][:1]:
+                        lines.append(f"    - {ex}")
+            else:
+                custom = extra.get(key, {})
+                label = custom.get("label") or key
+                desc = custom.get("title") or label
+                lines.append(f"- Cue：{label}")
+                lines.append(
+                    "  - 请把该提示（大意：{}）自然展开成中文表演描写，保持克制简练。"
+                    .format(desc)
+                )
+        lines.append(
+            "不要把任一 Cue 强塞进每一个镜头或每一处近景，整体表演保持自然，"
+            "也不要把 Cue 写成技术标签或指令性的句子。"
+            "唯一下限：所有选中的 Cue 必须各自在 detailed_description 全文中出现至少一次；"
+            "若写完发现某 Cue 无处安放，回到情绪最契合的镜头补一处克制描写，不得省略。"
+        )
+    else:
+        lines.append("## Micro-expression & Acting Direction")
+        lines.append(
+            "For every [Shot N] that shows a human character in a close or medium shot, weave "
+            "the selected micro-expression / body-language cues below into that character's "
+            "acting description - naturally and sparingly, as a restrained film performance "
+            "rather than exaggerated pantomime."
+        )
+        if many:
+            lines.append(
+                "Distribute the cues across shots by each shot's emotion and rhythm. A shot may "
+                "combine at most two subtle cues when the beat calls for it (e.g. a glance away "
+                "with a faint lip tighten), but EVERY selected cue MUST appear at least once in "
+                "a shot showing the character in a close or medium shot - place it in the shot "
+                "where it fits best; omitting any selected cue is an unacceptable output."
+            )
+        limit = 1 if many and len(keys) > 3 else 2
+        for key in keys:
+            if key in _MICRO_EXPRESSION_PRESETS:
+                preset = _MICRO_EXPRESSION_PRESETS[key]
+                lines.append(f"- Cue: {preset['name_en']}（{preset['name_zh']}）")
+                lines.append(
+                    "  - Suggested phrasings (pick one per shot and paraphrase it naturally "
+                    "into the output language):"
+                )
+                for ex in preset["examples"][:limit]:
+                    lines.append(f"    - {ex}")
+            else:
+                custom = extra.get(key, {})
+                label = custom.get("label") or key
+                desc = custom.get("title") or label
+                lines.append(f"- Cue: {label}")
+                lines.append(
+                    "  - Suggested phrasings: describe this cue naturally in the output "
+                    "language (e.g. {}) keeping the acting subtle and brief.".format(desc)
+                )
+        lines.append(
+            "Do not force any cue into every shot or every close-up; keep the overall "
+            "performance natural, and never write the cue as a technical tag or instruction. "
+            "One hard requirement: every selected cue must appear at least once somewhere in "
+            "the detailed_description (each in the shot where it fits best). If you finish and "
+            "a cue has no home, add one restrained mention to the most fitting shot rather than "
+            "dropping it."
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _load_h3_skills_template(lang: str = "en") -> str:
     """Load the custom H3 skills template (four-field output) for the given language.
 
@@ -103,7 +1263,7 @@ def _load_h3_skills_template(lang: str = "en") -> str:
         return f.read()
 
 
-def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en") -> str:
+def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> str:
     """Build the full prompt sent to the local GGUF VLM.
 
     Includes the custom skills guide, the required JSON output format
@@ -111,6 +1271,9 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
     and the <@角色名称> / <#角色名称:对话内容> placeholder rules. When a reference
     image is provided it is NOT treated as a first frame; instead its contents
     are merged into "detailed_description" together with the user's input.
+    camera_motion: 运镜 key 或 key 列表（见 _CAMERA_MOTION_PRESETS），空/"auto"/
+    未知值不注入；多选时指令 LLM 为每个 [Shot N] 依镜头语义挑最契合的一种自然
+    嵌入英文运镜短语（不同 Shot 可轮换风格），速度词由模型自然写。
     """
     image_note = ""
     if has_image:
@@ -124,7 +1287,13 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
     duration_note = ""
     if duration_seconds and duration_seconds > 0:
         duration_note = (
-            "The target video's total duration is %.2f seconds. "
+            "The target video's total duration is %.2f seconds. Plan the shot cut "
+            "timestamps against this total: the cut timestamps must be strictly "
+            "increasing, each one must lie inside the total duration, and the shots "
+            "must jointly cover the full duration with every shot getting a "
+            "reasonable, non-trivial share (avoid extremely short shots such as a "
+            "2-second shot inside an 8-second video, and avoid one shot dominating "
+            "almost the whole duration unless the action truly requires it). "
         ) % (float(duration_seconds))
 
     # 输出语言指令放在 prompt 末尾（模型注意力最强的位置），
@@ -147,6 +1316,11 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
             "<#...>), the four field names, character names, and scene-visible "
             "text/dialogue may keep their original language.\n"
         )
+
+    camera_note = _camera_motion_note(camera_motion, lang=lang)
+    expression_note = _expression_note(expression, expression_catalog, lang=lang)
+    shot_note = _shot_size_note(shot_size, lang=lang)
+    framing_note = _framing_note(framing, lang=lang)
 
     return f"""You are an expert video prompt writer. Follow the skills guide below.
 
@@ -175,9 +1349,9 @@ Write one short paragraph summarizing the target video and its reference relatio
 ## Strictness
 - "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".
 - Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
-{image_note}{lang_note}## User Input Prompt
+{image_note}{lang_note}{camera_note}{expression_note}## User Input Prompt
 {duration_note}{prompt}
-
+{shot_note}{framing_note}
 Output ONLY the JSON object. Do not add any text before or after it."""
 
 
@@ -227,25 +1401,101 @@ def _unmask_protected(text: str, placeholders: dict[str, str]) -> str:
     return text
 
 
+# Camera-motion 保真规则（中→英翻译指令共用）：下游若挂载 Camera Motion LoRA，必须把
+# 源文中的摄影机运动改写为 "camera motion, ..." 触发短语（技术词，不得意译成普通动词）。
+# 本常量文本镜像同步到 prompt/prompt_translate_to_en.txt 的 "## Camera motion fidelity" 小节，
+# 修改时请保持两处一致。
+_TRANSLATE_CAMERA_MOTION_RULES = (
+    "\n\n## Camera motion fidelity (MANDATORY)\n"
+    "The translated prompt is consumed by a downstream Camera Motion LoRA that "
+    "activates ONLY on the literal English token sequence \"camera motion, ...\". "
+    "Whenever the source text describes camera movement or a global camera style, "
+    "you MUST rewrite it as the matching \"camera motion, ...\" trigger phrase "
+    "listed below, never as plain verbs (\"aerial drone shot\", \"the camera slowly "
+    "descends\" or \"dolly in\" alone do NOT activate the LoRA).\n"
+    "Chinese cue -> required trigger phrase:\n"
+    "- 推近/拉近/前移 -> \"camera motion, slow push-in on the subject\".\n"
+    "- 拉远/后移 -> \"camera motion, slow pull-back revealing the surroundings\".\n"
+    "- 推拉结合/先推后拉 -> \"camera motion, push-in then pull-back in one flowing move\".\n"
+    "- 环绕/绕行/盘旋 -> \"camera motion, slow 360-degree orbit around the subject\".\n"
+    "- 跟拍/跟随/手持 -> \"camera motion, tracking shot following the subject\".\n"
+    "- 航拍/无人机/俯拍/高空 -> \"camera motion, aerial drone shot flying over the scene\".\n"
+    "- 升降/升起/仰起/落下/俯仰 -> \"camera motion, slow tilt from the feet up to the face\".\n"
+    "- 摇镜/扫过/横摇 -> \"camera motion, slow pan across the full scene\".\n"
+    "- 特写/微距 -> \"camera motion, extreme close-up on the subject's face\".\n"
+    "- Keep the framing target and speed in the phrase when the source names them "
+    "(拉近至中景 -> \"camera motion, push-in to a medium shot\"; 缓缓/缓慢 -> slow, "
+    "快速 -> quick, 平稳 -> steady).\n"
+    "- Global style statements (e.g. 全程采用航拍镜头风格 / 运镜风格为航拍/无人机) "
+    "must ALSO become a trigger phrase, e.g. \"camera motion, aerial drone shots "
+    "throughout\".\n"
+    "- Worked example: source \"无人机航拍，飞掠过整片海滩，镜头缓缓下降\" -> output "
+    "\"camera motion, aerial drone shot flying over the beach, slowly descending\".\n"
+    "- If a \"camera motion, ...\" phrase is already present in the source, keep it "
+    "exactly and never duplicate it. Only apply these rules where the source actually "
+    "describes camera movement; translate everything else normally and never invent "
+    "motion where the source has none.\n"
+)
+
+
+# 运镜 cue 检测（中英）：命中任一 cue 才注入 Camera motion fidelity 规则。
+# 中文 cue 均为运镜/镜头动词；英文 cue 用单词边界匹配。漏判代价大（运镜被意译），
+# 误判代价小（仅多注入一段规则，规则本身禁止无中生有），故宁可放宽。
+_CAMERA_CUE_RE = re.compile(
+    r"推近|拉近|前移|推上|推镜|推进|拉远|后移|拉开|拉镜|推拉|先推后拉|环绕|绕行|盘旋|环拍|"
+    r"跟拍|跟随|手持|航拍|无人机|俯拍|高空|升降|升起|仰起|落下|俯仰|摇镜|摇向|横摇|横移|平移|"
+    r"特写|微距|运镜|镜头缓缓|镜头缓慢|镜头拉近|镜头推近|镜头下降|镜头摇|"
+    r"缓慢(?:推|拉|环绕|移动|下降|上升|摇)|缓缓(?:推|拉|环绕|移动|下降|上升|摇)"
+    r"|push(?:es|ed|ing)?[- ]?in|pull(?:s|ed|ing)?[- ]?back|dolly(?:ing|es|ed)?|"
+    r"orbit(?:s|ing|ed)?|tracking(?: shot)?|handheld|aerial|drone|crane(?:s|ing|ed)? shot|"
+    r"\btilt(?:s|ing|ed)?\b|\bpan(?:s|ning|ned)?\b|close[- ]?up|\bmacro\b|zoom(?:s|ing|ed)?|"
+    r"camera motion|camera moves",
+    re.IGNORECASE,
+)
+
+
+def _has_camera_cue(text: str) -> bool:
+    """源文本是否含运镜描写 cue（中英文）。决定是否注入 Camera motion fidelity 规则。"""
+    return bool(text) and bool(_CAMERA_CUE_RE.search(text))
+
+
+# prompt_translate_to_en.txt 中 "## Camera motion fidelity" 小节
+# （介于标题与 "## Input JSON" 之间），源文无运镜 cue 时整体移除
+_CAMERA_FIDELITY_SECTION_RE = re.compile(
+    r"\n\n## Camera motion fidelity\n.*?\n\n## Input JSON", re.DOTALL
+)
+
+
 def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) -> str:
     """将整段视频提示词文本翻译为英文。
 
     调用方负责将禁止改写的片段（主体名/对白）掩码为占位符（如 MASKED_0），
     翻译后还原；本函数在指令中提示模型原样保留占位符 token。翻译失败回退原文，
     不抛出异常、不中断流程。
+    指令中追加 _TRANSLATE_CAMERA_MOTION_RULES：中文源文里的运镜描写会被改写为
+    "camera motion, ..." 触发短语，保证下游 Camera Motion LoRA 的触发词不被翻译丢失。
     """
     try:
+        # 源文含运镜描写时才注入 camera fidelity 规则，其余翻译不带这段指令
+        rules_block = _TRANSLATE_CAMERA_MOTION_RULES if _has_camera_cue(text) else ""
         full_prompt = (
             "You are a professional video prompt translator. Translate the following "
             "video prompt text into fluent, natural English.\n\n"
             "Rules:\n"
             "- Keep fixed structural markers unchanged: [Shot N], At MM:SS.mmm, "
             "<@...>, <#...>, <d>...</d>.\n"
+            "- Keep every section label line and its section exactly as-is: "
+            "subject_definitions:, summary:, retention_analysis:, detailed_description:, "
+            "overall_soundscape:, non_diegetic_music:. Never drop, merge, reorder, "
+            "or rephrase any section heading or section.\n"
             "- Keep every placeholder token such as MASKED_0 exactly as-is, at the "
             "same position and in the same order. Never translate, delete, or reorder them.\n"
             "- Output only the translated text, with no extra commentary.\n\n"
             "## Text to translate\n\n"
             + text
+            # camera fidelity 规则置于待译文本之后、模型开始输出之前（末尾注意力最强），
+            # 命中运镜 cue 时才追加；无 cue 时为空串
+            + rules_block
         )
         if vlm_mode == "api":
             generated = generate_prompt_with_api(
@@ -304,6 +1554,9 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
         with open(_TRANSLATE_TO_EN_TEMPLATE_PATH, "r", encoding="utf-8") as f:
             skill = f.read()
         full_prompt = skill.replace("{{INPUT_JSON}}", input_json)
+        # 四字段源文均无运镜描写：移除 Camera motion fidelity 小节，避免多余 token
+        if not _has_camera_cue(" ".join(str(v) for v in masked.values() if isinstance(v, str))):
+            full_prompt = _CAMERA_FIDELITY_SECTION_RE.sub("\n\n## Input JSON", full_prompt)
         if vlm_mode == "api":
             generate_text = generate_prompt_with_api(
                 image=None, prompt=full_prompt, provider=options.get("provider", "GLM"),
@@ -343,7 +1596,7 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
         return json_data
 
 
-def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en") -> dict:
+def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en", camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> dict:
     """Generate an H3 full-reference prompt JSON.
 
     options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
@@ -369,12 +1622,24 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     by the model, with a language tag such as [Chinese] or [English] before the
     dialogue text. No mapping is returned. 输出语言由所选 skills 模板决定：
     lang="zh" 中文模板强制中文，其余语言英文模板强制英文。
+    camera_motion: 运镜 key 或 key 列表（见 _CAMERA_MOTION_PRESETS），空/"auto"/
+    未知值不注入，其余值向最终 prompt 追加 "## Camera Motion Direction" 指令块。
+    多选时 LLM 依据每个 [Shot N] 的镜头语义为该 Shot 挑选最契合的单一运镜并自然
+    嵌入对应英文运镜短语（中文输出时运镜短语仍保留英文，属 LoRA 技术词），不同
+    Shot 可轮换风格；速度词（slow/steady/quick 等）由模型依镜头节奏自然写出。
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
     image = load_image_tensor(image_path) if image_path else None
     skills = _load_h3_skills_template(lang)
-    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds, lang)
+    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds, lang,
+                                   camera_motion=camera_motion, expression=expression,
+                                   expression_catalog=expression_catalog,
+                                   shot_size=shot_size, framing=framing)
+    _dbg_note = (_shot_size_note(shot_size, lang=lang) or "").strip() or (_framing_note(framing, lang=lang) or "").strip()
+    if _dbg_note:
+        _head = "\n".join(_dbg_note.splitlines()[:4])
+        print(f"[MiniMaxRefDirector debug] shot/framing note INJECTED ({len(_dbg_note)} chars):\n{_head}", flush=True)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
             image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),

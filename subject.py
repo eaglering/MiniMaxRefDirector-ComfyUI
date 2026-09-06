@@ -224,7 +224,7 @@ class MiniMaxRefSubject(io.ComfyNode):
             "subject_count": subject_count,
         }
 
-        log.info(f"[MiniMaxRefSubject] config: {json.dumps(config, indent=2)}")
+        log.info(f"[MiniMaxRefSubject] config: {json.dumps(config, indent=2, ensure_ascii=False)}")
         return io.NodeOutput(
             config,
         )

@@ -297,7 +297,8 @@ function parseInitial(jsonStr) {
     overrideAudio: false,
     inpaint_audio: true,
     normalStartFrame: 0,
-    normalDurationFrames: 120
+    normalDurationFrames: 120,
+    defaultCameraMotions: []
   };
   try {
     if (jsonStr) {
@@ -310,9 +311,24 @@ function parseInitial(jsonStr) {
       if (p.inpaint_audio !== undefined) parsed.inpaint_audio = p.inpaint_audio;
       if (p.normalStartFrame !== undefined) parsed.normalStartFrame = p.normalStartFrame;
       if (p.normalDurationFrames !== undefined) parsed.normalDurationFrames = p.normalDurationFrames;
+      if (Array.isArray(p.defaultCameraMotions)) {
+        parsed.defaultCameraMotions = p.defaultCameraMotions.filter(k => typeof k === "string");
+      }
       if (Array.isArray(p.segments)) {
         parsed.segments = p.segments.map(s => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
+          // 迁移旧版单值运镜字段（cameraMotion）→ 多选数组（cameraMotions），并清理残留
+          if (rest.cameraMotions === undefined && typeof rest.cameraMotion === "string" && rest.cameraMotion && rest.cameraMotion !== "auto") {
+            rest.cameraMotions = [rest.cameraMotion];
+          }
+          delete rest.cameraMotion;
+          // 段级微表情多选（表演提示）：归一化为字符串 key 数组；兼容旧单值 expression → 数组
+          if (Array.isArray(rest.expressions)) {
+            rest.expressions = rest.expressions.filter(k => typeof k === "string" && k.trim());
+          } else if (typeof rest.expression === "string" && rest.expression.trim() && rest.expression !== "auto") {
+            rest.expressions = [rest.expression.trim()];
+          }
+          delete rest.expression;
           return rest;
         });
       }
@@ -348,4 +364,86 @@ function parseInitial(jsonStr) {
 }
 
 
-export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl };
+// --- 运镜风格库（共享给 transfer.js / settings.js 使用） ---
+// key 与后端 lib/prompt.py _CAMERA_MOTION_PRESETS 完全一致；label/title 用作 i18n key
+// （英文原文即英文显示，中文走 ZH 翻译）。多选后随 generate_prompt_json 请求携带
+// camera_motion 数组，由 LLM 依据每个 [Shot N] 的语义自动分配到各 Shot。
+// 不设 "auto" 项：空集合（[]）即表达"运镜自由、由模型决定"。
+const CAMERA_MOTIONS = [
+  { key: "push_in", label: "Push-in", title: "Push-in / Dolly-in: the camera moves toward the subject or a point of interest, tightening the framing" },
+  { key: "pull_back", label: "Pull-back", title: "Pull-back / Dolly-out: the camera retreats to reveal the wider scene and context" },
+  { key: "push_pull", label: "Push+Pull", title: "Push + Pull: a continuous move combining a push-in with a pull-back in one shot" },
+  { key: "orbit", label: "Orbit", title: "Orbit: the camera circles around the subject on a partial or full arc" },
+  { key: "tracking", label: "Tracking", title: "Tracking / Handheld: the camera follows the subject laterally or from behind" },
+  { key: "aerial", label: "Aerial", title: "Aerial / Drone: high-angle aerial or drone shot establishing or flying over the scene" },
+  { key: "crane", label: "Crane", title: "Crane / Tilt: vertical crane move or tilt sweep that reframes the scene" },
+  { key: "pan", label: "Pan", title: "Pan: the camera sweeps horizontally from a fixed position" },
+  { key: "close_up", label: "Close-up", title: "Close-up / Macro: extreme close-up or macro framing on a face, object or detail" },
+];
+
+// --- 景别词库（Shot Size,共享给 transfer.js 使用） ---
+// 按"主体在画面中的大小/距离"从远到近排列的连续档位;非 LoRA 触发词,后端依镜头
+// 语义意译进输出语言。多选后随 generate_prompt_json 请求携带 shot_size 数组,由 LLM
+// 依据每个 [Shot N] 的叙事需求挑选合适档位;空集合（[]）= 景别自由、由模型决定。
+// key 与后端 lib/prompt.py _SHOT_SIZE_PRESETS 完全一致;label/title 用作 i18n key。
+const SHOT_SIZES = [
+  { key: "extreme_wide", label: "Extreme wide", title: "Extreme wide / extreme long shot: the subject is tiny or part of the environment and the scene dominates" },
+  { key: "wide", label: "Wide", title: "Wide / long shot: the whole subject appears small with generous surroundings, placing it in context" },
+  { key: "full", label: "Full shot", title: "Full shot: the whole subject just fills the frame from head to toe" },
+  { key: "medium_long", label: "Medium long", title: "Medium long shot: framed from around the knees (or shins) upward" },
+  { key: "cowboy", label: "Cowboy shot", title: "Cowboy shot: framed from the mid-thigh up, a western-style medium framing" },
+  { key: "medium", label: "Medium", title: "Medium shot: framed from the waist up, balancing subject and setting" },
+  { key: "medium_close_up", label: "Medium close-up", title: "Medium close-up: framed from the chest up, favouring the face and shoulders" },
+  { key: "close_up", label: "Close-up", title: "Close-up: framed from the shoulders up with the face dominant" },
+  { key: "extreme_close_up", label: "Extreme close-up", title: "Extreme close-up: a single feature such as an eye or mouth, or a detail, fills the frame" },
+];
+
+// --- 构图与镜头关系词库（Framing,共享给 transfer.js 使用） ---
+// 非景别档位,按"画面里有什么 / 机位与人物关系 / 镜头功能"划分的构图惯例:
+// over-the-shoulder / two-shot（关系构图）、insert（细节切出）、establishing（开场定位）。
+// 非 LoRA 触发词,可意译进输出语言。多选后随 generate_prompt_json 请求携带 framing
+// 数组;空集合（[]）= 构图自由、由模型决定。key 与后端 _FRAMING_PRESETS 一致。
+const FRAMINGS = [
+  { key: "over_the_shoulder", label: "Over-the-shoulder", title: "Over-the-shoulder: the camera looks past one person's shoulder at the other, tying two characters in conversation" },
+  { key: "two_shot", label: "Two-shot", title: "Two-shot: both characters share the frame, showing their interaction" },
+  { key: "insert", label: "Insert", title: "Insert: an isolated detail (a hand, an object, a letter) fills the frame as a cutaway" },
+  { key: "establishing", label: "Establishing", title: "Establishing: an opening wide view that orients the audience to the location before the action" },
+];
+
+// --- 微表情 / 表演细节词库（共享给 transfer.js / settings.js 使用） ---
+// key 与后端 lib/prompt.py _MICRO_EXPRESSION_PRESETS 完全一致；label/title 用作 i18n key
+// （英文原文即英文显示，中文走 ZH 翻译）。多选后随 generate_prompt_json 请求携带
+// expression 数组，由 LLM 依据每个 [Shot N] 的人物状态自然分配到各镜头（表演提示，
+// 可意译进输出语言，非 LoRA 触发词）。category 仅用于组织与潜在分组，不参与协议。
+// 空集合（[]）= 表演自然，不注入任何指令（回归安全）。支持本地导入自定义条目扩充，
+// 自定义条目结构同本数组：{ key, label, title, category }，label/title 为自定义原文
+// （无 i18n 翻译，后端注入时直接使用）。
+const MICRO_EXPRESSIONS = [
+  // eye 眼神
+  { key: "gaze_shift", label: "Gaze shift", title: "Gaze shift: the eyes slide away for a moment, then return", category: "eye" },
+  { key: "glance_away", label: "Glance away", title: "Glance away: briefly drops or escapes the gaze, avoiding contact", category: "eye" },
+  { key: "stare_hard", label: "Fixed stare", title: "Fixed stare: eyes fix on something ahead, unblinking and still", category: "eye" },
+  { key: "blink_slow", label: "Slow blink", title: "Slow blink: a single long, deliberate blink, as if processing", category: "eye" },
+  // brow 眉眼
+  { key: "brow_raise", label: "Brow raise", title: "Brow raise: the brows lift briefly in doubt or surprise", category: "brow" },
+  { key: "brow_furrow", label: "Brow furrow", title: "Brow furrow: the brows draw together in a faint frown or worry", category: "brow" },
+  { key: "one_brow_rise", label: "One brow", title: "One brow: a single eyebrow arches alone, skeptical or amused", category: "brow" },
+  // mouth 嘴角/唇
+  { key: "lip_press", label: "Lip press", title: "Lip press: the lips press together into a thin, tight line", category: "mouth" },
+  { key: "lip_tighten", label: "Lip tighten", title: "Lip tighten: the corners of the mouth clench almost imperceptibly", category: "mouth" },
+  { key: "micro_smile", label: "Fleeting smile", title: "Fleeting smile: a faint smile flickers across the lips and is gone", category: "mouth" },
+  { key: "lips_part", label: "Lips part", title: "Lips part: the mouth falls slightly open as if to speak or in surprise", category: "mouth" },
+  { key: "lip_corner_twitch", label: "Lip-corner twitch", title: "Lip-corner twitch: an involuntary twitch pulls at one corner of the mouth", category: "mouth" },
+  // breath 呼吸/喉
+  { key: "breath_catch", label: "Catch breath", title: "Catch breath: the breath catches or a small inward gasp is held", category: "breath" },
+  { key: "exhale_sigh", label: "Soft sigh", title: "Soft sigh: a long quiet exhale that releases held tension", category: "breath" },
+  { key: "swallow", label: "Swallow", title: "Swallow: a nervous, audible swallow moves down the throat", category: "breath" },
+  // body 头部与身体微动作
+  { key: "head_tilt", label: "Head tilt", title: "Head tilt: the head cants a few degrees, considering or doubting", category: "body" },
+  { key: "head_drop", label: "Head drop", title: "Head drop: the chin dips and the eyes fall to the ground", category: "body" },
+  { key: "turn_away", label: "Turn away", title: "Turn away: the face or head turns away by a fraction in avoidance", category: "body" },
+  { key: "shoulder_tense", label: "Shoulders tense", title: "Shoulders tense: a subtle stiffening of the neck and shoulders", category: "body" },
+  { key: "hand_still", label: "Hand control", title: "Hand control: the hand freezes mid-gesture or is held rigidly still", category: "body" },
+];
+
+export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl, CAMERA_MOTIONS, SHOT_SIZES, FRAMINGS, MICRO_EXPRESSIONS };

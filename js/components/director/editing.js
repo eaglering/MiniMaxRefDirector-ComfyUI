@@ -489,6 +489,7 @@ export const editing = {
       inpaint_audio: !!(this.node.widgets?.find(w => w.name === "inpaint_audio")?.value),
       normalStartFrame: this.timeline.normalStartFrame,
       normalDurationFrames: this.timeline.normalDurationFrames,
+      defaultCameraMotions: this.timeline.defaultCameraMotions || [],
       segments: sortedSegments.map(s => {
         const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
         return rest;

@@ -1,8 +1,10 @@
 
+import functools
 import json
 import logging
 import os
 import re
+import threading
 import urllib.error
 import urllib.request
 
@@ -15,6 +17,24 @@ from .image import has_image, tensor_to_base64
 log = logging.getLogger(__name__)
 
 _LLAMA_MODEL_CACHE: dict = {}
+
+# 全局 LLM 推理锁：本地 GGUF（llama-cpp 共享缓存非线程安全，close() 发生在
+# 并发线程里会让正在推理的模型崩溃）、云 API 与 Ollama 的推理全部经
+# _llm_serialized 串行化——多个请求（HTTP to_thread worker / 节点执行器线程）
+# 同时打进来会排队而不是并发抢共享模型与显存。用 threading.Lock 而非
+# asyncio.Lock：临界区可能跨线程（执行器线程与 asyncio 线程池同时到达）。
+_LLM_INFER_LOCK = threading.Lock()
+
+
+def _llm_serialized(fn):
+    """持全局锁执行一次 LLM 推理/生成，保证任何时刻只有一个请求在跑。"""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _LLM_INFER_LOCK:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 def list_llm_gguf_files() -> list[str]:
     """List *.gguf under the registered 'llm' folders plus models/llm (or models/LLM).
@@ -102,7 +122,18 @@ def ensure_llama_cpp() -> None:
 
 
 def unload_llama_models(keep: set | None = None) -> None:
-    """Explicitly close and drop cached llama-cpp models, freeing their memory.
+    """带锁卸载缓存的 llama-cpp 模型（节点 / HTTP 路由等外部入口）。
+
+    与进行中的 LLM 推理互斥：若另一个线程正在推理（已持有 _LLM_INFER_LOCK），
+    本调用会排队等推理结束才 close，避免并发 close 正在使用的 llama-cpp 模型
+    导致崩溃。generate_prompt_with_llama 内部已持锁，直接调 _unload_llama_models。
+    """
+    with _LLM_INFER_LOCK:
+        _unload_llama_models(keep)
+
+
+def _unload_llama_models(keep: set | None = None) -> None:
+    """（无锁私有实现）显式 close 并丢弃缓存的 llama-cpp 模型，释放其内存。
 
     A llama-cpp-python ``Llama`` object owns native buffers (RAM + VRAM) that
     are only returned once ``close()`` is called and the object is released —
@@ -184,10 +215,11 @@ def get_llama_model(gguf_path: str, mmproj_path: str = ""):
     _LLAMA_MODEL_CACHE[key] = model
     # Evict any previously cached model(s) so only the freshly loaded one stays
     # resident (avoids holding multiple multi-GB GGUFs in RAM/VRAM at once).
-    unload_llama_models(keep={key})
+    _unload_llama_models(keep={key})
     return model
 
 
+@_llm_serialized
 def generate_prompt_with_llama(
     image = None,
     prompt: str = "",
@@ -227,7 +259,7 @@ def generate_prompt_with_llama(
         )
     except Exception as e:
         raise RuntimeError(f"[llm] GGUF generation failed: {e}") from e
-    unload_llama_models()
+    _unload_llama_models()
     generated_text = ""
     try:
         generated_text = resp["choices"][0]["message"]["content"]
@@ -266,6 +298,7 @@ def _is_glm_vision_model(model: str) -> bool:
     return bool(re.search(r"glm-4(?:\.\d+)?v", (model or "").strip().lower()))
 
 
+@_llm_serialized
 def generate_prompt_with_api(
     image = None,
     prompt: str = "",
@@ -352,6 +385,7 @@ def generate_prompt_with_api(
     return generated_text
 
 
+@_llm_serialized
 def generate_prompt_with_ollama(
     image=None,
     prompt: str = "",
