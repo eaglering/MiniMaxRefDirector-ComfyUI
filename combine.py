@@ -8,8 +8,8 @@
   并以 clip_audio 为音轨；否则音轨按 audio 输入 → audio_vae 解码 latent 音频流
   兜底。视频帧：直接提供 images 时跳过 VAE 解码，否则用 video_vae 解码。
 
-两条路径均输出 VHS_FILENAMES 4 元组 (filename, subfolder, type, full_path)，
-与 guide.py ``_vhs_tuple_path`` 的解析约定一致，可直连 Guide 的 prev_tail。
+保存完成后输出 Filename（本段视频路径），供下一段 MiniMaxRefGuide 的 prev_tail
+输入直接使用（motion context 像素路径 / 降噪来源）。
 
 实际编码逻辑复用 lib.video_combine.encode_frames_with_vhs：
 优先调用 VideoHelperSuite 的 VideoCombine（完整支持 AUDIO / metadata /
@@ -60,7 +60,7 @@ def _trim_images_and_audio(images, audio, trim_frames, frame_rate):
 
 
 class MiniMaxRefCombine(io.ComfyNode):
-    """合并解码后的 IMAGE 帧或 joint H3 latent 并保存，输出 VHS_FILENAMES。"""
+    """合并解码后的 IMAGE 帧或 joint H3 latent 并保存，输出 Filename 供下一段衔接。"""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -76,7 +76,8 @@ class MiniMaxRefCombine(io.ComfyNode):
                 "（image_latent + meta + clip_audio wav）并以 clip_audio "
                 "为音轨；否则音轨按 audio 输入 → audio_vae 解码 latent 音频流兜底。"
                 "视频帧：直接提供 images 时跳过 VAE 解码，否则用 video_vae 解码。\n"
-                "输出 VHS_FILENAMES 供 MiniMaxRefGuide 的 prev_tail 输入使用。"
+                "输出 Filename（本段视频路径），供下一段 MiniMaxRefGuide 的 prev_tail "
+                "输入直接使用。"
             ),
             inputs=[
                 io.Image.Input(
@@ -163,10 +164,8 @@ class MiniMaxRefCombine(io.ComfyNode):
             outputs=[
                 io.String.Output(
                     "Filename",
-                    tooltip=(
-                        "单个 Filename（形如 subfolder/filename，subfolder 为空时仅文件名），"
-                        "直连 MiniMaxRefGuide 的 prev_tail。"
-                    ),
+                    tooltip="生成的视频输出。接下一段 MiniMax Ref Guide 的 prev_tail "
+                            "输入，作为 motion context 像素路径 / 降噪来源。",
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
@@ -287,6 +286,8 @@ class MiniMaxRefCombine(io.ComfyNode):
             payload.get("clip_audio"), _notify_ctx_node,
         )
         _send_progress(payload)
+        # Filename 输出本段视频路径，供下一段 MiniMax Ref Guide 的 prev_tail 输入
+        # 直接使用（motion context 像素路径 / 降噪来源）。
         return io.NodeOutput(filename, ui=ui)
 
 

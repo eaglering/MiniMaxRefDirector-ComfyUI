@@ -4,3 +4,7 @@
 
 # 音频/视频加载（lib.py 使用 av 读取音频）
 av>=12.0.0
+
+# 音频序列化为临时 WAV（lib/audio.py save_audio_to_temp_wav；
+# 注：torchaudio 的 wav 写出后端同样依赖 soundfile）
+soundfile>=0.12.1

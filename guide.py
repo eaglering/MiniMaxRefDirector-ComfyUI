@@ -33,7 +33,12 @@ from comfy_api.latest import io
 from comfy_execution.graph import ExecutionBlocker
 
 from .lib.llm import unload_llama_models
-from .lib.motion_context import _apply_motion_context, _load_prev_tail_frames
+from .lib.motion_context import (
+    _apply_motion_context,
+    _denoise_context_frames,
+    _denoise_opts,
+    _load_prev_tail_frames,
+)
 from .lib.path import vhs_tuple_path
 from .lib.song_audio import _get_song_audio_module, _snap_h3_run, _synthesize_master_audio
 
@@ -117,7 +122,10 @@ class MiniMaxRefGuide(io.ComfyNode):
                 io.String.Input(
                     "prev_tail",
                     optional=True,
-                    tooltip="上一段生成完成的视频路径；文本段 guideStrength>0（启用 motion context）时作为 motion context 实现跨段衔接；收到时通知前端该段完成。",
+                    tooltip="上一段生成完成的视频路径（上一段 MiniMax Ref Combine 的 Filename 输出）。"
+                            "文本段 guideStrength>0（启用 motion context）时作为 motion context "
+                            "像素路径实现跨段衔接（该段开启降噪时对解码帧尾部先降噪）；"
+                            "收到时通知前端该段完成。",
                 ),
                 io.Int.Input("seed", optional=True, default=0, min=0, step=1,
                     tooltip="随机种子，透传给外部 KSampler 以复现每段生成；"
@@ -152,6 +160,10 @@ class MiniMaxRefGuide(io.ComfyNode):
                 guide_index=None) -> io.NodeOutput:
         """按 guide_index 取段 → 条件编码 → 输出 positive/latent；并按 prev_tail/越界发送通知。
 
+        跨段衔接（像素路径）：prev_tail（上一段视频文件路径）解码其尾部帧作为
+        H3 motion context pinned 引导帧；文本段 guideStrength>0 时生效，该段开启
+        降噪时先对解码帧尾部注入锥形噪声再编码。
+
         guide_index 未连接（None）时自动按 timeline 段顺序取段（模块级计数器，
         以 id(guide_data) 键控，同一 prompt 内递增，跨 prompt 自动重置）。
         """
@@ -164,13 +176,18 @@ class MiniMaxRefGuide(io.ComfyNode):
         idx = int(guide_index) if guide_index is not None else 0
         total = len(timeline)
 
+        # prev_tail：上一段生成完成的视频路径（上一段 MiniMax Ref Combine 的
+        # Filename 输出）。文本段 motion context 的像素路径来源：解码其尾部帧
+        # 作为 pinned 引导帧。None/空串视为无上一段。
+        tail = prev_tail
+
         # 资源更新通知：把生成/合并的视频追加到对应 Director 前端素材条
         _director_id = guide_data.get("_director_node_id") if isinstance(guide_data, dict) else None
-        if prev_tail:
+        if tail:
             _send_progress({
                 "status": "add_material",
                 "type": "video",
-                "imageFile": prev_tail
+                "imageFile": tail
             }, director_node_id=_director_id)
 
         # 越界轮：MiniMaxRefDirector 故意把 segment_count+1 接到 forLoopStart.total，
@@ -258,11 +275,13 @@ class MiniMaxRefGuide(io.ComfyNode):
         trim_frames: int = 0
         prev_is_video = False
 
+        # 文本段启用 motion context 时，以 prev_tail（上一段视频文件）作为
+        # 上一段视频来源（像素路径）；prevType/prevImageFile 兜底旧素材。
         if entry.get("type") == "text":
-            if prev_tail:
+            if tail:
                 prev_is_video = True
             elif entry.get("prevType") == "video":
-                prev_tail = entry.get("prevImageFile", "")
+                tail = entry.get("prevImageFile", "")
                 prev_is_video = True
 
         # 图片段 + imageFile：把静态图重复成 8 帧作为 motion context pinned 帧，
@@ -287,21 +306,27 @@ class MiniMaxRefGuide(io.ComfyNode):
                     log.warning(f"[MiniMaxRefGuide] guide_index={idx} image motion context "
                                 f"skipped: failed to load image {img_src!r}")
 
-        # 文本段 + guideStrength > 0（表示启用 motion context）：用 prev_tail 视频做跨段衔接
-        if guide_strength > 0 and prev_tail and prev_is_video:
-            log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail={prev_tail}")
-            frames = _load_prev_tail_frames(prev_tail)
+        # 文本段 + guideStrength > 0（启用 motion context）：跨段衔接（像素路径）。
+        # 以 prev_tail（上一段视频文件）为来源：解码其尾部帧作为 H3 motion context
+        # pinned 引导帧；该段开启片段级降噪时，先对解码帧尾部注入锥形噪声再编码。
+        if guide_strength > 0 and prev_is_video:
+            denoise = _denoise_opts(entry.get("denoise"))
+            frames = None
+            log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail={tail}")
+            frames = _load_prev_tail_frames(tail)
+            if frames is not None and denoise is not None:
+                frames = _denoise_context_frames(frames, ctx_len, denoise)
             if frames is not None and frames.shape[0] >= 1:
                 cond, trim_frames = _apply_motion_context(
                     cond, latent, video_vae, frames,
                     context_length=guide_strength, audio_vae=audio_vae,
                 )
-                log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
-                         f"({frames.shape[0]} frames)")
+                log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion "
+                         f"context ({frames.shape[0]} frames)")
             else:
                 log.warning(
                     f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
-                    f"skipped: {prev_tail} could not be decoded")
+                    f"skipped: could not be decoded")
 
         return io.NodeOutput(cond, latent, trim_frames, secondPass, upscale, clip_audio,
                              ctx_len)

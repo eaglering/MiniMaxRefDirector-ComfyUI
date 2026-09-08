@@ -818,7 +818,185 @@ export const dom = {
     this.strengthRow.appendChild(this.strengthLabel);
     this.strengthRow.appendChild(this.strengthValue);
 
+    // --- 片段级降噪（开关与「配置」入口紧跟「引导强度」控件之后、同一行内；
+    //     Guide 在 motion context 路径调用 ComfyUI-H3-Context-Noise，
+    //     文本段需该段 guideStrength>0）---
+    this.denoiseGroup = document.createElement("div");
+    Object.assign(this.denoiseGroup.style, {
+      display: "none", alignItems: "center", gap: "4px",
+      boxSizing: "border-box", flexShrink: "0",
+    });
 
+    this.denoiseRow = document.createElement("div");
+    Object.assign(this.denoiseRow.style, {
+      display: "flex", alignItems: "center", gap: "4px",
+      userSelect: "none", color: "#d7dce4",
+    });
+
+    this.denoiseToggle = document.createElement("input");
+    this.denoiseToggle.type = "checkbox";
+    this.denoiseToggle.style.cursor = "pointer";
+
+    const denoiseLabel = document.createElement("span");
+    denoiseLabel.className = "mrd-pr-strength-label";
+    denoiseLabel.style.fontSize = "11px";
+    denoiseLabel.style.cursor = "pointer";
+    denoiseLabel.style.color = "#d7dce4";
+    denoiseLabel.textContent = t("Denoise");
+    denoiseLabel.title = t("DenoiseHint");
+    this.denoiseToggle.title = t("DenoiseHint");
+
+    // 「配置」按钮：点击以 settings 弹窗样式浮出参数面板
+    this.denoiseParamsToggle = document.createElement("button");
+    this.denoiseParamsToggle.type = "button";
+    this.denoiseParamsToggle.innerHTML = ICONS.gear;
+    Object.assign(this.denoiseParamsToggle.style, {
+      background: "none", border: "1px solid #3a4150", color: "#8a93a3",
+      borderRadius: "3px", cursor: "pointer", height: "16px",
+      padding: "1px 3px", lineHeight: "1", display: "flex",
+      alignItems: "center", justifyContent: "center",
+    });
+    this.denoiseParamsToggle.title = t("DenoiseParamsToggleHint");
+
+    // 浮动参数面板：fixed 定位、外观与行为参照时间轴 Settings 弹窗
+    // （标题栏 + 设置行；点击锚点外/滚轮即关闭）。常驻构建一次并挂到 body，
+    // 避免重建导致 state.js 中 alphaValue 等输入引用失效
+    if (this.denoiseParams || this._denoiseDismisser) {
+      if (this._dismissDenoisePanel) this._dismissDenoisePanel();
+      if (this.denoiseParams) { this.denoiseParams.remove(); this.denoiseParams = null; }
+    }
+    this.denoiseParams = document.createElement("div");
+    this.denoiseParams.className = "mrd-pr-settings-menu";
+    this.denoiseParams.style.display = "none";
+    this.denoiseParams.style.minWidth = "230px";
+    this.denoiseParams.style.width = "auto";
+
+    const dismissPanel = () => {
+      this.denoiseParams.style.display = "none";
+      if (this._denoiseDismisser) {
+        document.removeEventListener("pointerdown", this._denoiseDismisser, true);
+        document.removeEventListener("wheel", this._denoiseDismisser, true);
+        this._denoiseDismisser = null;
+      }
+    };
+    this._dismissDenoisePanel = dismissPanel;
+
+    const showPanel = () => {
+      this.denoiseParams.style.display = "flex";
+      const p = this.denoiseParams;
+      const rect = this.denoiseParamsToggle.getBoundingClientRect();
+      let left = rect.right - p.offsetWidth;
+      if (left < 8) left = rect.left;
+      if (left + p.offsetWidth > window.innerWidth - 8) left = window.innerWidth - p.offsetWidth - 8;
+      let top = rect.bottom + 6;
+      if (top + p.offsetHeight > window.innerHeight - 8) top = Math.max(8, rect.top - p.offsetHeight - 6);
+      p.style.left = `${Math.max(8, left)}px`;
+      p.style.top = `${Math.max(8, top)}px`;
+    };
+
+    const dnTitle = document.createElement("div");
+    dnTitle.className = "mrd-pr-settings-title";
+    dnTitle.style.display = "flex";
+    dnTitle.style.justifyContent = "space-between";
+    dnTitle.style.alignItems = "center";
+    const dnTitleText = document.createElement("span");
+    dnTitleText.textContent = t("DenoiseParamsTitle");
+    dnTitle.appendChild(dnTitleText);
+    const dnClose = document.createElement("button");
+    dnClose.className = "mrd-pr-settings-close-btn";
+    dnClose.innerHTML = ICONS.close;
+    dnClose.title = t("Close Settings");
+    dnClose.addEventListener("click", dismissPanel);
+    dnTitle.appendChild(dnClose);
+    this.denoiseParams.appendChild(dnTitle);
+
+    // 参数行（alpha/alpha_end/ramp/seed），change 时写回 seg.denoise
+    const paramRow = (key, labelKey, defVal, step, min, max, decimals) => {
+      const row = document.createElement("div");
+      row.className = "mrd-pr-settings-row";
+      const lab = document.createElement("span");
+      lab.className = "mrd-pr-settings-label";
+      lab.textContent = t(labelKey);
+      lab.title = t(labelKey);
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = String(step);
+      input.min = String(min);
+      input.max = String(max);
+      input.value = String(defVal);
+      input.disabled = true;
+      Object.assign(input.style, {
+        width: "64px", background: "#242a35", color: "#d7dce4",
+        border: "1px solid #3a4150", borderRadius: "3px", fontSize: "11px",
+        padding: "2px 4px", boxSizing: "border-box", opacity: "0.35",
+        textAlign: "center", height: "20px",
+      });
+      row.appendChild(lab);
+      row.appendChild(input);
+      input.addEventListener("keydown", (e) => e.stopPropagation());
+      input.addEventListener("change", () => {
+        if (input.disabled) return;
+        let v = parseFloat(input.value);
+        if (isNaN(v)) v = defVal;
+        v = Math.min(max, Math.max(min, v));
+        input.value = String(decimals ? Number(v.toFixed(decimals)) : v);
+        const seg = this.timeline.segments[this.selectedIndex];
+        if (!seg || this.selectionType === "audio") return;
+        const d = this._ensureDenoiseObj(seg);
+        d[key] = decimals ? Number(v.toFixed(decimals)) : v;
+        this.commitChanges();
+      });
+      this.denoiseParams.appendChild(row);
+      return input;
+    };
+    this.alphaValue = paramRow("alpha", "AlphaStart", 0.45, 0.01, 0, 1, 2);
+    this.alphaEndValue = paramRow("alpha_end", "AlphaEnd", 0.10, 0.01, 0, 1, 2);
+    this.rampValue = paramRow("ramp", "RampFrames", 3, 1, 1, 9999, 0);
+    this.seedValue = paramRow("seed", "Seed", 0, 1, 0, 99999999, 0);
+
+    // 展开/收起浮动面板（锚点外点击或滚轮关闭，与 Settings 菜单一致）
+    this.denoiseParamsToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (this.denoiseParams.style.display === "none") {
+        showPanel();
+        if (!this._denoiseDismisser) {
+          this._denoiseDismisser = (ev) => {
+            if (!this.denoiseParams.contains(ev.target) &&
+                !this.denoiseParamsToggle.contains(ev.target)) dismissPanel();
+          };
+          document.addEventListener("pointerdown", this._denoiseDismisser, true);
+          document.addEventListener("wheel", this._denoiseDismisser, true);
+        }
+      } else {
+        dismissPanel();
+      }
+    });
+
+    // 开关：写回 seg.denoise.enabled
+    const toggleDenoise = () => {
+      const seg = this.timeline.segments[this.selectedIndex];
+      if (!seg || this.selectionType === "audio") return;
+      const d = this._ensureDenoiseObj(seg);
+      d.enabled = this.denoiseToggle.checked;
+      this._setDenoiseParamEnabled(d.enabled);
+      this.commitChanges();
+    };
+    this.denoiseToggle.addEventListener("change", toggleDenoise);
+    denoiseLabel.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (this.denoiseToggle.disabled) return;
+      this.denoiseToggle.checked = !this.denoiseToggle.checked;
+      toggleDenoise();
+    });
+
+    this.denoiseRow.appendChild(this.denoiseToggle);
+    this.denoiseRow.appendChild(denoiseLabel);
+    this.denoiseRow.appendChild(this.denoiseParamsToggle);
+    this.denoiseGroup.appendChild(this.denoiseRow);
+    // 降噪开关与「配置」入口紧跟「引导强度」输入框之后（同行）
+    this.strengthRow.appendChild(this.denoiseGroup);
+    // 浮动面板挂到 body（fixed 定位，独立于节点滚动容器）
+    document.body.appendChild(this.denoiseParams);
 
     // Layout container for sidebar + viewport
     this.layoutContainer = document.createElement("div");

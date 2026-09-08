@@ -1490,12 +1490,14 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) ->
             "or rephrase any section heading or section.\n"
             "- Keep every placeholder token such as MASKED_0 exactly as-is, at the "
             "same position and in the same order. Never translate, delete, or reorder them.\n"
-            "- Output only the translated text, with no extra commentary.\n\n"
-            "## Text to translate\n\n"
-            + text
-            # camera fidelity 规则置于待译文本之后、模型开始输出之前（末尾注意力最强），
-            # 命中运镜 cue 时才追加；无 cue 时为空串
+            "- Output only the translated text, with no extra commentary.\n"
+            "- Apply the camera-fidelity instruction block below by rewriting "
+            "camera-motion descriptions INSIDE the text; never append such phrases "
+            "after the translation and never quote the instruction block itself."
             + rules_block
+            + "\n\n## Text to translate\n\n"
+            + text
+            + "\n\nTranslated text:"
         )
         if vlm_mode == "api":
             generated = generate_prompt_with_api(

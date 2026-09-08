@@ -316,6 +316,9 @@ export const state = {
       }
     }
 
+    // 片段级降噪开关状态回显（audio 轨段不可用；seg 存在才激活）
+    if (this._syncDenoiseUI) this._syncDenoiseUI(seg && this.selectionType !== "audio" ? seg : null);
+
     if (this.segmentBoundsDisplay) {
       if (seg) {
         const startStr = this.formatTime(seg.start, true);
@@ -328,8 +331,49 @@ export const state = {
     }
 
     if (this._transferSetSeg) this._transferSetSeg(seg);
-  }
-,
+  },
+
+  // ---------- 片段级降噪（seg.denoise）UI ----------
+  _ensureDenoiseObj(seg) {
+    if (!seg || typeof seg !== "object") return null;
+    if (!seg.denoise || typeof seg.denoise !== "object" || Array.isArray(seg.denoise)) {
+      seg.denoise = { enabled: false, alpha: 0.45, alpha_end: 0.10, ramp: 3, seed: 0 };
+    }
+    return seg.denoise;
+  },
+
+  _setDenoiseParamEnabled(enabled) {
+    if (!this.alphaValue) return;
+    [this.alphaValue, this.alphaEndValue, this.rampValue, this.seedValue].forEach((inp) => {
+      inp.disabled = !enabled;
+      inp.style.opacity = enabled ? "1.0" : "0.35";
+    });
+  },
+
+  _syncDenoiseUI(seg) {
+    const group = this.denoiseGroup;
+    if (!group) return;
+    const active = !!seg && this.selectionType !== "audio";
+    group.style.display = active ? "flex" : "none";
+    if (!active) {
+      // 切到不可用状态（未选中 / audio 轨段）时顺带收起浮动参数面板
+      if (this._dismissDenoisePanel) this._dismissDenoisePanel();
+      return;
+    }
+    const d = (seg.denoise && typeof seg.denoise === "object" && !Array.isArray(seg.denoise))
+      ? seg.denoise : null;
+    const enabled = !!(d && d.enabled);
+    this.denoiseToggle.checked = enabled;
+    this._setDenoiseParamEnabled(enabled);
+    const v = d || { enabled: false, alpha: 0.45, alpha_end: 0.10, ramp: 3, seed: 0 };
+    this.alphaValue.value = v.alpha ?? 0.45;
+    this.alphaEndValue.value = v.alpha_end ?? 0.10;
+    this.rampValue.value = v.ramp ?? 3;
+    this.seedValue.value = v.seed ?? 0;
+    if (this.denoiseParamsToggle) {
+      this.denoiseParamsToggle.style.opacity = enabled ? "1.0" : "0.6";
+    }
+  },
 
   updateSidebarHeights() {
     if (this.mainTrackLabel) {

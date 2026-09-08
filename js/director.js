@@ -435,6 +435,9 @@ class TimelineEditor {
   destroy() {
     cancelAnimationFrame(this._renderLoop);
     this.pauseAudio();
+    // 清理降噪浮动参数面板（fixed 层挂在 body）
+    if (this._dismissDenoisePanel) this._dismissDenoisePanel();
+    if (this.denoiseParams) { this.denoiseParams.remove(); this.denoiseParams = null; }
     window.removeEventListener("keydown", this.handleKeyDown, true);
     window.removeEventListener("paste", this.handlePaste, true);
   }

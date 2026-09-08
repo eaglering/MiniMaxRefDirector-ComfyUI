@@ -144,6 +144,89 @@ def _load_prev_tail_frames(prev_tail, max_frames=56):
     return frames
 
 
+def _get_h3_context_noise_module():
+    """定位 ComfyUI-H3-Context-Noise 的 nodes 子模块（frames 路径降噪用），缺失返回 None。
+
+    该插件的加噪节点类定义在 nodes.py：
+    - MiniMaxH3ContextTaperNoise  IMAGE -> IMAGE（context_frames 路径）
+
+    ComfyUI 启动 import 的是包 __init__.py，它只 re-export NODE_CLASS_MAPPINGS，
+    不把节点类挂到包对象上；而 sys.modules 里包与 nodes 子模块的 __file__ 都
+    含插件目录名。因此必须精确匹配 *nodes.py 子模块*：仅按目录名匹配会命中
+    包对象，getattr 类名即抛 AttributeError。找不到时返回 None，调用方跳过
+    降噪（行为等同未开启），不阻断执行。
+    """
+    for mod in list(sys.modules.values()):
+        f = (getattr(mod, "__file__", None) or "").replace("\\", "/")
+        if not f.endswith("/nodes.py") or "ComfyUI-H3-Context-Noise" not in f:
+            continue
+        if hasattr(mod, "MiniMaxH3ContextTaperNoise"):
+            return mod
+    root = os.path.join(folder_paths.base_path, "custom_nodes",
+                        "ComfyUI-H3-Context-Noise")
+    if os.path.isdir(root):
+        pkg_name = "ComfyUI-H3-Context-Noise"
+        try:
+            if pkg_name not in sys.modules:
+                # 执行目录 __init__.py，触发其中的 from .nodes import ... 加载子模块
+                spec = importlib.util.spec_from_file_location(
+                    pkg_name, os.path.join(root, "__init__.py"))
+                pkg = importlib.util.module_from_spec(spec)
+                sys.modules[pkg_name] = pkg
+                if spec.loader is not None:
+                    spec.loader.exec_module(pkg)
+            mod = sys.modules.get(pkg_name + ".nodes")
+            if mod is not None and hasattr(mod, "MiniMaxH3ContextTaperNoise"):
+                return mod
+        except Exception:
+            log.warning(
+                "[MiniMaxRefGuide] could not load ComfyUI-H3-Context-Noise "
+                "(denoise skipped)", exc_info=True)
+    return None
+
+
+def _denoise_opts(seg_denoise: dict | None) -> dict | None:
+    """规整片段级降噪参数；未启用返回 None（调用方跳过）。"""
+    if not isinstance(seg_denoise, dict) or not seg_denoise.get("enabled"):
+        return None
+    return {
+        "alpha": float(seg_denoise.get("alpha", 0.45)),
+        "alpha_end": float(seg_denoise.get("alpha_end", 0.10)),
+        "ramp": max(1, int(seg_denoise.get("ramp", 3) or 3)),
+        "seed": int(seg_denoise.get("seed", 0) or 0),
+    }
+
+
+def _denoise_context_frames(frames, ctx_len, opts):
+    """frames 路径降噪：MiniMaxH3ContextTaperNoise 对尾部 ctx_len 帧注入锥形噪声。
+
+    调用方在把帧交给 H3 motion context 之前调用（H3 节点取尾部 n 帧钉住，
+    因此 tail_frames=ctx_len 保证被钉的帧全部经过加噪处理）。失败时返回原帧。
+    """
+    mod = _get_h3_context_noise_module()
+    if mod is None:
+        log.warning("[MiniMaxRefGuide] denoise requested but ComfyUI-H3-Context-Noise "
+                    "is not installed; skipping denoise")
+        return frames
+    try:
+        node = getattr(mod, "MiniMaxH3ContextTaperNoise")()
+        out, _schedule = node.inject(
+            images=frames,
+            tail_frames=int(ctx_len),
+            alpha=opts["alpha"],
+            alpha_end=opts["alpha_end"],
+            ramp_frames=opts["ramp"],
+            seed=opts["seed"],
+        )
+        log.info("[MiniMaxRefGuide] denoise(frames) tail=%d alpha=%.3f->%.3f ramp=%d",
+                 int(ctx_len), opts["alpha"], opts["alpha_end"], opts["ramp"])
+        return out
+    except Exception:
+        log.warning("[MiniMaxRefGuide] denoise(frames) failed, continuing with "
+                    "original frames", exc_info=True)
+        return frames
+
+
 def _apply_motion_context(cond, latent, video_vae, context_frames,
                           context_length, audio_vae=None):
     """对段条件叠加 H3 motion context：把 pinned 帧钉到段头部作为 keyframes。

@@ -1140,10 +1140,195 @@ async def merge_latents_api(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
-# 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
-# PromptServer.instance 此时已就绪）。若仍不可用，_pending 保留，等待
-# __init__.py 末尾再次调用 _LazyRoutes.flush()。
-_LazyRoutes.flush()
+# ── 依赖管理（插件 / LoRA）：业务逻辑在 ext_mgmt.py，路由宿主在此 ──
+# 统一把同步 git / ModelScope 网络操作丢到线程池执行，避免冻结事件循环。
+
+
+@_routes.post(f"{API_PREFIX}/ext/scan")
+async def ext_scan_api(request: web.Request) -> web.Response:
+    """扫描：body {"node_classes": [...], "model_refs": [{"name","type"}], ...} →
+    本地已装插件 / 工作流用到插件 / 缺失插件(含 CM db 候选仓库) /
+    各模型类型(models/loras|checkpoints|diffusion_models|unet|vae)存在性。"""
+    try:
+        from . import ext_mgmt as _ext
+        data = await request.json()
+        result = await asyncio.to_thread(
+            _ext.scan_payload,
+            data.get("node_classes"),
+            data.get("lora_names"),
+            data.get("widget_values"),
+            data.get("model_refs"),
+            data.get("file_refs"),
+        )
+        return web.json_response({"success": True, "data": result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/debug_class")
+async def ext_debug_class_api(request: web.Request) -> web.Response:
+    """dump 单个 class 的归属判定链路（body: {"c": "MiniMaxRefGuide"}），
+    供面板「扫描诊断」点「详情」排障（同名 key 被谁导出 / 类定义落点 / 最终归属）。"""
+    try:
+        from . import ext_mgmt as _ext
+        data = await request.json()
+        c = str(data.get("c") or "").strip()
+        result = await asyncio.to_thread(_ext.debug_class_origin, c)
+        return web.json_response({"success": True, "data": result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/install")
+async def ext_install_api(request: web.Request) -> web.Response:
+    """git clone 安装缺失插件到 custom_nodes（安装后需重启 ComfyUI 生效）。"""
+    try:
+        from . import ext_mgmt as _ext
+        data = await request.json()
+        url = (data.get("url") or "").strip()
+        if not url:
+            return web.json_response({"success": False, "error": "缺少仓库 URL"}, status=400)
+        result = await asyncio.to_thread(_ext.install_plugin, url)
+        return web.json_response({"success": True, "data": result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/update")
+async def ext_update_api(request: web.Request) -> web.Response:
+    """git pull 更新已装插件：body {"folder": 插件目录名}。
+
+    拉到新代码时后端自动执行仓库根 requirements.txt / install.bat
+    (可能耗时数分钟,该路由在此期间保持等待)。"""
+    try:
+        from . import ext_mgmt as _ext
+        data = await request.json()
+        folder = (data.get("folder") or "").strip()
+        if not folder:
+            return web.json_response({"success": False, "error": "缺少插件目录名"}, status=400)
+        result = await asyncio.to_thread(_ext.update_plugin, folder)
+        return web.json_response({"success": True, "data": result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/deps_install")
+async def ext_deps_install_api(request: web.Request) -> web.Response:
+    """手动安装已装插件的运行依赖：仓库根 requirements.txt + install.bat(如有)。
+
+    与 /ext/update 拉新后自动执行的步骤一致,供「插件已最新但想重装依赖」
+    或非 git 手动安装插件使用(可能耗时数分钟,期间保持等待)。"""
+    try:
+        from . import ext_mgmt as _ext
+        data = await request.json()
+        folder = (data.get("folder") or "").strip()
+        if not folder:
+            return web.json_response({"success": False, "error": "缺少插件目录名"}, status=400)
+        result = await asyncio.to_thread(_ext.install_plugin_deps, folder)
+        return web.json_response({"success": True, "data": result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/clear_restart")
+async def ext_clear_restart_api(request: web.Request) -> web.Response:
+    """前端关闭重启提示后清除待重启标记。"""
+    try:
+        from . import ext_mgmt as _ext
+        _ext.clear_pending_restart()
+        return web.json_response({"success": True})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/restart")
+async def ext_restart_api(request: web.Request) -> web.Response:
+    """软重启：以同参新进程在后台拉起 ComfyUI，随后结束当前进程。"""
+    try:
+        from . import ext_mgmt as _ext
+        scheduled = await asyncio.to_thread(_ext.restart_comfyui)
+        return web.json_response({"success": True, "data": {"scheduled": scheduled}})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/pip_install")
+async def ext_pip_install_api(request: web.Request) -> web.Response:
+    """pip 安装 python 依赖（默认 llama-cpp-python，可带附加 pip 参数）。"""
+    try:
+        body = await request.json()
+        pkg = (body.get("pkg") or "llama-cpp-python").strip()
+        args = body.get("args") or ""
+        from . import ext_mgmt as _ext
+        res = await asyncio.to_thread(_ext.pip_install_package, pkg, str(args))
+        return web.json_response({"success": True, "data": res})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/ms_files")
+async def ext_ms_files_api(request: web.Request) -> web.Response:
+    """ModelScope 仓库文件列举：body {"model_id": "owner/name 或模型页 URL"}。"""
+    try:
+        from . import ext_mgmt as _ext
+        data = await request.json()
+        model_id = (data.get("model_id") or "").strip()
+        if not model_id:
+            return web.json_response({"success": False, "error": "缺少 ModelScope 模型 ID"}, status=400)
+        files = await asyncio.to_thread(_ext.ms_repo_files, model_id)
+        return web.json_response({"success": True, "files": files})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/ms_download")
+async def ext_ms_download_api(request: web.Request) -> web.Response:
+    """ModelScope 下载文件到 models/<target_dir>(默认 loras)：
+    body {"model_id", "file_path", "target_dir"(可选，相对 models/ 的保存路径，
+    兼容旧字段 "model_type"——行内缺失项下载仍按类型目录落盘), "subdir"(可选)}。"""
+    try:
+        from . import ext_mgmt as _ext
+        data = await request.json()
+        target_dir = (data.get("target_dir") or "").strip() \
+            or (data.get("model_type") or "").strip()
+        result = await asyncio.to_thread(
+            _ext.ms_download_file,
+            (data.get("model_id") or "").strip(),
+            (data.get("file_path") or "").strip(),
+            target_dir or "loras",
+            (data.get("subdir") or "").strip(),
+        )
+        return web.json_response({"success": True, "data": result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/ext/ms_search")
+async def ext_ms_search_api(request: web.Request) -> web.Response:
+    """ModelScope 按关键词搜索模型仓库：body {"query": "xl_more_art"} →
+    {"results": [{modelId,title,owner,description,url}], "degraded": bool}。"""
+    try:
+        from . import ext_mgmt as _ext
+        data = await request.json()
+        query = (data.get("query") or "").strip()
+        if not query:
+            return web.json_response(
+                {"success": False, "error": "缺少搜索关键词"}, status=400)
+        result = await asyncio.to_thread(_ext.ms_search, query)
+        return web.json_response({"success": True, **result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
 # 模块末尾尝试将惰性收集的路由注册到 PromptServer（正常 ComfyUI 启动时
