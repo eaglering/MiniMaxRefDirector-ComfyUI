@@ -103,6 +103,7 @@ call :install_dep ComfyUI-Easy-Use https://github.com/yolain/ComfyUI-Easy-Use
 call :install_dep ComfyUI-KJNodes https://github.com/kijai/ComfyUI-KJNodes
 call :install_dep ComfyUI-H3-Motion-Context-MultiRef https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef
 call :install_dep Comfyui_Minimax_h3_latent_Upscaler https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
+call :install_dep ComfyUI-H3-Context-Noise https://github.com/beijinren/ComfyUI-H3-Context-Noise.git
 
 :: ---------- 5. 安装本插件自身依赖 ----------
 :install_self

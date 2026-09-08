@@ -820,7 +820,7 @@ export const dom = {
 
     // --- 片段级降噪（开关与「配置」入口紧跟「引导强度」控件之后、同一行内；
     //     Guide 在 motion context 路径调用 ComfyUI-H3-Context-Noise，
-    //     需该段 guideStrength>0 或已接 context_latent）---
+    //     文本段需该段 guideStrength>0）---
     this.denoiseGroup = document.createElement("div");
     Object.assign(this.denoiseGroup.style, {
       display: "none", alignItems: "center", gap: "4px",

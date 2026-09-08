@@ -75,7 +75,7 @@ const ZH = {
   "Guide Strength:": "引导强度：",
   "Duration:": "时长：",
   "Denoise": "降噪",
-  "DenoiseHint": "对 motion-context 上下文尾部注入锥形噪声（ComfyUI-H3-Context-Noise），抑制多次循环产生的噪点累积。需该段引导强度>0（文本段）或已接 context_latent 才生效；tail 帧数自动取该段引导强度吸附值",
+  "DenoiseHint": "对 motion-context 上下文尾部注入锥形噪声（ComfyUI-H3-Context-Noise），抑制多次循环产生的噪点累积。文本段需该段引导强度>0 才生效；tail 帧数自动取该段引导强度吸附值",
   "DenoiseParamsTitle": "降噪参数",
   "DenoiseParamsToggleHint": "打开降噪参数设置",
   "AlphaStart": "起始α",

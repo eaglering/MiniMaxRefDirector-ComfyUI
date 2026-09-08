@@ -120,12 +120,8 @@ MiniMaxRefDirector-ComfyUI/
   - 工作流用到但本地缺失的插件：后端经 ComfyUI-Manager 数据库（`custom-node-list.json` + `node_db/*`，惰性读取 + 进程级缓存）给出候选仓库，选中后一键 `git clone` 到 `custom_nodes`；
   - LoRA：比对 `models/loras` 目录（名称 / 子目录 / 去扩展名 stem 匹配）；缺失引用可经 **ModelScope**（填 `owner/name` 或模型页链接 → 列出模型文件 → 选择下载）落盘到 `models/loras`；
   - 安装 / 更新完成后需重启 ComfyUI 生效（面板内有提示）。后端路由挂载于 `server.py` 现有 `/minimax_ref/api/ext/*` 组，逻辑见 `ext_mgmt.py` / `ext_node.py`。
-- **motion-context 支持 `context_latent` 跨段衔接**：`MiniMax Ref Guide` 新增可选 `context_latent`（LATENT）输入并**优先于 `prev_tail`**：
-  - 传入上一段最终 joint latent（KSampler 输出 / `MiniMax Ref Combine` 的 `context_latent` 输出 / H3 Motion Context LoadLatent）时，直接解码其视频流尾部像素帧作为 motion context（跳过「先落盘 mp4 再解码」的有损往返，抑制多次循环噪点累积），并把含音频流的原 latent 透传给 H3 Motion Context（音频直切，免 `audio_vae` 二次重建）；
-  - `prev_tail` 像素帧路径完整保留作兜底；未接 `context_latent` 时行为与旧版一致；
-  - `MiniMax Ref Combine` 新增 `context_latent`（LATENT）输出：透传本段最终 joint latent（仅引用不修改），供工作流循环接回下一段 Guide 的 `context_latent`。
+- **motion-context 跨段衔接（prev_tail 像素路径）**：文本段 `guideStrength > 0` 时，`MiniMax Ref Guide` 的 `prev_tail` 输入接上一段 `MiniMax Ref Combine` 的 Filename 输出，直接解码上一段视频尾部像素帧作为 motion context pinned 引导帧（无中间 latent 往返）。
 - **片段级「降噪」开关**：分镜编辑器「引导强度」控件下方新增「降噪」开关与可折叠参数（起始α / 末端α / 斜坡 / 随机种子）。开启后 Guide 在 motion-context 路径内嵌调用 ComfyUI-H3-Context-Noise 注入锥形噪声（`tail_frames` 自动取该段引导强度吸附后的合法 H3 run）：
-  - latent 路径：`MiniMaxH3ContextLatentTaperNoise`（只注视频流尾帧，音频流不动）；
   - prev_tail / frames 路径：`MiniMaxH3ContextTaperNoise`；
   - 该插件未安装或调用失败时自动降级跳过（告警日志，行为等同未开启），不阻断执行。
 
