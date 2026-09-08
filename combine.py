@@ -8,8 +8,8 @@
   并以 clip_audio 为音轨；否则音轨按 audio 输入 → audio_vae 解码 latent 音频流
   兜底。视频帧：直接提供 images 时跳过 VAE 解码，否则用 video_vae 解码。
 
-两条路径均输出 VHS_FILENAMES 4 元组 (filename, subfolder, type, full_path)，
-与 guide.py ``_vhs_tuple_path`` 的解析约定一致，可直连 Guide 的 prev_tail。
+保存完成后打包输出 PREV_DATA dict：{"prev_tail": 本段视频路径, "context_latent":
+本段 joint H3 latent}，供下一段 MiniMaxRefGuide 的 prev_data 输入直接使用。
 
 实际编码逻辑复用 lib.video_combine.encode_frames_with_vhs：
 优先调用 VideoHelperSuite 的 VideoCombine（完整支持 AUDIO / metadata /
@@ -31,7 +31,7 @@ from .lib.video_combine import (
     build_vhs_filenames,
     encode_frames_with_vhs,
 )
-from .guide import _send_progress
+from .guide import PrevData, _send_progress
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def _trim_images_and_audio(images, audio, trim_frames, frame_rate):
 
 
 class MiniMaxRefCombine(io.ComfyNode):
-    """合并解码后的 IMAGE 帧或 joint H3 latent 并保存，输出 VHS_FILENAMES。"""
+    """合并解码后的 IMAGE 帧或 joint H3 latent 并保存，输出 PREV_DATA 供下一段衔接。"""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -76,7 +76,8 @@ class MiniMaxRefCombine(io.ComfyNode):
                 "（image_latent + meta + clip_audio wav）并以 clip_audio "
                 "为音轨；否则音轨按 audio 输入 → audio_vae 解码 latent 音频流兜底。"
                 "视频帧：直接提供 images 时跳过 VAE 解码，否则用 video_vae 解码。\n"
-                "输出 VHS_FILENAMES 供 MiniMaxRefGuide 的 prev_tail 输入使用。"
+                "输出 PREV_DATA（{prev_tail: 本段视频路径, context_latent: 本段 joint "
+                "latent}）供下一段 MiniMaxRefGuide 的 prev_data 输入直接使用。"
             ),
             inputs=[
                 io.Image.Input(
@@ -163,9 +164,16 @@ class MiniMaxRefCombine(io.ComfyNode):
             outputs=[
                 io.String.Output(
                     "Filename",
+                    tooltip="生成的视频输出。",
+                ),
+                PrevData.Output(
+                    "prev_data",
                     tooltip=(
-                        "单个 Filename（形如 subfolder/filename，subfolder 为空时仅文件名），"
-                        "直连 MiniMaxRefGuide 的 prev_tail。"
+                        "本段产物打包的 PREV_DATA：{\"prev_tail\": 本段视频路径或 None, "
+                        "\"context_latent\": 本段最终 joint H3 latent（透传 latent 输入，"
+                        "仅引用不修改）或 None}。直连下一段 MiniMax Ref Guide 的 prev_data "
+                        "输入（context_latent 走 latent 路径 motion context，免视频文件"
+                        "往返；纯像素路径时 context_latent 为 None，Guide 回落像素路径）。"
                     ),
                 ),
             ],
@@ -287,7 +295,14 @@ class MiniMaxRefCombine(io.ComfyNode):
             payload.get("clip_audio"), _notify_ctx_node,
         )
         _send_progress(payload)
-        return io.NodeOutput(filename, ui=ui)
+        # 打包 prev_data：本段视频文件路径（下一段的 prev_tail）+ 本段最终 joint
+        # latent（仅引用不修改，作为下一段的 context_latent；纯像素路径时为 None）。
+        # 供下一段 MiniMax Ref Guide 的 prev_data 输入直接使用。
+        prev_data = {
+            "prev_tail": filename or None,
+            "context_latent": latent,
+        }
+        return io.NodeOutput(filename, prev_data, ui=ui)
 
 
 NODE_CLASS_MAPPINGS = {

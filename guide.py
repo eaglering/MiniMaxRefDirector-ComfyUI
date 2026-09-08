@@ -33,7 +33,14 @@ from comfy_api.latest import io
 from comfy_execution.graph import ExecutionBlocker
 
 from .lib.llm import unload_llama_models
-from .lib.motion_context import _apply_motion_context, _load_prev_tail_frames
+from .lib.motion_context import (
+    _apply_motion_context,
+    _denoise_context_frames,
+    _denoise_context_latent,
+    _denoise_opts,
+    _load_prev_tail_frames,
+    _load_prev_tail_latent_frames,
+)
 from .lib.path import vhs_tuple_path
 from .lib.song_audio import _get_song_audio_module, _snap_h3_run, _synthesize_master_audio
 
@@ -45,6 +52,9 @@ log = logging.getLogger(__name__)
 GuideData = io.Custom("GUIDE_DATA")
 VhsFilenames = io.Custom("VHS_FILENAMES")
 VhsFilename = io.Custom("VHS_FILENAME")
+# 段间衔接数据：Combine 打包本段产物 → 下一段 Guide。
+# {"prev_tail": 视频文件路径或 None, "context_latent": joint H3 latent 或 None}
+PrevData = io.Custom("PREV_DATA")
 
 # guide_index 未连接时的自动取段计数器：{id(guide_data): next_index}
 # Easy-Use forLoop 展开时，若循环体节点直接引用 forLoopStart 的输出，
@@ -117,7 +127,21 @@ class MiniMaxRefGuide(io.ComfyNode):
                 io.String.Input(
                     "prev_tail",
                     optional=True,
-                    tooltip="上一段生成完成的视频路径；文本段 guideStrength>0（启用 motion context）时作为 motion context 实现跨段衔接；收到时通知前端该段完成。",
+                    tooltip="上一段生成完成的视频路径（历史连线兼容：显式传入非空时优先使用，"
+                            "否则回落 prev_data 的 prev_tail）。文本段 guideStrength>0（启用 "
+                            "motion context）时作为 motion context 像素路径实现跨段衔接；"
+                            "收到时通知前端该段完成。",
+                ),
+                PrevData.Input(
+                    "prev_data",
+                    optional=True,
+                    tooltip="上一段产物（MiniMax Ref Combine 的 prev_data 输出）："
+                            "{\"prev_tail\": 视频路径或 None, \"context_latent\": 上一段 joint "
+                            "H3 latent 或 None}。文本段 motion context 优先走 latent 路径"
+                            "（context_latent）：直接解码其视频流取尾帧（免视频文件落盘往返，"
+                            "抑制多次循环噪点累积），并把含音频流的 latent 透传给 H3 Motion "
+                            "Context（音频免 audio_vae 二次重建）；context_latent 为 None 时"
+                            "回落 prev_tail 像素帧路径。未连接视为无上一段。",
                 ),
                 io.Int.Input("seed", optional=True, default=0, min=0, step=1,
                     tooltip="随机种子，透传给外部 KSampler 以复现每段生成；"
@@ -148,9 +172,14 @@ class MiniMaxRefGuide(io.ComfyNode):
 
     @classmethod
     def execute(cls, guide_data=None, model=None, clip=None, video_vae=None, 
-                audio_vae=None, prev_tail=None, seed=None, 
+                audio_vae=None, prev_tail=None, prev_data=None, seed=None, 
                 guide_index=None) -> io.NodeOutput:
         """按 guide_index 取段 → 条件编码 → 输出 positive/latent；并按 prev_tail/越界发送通知。
+
+        跨段衔接：prev_data 的 context_latent（上一段 joint latent）优先于视频文件路径
+        （历史 prev_tail 输入显式传入时优先使用该路径，否则取 prev_data.prev_tail）；
+        文本段 guideStrength>0 时走 latent 路径（视频流解码取尾帧 + 音频流透传直切）；
+        像素帧路径保留兜底。
 
         guide_index 未连接（None）时自动按 timeline 段顺序取段（模块级计数器，
         以 id(guide_data) 键控，同一 prompt 内递增，跨 prompt 自动重置）。
@@ -164,13 +193,22 @@ class MiniMaxRefGuide(io.ComfyNode):
         idx = int(guide_index) if guide_index is not None else 0
         total = len(timeline)
 
+        # prev_data（Combine 的 PREV_DATA 输出）与历史 prev_tail 输入兼容：
+        # - prev_tail 参数显式传入（非空，如旧版直连）时优先作为上一段视频路径；
+        # - 否则取 prev_data["prev_tail"]（可能为 None/空串 → 视为无上一段）；
+        # - prev_data["context_latent"] 提供上一段 joint latent（latent 路径来源，
+        #   为 None 时回落像素路径）。
+        pd = prev_data if isinstance(prev_data, dict) else {}
+        pd_latent = pd.get("context_latent") if isinstance(pd, dict) else None
+        tail = prev_tail if prev_tail else (pd.get("prev_tail") if isinstance(pd, dict) else None)
+
         # 资源更新通知：把生成/合并的视频追加到对应 Director 前端素材条
         _director_id = guide_data.get("_director_node_id") if isinstance(guide_data, dict) else None
-        if prev_tail:
+        if tail:
             _send_progress({
                 "status": "add_material",
                 "type": "video",
-                "imageFile": prev_tail
+                "imageFile": tail
             }, director_node_id=_director_id)
 
         # 越界轮：MiniMaxRefDirector 故意把 segment_count+1 接到 forLoopStart.total，
@@ -258,11 +296,13 @@ class MiniMaxRefGuide(io.ComfyNode):
         trim_frames: int = 0
         prev_is_video = False
 
+        # context_latent（上一段 joint latent）优先于 prev_tail（视频文件）：
+        # 文本段启用 motion context 时，有 latent 走 latent 路径，否则保留像素路径。
         if entry.get("type") == "text":
-            if prev_tail:
+            if pd_latent is not None or tail:
                 prev_is_video = True
             elif entry.get("prevType") == "video":
-                prev_tail = entry.get("prevImageFile", "")
+                tail = entry.get("prevImageFile", "")
                 prev_is_video = True
 
         # 图片段 + imageFile：把静态图重复成 8 帧作为 motion context pinned 帧，
@@ -287,21 +327,41 @@ class MiniMaxRefGuide(io.ComfyNode):
                     log.warning(f"[MiniMaxRefGuide] guide_index={idx} image motion context "
                                 f"skipped: failed to load image {img_src!r}")
 
-        # 文本段 + guideStrength > 0（表示启用 motion context）：用 prev_tail 视频做跨段衔接
-        if guide_strength > 0 and prev_tail and prev_is_video:
-            log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail={prev_tail}")
-            frames = _load_prev_tail_frames(prev_tail)
+        # 文本段 + guideStrength > 0（启用 motion context）：跨段衔接。
+        # - context_latent 提供 → latent 路径：从上一段 joint latent 解码视频流取尾帧
+        #   （免视频文件落盘→再解码的往返，抑制多次循环噪点累积）；latent（含音频流）
+        #   透传给 H3 Motion Context 的 context_latent，音频流免 audio_vae 二次重建。
+        #   该段开启片段级降噪时，先对 latent 视频流尾部注入锥形噪声再解码。
+        # - 否则 → prev_tail 像素路径（原行为）；开启降噪时对解码帧尾部注入锥形噪声。
+        if guide_strength > 0 and prev_is_video:
+            denoise = _denoise_opts(entry.get("denoise"))
+            frames = None
+            mc_ctx_latent = None
+            src_desc = "prev_tail"
+            if pd_latent is not None:
+                src_desc = "context_latent"
+                ctx_latent = pd_latent
+                if denoise is not None:
+                    ctx_latent = _denoise_context_latent(ctx_latent, ctx_len, denoise)
+                frames, mc_ctx_latent = _load_prev_tail_latent_frames(
+                    ctx_latent, video_vae)  # 音频流有效时才透传 latent 供音频直切
+            else:
+                log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail={tail}")
+                frames = _load_prev_tail_frames(tail)
+                if frames is not None and denoise is not None:
+                    frames = _denoise_context_frames(frames, ctx_len, denoise)
             if frames is not None and frames.shape[0] >= 1:
                 cond, trim_frames = _apply_motion_context(
                     cond, latent, video_vae, frames,
                     context_length=guide_strength, audio_vae=audio_vae,
+                    context_latent=mc_ctx_latent,
                 )
-                log.info(f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
-                         f"({frames.shape[0]} frames)")
+                log.info(f"[MiniMaxRefGuide] guide_index={idx} {src_desc} motion "
+                         f"context ({frames.shape[0]} frames)")
             else:
                 log.warning(
-                    f"[MiniMaxRefGuide] guide_index={idx} prev_tail motion context "
-                    f"skipped: {prev_tail} could not be decoded")
+                    f"[MiniMaxRefGuide] guide_index={idx} {src_desc} motion context "
+                    f"skipped: could not be decoded")
 
         return io.NodeOutput(cond, latent, trim_frames, secondPass, upscale, clip_audio,
                              ctx_len)

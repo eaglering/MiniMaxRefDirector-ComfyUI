@@ -4,6 +4,7 @@ from .subject import MiniMaxRefSubject
 from .director import MiniMaxRefDirector
 from .guide import MiniMaxRefGuide
 from .combine import MiniMaxRefCombine
+from .ext_node import MiniMaxRefExtManager
 from .lib.utils import RefJoinString
 from .lib.video import RefMergeVideosFromPaths
 from .lib.audio import RefSaveAudio
@@ -42,7 +43,8 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxRefSaveAudio": RefSaveAudio,
     "MiniMaxRefJoinString": RefJoinString,
     "MiniMaxRefHybridLoader": RefHybridLoader,
-    "MiniMaxRefPureVRAM": RefPureVRAM
+    "MiniMaxRefPureVRAM": RefPureVRAM,
+    "MiniMaxRefExtManager": MiniMaxRefExtManager
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefSubject": "MiniMax Subject",
@@ -54,7 +56,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefSaveAudio": "Save Audio",
     "MiniMaxRefJoinString": "Join Strings",
     "MiniMaxRefHybridLoader": "MiniMax Ref Hybrid Loader",
-    "MiniMaxRefPureVRAM": "MiniMax Ref Pure VRAM"
+    "MiniMaxRefPureVRAM": "MiniMax Ref Pure VRAM",
+    "MiniMaxRefExtManager": "MiniMax Ref Ext Manager"
 }
 
 WEB_DIRECTORY = "./js"

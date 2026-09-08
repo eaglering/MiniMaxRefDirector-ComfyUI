@@ -148,6 +148,11 @@ class MiniMaxRefDirector(io.ComfyNode):
                 GuideData.Output(display_name="guide_data"),
                 io.Int.Output(display_name="segment_count"),
                 io.Float.Output(display_name="frame_rate"),
+                io.Audio.Output(
+                    display_name="master_audio",
+                    tooltip="完整音频：由补齐后的 audioSegments 合成为覆盖 [start,end) "
+                            "的整轨波形（含空白段静音）。无音轨/全部静音时为 None。",
+                ),
             ],
         )
 
@@ -252,6 +257,9 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "upscale": seg.get("upscale", False),
                     "secondPass": seg.get("secondPass", False),
                     "guideStrength": seg.get("guideStrength", 22),
+                    # 片段级降噪（seg.denoise = {enabled, alpha, alpha_end, ramp, seed}）；
+                    # Guide 在 motion context 路径开启时调用 ComfyUI-H3-Context-Noise
+                    "denoise": seg.get("denoise") or None,
                 }
                 guide_timeline.append(entry)
                 segment_count += 1
@@ -293,15 +301,31 @@ class MiniMaxRefDirector(io.ComfyNode):
             "_director_node_id": director_node_id,
         }
 
+        # --- Synthesize master audio（整轨完整音频，供下游 SaveAudio / 音频节点）---
+        # 复用 Guide 同款合成（lib.song_audio._synthesize_master_audio，内容指纹缓存：
+        # 同 prompt 内 Guide 再次合成时直接命中，不重复读文件/重采样）。无音轨时为空。
+        master_audio = None
+        if audio_segments:
+            try:
+                from .lib.song_audio import _synthesize_master_audio
+                master_audio = _synthesize_master_audio(guide_data)
+            except Exception:
+                log.warning(
+                    "[MiniMaxRefDirector] failed to synthesize master_audio, "
+                    "outputting none", exc_info=True)
+                master_audio = None
+
         log.info(
             f"[MiniMaxRefDirector] {segment_count} segments | timeline: {timeline_data} | "
             f"start_second: {start_second} | end_second: {end_second} | duration_seconds: {duration_seconds} | "
             f"start_frane: {start_frame} | end_frame: {end_frame} | duration_frames: {duration_frames} | "
             f"{out_w}×{out_h} ({outpu_resolution}, {million_pixels}MP) | "
             f"{len(subject)} subjects | {global_prompt} | audio_segments: {len(audio_segments)} | "
+            f"master_audio: "
+            f"{'ok' if master_audio is not None else 'none'}"
         )
 
-        result = io.NodeOutput(guide_data, segment_count + 1, frame_rate)
+        result = io.NodeOutput(guide_data, segment_count + 1, frame_rate, master_audio)
         return result
 
 
