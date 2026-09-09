@@ -97,6 +97,17 @@ MiniMaxRefDirector-ComfyUI/
 
 ## 更新日志
 
+### v3.1.9
+
+- **插件 / LoRA 依赖管理节点（`MiniMax Ref Ext Manager`）**：新增工具节点（MiniMax Ref Director/Utils），节点体上「打开管理面板」按钮弹出可拖拽/缩放面板，展示当前工作流用到的全部自定义节点归属插件与 LoRA 引用：
+  - 已安装插件按目录列出并标注「工作流用到」，git 仓库型插件可一键 `git pull` 更新；
+  - 工作流用到但本地缺失的插件：后端经 ComfyUI-Manager 数据库（`custom-node-list.json` + `node_db/*`，惰性读取 + 进程级缓存）给出候选仓库，选中后一键 `git clone` 到 `custom_nodes`；
+  - LoRA：比对 `models/loras` 目录（名称 / 子目录 / 去扩展名 stem 匹配）；缺失引用可经 **ModelScope**（填 `owner/name` 或模型页链接 → 列出模型文件 → 选择下载）落盘到 `models/loras`；
+  - 安装 / 更新完成后需重启 ComfyUI 生效（面板内有提示）。后端路由挂载于 `server.py` 现有 `/minimax_ref/api/ext/*` 组，逻辑见 `ext_mgmt.py` / `ext_node.py`。
+- **片段级「降噪」开关**：分镜编辑器「引导强度」控件下方新增「降噪」开关与可折叠参数（起始α / 末端α / 斜坡 / 随机种子）。开启后 Guide 在 motion-context 路径内嵌调用 ComfyUI-H3-Context-Noise 注入锥形噪声（`tail_frames` 自动取该段引导强度吸附后的合法 H3 run）：
+  - prev_tail / frames 路径：`MiniMaxH3ContextTaperNoise`；
+  - 该插件未安装或调用失败时自动降级跳过（告警日志，行为等同未开启），不阻断执行。
+  - 
 ### v3.1.8
 
 - **优化主体参考绑定**：
@@ -112,18 +123,6 @@ MiniMaxRefDirector-ComfyUI/
 - **翻译链路运镜保真**：中 → 英翻译时把镜头运动改写为 `camera motion, ...` 触发短语并保护引号内容，确保下游运镜 LoRA 精确触发、台词/标语不被改写。
 - **片段级「双采」输出（Second Pass）**：任一片段右键菜单可标记「Second Pass / 二次采样 X2」，片段右上角即时显示 `#2` 角标；Director 将 `secondPass`（可与 Flash VSR 的 `upscale` 叠加）逐段写入 guide 时间线，Guide 在循环中按段以布尔输出 `secondPass`，下游采样链路据此对**该片段单独**执行第二遍采样精修——逐段独立开关，不影响其他片段。
 - 分镜编辑器左侧面板支持分栏拖动调整宽度；LLM 生成任务改由后端统一调度处理；随版本更新示例工作流 `workflow/MinimaxH3 V3.1.8.json`。
-
-### v3.1.9
-
-- **插件 / LoRA 依赖管理节点（`MiniMax Ref Ext Manager`）**：新增工具节点（MiniMax Ref Director/Utils），节点体上「打开管理面板」按钮弹出可拖拽/缩放面板，展示当前工作流用到的全部自定义节点归属插件与 LoRA 引用：
-  - 已安装插件按目录列出并标注「工作流用到」，git 仓库型插件可一键 `git pull` 更新；
-  - 工作流用到但本地缺失的插件：后端经 ComfyUI-Manager 数据库（`custom-node-list.json` + `node_db/*`，惰性读取 + 进程级缓存）给出候选仓库，选中后一键 `git clone` 到 `custom_nodes`；
-  - LoRA：比对 `models/loras` 目录（名称 / 子目录 / 去扩展名 stem 匹配）；缺失引用可经 **ModelScope**（填 `owner/name` 或模型页链接 → 列出模型文件 → 选择下载）落盘到 `models/loras`；
-  - 安装 / 更新完成后需重启 ComfyUI 生效（面板内有提示）。后端路由挂载于 `server.py` 现有 `/minimax_ref/api/ext/*` 组，逻辑见 `ext_mgmt.py` / `ext_node.py`。
-- **motion-context 跨段衔接（prev_tail 像素路径）**：文本段 `guideStrength > 0` 时，`MiniMax Ref Guide` 的 `prev_tail` 输入接上一段 `MiniMax Ref Combine` 的 Filename 输出，直接解码上一段视频尾部像素帧作为 motion context pinned 引导帧（无中间 latent 往返）。
-- **片段级「降噪」开关**：分镜编辑器「引导强度」控件下方新增「降噪」开关与可折叠参数（起始α / 末端α / 斜坡 / 随机种子）。开启后 Guide 在 motion-context 路径内嵌调用 ComfyUI-H3-Context-Noise 注入锥形噪声（`tail_frames` 自动取该段引导强度吸附后的合法 H3 run）：
-  - prev_tail / frames 路径：`MiniMaxH3ContextTaperNoise`；
-  - 该插件未安装或调用失败时自动降级跳过（告警日志，行为等同未开启），不阻断执行。
 
 ### v3.1.6
 
