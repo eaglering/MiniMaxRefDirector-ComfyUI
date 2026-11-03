@@ -1,0 +1,75 @@
+/* ===== MiniMax 导演台 — Cinematic Studio Dark 全局样式 ===== */
+:root {
+  --mrd-bg-0: #0e1015;
+  --mrd-bg-1: #151821;
+  --mrd-bg-2: #1c202b;
+  --mrd-bg-3: #232837;
+  --mrd-border: #2a3042;
+  --mrd-border-soft: #222736;
+  --mrd-text-0: #edeff5;
+  --mrd-text-1: #a9b1c3;
+  --mrd-text-2: #6b7488;
+  --mrd-primary: #6c5ce7;
+  --mrd-primary-2: #4d6bfe;
+  --mrd-primary-soft: #a78bfa;
+  --mrd-amber: #f5b544;
+  --mrd-green: #22c55e;
+  --mrd-red: #ef4444;
+  --mrd-blue: #38bdf8;
+  --mrd-radius: 10px;
+}
+
+html.dark {
+  color-scheme: dark;
+  /* Element Plus 暗色变量映射到电影工作台配色 */
+  --el-color-primary: #6c5ce7;
+  --el-color-primary-light-3: #8478ec;
+  --el-color-primary-light-5: #9d94f1;
+  --el-color-primary-light-7: #b6b0f5;
+  --el-color-primary-light-8: #cac5f8;
+  --el-color-primary-light-9: #dddaf9;
+  --el-color-primary-dark-2: #564ab9;
+  --el-bg-color: #151821;
+  --el-bg-color-overlay: #1c202b;
+  --el-bg-color-page: #0e1015;
+  --el-border-color: #2a3042;
+  --el-border-color-light: #262c3d;
+  --el-border-color-lighter: #222736;
+  --el-text-color-primary: #edeff5;
+  --el-text-color-regular: #a9b1c3;
+  --el-text-color-secondary: #6b7488;
+  --el-fill-color-blank: #1c202b;
+  --el-fill-color-light: #232837;
+  --el-fill-color: #202633;
+  --el-disabled-bg-color: #1a1e29;
+}
+
+/* 布局 */
+.mrd-app { height: 100%; display: flex; flex-direction: column; background: var(--mrd-bg-0); }
+.mrd-main { flex: 1; min-height: 0; overflow: auto; padding: 16px; position: relative; }
+
+/* 卡片 */
+.mrd-card {
+  background: linear-gradient(180deg, var(--mrd-bg-2) 0%, var(--mrd-bg-1) 100%);
+  border: 1px solid var(--mrd-border-soft);
+  border-radius: var(--mrd-radius);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 4px 16px rgba(0, 0, 0, 0.28);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.16s ease;
+}
+.mrd-card:hover { border-color: var(--mrd-border); }
+
+/* 通用淡入 */
+.mrd-fade-enter-active { transition: opacity 0.16s ease, transform 0.16s ease; }
+.mrd-fade-enter-from { opacity: 0; transform: translateY(6px); }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2c3245; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4258; }
+
+/* Element 细节微调 */
+.el-message-box, .el-dialog { border: 1px solid var(--mrd-border-soft); }
+.el-card { --el-card-bg-color: var(--mrd-bg-2); border-color: var(--mrd-border-soft); }
+.el-tabs__item { font-size: 13px; }
+.el-table { --el-table-header-bg-color: #1a1f2c; --el-table-row-hover-bg-color: #202633; }

@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "MiniMax Ref Director — DeepSeek Bridge",
+  "version": "1.0.0",
+  "description": "Bridge between the MiniMax Director SPA page and chat.deepseek.com: routes H3 prompt generation / translation requests into the DeepSeek web chat and returns the reply.",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": ["https://chat.deepseek.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chat.deepseek.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "externally_connectable": {
+    "matches": [
+      "http://localhost/*",
+      "http://127.0.0.1/*"
+    ]
+  }
+}

@@ -20,6 +20,8 @@ from .api_config import api_config_manager
 
 API_PREFIX = "/minimax_ref/api"
 
+log = logging.getLogger(__name__)
+
 
 async def _await_llm_work(fn, *args, **kwargs):
     """把同步 LLM 工作丢到默认线程池执行并等待结果。
@@ -909,6 +911,15 @@ async def merge_videos_api(request: web.Request) -> web.Response:
         if node_id is not None:
             payload["director_node_id"] = node_id
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
+        # 登记生成记录（失败仅告警不阻断）
+        try:
+            from .lib.records import build_record, append_record
+            append_record(build_record(
+                "merge_video", file_info,
+                director_node_id=str(node_id) if node_id is not None else "",
+            ))
+        except Exception:
+            log.warning("[Records] failed to record merge_videos result", exc_info=True)
         return web.json_response({"success": True, "name": f"whatdreamscost/{name}", "file": file_info})
     except Exception as e:
         traceback.print_exc()
@@ -1132,6 +1143,16 @@ async def merge_latents_api(request: web.Request) -> web.Response:
         if node_id is not None:
             payload["director_node_id"] = node_id
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
+        # 登记生成记录（SPA「视频生成记录」页；失败仅告警不阻断）
+        try:
+            from .lib.records import build_record, append_record
+            append_record(build_record(
+                "merge_latent", file_info,
+                fps=float(first_meta.get("fps") or 24.0),
+                director_node_id=str(node_id) if node_id is not None else "",
+            ))
+        except Exception:
+            log.warning("[Records] failed to record merge_latents result", exc_info=True)
         return web.json_response(
             {"success": True, "name": f"whatdreamscost/{name}", "file": file_info}
         )

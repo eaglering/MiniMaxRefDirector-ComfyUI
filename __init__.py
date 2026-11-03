@@ -1,10 +1,12 @@
 from . import server  # registers /minimax_ref/api routes
+from . import spa_server  # registers /minimax_ref/api/spa/* routes
 
 from .subject import MiniMaxRefSubject
 from .director import MiniMaxRefDirector
 from .guide import MiniMaxRefGuide
 from .combine import MiniMaxRefCombine
 from .ext_node import MiniMaxRefExtManager
+from .spa_node import MiniMaxRefDirectorSPA
 from .lib.utils import RefJoinString
 from .lib.video import RefMergeVideosFromPaths
 from .lib.audio import RefSaveAudio
@@ -44,7 +46,8 @@ NODE_CLASS_MAPPINGS = {
     "MiniMaxRefJoinString": RefJoinString,
     "MiniMaxRefHybridLoader": RefHybridLoader,
     "MiniMaxRefPureVRAM": RefPureVRAM,
-    "MiniMaxRefExtManager": MiniMaxRefExtManager
+    "MiniMaxRefExtManager": MiniMaxRefExtManager,
+    "MiniMaxRefDirectorSPA": MiniMaxRefDirectorSPA,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefSubject": "MiniMax Subject",
@@ -57,7 +60,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxRefJoinString": "Join Strings",
     "MiniMaxRefHybridLoader": "MiniMax Ref Hybrid Loader",
     "MiniMaxRefPureVRAM": "MiniMax Ref Pure VRAM",
-    "MiniMaxRefExtManager": "MiniMax Ref Ext Manager"
+    "MiniMaxRefExtManager": "MiniMax Ref Ext Manager",
+    "MiniMaxRefDirectorSPA": "MiniMax Director SPA",
 }
 
 WEB_DIRECTORY = "./js"

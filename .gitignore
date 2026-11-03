@@ -1,3 +1,7 @@
 __pycache__
 .idea
 .vscode
+
+# SPA 构建工程：依赖与本地产物不入仓（js/spa/index.html 单文件产物需入仓）
+spa/node_modules
+spa/dist

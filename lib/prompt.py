@@ -2170,7 +2170,17 @@ def build_h3_prompt(
             elif previous_timeline_segment.get("type", "text") == "image" and previous_timeline_segment.get("imageFile", ""):
                 prev_image_file = previous_timeline_segment.get("imageFile", "")
 
-        if timeline_segment.get("autoEndFrame", False) and next_timeline_segment is not None:
+        # 段级显式尾帧图（SPA 分镜参数「尾帧图」lastFrameFile）：优先于
+        # autoEndFrame 推导，直接作为结束锚点 <Picture N>（容错：仅接受非空字符串）。
+        _explicit_last_frame = timeline_segment.get("lastFrameFile")
+        if isinstance(_explicit_last_frame, str) and _explicit_last_frame.strip():
+            label = f"<Picture {index}>"
+            last_frame_pic = label
+            subject_definitions = subject_definitions + f"\n{label} is the last frame of the target video."
+            retention_analysis = retention_analysis + f"\n{label} (last frame of the target video): fully_preserved."
+            index += 1
+            images.append(_explicit_last_frame.strip())
+        elif timeline_segment.get("autoEndFrame", False) and next_timeline_segment is not None:
             if next_timeline_segment.get("type", "text") == "video" and next_timeline_segment.get("imageFile", ""):
                     video_path = next_timeline_segment.get("imageFile", "")
                     video_start = next_timeline_segment.get("trimStart", 1)

@@ -47,6 +47,32 @@ pip install -r requirements.txt   # 仅 av 一个额外依赖，其余由 ComfyU
 | `MiniMaxRefSaveAudio` | 保存音频到输出目录 |
 | `MiniMaxRefHybridLoader` | fl2va + ref2va 混合加载器：加载基底模型并叠加参考条件覆盖 |
 | `MiniMaxRefPureVRAM` | 清理 VRAM / 卸载模型，防止长时间批量生成导致显存耗尽 |
+| `MiniMaxRefDirectorSPA` | **导演台入口**：选择图中已有的 `MiniMaxRefDirector` 节点，新标签页打开 SPA 导演台（Vue3 + Element Plus 单文件页面），编辑结果写回该节点的 `timeline_data` |
+
+## 导演台（SPA）
+
+`MiniMaxRefDirectorSPA` 节点在新标签页打开独立的导演台页面，数据结构与 `timeline_data`
+完全一致，旧工作流与 Director 节点现有面板不受影响。
+
+- **打开方式**：添加 `MiniMax Ref Director` → `MiniMax Director SPA` 节点 → 下拉选择目标
+  超级导演节点（图中仅一个时自动选中）→ 点「打开导演台」。
+- **保存机制**：编辑后 500ms 防抖自动保存至服务端
+  （`user/default/MiniMaxRefDirector/spa/state/{node_id}.json`），
+  再经 WebSocket 回写目标节点 widget；刷新/重开标签页不丢数据。
+- **四个菜单**：全局参数（基础设置 / LLM：llama-cpp·API·Ollama·DeepSeek 代理 / 全局提示词）、
+  主体管理、分镜（三栏：分镜列表 + 提示词与技能 + 参数/预览）、视频生成记录（多选合并 / 无损合并）。
+- **分镜级主体**：默认继承全局主体，可勾选「自定义主体」为单个分镜定义独立主体集合，
+  并「向下继承」到后续分镜（适合“小孩子成长过程”这类同一主体跨阶段变化的场景）。
+
+构建 SPA（前端源码在 `spa/`，产物 `js/spa/index.html` 已入仓，通常无需重新构建）：
+
+```bash
+cd spa
+npm install
+npm run build   # → ../js/spa/index.html（JS/CSS 全内联的单文件）
+```
+
+DeepSeek 代理模式需安装附带的浏览器扩展，见 [extension/README.md](extension/README.md)。
 
 ## 使用流程
 

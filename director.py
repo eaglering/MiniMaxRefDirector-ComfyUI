@@ -226,7 +226,38 @@ class MiniMaxRefDirector(io.ComfyNode):
                 h3_prompt_json = seg.get("h3PromptJson", "")
                 prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
                 next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
-                prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=subject_data, 
+                # 段级主体覆盖（SPA 分镜预览页按引用「自定义」）：seg.subjectsOverride
+                # 为被覆盖主体（含其子主体）的副本数组；以全局 subject_data 为底，
+                # 按 name 匹配替换，override 中全局没有的主体追加；缺失 / 空列表 /
+                # 类型异常时回退全局（完全向后兼容，亦兼容旧"整体替换"数据）。
+                seg_subject_data = subject_data
+                _seg_override = seg.get("subjectsOverride")
+                if isinstance(_seg_override, list) and _seg_override:
+                    _global_subjects = subject_data.get("subjects") if isinstance(subject_data, dict) else None
+                    if isinstance(_global_subjects, list):
+                        _ov_by_name = {}
+                        for _s in _seg_override:
+                            if isinstance(_s, dict):
+                                _n = str(_s.get("name") or "").strip()
+                                if _n:
+                                    _ov_by_name[_n] = _s
+                        _merged = []
+                        _consumed = set()
+                        for _g in _global_subjects:
+                            if not isinstance(_g, dict):
+                                _merged.append(_g)
+                                continue
+                            _gn = str(_g.get("name") or "").strip()
+                            if _gn and _gn in _ov_by_name:
+                                _merged.append(_ov_by_name[_gn])
+                                _consumed.add(_gn)
+                            else:
+                                _merged.append(_g)
+                        for _n, _s in _ov_by_name.items():
+                            if _n not in _consumed:
+                                _merged.append(_s)
+                        seg_subject_data = {"subjects": _merged}
+                prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=seg_subject_data, 
                                              prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
                                              timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio,
                                              frame_rate=frame_rate)

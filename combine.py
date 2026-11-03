@@ -286,6 +286,21 @@ class MiniMaxRefCombine(io.ComfyNode):
             payload.get("clip_audio"), _notify_ctx_node,
         )
         _send_progress(payload)
+        # 登记视频生成记录（SPA「视频生成记录」页；append_record 内部吞异常，不阻断主流程）
+        try:
+            from .lib.records import append_record
+            append_record({
+                "kind": "generate",
+                "video": payload.get("imageFile") or filename,
+                "image_latent": payload.get("image_latent") or "",
+                "meta_file": payload.get("meta_file") or "",
+                "meta": payload.get("meta") or {},
+                "clip_audio": payload.get("clip_audio") or "",
+                "director_node_id": str(_notify_ctx_node) if _notify_ctx_node else "",
+                "fps": float(frame_rate),
+            })
+        except Exception:
+            log.warning("[MiniMaxRefCombine] failed to append video record", exc_info=True)
         # Filename 输出本段视频路径，供下一段 MiniMax Ref Guide 的 prev_tail 输入
         # 直接使用（motion context 像素路径 / 降噪来源）。
         return io.NodeOutput(filename, ui=ui)
