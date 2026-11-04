@@ -89,6 +89,22 @@ Rules:
 - detailed_description must break the shot into [Shot 1], [Shot 2] ... beats with timestamps.
 - Write in the same language style as the input unless told otherwise.`;
 
+function h3Brief(text, n = 120) {
+  return String(text || "").replace(/\s+/g, " ").slice(0, n);
+}
+
+// 宽松解析：抓到的文本可能是 DOM 兜底内容，前面会带「已深度思考（用时 12 秒）」
+// 之类的页面文字，或包在 ```json 围栏里。直接 JSON.parse 必然失败（整步全灭），
+// 统一走 parseJsonBlock：剥围栏 + 取首个 { 到最后一个 } 再解析。
+function parseH3(text) {
+  try {
+    const obj = parseJsonBlock(text);
+    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function deepseekGenerateH3(opts, payload) {
   const extId = (opts?.extension_id || "").trim();
   if (!deepseekAvailable(extId)) {
@@ -101,22 +117,66 @@ export async function deepseekGenerateH3(opts, payload) {
   if (payload?.framing?.length) parts.push(`Framing: ${payload.framing.join(", ")}.`);
   if (payload?.expression?.length) parts.push(`Micro expressions: ${payload.expression.join(", ")}.`);
   parts.push(`Shot description:\n${payload?.prompt || ""}`);
-  const resp = await deepseekComplete(extId, {
-    system: DEEPSEEK_H3_SYSTEM,
-    prompt: parts.join("\n"),
-    expectJson: true,
-  });
-  if (!resp.ok) {
-    return { success: false, error: resp.error || "DeepSeek 桥接调用失败" };
-  }
-  let json_data = null;
+
+  // 同一批 H3 转换共用一个会话：首镜走新会话，后续镜头传入 chat_id 直接追问，
+  // 避免每镜都回首页开新会话（11 镜 = 11 个会话，慢且易中途失败）。
+  let sessionChat = String(payload?.chat_id || "");
+  const ask = async (extra) => {
+    const prompt = parts.join("\n") + (extra || "");
+    if (sessionChat) {
+      const text = await deepseekCompleteInSession(extId, {
+        system: DEEPSEEK_H3_SYSTEM,
+        prompt,
+        chatId: sessionChat,
+        expectJson: true,
+      });
+      return { text: String(text || ""), chatId: sessionChat };
+    }
+    const resp = await deepseekComplete(extId, {
+      system: DEEPSEEK_H3_SYSTEM,
+      prompt,
+      expectJson: true,
+    });
+    if (!resp.ok) throw new Error(resp.error || "DeepSeek 桥接调用失败");
+    return { text: String(resp.text || ""), chatId: resp.chat_id || "" };
+  };
+
+  let text = "";
   try {
-    const text = String(resp.text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/, "");
-    json_data = JSON.parse(text);
-  } catch {
-    return { success: false, error: "DeepSeek 返回内容无法解析为 H3 JSON" };
+    const r = await ask("");
+    text = r.text;
+    if (r.chatId) sessionChat = r.chatId;
+  } catch (e) {
+    return { success: false, error: e.message || String(e), chatId: sessionChat };
   }
-  return { success: true, json_data };
+  let json_data = parseH3(text);
+  if (!json_data) {
+    // 自动追问一次（只纠正格式，不改镜头内容）
+    try {
+      const r2 = await ask(
+        "\n\n上一次的回复不是合法 JSON。请只输出一个 JSON 对象，" +
+          "键为 summary / detailed_description / overall_soundscape / non_diegetic_music，" +
+          "不要任何解释、不要 Markdown 围栏之外的内容。"
+      );
+      text = r2.text;
+      if (r2.chatId) sessionChat = r2.chatId;
+    } catch (e) {
+      return { success: false, error: e.message || String(e), chatId: sessionChat };
+    }
+    json_data = parseH3(text);
+  }
+  if (!json_data) {
+    return {
+      success: false,
+      error: `DeepSeek 返回内容无法解析为 H3 JSON（原文摘录：${h3Brief(text)}…）`,
+      chatId: sessionChat,
+    };
+  }
+  const missing = ["summary", "detailed_description"].filter((k) => !String(json_data[k] || "").trim());
+  if (missing.length) {
+    return { success: false, error: `H3 JSON 缺少字段：${missing.join("、")}`, chatId: sessionChat };
+  }
+  return { success: true, json_data, chatId: sessionChat };
 }
 
 // ---------------- deepseek-proxy 会话管理（分镜导入流水线用） ----------------
@@ -174,39 +234,17 @@ export async function deepseekListSessions(extensionId) {
   return Array.isArray(data) ? data : [];
 }
 
-// 读取会话消息历史 → { chatId, count, messages: [{ id, role, content }] }
-export async function deepseekReadSession(extensionId, chatId) {
-  const resp = await extSend(extensionId, { type: "deepseek/read_session", chat_id: chatId });
-  const data = unwrapData(resp);
-  if (!data) throw new Error(resp?.error || "读取会话消息失败");
-  return data;
-}
-
-// 新建空会话 → { id }
-export async function deepseekNewSession(extensionId) {
-  const resp = await extSend(extensionId, { type: "deepseek/new_session" });
-  const data = unwrapData(resp);
-  if (!data || !data.id) throw new Error(resp?.error || "新建会话失败");
-  return data;
-}
-
-// 删除会话内指定消息（恢复会话原状）。
-// messageIds 显式列表；或 keepCount = 保留前 N 条、删除其余。
-export async function deepseekDeleteMessages(extensionId, chatId, { keepCount, messageIds } = {}) {
-  const resp = await extSend(extensionId, {
-    type: "deepseek/delete_messages",
-    chat_id: chatId,
-    keep_count: keepCount,
-    message_ids: messageIds,
-  });
-  if (!resp.ok) throw new Error(resp?.error || "删除会话新增消息失败");
-  return resp.data || {};
+// 删除整个会话（导入结束后清理本次新建的会话）→ { chatId }
+export async function deepseekDeleteSession(extensionId, chatId) {
+  const resp = await extSend(extensionId, { type: "deepseek/delete_session", chat_id: chatId }, 30_000);
+  if (!resp.ok) throw new Error(resp?.error || "删除会话失败");
+  return { chatId };
 }
 
 // 在指定会话内完成一次生成（session_mode: "reuse"，扩展负责导航到该会话）
 export async function deepseekCompleteInSession(
   extensionId,
-  { system = "", prompt = "", chatId = "", expectJson = false, timeoutMs = 180_000 }
+  { system = "", prompt = "", chatId = "", expectJson = false, timeoutMs = 300_000 }
 ) {
   const resp = await extSend(
     extensionId,
@@ -229,7 +267,7 @@ export async function deepseekCompleteInSession(
 // 返回 { text, chatId }：chatId 从发送后的页面 URL 解析，供后续步骤复用该会话。
 export async function deepseekCompleteNewSession(
   extensionId,
-  { system = "", prompt = "", expectJson = false, timeoutMs = 180_000 }
+  { system = "", prompt = "", expectJson = false, timeoutMs = 300_000 }
 ) {
   const resp = await extSend(
     extensionId,

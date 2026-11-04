@@ -1,9 +1,9 @@
 // MiniMax Ref Director — DeepSeek Bridge (content script on chat.deepseek.com)
 // 职责：
-// 1) 接收 background 的 ds/fill → 开新会话（或在当前会话）→ 填充输入 → 触发发送 →
+// 1) 接收 background 的 ds/input_ready / ds/write / ds/enter / ds/sent_check 同步指令 →
 //    观察助手回复完成 → 经 chrome.runtime.sendMessage({type:"ds/reply"}) 回传。
 // 2) 会话管理：ds/list_sessions / ds/read_session / ds/new_session /
-//    ds/delete_messages / ds/rename_session —— 走 chat.deepseek.com 站内 API
+//    ds/rename_session —— 走 chat.deepseek.com 站内 API
 //    （同源带 cookie fetch）。
 // 3) ds/probe：自检（输入框/发送按钮/回复区是否可定位），供前端「页面自检」按钮调用。
 // DOM 选择器尽力兼容 DeepSeek Web 多个版本（textarea / contenteditable 双策略）。
@@ -12,12 +12,10 @@
   if (window.__mrdDeepseekBridge) return;
   window.__mrdDeepseekBridge = true;
 
-  const SEND_TIMEOUT_MS = 240_000;
-  const STABLE_INTERVAL_MS = 2500;
-  const NO_SIGNAL_MS = 90_000;
-
   // 回复捕获：主通道是 page-hook.js（MAIN world）hook 的 /api/v0/chat/completion
   // SSE 流（不依赖 DOM 类名）；DOM 文本块作为兜底。
+  // 注意：所有计时（超时/重试/轮询）都在 background SW 里——页面侧零定时等待，
+  // 否则隐藏/冻结标签页的定时器被 Chrome 停摆会导致流程永久卡死。
   const sse = { startAt: 0, text: "", doneAt: 0, lastLen: 0 };
   let currentFillId = "";
 
@@ -45,18 +43,26 @@
     if (!d || d.__mrd_ds !== 1) return;
     if (d.type === "stream_start") {
       sse.startAt = Date.now();
-      sse.text = "";
       sse.doneAt = 0;
       sse.lastLen = 0;
       stage("stream_start");
     } else if (d.type === "stream_progress") {
       sse.lastLen = d.length || 0;
     } else if (d.type === "stream_done") {
-      sse.text = String(d.text || "");
+      // 同一轮可能出现多条流（分片重发/标题生成等）：只保留更长的正文，
+      // 避免短片段覆盖真正的答案。正文清空统一由 resetSse() 负责。
+      const t = String(d.text || "");
+      if (t.length > sse.text.length) sse.text = t;
       sse.doneAt = Date.now();
-      stage("stream_done", `len=${sse.text.length}`);
+      stage("stream_done", `len=${t.length} kept=${sse.text.length}`);
+    } else if (d.type === "hook_pong") {
+      hookAlive = true;
     }
   });
+
+  // MAIN world 钩子（page-hook.js）存活标志：经 postMessage 握手确认。
+  // 注意隔离世界看不到页面全局变量，不能用 window.__mrdDsHook 判断。
+  let hookAlive = false;
 
   // ---- 站内 API 端点（同源 fetch，带 cookie）----
   // 路径与响应结构对齐 linuxfight/deepseek4free（pkg/api/instance.go、models/chat.go）。
@@ -65,15 +71,8 @@
   const DS_API = {
     // 会话列表（分页）：GET …/chat_session/fetch_page?count=&cursor=
     list: "/api/v0/chat_session/fetch_page",
-    // 新建会话：POST，body {"agent":"chat"} → data.biz_data.id
-    create: "/api/v0/chat_session/create",
+    // 删除整个会话：POST，body {"chat_session_id":"<id>"}（界面「… → 删除」同一端点）
     del: "/api/v0/chat_session/delete",
-    rename: "/api/v0/chat_session/update_title",
-    // 消息历史：GET …/chat/history_messages?chat_session_id=<id>
-    history: (id) => `/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(id)}`,
-    // 删除单条消息：DeepSeek 站内无公开逆向资料确认此端点，先尝试；
-    // 失败时返回明确错误（前端提示手动清理），绝不动用户整个会话。
-    messageDelete: "/api/v0/chat/message/delete",
   };
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -84,31 +83,38 @@
         sendResponse({ pong: true, v: chrome.runtime.getManifest().version });
         return;
       case "ds/probe":
-        sendResponse(probe());
-        return;
+        probe().then(sendResponse);
+        return true;
       case "ds/cancel":
         // 用户在导入界面点了取消：中止当前 fill 的等待循环
         cancelFlag = true;
         sendResponse({ cancelled: true });
         return;
-      case "ds/fill":
-        handleFill(msg.id, msg.text || "", msg.opts || {});
-        sendResponse({ accepted: true });
+      case "ds/input_ready":
+        sendResponse(inputReady());
+        return;
+      case "ds/write":
+        sendResponse(writePrompt(msg.id || "", msg.text || ""));
+        return;
+      case "ds/enter":
+        sendResponse(enterNow(msg.marker || ""));
+        return;
+      case "ds/sent_check":
+        sendResponse(sentCheck(msg.marker || "", msg.beforeMarker, msg.pathBefore));
+        return;
+      case "ds/click_send":
+        // 同步动作：点击发送按钮（Enter 无效时的备选）
+        sendResponse(clickSend());
+        return;
+      case "ds/check":
+        // 同步状态快照：SSE 捕获 + DOM 回复块 + 取消标志（供 SW 轮询判定）
+        sendResponse(checkState(msg.id || ""));
         return;
       case "ds/list_sessions":
         handleApi(sendResponse, listSessions);
         return true;
-      case "ds/read_session":
-        handleApi(sendResponse, () => readSession(msg.chat_id));
-        return true;
-      case "ds/new_session":
-        handleApi(sendResponse, newSession);
-        return true;
-      case "ds/delete_messages":
-        handleApi(sendResponse, () => deleteMessages(msg.chat_id, msg.message_ids, msg.keep_count));
-        return true;
-      case "ds/rename_session":
-        handleApi(sendResponse, () => renameSession(msg.chat_id, msg.title));
+      case "ds/delete_session":
+        handleApi(sendResponse, () => deleteSession(msg.chat_id));
         return true;
     }
   });
@@ -128,15 +134,123 @@
     return m ? m[1] : "";
   }
 
-  function reply(id, ok, text, error) {
-    if (id === currentFillId) {
-      stage(ok ? "replied" : "reply_error", error || "");
-      currentFillId = "";
+  // ---------- 同步填充协议 ----------
+  // 设计要点：页面里不做任何 await/定时等待。隐藏或被冻结的标签页里定时器
+  // 会被 Chrome 节流（最长 1 次/分钟）甚至完全停摆，异步流程会在第一个
+  // await 处永久挂起；而扩展消息可以随时唤醒页面同步执行。因此：
+  //   ds/input_ready → 输入框是否就绪（可见/未禁用）
+  //   ds/write       → 只写入，回传回读内容供 SW 校验（防止重渲染丢弃）
+  //   ds/enter       → 回车提交，回传发送前基线（助手块/marker 次数/路径）
+  //   ds/sent_check  → 核对：输入框是否清空 + 页面上是否真的出现该用户消息
+  //   ds/click_send  → 点击发送按钮（Enter 无效时的备选）
+  //   ds/check       → 状态快照（SSE/DOM/取消标志），供 SW 轮询取回复
+  // 计时、重试、超时、结果判定全部在 background SW 中。
+
+  let lastInput = null; // 最近一次定位到的输入框（verify/click 复用）
+
+  // 输入框是否就绪（SW 轮询用；页面侧零等待）
+  function inputReady() {
+    const input = findInput();
+    const ok = !!(input && isVisible(input) && !input.disabled);
+    return {
+      ready: ok,
+      tag: input ? input.tagName : "",
+      vis: document.visibilityState,
+      path: location.pathname,
+    };
+  }
+
+  // 只写入、不回车。回读内容回传给 SW 校验——避免"写进去又被重渲染丢弃"被误判成功。
+  function writePrompt(id, text) {
+    currentFillId = id;
+    cancelFlag = false;
+    stage("write_start", `${location.pathname} vis=${document.visibilityState}`);
+    try {
+      const input = findInput();
+      if (!input || !isVisible(input)) {
+        stage("no_input");
+        return { status: "no_input" };
+      }
+      lastInput = input;
+      setInputText(input, text);
+      const readBack = inputText(input);
+      stage("write_done", `chars=${readBack.length}/${String(text).length}`);
+      if (!readBack) return { status: "write_failed" };
+      return {
+        status: "written",
+        readBackLen: readBack.length,
+        prefix: readBack.slice(0, 40),
+      };
+    } catch (e) {
+      stage("exception", String(e && e.message));
+      return { status: "error", error: `页面执行异常：${(e && e.message) || e}` };
     }
-    chrome.runtime.sendMessage({
-      type: "ds/reply", id, ok, text: text || "", error: error || "",
+  }
+
+  function countInBody(marker) {
+    if (!marker) return 0;
+    const body = (document.body && document.body.innerText) || "";
+    if (!body) return 0;
+    return body.split(marker).length - 1;
+  }
+
+  // 回车提交，附带"发送前基线"（助手块数量/最后文本/marker 出现次数/路径）
+  function enterNow(marker) {
+    const input = lastInput && lastInput.isConnected ? lastInput : findInput();
+    if (!input) return { ok: false, reason: "no_input" };
+    lastInput = input;
+    const beforeCount = assistantBlocks().length;
+    const beforeLast = lastAssistantText();
+    const beforeMarker = countInBody(marker);
+    const pathBefore = location.pathname;
+    resetSse();
+    pressEnter(input);
+    stage("enter_sent", `path=${pathBefore} marker=${beforeMarker}`);
+    return { ok: true, beforeCount, beforeLast, beforeMarker, pathBefore };
+  }
+
+  function clickSend() {
+    const input = lastInput && lastInput.isConnected ? lastInput : findInput();
+    if (!input) return { clicked: false };
+    const btn = findSendButton(input);
+    if (btn) {
+      btn.click();
+      stage("clicked_send");
+      return { clicked: true };
+    }
+    return { clicked: false };
+  }
+
+  // 发送结果核对：输入框清空 + 页面上真的出现了这条用户消息（唯一可信判据）
+  function sentCheck(marker, beforeMarker, pathBefore) {
+    const input = lastInput && lastInput.isConnected ? lastInput : findInput();
+    lastInput = input;
+    const empty = !input || !inputText(input);
+    const markerCount = countInBody(marker);
+    const blocks = assistantBlocks();
+    return {
+      inputEmpty: empty,
+      markerCount,
+      markerAppeared: markerCount > (Number(beforeMarker) || 0),
+      pathChanged: location.pathname !== String(pathBefore || ""),
+      blockCount: blocks.length,
+      sseActive: !!sse.startAt,
       chatId: currentChatId(),
-    });
+    };
+  }
+
+  function checkState(msgId) {
+    const blocks = assistantBlocks();
+    return {
+      stale: currentFillId !== msgId,
+      cancelled: cancelFlag,
+      sseActive: !!sse.startAt,
+      sseDone: !!sse.doneAt,
+      sseText: sse.text,
+      blockCount: blocks.length,
+      lastBlockText: blocks.length ? blocks[blocks.length - 1] : "",
+      chatId: currentChatId(),
+    };
   }
 
   // ---------- 站内 API ----------
@@ -222,78 +336,12 @@
     return out;
   }
 
-  async function readSession(chatId) {
+  // 删除整个会话（导入结束后清理本次新建的会话）。注意：DeepSeek 没有删除
+  // 单条消息的能力，只能删整个会话；用户原会话里的消息无法撤回。
+  async function deleteSession(chatId) {
     if (!chatId) throw new Error("缺少 chat_id");
-    const data = bizData(await api(DS_API.history(chatId)));
-    const items = (data && (data.chat_messages || data.chatMessages)) || (Array.isArray(data) ? data : []);
-    const messages = items
-      .map((m) => ({
-        id: m.message_id != null ? m.message_id : (m.id != null ? m.id : null),
-        role: String(m.role || "").toLowerCase() === "assistant" ? "assistant" : "user",
-        content: typeof m.content === "string" ? m.content : "",
-      }))
-      .filter((m) => m.content);
-    return { chatId, count: messages.length, messages };
-  }
-
-  async function newSession() {
-    const data = bizData(await api(DS_API.create, { method: "POST", body: { agent: "chat" } }));
-    const id = data && (data.id || data.chat_session_id);
-    if (!id) throw new Error("新建会话未返回会话 id");
-    return { id };
-  }
-
-  async function renameSession(chatId, title) {
-    if (!chatId || !title) throw new Error("缺少 chat_id 或 title");
-    await api(DS_API.rename, { method: "POST", body: { chat_session_id: chatId, title } });
-    return { ok: true };
-  }
-
-  // 删除会话内指定消息（用于清除本次导入新增的 skill 输入与模型返回）。
-  // message_ids：显式消息 id 列表；keep_count：保留前 N 条、删除其余。
-  async function deleteMessages(chatId, messageIds, keepCount) {
-    if (!chatId) throw new Error("缺少 chat_id");
-    let targets = [];
-    if (Array.isArray(messageIds) && messageIds.length) {
-      targets = messageIds;
-    } else if (typeof keepCount === "number" && keepCount >= 0) {
-      const snap = await readSession(chatId);
-      targets = snap.messages.map((m) => m.id).filter((id) => !!id).slice(keepCount);
-    } else {
-      throw new Error("缺少 message_ids 或 keep_count");
-    }
-    if (!targets.length) return { deleted: 0, skipped: true };
-
-    const failed = [];
-    for (const mid of targets) {
-      if (!mid) {
-        failed.push("(无 id 消息)");
-        continue;
-      }
-      let ok = false;
-      // 先尝试 chat_session_id 命名（与其余端点一致），再尝试 chat_id 与仅 message_id
-      for (const body of [
-        { message_id: mid, chat_session_id: chatId },
-        { message_id: mid, chat_id: chatId },
-        { message_id: mid },
-      ]) {
-        try {
-          await api(DS_API.messageDelete, { method: "POST", body });
-          ok = true;
-          break;
-        } catch {
-          // 尝试下一种请求体
-        }
-      }
-      if (!ok) failed.push(mid);
-    }
-    if (failed.length) {
-      throw new Error(
-        `DeepSeek 网页 API 未能删除 ${failed.length}/${targets.length} 条消息（该端点可能不被支持）。` +
-          "请在 chat.deepseek.com 页面手动删除本次新增的两条消息；原会话其余内容未受影响。"
-      );
-    }
-    return { deleted: targets.length };
+    await api(DS_API.del, { method: "POST", body: { chat_session_id: chatId } });
+    return { ok: true, chatId };
   }
 
   // ---------- DOM 定位 ----------
@@ -386,7 +434,16 @@
   }
 
   // 自检：返回当前页面定位状态，供前端快速判断页面结构是否可用
-  function probe() {
+  async function probe() {
+    // 钩子握手：发 ping 等 pong（page-hook 在 MAIN world，须经 postMessage 探测）
+    hookAlive = false;
+    try {
+      window.postMessage({ __mrd_ds_ping: 1 }, "*");
+    } catch {
+      // 忽略
+    }
+    await sleep(350);
+
     const input = findInput();
     const btn = input ? findSendButton(input) : null;
     const blocks = assistantBlocks();
@@ -399,6 +456,8 @@
       data: {
         url: location.href,
         title: document.title,
+        visibility: document.visibilityState,
+        wasDiscarded: !!document.wasDiscarded,
         inputFound: !!input,
         inputKind: input ? input.tagName : "",
         inputCandidates: cands,
@@ -408,7 +467,7 @@
           : "",
         assistantBlocks: blocks.length,
         lastBlockChars: blocks.length ? blocks[blocks.length - 1].length : 0,
-        hookInstalled: !!window.__mrdDsHook,
+        hookInstalled: hookAlive,
         sseActive: !!sse.startAt,
         sseDone: !!sse.doneAt,
         sseChars: sse.text.length,
@@ -457,146 +516,6 @@
         })
       );
     }
-  }
-
-  // opts.noNewChat: true → 在当前会话内发送（会话复用模式，由 background 负责导航）
-  async function handleFill(id, text, opts) {
-    currentFillId = id;
-    cancelFlag = false;
-    stage("fill_start", `${location.pathname} reuse=${!!opts.noNewChat}`);
-    try {
-      // 1) 默认开新会话（避免上下文污染；失败忽略）
-      if (!opts.noNewChat) {
-        const newChat = findNewChatButton();
-        if (newChat) {
-          newChat.click();
-          await sleep(1200);
-        }
-      }
-
-      // 2) 输入框（会话页面渲染有延迟，最多等 15s）
-      let input = null;
-      for (let i = 0; i < 25; i++) {
-        input = findInput();
-        if (input && isVisible(input)) break;
-        await sleep(600);
-      }
-      if (!input) {
-        stage("no_input");
-        reply(id, false, "", `未找到 DeepSeek 输入框（当前页面 ${location.pathname}，页面结构可能已更新）`);
-        return;
-      }
-      stage("input_ready", input.tagName);
-
-      // 3) 写入并校验
-      setInputText(input, text);
-      await sleep(400);
-      if (!inputText(input)) {
-        stage("write_failed");
-        reply(id, false, "", "无法写入 DeepSeek 输入框（页面结构可能已更新，请在该页面手动粘贴一次以确认可输入）");
-        return;
-      }
-      stage("written", `chars=${inputText(input).length}`);
-
-      // 4) 记录发送前状态：助手文本块数量 + 最后一个块文本
-      const beforeCount = assistantBlocks().length;
-      const beforeLast = lastAssistantText();
-      resetSse();
-
-      // 5) 发送并校验输入框被清空（先 Enter——DeepSeek 默认回车发送，再点发送按钮）
-      let sent = false;
-      for (let attempt = 0; attempt < 3 && !sent; attempt++) {
-        if (attempt === 1) {
-          const btn = findSendButton(input);
-          if (btn) btn.click();
-        } else {
-          pressEnter(input);
-        }
-        await sleep(1200);
-        if (!inputText(input)) sent = true;
-      }
-      if (!sent) {
-        stage("send_failed");
-        reply(id, false, "", "发送失败：输入框内容未被提交（Enter 与发送按钮均无效，请在该页面手动按一次回车确认可用）");
-        return;
-      }
-      stage("sent");
-
-      // 6) 等待回复：主通道 = SSE 流结束（page-hook），兜底 = DOM 文本块稳定
-      const deadline = Date.now() + SEND_TIMEOUT_MS;
-      const noSignalAt = Date.now() + NO_SIGNAL_MS;
-      let lastText = "";
-      let lastChangeAt = Date.now();
-      let sawAny = false;
-
-      while (Date.now() < deadline) {
-        await sleep(600);
-
-        // 用户取消：立即中止
-        if (cancelFlag) {
-          reply(id, false, "", "已取消");
-          return;
-        }
-
-        // 主通道：SSE 已结束且有正文 → 直接返回（不依赖 DOM）
-        if (sse.doneAt && sse.text.trim()) {
-          stage("reply_via_sse", `chars=${sse.text.length}`);
-          reply(id, true, sse.text.trim());
-          return;
-        }
-
-        // 兜底：DOM 助手文本块
-        const blocks = assistantBlocks();
-        const cur = blocks.length ? blocks[blocks.length - 1] : "";
-        const isNew = !!cur && (blocks.length > beforeCount || cur !== beforeLast);
-        if (isNew) {
-          sawAny = true;
-          if (cur !== lastText) {
-            lastText = cur;
-            lastChangeAt = Date.now();
-          } else if (!sse.startAt && Date.now() - lastChangeAt > STABLE_INTERVAL_MS) {
-            stage("reply_via_dom", `chars=${lastText.length}`);
-            reply(id, true, lastText);
-            return;
-          }
-        }
-
-        // 既无 SSE 流、也无任何 DOM 变化 → 快速失败，避免长时间"看起来卡死"
-        if (!sse.startAt && !sawAny && Date.now() > noSignalAt) {
-          stage("no_signal");
-          reply(
-            id,
-            false,
-            "",
-            "发送后 90s 内未检测到 DeepSeek 回复流（未登录 / 被风控 / 页面接口变更）。" +
-              "请在 chat.deepseek.com 手动发一条消息确认可正常回复，再点「页面自检」查看状态"
-          );
-          return;
-        }
-      }
-
-      if (sse.text.trim()) {
-        reply(id, true, sse.text.trim());
-      } else if (sawAny && lastText) {
-        reply(id, true, lastText);
-      } else {
-        stage("timeout");
-        reply(id, false, "", "等待 DeepSeek 回复超时（生成过久或页面接口已变更）");
-      }
-    } catch (e) {
-      stage("exception", String(e && e.message));
-      reply(id, false, "", `页面执行异常：${e.message || e}`);
-    }
-  }
-
-  function findNewChatButton() {
-    const candidates = [...document.querySelectorAll("button, div[role='button'], a")];
-    for (const el of candidates) {
-      if (!isVisible(el)) continue;
-      const label = (el.getAttribute("aria-label") || el.textContent || "").trim();
-      if (label === "开启新对话" || label === "New chat" || label === "新建对话") return el;
-    }
-    return null;
   }
 
   // 等待：经 background SW 计时。页面隐藏时本地 setTimeout 会被浏览器节流到

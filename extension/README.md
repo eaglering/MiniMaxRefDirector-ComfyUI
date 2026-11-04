@@ -79,18 +79,19 @@ deepseek-proxy LLM 模式的桥接扩展，两条通道并存：
 |---|---|---|
 | `deepseek/complete` | `payload: { system, prompt, expectJson, session_mode?, chat_id? }` | 生成完成。`session_mode:"reuse"` 时在 `chat_id` 会话内发送 |
 | `deepseek/list_sessions` | — | 列出 chat.deepseek.com 全部会话（站内 API） |
-| `deepseek/read_session` | `chat_id` | 读取会话消息历史 `{ chatId, count, messages: [{id, role, content}] }` |
-| `deepseek/new_session` | — | 新建空会话，返回 `{ id }` |
-| `deepseek/delete_messages` | `chat_id` + `message_ids` 或 `keep_count` | 删除会话内指定消息（清理导入新增的 skill 输入与返回，恢复会话原状） |
-| `deepseek/rename_session` | `chat_id`, `title` | 会话重命名（兜底重建时使用） |
+| `deepseek/delete_session` | `chat_id` | 删除整个会话（导入结束后清理本次新建的会话） |
 | `deepseek/set_bridge_url` | `url` | 配置 ComfyUI WS 桥接地址并立即重连 |
 | `deepseek/bridge_status` | — | 查询 WS 桥接连接状态 |
 
 ### background ↔ content（`chrome.tabs.sendMessage`）
 
-`ds/ping` / `ds/fill`（`opts.noNewChat` 复用当前会话）/ `ds/list_sessions` /
-`ds/read_session` / `ds/new_session` / `ds/delete_messages` / `ds/rename_session`；
-content → background 异步回传 `{ type: "ds/reply", id, ok, text, error }`（仅 `ds/fill`）。
+`ds/ping` / `ds/input_ready`（输入框就绪 + 当前 path）/ `ds/write`（只写入，回传
+回读内容）/ `ds/enter`（回车 + 发送前基线）/ `ds/sent_check`（核验消息是否真的出现）/
+`ds/click_send`（点发送按钮）/ `ds/check`（回复流状态快照）/ `ds/probe`（页面自检）/
+`ds/list_sessions` / `ds/cancel`。
+
+页面侧**不做任何定时等待**：所有计时、重试、轮询与结果判定都在 background SW
+中完成（隐藏标签页的定时器会被 Chrome 节流甚至停摆，异步流程会永久挂起）。
 
 ### ComfyUI → 扩展（WebSocket `/minimax_ref/api/deepseek/bridge`）
 
@@ -109,6 +110,7 @@ linuxfight/deepseek4free 逆向源码）：
 `GET /api/v0/chat/history_messages?chat_session_id={id}`。若 DeepSeek 改版失效，
 可在网页 DevTools → Network 面板核对真实端点后修改 content.js 顶部的 `DS_API` 常量。
 
-**删除单条消息**目前无公开逆向资料确认（`/api/v0/chat/message/delete` 为尝试性
-实现）：删除失败时扩展返回明确错误，前端提示在 DeepSeek 页面手动删除本次新增
-的两条消息，**绝不会删除用户的整个会话**。
+**删除单条消息不可用**：DeepSeek 网页端界面没有该功能，站内也没有可用端点
+（早期尝试过的 `/api/v0/chat/message/delete` 从未成功，已移除）。因此导入流程改为
+“从源头不污染”：故事大纲先读取会话消息快照，再在**全新会话**内提取，原会话不会
+新增任何消息；扩展也绝不会删除用户的整个会话。

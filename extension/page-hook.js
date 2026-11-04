@@ -23,7 +23,42 @@
     }
   }
 
-  // 解析一行 SSE：只累积正文（response/content），忽略思考过程（thinking_*）
+  // 握手：content（隔离世界）通过 postMessage 探测本钩子是否已注入
+  window.addEventListener("message", (ev) => {
+    const d = ev && ev.data;
+    if (d && d.__mrd_ds_ping === 1) post({ type: "hook_pong" });
+  });
+
+  // 解析一行 SSE：只累积正文（response/content），忽略思考过程。
+  // 注意 DeepSeek 的思考片段路径可能是 thinking_content / reasoning_content /
+  // thought 等，其中 reasoning_content 也含 "content"，只过滤 "thinking" 会把
+  // 英文思考过程当成正文（实测抓到 "need answer JSON only. Need design..."）。
+  const REASONING_RE = /think|reason|thought|cot|reflect/i;
+
+  function isReasoningPath(p) {
+    return typeof p === "string" && REASONING_RE.test(p);
+  }
+
+  function appendText(state, s) {
+    if (!s) return;
+    if (state.text.length < MAX_TEXT) {
+      state.text += s;
+      state.touched = true;
+    }
+  }
+
+  // 分片数组（部分版本把一次增量拆成 fragments）：只取 THINK/REASONING 之外的内容
+  function readFragments(state, arr) {
+    for (const f of arr) {
+      if (!f || typeof f !== "object") continue;
+      const type = String(f.type || f.kind || "").toUpperCase();
+      if (type.indexOf("THINK") >= 0 || type.indexOf("REASON") >= 0) continue;
+      if (isReasoningPath(f.p || f.path)) continue;
+      if (typeof f.content === "string") appendText(state, f.content);
+      else if (typeof f.text === "string") appendText(state, f.text);
+    }
+  }
+
   function parseLine(line, state) {
     if (!line || line.charCodeAt(0) === 58 /* ':' */) return;
     if (!line.startsWith("data:")) return;
@@ -44,21 +79,20 @@
       if (st === "FINISHED" || st === "COMPLETED") state.finished = true;
       return;
     }
-    // 路径含 thinking 的片段是思考过程，丢弃
-    if (typeof obj.p === "string" && obj.p.indexOf("thinking") >= 0) return;
+    // 思考过程（以及标题 / 搜索等旁路）一律丢弃
+    if (isReasoningPath(obj.p)) return;
+    if (typeof obj.p === "string" && (obj.p.indexOf("title") >= 0 || obj.p.indexOf("search") >= 0)) return;
 
     if (typeof obj.v === "string") {
-      if (!obj.p || obj.p.indexOf("content") >= 0) {
-        if (state.text.length < MAX_TEXT) state.text += obj.v;
-        state.touched = true;
-      }
+      if (!obj.p || obj.p.indexOf("content") >= 0) appendText(state, obj.v);
+      return;
+    }
+    if (Array.isArray(obj.v)) {
+      readFragments(state, obj.v);
       return;
     }
     const r = obj.v && obj.v.response;
-    if (r && typeof r.content === "string" && r.content) {
-      if (state.text.length < MAX_TEXT) state.text += r.content;
-      state.touched = true;
-    }
+    if (r && typeof r.content === "string") appendText(state, r.content);
   }
 
   function readStream(resp) {

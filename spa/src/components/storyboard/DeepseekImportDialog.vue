@@ -60,12 +60,13 @@ async function runDiag() {
     const d = await deepseekDiag(extId.value);
     const p = d.probe || {};
     const lines = [
-      `扩展版本：v${d.version || "未知"}${d.version && d.version < "1.3.4" ? "（过旧，请在 chrome://extensions 重新加载扩展）" : ""}`,
+      `扩展版本：v${d.version || "未知"}${d.version && d.version < "1.4.7" ? "（过旧，请在 chrome://extensions 重新加载扩展）" : ""}`,
       `标签页：${d.tabUrl || "（未找到 chat.deepseek.com 标签页）"}`,
       `DeepSeek 标签页共 ${(d.tabs || []).length} 个：${
         (d.tabs || []).map((t) => `#${t.id}${t.active ? "（当前）" : t.discarded ? "（已丢弃）" : ""}${t.url}`).join("、") || "-"
       }${(d.tabs || []).length > 1 ? "——建议关掉多余标签页，只留一个，避免填错页" : ""}`,
       `content 脚本就绪：${d.contentReady ? "是" : "否"}`,
+      `页面可见性：${p.visibility || "?"}${p.wasDiscarded ? "（曾被内存节省丢弃）" : ""}`,
       `输入框：${p.inputFound ? `已找到（${p.inputKind || "?"}）` : "未找到"}`,
       `输入框候选：${
         (p.inputCandidates || [])
@@ -139,23 +140,43 @@ const elapsed = ref(0);
 let elapsedTimer = null;
 // 当前阶段（轮询扩展的 ds/stage 流水）
 const stageText = ref("");
+const debugTail = ref([]); // 最近 15 条 SW 事件（含页面消息往返/超时）
 let stageTimer = null;
 const STAGE_LABELS = {
   queued: "已排队",
   tab_ready: "已连接 DeepSeek 标签页",
+  tab_alive: "已确保页面可见（小窗）",
   go_home: "正在回到首页开新会话",
+  home_ready: "已回到首页",
+  home_timeout: "回首页超时",
   navigating: "正在打开会话页面",
   nav_done: "会话页面已就绪",
-  fill_start: "打开会话 / 定位页面",
+  nav_timeout: "会话页面导航超时",
+  content_ready: "页面脚本已就绪",
+  content_stale: "页面脚本过旧，已刷新",
+  content_timeout: "等待页面脚本超时",
+  input_probe: "等待输入框就绪",
+  input_probe_err: "输入框探测失败，重试",
+  write_start: "正在写入输入框",
+  write_done: "写入完成，核对回读",
+  write_resp: "写入结果",
+  write_err: "写入消息超时，重试",
+  enter_sent: "已回车提交",
+  enter_refused: "回车被拒绝",
+  enter_err: "回车消息超时，重试",
+  sent_check: "核对用户消息是否出现",
+  sent_check_err: "核验超时，重试",
   fill_sent: "已派发填充任务",
-  input_ready: "已找到输入框",
-  written: "已写入输入框",
-  sent: "已发送，等待回复",
+  send_retry: "重试发送（点击发送按钮）",
+  send_ok: "已确认消息出现在页面，等待回复",
+  check_miss: "页面状态查询失败，重试",
   stream_start: "回复生成中",
   stream_done: "回复生成完毕",
   replied: "已取回回复",
   reply_via_sse: "已取回回复（SSE 通道）",
   reply_via_dom: "已取回回复（DOM 兜底）",
+  reply_not_json_yet: "回复未含 JSON，等待更完整正文",
+  reply_not_json_timeout: "回复始终不含 JSON，交由前端追问",
   reply_error: "调用失败",
   no_signal: "90s 内无回复信号",
   no_input: "未找到输入框",
@@ -182,6 +203,7 @@ function startElapsed() {
       const last = stages[stages.length - 1];
       if (last) stageText.value = STAGE_LABELS[last.stage] || last.stage;
       else if (d && d.version) stageText.value = `扩展 v${d.version}（暂无阶段上报）`;
+      debugTail.value = (d && d.debugTail) || [];
     } catch {
       // 忽略轮询失败
     }
@@ -202,6 +224,43 @@ function resetRun() {
   h3Done.value = 0;
   h3Total.value = 0;
   runError.value = "";
+  debugTail.value = [];
+}
+
+function hhmmss(ts) {
+  const d = new Date(Number(ts) || Date.now());
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// 一键导出调试包：SPA 日志 + 后台事件流水 + 现场自检（含输入框候选/可见性）
+async function copyDebug() {
+  let diag = null;
+  try {
+    diag = await deepseekDiag(extId.value);
+  } catch (e) {
+    diag = { error: String(e.message || e) };
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    steps: { ...stepStatus },
+    spaLogs: logs.value.map((l) => `${l.time} [${l.level}] ${l.msg}`),
+    backgroundEvents: (debugTail.value || []).map((e) => `${hhmmss(e.at)} ${e.kind} ${e.detail}`),
+    diag,
+  };
+  const text = JSON.stringify(payload, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage.success("调试日志已复制到剪贴板，直接粘贴发我即可");
+  } catch {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `deepseek-import-debug-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    ElMessage.success("调试日志已下载为 JSON 文件");
+  }
 }
 
 function addLog(level, msg) {
@@ -342,7 +401,7 @@ function close() {
         :closable="false"
         show-icon
         class="mrd-dsi-alert"
-        title="选择一个包含你创作构想的 DeepSeek 会话：导入将在该会话内提取故事大纲，完成后自动恢复会话原状，并在新会话中完成分镜 / 主体 / 音频 / 首帧 / H3 全套提取。"
+        title="选择一个包含你创作构想的 DeepSeek 会话：导入将在该会话内提取故事大纲（该会话会新增 2 条消息，DeepSeek 无法删除单条消息），随后在新会话中完成分镜 / 主体 / 音频 / 首帧 / H3 全套提取。"
       />
 
       <div class="mrd-dsi-list">
@@ -404,6 +463,7 @@ function close() {
           </div>
           <el-button v-if="running" type="danger" plain @click="cancelImport">取消导入</el-button>
           <el-button v-else type="primary" @click="close">关闭</el-button>
+          <el-button link type="info" size="small" @click="copyDebug">复制调试日志</el-button>
           <div class="mrd-dsi-elapsed">
             已用时 {{ elapsed }}s<span v-if="stageText"> · {{ stageText }}</span>
           </div>
@@ -416,6 +476,17 @@ function close() {
           <span class="mrd-dsi-log-msg">{{ l.msg }}</span>
         </div>
       </div>
+
+      <details v-if="debugTail.length" class="mrd-dsi-debug" open>
+        <summary>后台事件流水（最近 {{ debugTail.length }} 条）</summary>
+        <div class="mrd-dsi-debug-body">
+          <div v-for="(e, i) in debugTail" :key="i" class="mrd-dsi-debug-row">
+            <span class="mrd-dsi-debug-time">{{ hhmmss(e.at) }}</span>
+            <span class="mrd-dsi-debug-kind">{{ e.kind }}</span>
+            <span class="mrd-dsi-debug-detail">{{ e.detail }}</span>
+          </div>
+        </div>
+      </details>
 
       <el-alert
         v-if="runError"
@@ -537,4 +608,23 @@ function close() {
 .lv-success .mrd-dsi-log-msg { color: #4ade80; }
 .lv-warn .mrd-dsi-log-msg { color: #facc15; }
 .lv-error .mrd-dsi-log-msg { color: #f87171; }
+
+.mrd-dsi-debug {
+  border: 1px solid #222736;
+  border-radius: 10px;
+  background: #0d1017;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 11px;
+}
+.mrd-dsi-debug > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: #8b93a7;
+  user-select: none;
+}
+.mrd-dsi-debug-body { max-height: 160px; overflow: auto; padding: 0 10px 8px; }
+.mrd-dsi-debug-row { display: flex; gap: 8px; line-height: 1.55; }
+.mrd-dsi-debug-time { flex: none; color: #4b5366; }
+.mrd-dsi-debug-kind { flex: none; color: #7c89d6; }
+.mrd-dsi-debug-detail { color: #9aa3b2; word-break: break-all; }
 </style>
