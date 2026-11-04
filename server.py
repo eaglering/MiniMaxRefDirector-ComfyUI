@@ -245,6 +245,13 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
                     base_url=base_url, api_key=api_key, seed=seed,
                 )
                 return {"detailed_description": text}
+        elif vlm_mode == "deepseek-proxy":
+            # 网页会话无法传图，图片分析不支持 deepseek-proxy（必须在 api 兜底分支之前）
+            return web.json_response(
+                {"success": False,
+                 "error": "deepseek-proxy 不支持图片分析（网页会话无法传图）：请改用 api / ollama / llama-cpp 模式"},
+                status=400,
+            )
         else:
             provider = data.get("provider", "GLM")
             api_key = data.get("api_key", "")
@@ -313,6 +320,14 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             # model / base_url 允许为空：generate_prompt_with_ollama 会回落
             # API 管理器 ollama 服务配置 / 内置默认值（http://localhost:11434）
             pass
+        elif vlm_mode == "deepseek-proxy":
+            # 经浏览器扩展 WS 桥接调用 chat.deepseek.com 网页会话（纯文本）
+            if image_path:
+                return web.json_response(
+                    {"success": False,
+                     "error": "deepseek-proxy 不支持参考图（网页会话无法传图）：请改用 api / ollama / llama-cpp，或移除参考图"},
+                    status=400,
+                )
         work = lambda: generate_h3_prompt(
             prompt=prompt, image_path=image_path, seed=seed,
             vlm_mode=vlm_mode, options=options,

@@ -637,3 +637,48 @@ def generate_prompt_with_ollama(
             raise RuntimeError(f"[llm] Unexpected Ollama response: {body[:500]}") from e
     log.info("[llm] Ollama generated (first 200 chars): %s", str(generated_text)[:200])
     return generated_text
+
+
+# ---------------------------------------------------------------------------
+# deepseek-proxy：经浏览器扩展（DeepSeek Bridge）的 WS 桥接调用 chat.deepseek.com
+# 网页会话完成纯文本生成，无需 API Key，也无需本地模型。
+# ---------------------------------------------------------------------------
+# 专用轻量锁（与 _LLM_INFER_LOCK 分离）：deepseek 不占本地模型与显存，不应把
+# llama 卸载（unload_llama_models 抢 _LLM_INFER_LOCK）与本地推理卡在它后面；
+# 但扩展侧单个 DeepSeek 页面同一时刻只能服务一次填充发送，后端并发任务必须
+# 排队，否则「发送前文本快照 / 回复归属」会错乱。
+_DEEPSEEK_LOCK = threading.Lock()
+
+
+def generate_prompt_with_deepseek_proxy(
+    prompt: str = "", image=None, seed: int = 42, timeout_s: float = 290.0,
+) -> str:
+    """Generate text via the DeepSeek web-chat bridge (browser extension over WS).
+
+    与 generate_prompt_with_api / ollama / llama 同一契约：返回生成的原始文本
+    str，出错 raise（ValueError / RuntimeError）。仅支持纯文本——image 非 None
+    时抛 ValueError（网页会话无法传图，请改用 api / ollama / llama-cpp）。
+    seed 仅为接口对齐（网页会话无法固定采样种子，忽略）。
+    timeout_s 默认 290s：受扩展 MV3 Service Worker 单请求存活上限约束。
+    """
+    if image is not None:
+        raise ValueError(
+            "deepseek-proxy 不支持图片输入（网页会话无法传图）："
+            "请改用 api / ollama / llama-cpp 模式"
+        )
+    if not (prompt or "").strip():
+        raise ValueError("[llm] deepseek-proxy: prompt is empty")
+
+    from .deepseek_bridge import deepseek_complete  # 惰性导入，规避导入顺序问题
+
+    with _DEEPSEEK_LOCK:
+        result = deepseek_complete(
+            system="", prompt=prompt, expect_json=False, timeout_s=timeout_s,
+        )
+    if not result.get("ok"):
+        raise RuntimeError(
+            f"[llm] deepseek-proxy bridge failed: {result.get('error') or 'unknown error'}"
+        )
+    generated_text = str(result.get("text") or "")
+    log.info("[llm] deepseek-proxy generated (first 200 chars): %s", generated_text[:200])
+    return generated_text

@@ -194,7 +194,13 @@ function applyStateToNodes(state) {
   return true;
 }
 
+// 开发模式：填 vite dev server 地址（如 "http://127.0.0.1:5173/"）后，
+// 点「打开导演台」会直接打开 dev 页面（携带真实 node_id，前端改动热更新）。
+// 留空 = 使用随 ComfyUI 提供的构建产物 js/spa/index.html。
+const SPA_DEV_ORIGIN = "";
+
 function spaPageUrl() {
+  if (SPA_DEV_ORIGIN) return new URL(SPA_DEV_ORIGIN).href;
   // js/spa-node.js 位于 /extensions/<pkg>/ 下 → ./spa/index.html
   return new URL("./spa/index.html", import.meta.url).href;
 }

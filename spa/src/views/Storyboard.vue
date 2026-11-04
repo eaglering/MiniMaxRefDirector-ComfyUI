@@ -4,17 +4,22 @@
 import { computed, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../stores/workspace.js";
-import { genId, framesToSeconds } from "../utils/media.js";
+import { genId, framesToSeconds, secondsToFrames } from "../utils/media.js";
+import { makeSubject } from "../constants/subject.js";
 import ShotList from "../components/storyboard/ShotList.vue";
 import PromptPanel from "../components/storyboard/PromptPanel.vue";
 import ExtraSubjects from "../components/storyboard/ExtraSubjects.vue";
 import ShotParams from "../components/storyboard/ShotParams.vue";
 import ShotPreview from "../components/storyboard/ShotPreview.vue";
+import DeepseekImportDialog from "../components/storyboard/DeepseekImportDialog.vue";
 
 const ws = useWorkspace();
 const selectedId = ref("");
 const rightTab = ref("params");
 const rightDrawer = ref(false);
+const showDeepseekImport = ref(false);
+
+const isDeepseek = computed(() => ws.llm.mode === "deepseek-proxy");
 
 const segments = computed(() => ws.timeline.segments);
 
@@ -115,6 +120,82 @@ const totalSeconds = computed(() =>
     ws.widgets.frame_rate
   )
 );
+
+// ---- DeepSeek 分镜导入结果写入 ----
+function emptyH3() {
+  return { summary: "", detailed_description: "", overall_soundscape: "", non_diegetic_music: "" };
+}
+
+// 主体同名更新、否则新增（与 skills 的「同名会被更新覆盖」约定一致）
+function upsertSubject(entry, type) {
+  const name = String(entry.name || "").trim();
+  if (!name) return false;
+  const list = ws.subjects.subjects;
+  let target = list.find(
+    (s) => !s.ownerUid && s.type === type && String(s.name || "").trim() === name
+  );
+  if (!target) {
+    target = makeSubject(type);
+    list.push(target);
+  }
+  target.name = name;
+  if (entry.description) target.description = String(entry.description);
+  if (entry.retention) target.retention = String(entry.retention);
+  if (entry.relationship) target.relationship = String(entry.relationship);
+  if (entry.audioRef) target.audioRef = String(entry.audioRef);
+  if (entry.mediaPrompt) target.mediaPrompt = String(entry.mediaPrompt);
+  return true;
+}
+
+function onDeepseekImported(result) {
+  const fps = ws.widgets.frame_rate || 24;
+  let added = 0;
+  let firstNewId = "";
+
+  for (const shot of result.segments || []) {
+    const seg = defaultSegment();
+    seg.length = secondsToFrames(
+      Number(shot.duration_seconds) > 0 ? Number(shot.duration_seconds) : 5,
+      fps
+    );
+    seg.prompt = String(shot.prompt || "");
+    if (Array.isArray(shot.camera_motions)) seg.cameraMotions = shot.camera_motions.filter(Boolean);
+    if (Array.isArray(shot.shot_sizes)) seg.shotSizes = shot.shot_sizes.filter(Boolean);
+    if (Array.isArray(shot.framings)) seg.framings = shot.framings.filter(Boolean);
+    // 首/尾帧提示词：自定义字段（parseInitial 保留未知字段，供后续首尾帧图生成使用）
+    if (shot.first_frame_prompt) seg.firstFramePrompt = String(shot.first_frame_prompt);
+    if (shot.last_frame_prompt) seg.lastFramePrompt = String(shot.last_frame_prompt);
+    if (typeof shot.guide_strength === "number") seg.guide_strength = shot.guide_strength;
+    if (shot.h3) {
+      seg.h3PromptJson = {
+        summary: String(shot.h3.summary || ""),
+        detailed_description: String(shot.h3.detailed_description || ""),
+        overall_soundscape: String(shot.h3.overall_soundscape || ""),
+        non_diegetic_music: String(shot.h3.non_diegetic_music || ""),
+      };
+      if (shot.h3Cn) seg.h3Cn = String(shot.h3Cn);
+      if (shot.h3En) seg.h3En = String(shot.h3En);
+    } else {
+      seg.h3PromptJson = emptyH3();
+    }
+    segments.value.push(seg);
+    if (!firstNewId) firstNewId = seg.id;
+    added++;
+  }
+
+  let subjectsAdded = 0;
+  for (const c of result.characters || []) if (upsertSubject(c, "Subject")) subjectsAdded++;
+  for (const sc of result.scenes || []) if (upsertSubject(sc, "Picture")) subjectsAdded++;
+  for (const a of result.audios || []) if (upsertSubject(a, "Audio")) subjectsAdded++;
+
+  relayout();
+  if (firstNewId) selectedId.value = firstNewId;
+  ws.markDirty();
+  ws.saveNow();
+  if (subjectsAdded) {
+    ElMessage.info(`已写入 ${added} 个分镜与 ${subjectsAdded} 个主体条目（主体管理页查看）`);
+  }
+}
 </script>
 
 <template>
@@ -124,11 +205,13 @@ const totalSeconds = computed(() =>
       :selected-id="selected ? selected.id : ''"
       :display-mode="ws.widgets.display_mode"
       :frame-rate="ws.widgets.frame_rate"
+      :show-deepseek-import="isDeepseek"
       @select="id => (selectedId = id)"
       @change="ws.markDirty()"
       @add="addShot"
       @duplicate="duplicateShot"
       @remove="removeShot"
+      @deepseek-import="showDeepseekImport = true"
     />
 
     <div class="mrd-storyboard-center">
@@ -167,6 +250,9 @@ const totalSeconds = computed(() =>
         </el-tab-pane>
       </el-tabs>
     </el-drawer>
+
+    <!-- DeepSeek 分镜导入（仅 deepseek-proxy 模式可见入口） -->
+    <DeepseekImportDialog v-model="showDeepseekImport" @completed="onDeepseekImported" />
   </div>
 </template>
 

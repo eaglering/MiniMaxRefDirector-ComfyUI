@@ -9,7 +9,12 @@ import torch
 from PIL import Image
 
 from .image import load_image_tensor
-from .llm import generate_prompt_with_api, generate_prompt_with_llama, generate_prompt_with_ollama
+from .llm import (
+    generate_prompt_with_api,
+    generate_prompt_with_deepseek_proxy,
+    generate_prompt_with_llama,
+    generate_prompt_with_ollama,
+)
 from .path import resolve_input_path
 from .utils import find_index, parse_generated_json
 
@@ -1519,6 +1524,10 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) ->
                 api_key=options.get("api_key", "ollama"),
                 seed=seed,
             )
+        elif vlm_mode == "deepseek-proxy":
+            generated = generate_prompt_with_deepseek_proxy(
+                prompt=full_prompt, seed=seed,
+            )
         else:
             return text
         result = str(generated).strip()
@@ -1577,6 +1586,10 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
                 api_key=options.get("api_key", "ollama"),
                 seed=seed,
             )
+        elif vlm_mode == "deepseek-proxy":
+            generate_text = generate_prompt_with_deepseek_proxy(
+                prompt=full_prompt, seed=seed,
+            )
         else:
             return json_data
         translated = parse_generated_json(generate_text)
@@ -1607,7 +1620,8 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
       - image_path: 参考图路径（提供时与用户输入合并进 detailed_description）
       - seed: 采样种子
       - vlm_mode: "llama-cpp"（默认，本地 GGUF）/ "api"（云端 OpenAI 兼容接口）/
-        "ollama"（本地 Ollama 服务）
+        "ollama"（本地 Ollama 服务）/ "deepseek-proxy"（DeepSeek 网页会话，经
+        浏览器扩展 WS 桥接；纯文本，不支持参考图）
       - provider: vlm_mode="api" 时的服务商（走 API 管理器配置）
       - api_key: vlm_mode="api"/"ollama" 时的 key 覆盖（可留空，回落配置/环境变量；
         Ollama 无需真实 key，任意非空占位符即可）
@@ -1661,6 +1675,16 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
             base_url=opts.get("ollama_base_url", ""),
             api_key=opts.get("api_key", "ollama"),
             seed=seed,
+        )
+        json_data = parse_generated_json(generate_text)
+    elif vlm_mode == "deepseek-proxy":
+        if image is not None:
+            raise ValueError(
+                "deepseek-proxy 不支持参考图（网页会话无法传图）：请改用 api / "
+                "ollama / llama-cpp 模式，或移除参考图后重试"
+            )
+        generate_text = generate_prompt_with_deepseek_proxy(
+            prompt=full_prompt, seed=seed,
         )
         json_data = parse_generated_json(generate_text)
     else:

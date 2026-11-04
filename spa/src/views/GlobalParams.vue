@@ -1,8 +1,10 @@
 <script setup>
 // 全局参数配置页：基础设置 / LLM 设置（四种模式）/ 全局提示词
 import { computed, onMounted, ref } from "vue";
+import { ElMessage } from "element-plus";
 import { useWorkspace } from "../stores/workspace.js";
 import { fetchLlmFiles, fetchConfig } from "../api/client.js";
+import { deepseekBridgeStatus, deepseekSetBridgeUrl } from "../utils/llm.js";
 
 const ws = useWorkspace();
 
@@ -17,6 +19,8 @@ const LLM_MODES = [
 const ggufFiles = ref([]);
 const mmprojFiles = ref([]);
 const providers = ref([]);
+const bridgeSyncing = ref(false);
+const bridgeStatus = ref(null); // { connected, url } | null
 
 onMounted(async () => {
   try {
@@ -40,8 +44,42 @@ onMounted(async () => {
 const isDeepseek = computed(() => ws.llm.mode === "deepseek-proxy");
 const globalPromptLen = computed(() => (ws.globalPrompt || "").length);
 
+// 扩展 WS 直连 ComfyUI 的桥接地址：默认按当前页面 origin 推导
+const defaultBridgeUrl = computed(() =>
+  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/minimax_ref/api/deepseek/bridge`
+);
+
 function dirty() {
   ws.markDirty();
+}
+
+function openDeepseekWeb() {
+  window.open("https://chat.deepseek.com/", "_blank", "noopener");
+  ElMessage.info("请确保已在浏览器中登录 chat.deepseek.com");
+}
+
+async function syncBridgeUrl() {
+  const extId = (ws.llm.extension_id || "").trim();
+  if (!extId) {
+    ElMessage.warning("请先填写 DeepSeek 桥接扩展 ID");
+    return;
+  }
+  bridgeSyncing.value = true;
+  try {
+    const url = (ws.llm.bridge_url || "").trim() || defaultBridgeUrl.value;
+    const res = await deepseekSetBridgeUrl(extId, url);
+    if (res && res.ok) {
+      ws.llm.bridge_url = url;
+      ws.markDirty();
+      ElMessage.success(`桥接地址已同步到扩展：${url}`);
+    } else {
+      ElMessage.error(`同步失败：${(res && res.error) || "扩展不可用"}`);
+    }
+    const st = await deepseekBridgeStatus(extId);
+    bridgeStatus.value = st && !st.error ? st : { connected: false };
+  } finally {
+    bridgeSyncing.value = false;
+  }
 }
 </script>
 
@@ -140,16 +178,38 @@ function dirty() {
         <template v-else>
           <div class="mrd-field">
             <label>浏览器扩展 ID</label>
-            <el-input v-model="ws.llm.extension_id" placeholder="DeepSeek 桥接扩展的 ID（chrome://extensions 查看）" @change="dirty">
-              <template #prefix><el-icon><component :is="'Link'" /></el-icon></template>
-            </el-input>
+            <div class="mrd-ds-row">
+              <el-input v-model="ws.llm.extension_id" placeholder="DeepSeek 桥接扩展的 ID（chrome://extensions 查看）" @change="dirty">
+                <template #prefix><el-icon><component :is="'Link'" /></el-icon></template>
+              </el-input>
+            </div>
+          </div>
+          <div class="mrd-field">
+            <label>ComfyUI 桥接地址（WS，留空用当前页面地址）</label>
+            <div class="mrd-ds-row">
+              <el-input v-model="ws.llm.bridge_url" :placeholder="defaultBridgeUrl" @change="dirty" />
+              <el-button :loading="bridgeSyncing" @click="syncBridgeUrl">同步到扩展</el-button>
+            </div>
+            <p v-if="bridgeStatus" class="mrd-field-hint">
+              扩展 WS 桥接状态：
+              <span :class="bridgeStatus.connected ? 'mrd-ds-ok' : 'mrd-ds-bad'">
+                {{ bridgeStatus.connected ? "已连接" : "未连接" }}
+              </span>
+              （ComfyUI 工作流执行期间的 H3 生成 / 资源整理经此通道调用 DeepSeek）
+            </p>
           </div>
           <el-alert type="info" :closable="false" show-icon class="mrd-deepseek-hint">
             <template #title>
               deepseek-proxy 通过本仓库附带的浏览器扩展（extension/ 目录）调用 chat.deepseek.com。
-              请先「加载已解压的扩展程序」安装，再将扩展 ID 填到上方。未安装时翻译 / H3 生成将回退失败提示。
+              请先「加载已解压的扩展程序」安装，再将扩展 ID 填到上方，点击「打开 DeepSeek 网页」完成登录。
+              未安装时翻译 / H3 生成将回退失败提示。
             </template>
           </el-alert>
+          <div>
+            <el-button plain type="primary" :icon="'Position'" title="打开 chat.deepseek.com 并登录" @click="openDeepseekWeb">
+              打开 DeepSeek 网页
+            </el-button>
+          </div>
         </template>
       </div>
     </section>
@@ -200,7 +260,12 @@ function dirty() {
 .mrd-field > label { font-size: 12px; color: #a9b1c3; }
 .mrd-field-hint { font-size: 11.5px; color: #6b7488; margin: 2px 0 0; }
 .mrd-llm-modes { margin-bottom: 16px; }
-.mrd-llm-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px 18px; align-items: start; }
+.mrd-llm-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px 18px; align-items: start; }
 .mrd-deepseek-hint { grid-column: 1 / -1; }
+.mrd-ds-row { display: flex; gap: 8px; align-items: center; }
+.mrd-ds-row .el-input { flex: 1; }
+.mrd-ds-row .el-button { flex: none; }
+.mrd-ds-ok { color: #4ade80; }
+.mrd-ds-bad { color: #f87171; }
 .mrd-gp-meta { margin-top: 8px; font-size: 11.5px; color: #6b7488; text-align: right; }
 </style>

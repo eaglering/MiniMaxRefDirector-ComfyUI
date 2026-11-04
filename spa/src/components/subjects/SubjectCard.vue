@@ -9,7 +9,7 @@ import {
   refDefaultRelationship, nextChildName, isChildSubject,
 } from "../../constants/subject.js";
 import { uploadImage, uploadAudio, uploadVideo, viewUrl } from "../../api/client.js";
-import MentionTextarea from "./MentionTextarea.vue";
+import PromptEditor from "../common/PromptEditor.vue";
 
 const props = defineProps({
   subject: { type: Object, required: true },
@@ -296,28 +296,28 @@ function removeSelf() {
     <!-- 描述（@ 提及） -->
     <div v-if="descVisible" class="mrd-subj-row">
       <label class="mrd-subj-label">描述</label>
-      <MentionTextarea
-        v-model="subject.description"
-        :rows="compact ? 2 : 4"
-        placeholder="主体外观 / 身份定义；输入 @ 可引用图片、视频等主体"
+      <PromptEditor
+        :model-value="subject.description"
+        :min-height="compact ? 48 : 92"
+        placeholder="主体外观 / 身份定义；输入 @ 或 # 可引用图片、视频等主体"
         :candidates="subjects"
         :allowed-types="mentionTypes"
         :exclude-uid="subject.uid"
-        @update:model-value="changed"
+        @update:model-value="v => { subject.description = v; changed(); }"
       />
     </div>
 
     <!-- 保持度 -->
     <div v-if="descVisible" class="mrd-subj-row">
       <label class="mrd-subj-label">保持度</label>
-      <MentionTextarea
-        v-model="subject.retention"
-        :rows="compact ? 2 : 2"
+      <PromptEditor
+        :model-value="subject.retention"
+        :min-height="compact ? 44 : 56"
         placeholder="需要跨分镜保持的具体特征，如 the young man's short wavy brown hair..."
         :candidates="subjects"
         :allowed-types="mentionTypes"
         :exclude-uid="subject.uid"
-        @update:model-value="changed"
+        @update:model-value="v => { subject.retention = v; changed(); }"
       />
     </div>
 
@@ -388,6 +388,7 @@ function removeSelf() {
 .mrd-subj-name.name-missing { border-color: #ef4444; }
 
 .mrd-subj-row { display: flex; gap: 10px; align-items: flex-start; }
+.mrd-subj-row :deep(.mrd-cm-host) { flex: 1; min-width: 0; }
 .mrd-subj-label {
   flex: none;
   width: 58px;

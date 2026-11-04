@@ -8,11 +8,13 @@
     "build": "vite build"
   },
   "dependencies": {
-    "vue": "^3.5.13",
-    "vue-router": "^4.5.0",
-    "pinia": "^2.3.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@element-plus/icons-vue": "^2.3.1",
     "element-plus": "^2.9.3",
-    "@element-plus/icons-vue": "^2.3.1"
+    "pinia": "^2.3.1",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.3",

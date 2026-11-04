@@ -73,3 +73,58 @@ html.dark {
 .el-card { --el-card-bg-color: var(--mrd-bg-2); border-color: var(--mrd-border-soft); }
 .el-tabs__item { font-size: 13px; }
 .el-table { --el-table-header-bg-color: #1a1f2c; --el-table-row-hover-bg-color: #202633; }
+
+/* ===== CodeMirror 提示词编辑器 ===== */
+.cm-editor { background: transparent; }
+.cm-editor .cm-scroller::-webkit-scrollbar { width: 8px; }
+
+/* 主体 chip：缩略图 + 名称（<@主体> / <#主体:对白>） */
+.cm-subj-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0 7px 0 3px;
+  margin: 0 1px;
+  border-radius: 999px;
+  background: rgba(108, 92, 231, 0.18);
+  border: 1px solid rgba(108, 92, 231, 0.45);
+  color: #cfc7ff;
+  font-size: 11.5px;
+  line-height: 18px;
+  vertical-align: baseline;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.cm-subj-chip:hover {
+  background: rgba(108, 92, 231, 0.3);
+  border-color: rgba(167, 139, 250, 0.75);
+}
+.cm-subj-chip img {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+.cm-subj-chip-glyph {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: rgba(108, 92, 231, 0.5);
+  color: #fff;
+  font-size: 9.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.cm-subj-chip-name { color: #cfc7ff; }
+.cm-subj-chip-dialogue {
+  color: #a5d6a7;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cm-subj-chip-dialogue::before { content: "·"; color: #6b7488; margin-right: 3px; }

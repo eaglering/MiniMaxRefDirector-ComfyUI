@@ -1,11 +1,33 @@
 <script setup>
 import { computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "./stores/workspace.js";
 
 const ws = useWorkspace();
 const route = useRoute();
 const router = useRouter();
+
+// dev（vite dev server）下节点标签可点击切换 node_id，便于联调与验证 ComfyUI 回写
+const isDev = import.meta.env.DEV;
+
+async function switchNode() {
+  if (!isDev) return;
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "输入 ComfyUI 中 MiniMaxRefDirector 节点的 ID（留空回到 dev 默认状态）",
+      "切换节点",
+      { inputValue: ws.nodeId, inputPlaceholder: "例如 12", confirmButtonText: "切换并重载", cancelButtonText: "取消" }
+    );
+    const id = (value || "").trim() || "dev";
+    try {
+      localStorage.setItem("mrd_spa_node_id", id);
+    } catch { /* ignore */ }
+    location.reload();
+  } catch (e) {
+    if (e !== "cancel" && e !== "close") ElMessage.error(`切换失败：${e.message || e}`);
+  }
+}
 
 const menus = [
   { path: "/global", label: "全局参数", icon: "Setting" },
@@ -41,7 +63,16 @@ function onMenu(path) {
       <div class="mrd-brand">
         <span class="mrd-brand-mark">M</span>
         <span class="mrd-brand-name">MiniMax 导演台</span>
-        <el-tag v-if="ws.nodeId" size="small" effect="dark" class="mrd-node-tag">节点 {{ ws.nodeId }}</el-tag>
+        <el-tag v-if="isDev" size="small" effect="dark" class="mrd-dev-tag">DEV</el-tag>
+        <el-tag
+          v-if="ws.nodeId"
+          size="small"
+          effect="dark"
+          class="mrd-node-tag"
+          :class="{ clickable: isDev }"
+          :title="isDev ? '点击切换节点 ID' : ''"
+          @click="switchNode"
+        >节点 {{ ws.nodeId }}</el-tag>
       </div>
       <nav class="mrd-menus">
         <button
@@ -105,6 +136,9 @@ function onMenu(path) {
 }
 .mrd-brand-name { font-size: 15px; font-weight: 600; letter-spacing: 1px; }
 .mrd-node-tag { background: #232837; border-color: #2a3042; color: #a9b1c3; }
+.mrd-node-tag.clickable { cursor: pointer; }
+.mrd-node-tag.clickable:hover { border-color: #6c5ce7; color: #cfc7ff; }
+.mrd-dev-tag { background: rgba(255, 183, 77, 0.16); border-color: rgba(255, 183, 77, 0.5); color: #ffb74d; }
 
 .mrd-menus { display: flex; gap: 4px; flex: 1; height: 100%; }
 .mrd-menu-item {

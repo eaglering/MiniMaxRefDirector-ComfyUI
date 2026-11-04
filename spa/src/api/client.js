@@ -12,6 +12,8 @@ function resolveApiBase() {
       /* ignore */
     }
   }
+  // vite dev（热更新）：后端请求统一走 vite.config.js 的 server.proxy
+  if (import.meta.env.DEV) return "/";
   // 页面位于 /extensions/<node>/spa/index.html → ComfyUI 根为 ../../../
   return new URL("../../..", location.href).pathname.replace(/\/?$/, "/");
 }
@@ -73,6 +75,12 @@ export function deleteRecords(ids) {
 }
 export function fetchConfig() {
   return getJSON("/config");
+}
+
+// ===== FastDirector-Desktop skill 词库（deepseek 分镜导入用） =====
+// 无 name 时返回词库清单；有 name 时返回该 skill 的 prompt.md 全文
+export function fetchSkillLibrary(name = "") {
+  return getJSON(`/spa/skill_library${name ? `?name=${encodeURIComponent(name)}` : ""}`);
 }
 
 // ===== LLM（复用现有端点，显式传 opts） =====

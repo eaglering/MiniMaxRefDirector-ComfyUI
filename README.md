@@ -61,8 +61,8 @@ pip install -r requirements.txt   # 仅 av 一个额外依赖，其余由 ComfyU
   再经 WebSocket 回写目标节点 widget；刷新/重开标签页不丢数据。
 - **四个菜单**：全局参数（基础设置 / LLM：llama-cpp·API·Ollama·DeepSeek 代理 / 全局提示词）、
   主体管理、分镜（三栏：分镜列表 + 提示词与技能 + 参数/预览）、视频生成记录（多选合并 / 无损合并）。
-- **分镜级主体**：默认继承全局主体，可勾选「自定义主体」为单个分镜定义独立主体集合，
-  并「向下继承」到后续分镜（适合“小孩子成长过程”这类同一主体跨阶段变化的场景）。
+- **分镜级主体**：分镜预览中每个被引用的主体都可单独「自定义」（深拷贝该主体及其引用资源），
+  仅对当前分镜生效；未自定义的主体继续跟随全局主体。
 
 构建 SPA（前端源码在 `spa/`，产物 `js/spa/index.html` 已入仓，通常无需重新构建）：
 
@@ -71,6 +71,28 @@ cd spa
 npm install
 npm run build   # → ../js/spa/index.html（JS/CSS 全内联的单文件）
 ```
+
+### 开发模式（热更新）
+
+改前端不必每次手动构建，用 Vite dev server 联调：
+
+```bash
+cd spa
+npm install
+npm run dev     # http://127.0.0.1:5173
+```
+
+- 后端请求（`/minimax_ref`、`/view`、`/upload` 等）由 `vite.config.js` 的 `server.proxy`
+  转发到 ComfyUI（默认 `http://127.0.0.1:8188`）。端口不同时：
+  PowerShell `$env:COMFY_URL="http://127.0.0.1:8188"; npm run dev`，bash 用
+  `COMFY_URL=... npm run dev` 前缀。
+- 打开 `http://127.0.0.1:5173/?node_id=<节点ID>` 直接加载该节点状态；不带 `node_id` 时进入
+  `dev` 沙盒（状态存 `state/dev.json`，不会影响真实节点）。顶栏的 `DEV` 标记表示当前是 dev 构建，
+  旁边的「节点」标签可点击切换 node_id。
+- 想从 ComfyUI 里一键打开 dev 页面（携带真实节点 ID），把 `js/spa-node.js` 顶部的
+  `SPA_DEV_ORIGIN` 改为 `"http://127.0.0.1:5173/"` 后刷新 ComfyUI 页面即可。
+- 功能调试完成后执行 `npm run build` 更新 `js/spa/index.html`（提交前必须重新构建，
+  运行时不依赖 dev server）。
 
 DeepSeek 代理模式需安装附带的浏览器扩展，见 [extension/README.md](extension/README.md)。
 

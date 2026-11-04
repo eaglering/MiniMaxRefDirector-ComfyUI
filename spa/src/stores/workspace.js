@@ -103,8 +103,35 @@ function serializeTimeline(t) {
   return out;
 }
 
+// ---- node_id 解析 ----
+// 生产：由入口节点通过 URL query 传入（必需）。
+// dev（vite dev server）：允许缺省，优先 localStorage 记住的上次节点，其次 "dev"，
+// 便于 `npm run dev` + `?node_id=12` 直接联调热更新。
+const DEV_NODE_ID = "dev";
+const LS_KEY = "mrd_spa_node_id";
+
+function resolveNodeId() {
+  const q = (new URLSearchParams(location.search).get("node_id") || "").trim();
+  if (q) {
+    try {
+      localStorage.setItem(LS_KEY, q);
+    } catch {
+      /* ignore */
+    }
+    return q;
+  }
+  if (import.meta.env.DEV) {
+    try {
+      return (localStorage.getItem(LS_KEY) || "").trim() || DEV_NODE_ID;
+    } catch {
+      return DEV_NODE_ID;
+    }
+  }
+  return "";
+}
+
 export const useWorkspace = defineStore("workspace", () => {
-  const nodeId = ref(new URLSearchParams(location.search).get("node_id") || "");
+  const nodeId = ref(resolveNodeId());
   const nodeTitle = ref("");
   const loaded = ref(false);
   const loadError = ref("");

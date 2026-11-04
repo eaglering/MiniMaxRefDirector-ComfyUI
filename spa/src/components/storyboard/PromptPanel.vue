@@ -1,9 +1,7 @@
 <script setup>
-// 中间上部：提示词区
-// 左：skill 多选胶囊（运镜/景别/镜头结构/微表情 + 自定义）+ 原生提示词输入
-// 中：两个生成按钮（中文 H3 / 英文 H3）
-// 右：H3 提示词四段输入
-// 原生与 H3 输入框均支持 @ / # 主体提及（overlay 高亮），与旧版一致。
+// 中间上部：提示词区（左右两列）
+// 左列：技能胶囊 + 用户提示词（CodeMirror，仅 @ 触发；右下角曲线装饰 + 中/英 H3 生成按钮）
+// 右列：H3 提示词四段（同一容器内连续排列，整体占满高度，超出滚动；支持 @ 与 #）
 import { computed, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { SKILL_GROUPS } from "../../data/skills.js";
@@ -12,7 +10,7 @@ import { generateH3Prompt } from "../../utils/llm.js";
 import { saveSkills } from "../../api/client.js";
 import { framesToSeconds } from "../../utils/media.js";
 import { REF_MENTION_TYPES, mergeSegmentSubjects } from "../../constants/subject.js";
-import MentionTextarea from "../subjects/MentionTextarea.vue";
+import PromptEditor from "../common/PromptEditor.vue";
 
 const props = defineProps({
   segment: { type: Object, required: true },
@@ -35,7 +33,6 @@ const mentionCandidates = computed(() =>
   mergeSegmentSubjects(ws.subjects.subjects, props.segment.subjectsOverride)
 );
 const mentionTypes = computed(() => {
-  // 汇总所有类型可提及集合（不按单一父类型限制）
   const all = new Set();
   for (const arr of Object.values(REF_MENTION_TYPES)) arr.forEach((t) => all.add(t));
   return [...all];
@@ -75,10 +72,10 @@ async function addCustomSkill(groupId) {
 
 // ---- H3 提示词四段 ----
 const H3_FIELDS = [
-  { key: "summary", label: "概要 summary", rows: 3 },
-  { key: "detailed_description", label: "详细描述 detailed_description", rows: 6 },
-  { key: "overall_soundscape", label: "整体声景 overall_soundscape", rows: 2 },
-  { key: "non_diegetic_music", label: "非剧情音乐 non_diegetic_music", rows: 2 },
+  { key: "summary", label: "summary", minHeight: 56 },
+  { key: "detailed_description", label: "detailed_description", minHeight: 132 },
+  { key: "overall_soundscape", label: "overall_soundscape", minHeight: 56 },
+  { key: "non_diegetic_music", label: "non_diegetic_music", minHeight: 56 },
 ];
 
 function ensureH3() {
@@ -99,7 +96,7 @@ const h3 = computed(() => ensureH3());
 async function generateH3(lang) {
   const seg = props.segment;
   if (!(seg.prompt || "").trim()) {
-    ElMessage.warning("请先输入原生提示词");
+    ElMessage.warning("请先输入用户提示词");
     return;
   }
   translating.value = lang;
@@ -137,7 +134,7 @@ async function generateH3(lang) {
 
 <template>
   <div class="mrd-prompt-panel">
-    <!-- 左：skill + 原生提示词 -->
+    <!-- 左列：技能 + 用户提示词 -->
     <div class="mrd-native-col">
       <div class="mrd-skills">
         <div class="mrd-skills-head">
@@ -173,59 +170,51 @@ async function generateH3(lang) {
         </el-scrollbar>
       </div>
 
-      <div class="mrd-native-input">
+      <div class="mrd-native-card">
         <div class="mrd-col-title">
-          原生提示词
-          <span class="mrd-col-hint">输入 @ 或 # 可引用主体</span>
+          <div class="mrd-col-title-left">
+            用户提示词
+            <span class="mrd-col-hint">输入 @ 可引用主体</span>
+          </div>
+          <el-button
+              size="small"
+              type="primary"
+              :loading="translating === 'zh'"
+              :disabled="!!translating && translating !== 'zh'"
+              :icon="'MagicStick'"
+              @click="generateH3('zh')"
+            >转H3提示词</el-button>
         </div>
-        <MentionTextarea
-          :model-value="segment.prompt"
-          :rows="8"
-          placeholder="原生分镜提示词（可中文，支持 <@主体> / <#主体:对白> / <d>对白</d> 标签）；生成时会自动翻译"
-          :candidates="mentionCandidates"
-          :allowed-types="mentionTypes"
-          only-referencable
-          @update:model-value="v => { segment.prompt = v; ws.markDirty(); }"
-        />
+        <!-- 输入框下边框：左低右高，中间曲线连接（fill 与编辑器背景同色，视觉上是下边框本身） -->
+        <div class="mrd-curve-shell">
+          <PromptEditor
+            :model-value="segment.prompt"
+            fill
+            :min-height="120"
+            :allow-hash="false"
+            placeholder="原生分镜提示词（可中文，支持 <@主体> 标签）；生成时会自动翻译"
+            :candidates="mentionCandidates"
+            :allowed-types="mentionTypes"
+            only-referencable
+            @update:model-value="v => { segment.prompt = v; ws.markDirty(); }"
+          />
+        </div>
       </div>
     </div>
 
-    <!-- 中：生成按钮 -->
-    <div class="mrd-gen-col">
-      <el-button
-        size="small"
-        type="primary"
-        :loading="translating === 'zh'"
-        :disabled="!!translating && translating !== 'zh'"
-        :icon="'MagicStick'"
-        class="mrd-gen-btn"
-        @click="generateH3('zh')"
-      >生成中文H3<br/>提示词（中）</el-button>
-      <el-button
-        size="small"
-        type="primary"
-        :loading="translating === 'en'"
-        :disabled="!!translating && translating !== 'en'"
-        :icon="'MagicStick'"
-        class="mrd-gen-btn"
-        @click="generateH3('en')"
-      >生成英文H3<br/>提示词（英）</el-button>
-    </div>
-
-    <!-- 右：H3 提示词四段 -->
-    <div class="mrd-h3-col">
-      <div class="mrd-col-title">
-        H3 提示词
+    <!-- 右列：H3 提示词（整体一个容器） -->
+    <div class="mrd-h3-card">
+      <div class="mrd-h3-head">
+        <span class="mrd-col-title">H3 提示词</span>
         <span class="mrd-col-hint">输入 @ 或 # 可引用主体</span>
       </div>
       <el-scrollbar class="mrd-h3-scroll">
-        <div class="mrd-h3-fields">
-          <div v-for="f in H3_FIELDS" :key="f.key" class="mrd-h3-field">
-            <label>{{ f.label }}</label>
-            <MentionTextarea
+        <div class="mrd-h3-body">
+          <div v-for="f in H3_FIELDS" :key="f.key" class="mrd-h3-section">
+            <label class="mrd-h3-label">{{ f.label }}</label>
+            <PromptEditor
               :model-value="h3[f.key]"
-              :rows="f.rows"
-              :placeholder="f.key === 'summary' ? '本分镜概要' : ''"
+              :min-height="f.minHeight"
               :candidates="mentionCandidates"
               :allowed-types="mentionTypes"
               only-referencable
@@ -246,7 +235,7 @@ async function generateH3(lang) {
   gap: 10px;
   min-height: 0;
 }
-/* 左列：技能 + 原生提示词 */
+/* 左列 */
 .mrd-native-col {
   flex: 1;
   min-width: 0;
@@ -256,15 +245,14 @@ async function generateH3(lang) {
   min-height: 0;
 }
 .mrd-skills {
-  flex: 1;
-  min-height: 90px;
+  flex: none;
+  max-height: 270px;
   display: flex;
   flex-direction: column;
   background: #151821;
   border: 1px solid #222736;
   border-radius: 10px;
   padding: 10px;
-  min-height: 0;
   overflow: hidden;
 }
 .mrd-skills-head {
@@ -297,49 +285,99 @@ async function generateH3(lang) {
 .mrd-skill-pill.add { padding: 3px 8px; color: #6b7488; }
 .mrd-skill-custom { display: flex; gap: 4px; width: 100%; margin-top: 4px; }
 
-.mrd-native-input {
+.mrd-native-card {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  background: #151821;
+  border: 1px solid #222736;
+  border-radius: 10px;
+  padding: 10px;
 }
 .mrd-col-title {
   font-size: 12px; font-weight: 600; color: #a9b1c3;
   display: flex; align-items: center; gap: 8px;
 }
+.mrd-col-title-left { 
+  flex: 1;
+}
 .mrd-col-hint { font-size: 10.5px; font-weight: 400; color: #55607a; }
-.mrd-native-input .mrd-mention-wrap, .mrd-native-input :deep(.mrd-mention-wrap) { flex: 1; }
-
-/* 中列：生成按钮 */
-.mrd-gen-col {
-  flex: none;
+.mrd-curve-shell {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+}
+/* 编辑器去掉下边框，由下方 SVG 曲线充当底边 */
+.mrd-curve-shell :deep(.mrd-cm-host) {
+  border-radius: 6px 6px 0 0;
+}
+.mrd-curve-edge {
+  flex: none;
+  width: 100%;
+  height: 22px;
+  display: block;
+  margin-top: -1px;
+  pointer-events: none;
+}
+.mrd-curve-fill { fill: #151923; }
+.mrd-curve-line {
+  fill: none;
+  stroke: #2a3042;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  transition: stroke 0.15s ease;
+}
+.mrd-curve-shell:focus-within .mrd-curve-line { stroke: #6c5ce7; }
+.mrd-native-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 0 2px;
+  padding-top: 2px;
 }
-.mrd-gen-btn {
-  height: auto;
-  min-height: 56px;
-  padding: 6px 12px;
-  line-height: 1.5;
-  white-space: normal;
-  text-align: center;
-}
+.mrd-curve-caption { font-size: 10.5px; color: #55607a; }
+.mrd-gen-actions { flex: none; display: flex; gap: 8px; }
 
-/* 右列：H3 四段 */
-.mrd-h3-col {
+/* 右列：H3 卡片 */
+.mrd-h3-card {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 0;
+  background: #151821;
+  border: 1px solid #222736;
+  border-radius: 10px;
+  padding: 10px;
+  height: 100%;
 }
+.mrd-h3-head { flex: none; display: flex; align-items: baseline; gap: 8px; }
 .mrd-h3-scroll { flex: 1; min-height: 0; }
-.mrd-h3-fields { display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
-.mrd-h3-field { display: flex; flex-direction: column; gap: 4px; }
-.mrd-h3-field > label { font-size: 11.5px; color: #6b7488; }
+.mrd-h3-body { display: flex; flex-direction: column; padding-right: 4px; }
+.mrd-h3-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 10px;
+  border-bottom: 1px dashed #222736;
+}
+.mrd-h3-section:last-child { border-bottom: none; padding-bottom: 4px; }
+.mrd-h3-label {
+  font-size: 11px;
+  color: #6b7488;
+  letter-spacing: 0.3px;
+  font-family: ui-monospace, inherit;
+}
+/* H3 内嵌编辑器去边框，视觉上合并为一个整体 */
+.mrd-h3-section :deep(.mrd-cm-host) {
+  border: none;
+  background: #10131b;
+  border-radius: 4px;
+}
+.mrd-h3-section :deep(.mrd-cm-host:focus-within) { border: none; box-shadow: inset 0 0 0 1px rgba(108, 92, 231, 0.45); }
 </style>

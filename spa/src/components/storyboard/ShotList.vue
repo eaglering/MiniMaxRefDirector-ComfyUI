@@ -7,8 +7,9 @@ const props = defineProps({
   selectedId: { type: String, default: "" },
   displayMode: { type: String, default: "seconds" },
   frameRate: { type: Number, default: 24 },
+  showDeepseekImport: { type: Boolean, default: false },
 });
-const emit = defineEmits(["select", "change", "add", "duplicate", "remove"]);
+const emit = defineEmits(["select", "change", "add", "duplicate", "remove", "deepseek-import"]);
 
 const inSeconds = computed(() => props.displayMode === "seconds");
 
@@ -60,6 +61,14 @@ function onRemove(seg) {
       <span class="mrd-shotlist-title">分镜（{{ segments.length }}）</span>
       <el-button size="small" type="primary" :icon="'Plus'" @click="addShot">添加</el-button>
     </div>
+    <el-button
+      v-if="showDeepseekImport"
+      class="mrd-shotlist-dsi"
+      size="small"
+      plain
+      :icon="'ChatDotRound'"
+      @click="emit('deepseek-import')"
+    >DeepSeek 分镜导入</el-button>
 
     <el-scrollbar class="mrd-shotlist-scroll">
       <TransitionGroup name="mrd-shot">
@@ -107,6 +116,14 @@ function onRemove(seg) {
   min-height: 0;
 }
 .mrd-shotlist-head { display: flex; align-items: center; justify-content: space-between; flex: none; }
+.mrd-shotlist-dsi {
+  flex: none;
+  width: 100%;
+  border-style: dashed;
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250, 0.45);
+}
+.mrd-shotlist-dsi:hover { color: #c4b5fd; border-color: #a78bfa; background: rgba(108, 92, 231, 0.08); }
 .mrd-shotlist-title { font-size: 13px; font-weight: 600; color: #a9b1c3; }
 .mrd-shotlist-scroll { flex: 1; min-height: 0; }
 .mrd-shot-card {

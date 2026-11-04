@@ -1,14 +1,24 @@
 {
   "manifest_version": 3,
   "name": "MiniMax Ref Director — DeepSeek Bridge",
-  "version": "1.0.0",
-  "description": "Bridge between the MiniMax Director SPA page and chat.deepseek.com: routes H3 prompt generation / translation requests into the DeepSeek web chat and returns the reply.",
-  "permissions": ["tabs", "storage"],
-  "host_permissions": ["https://chat.deepseek.com/*"],
+  "version": "1.2.0",
+  "description": "Bridge between the MiniMax Director SPA page and chat.deepseek.com: routes H3 prompt generation / translation requests into the DeepSeek web chat, manages DeepSeek sessions for storyboard import, and exposes a WebSocket bridge to ComfyUI backend.",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": [
+    "https://chat.deepseek.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": ["https://chat.deepseek.com/*"],
+      "js": ["page-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": ["https://chat.deepseek.com/*"],
       "js": ["content.js"],

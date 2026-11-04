@@ -1,6 +1,8 @@
 from . import server  # registers /minimax_ref/api routes
 from . import spa_server  # registers /minimax_ref/api/spa/* routes
 
+from .lib import deepseek_bridge  # DeepSeek 扩展 WS 桥接（路由经 register_routes 注册）
+
 from .subject import MiniMaxRefSubject
 from .director import MiniMaxRefDirector
 from .guide import MiniMaxRefGuide
@@ -71,6 +73,13 @@ WEB_DIRECTORY = "./js"
 try:
     from .server import _LazyRoutes
     _LazyRoutes.flush()
+except Exception:
+    pass
+
+# DeepSeek 扩展 WS 桥接路由（若 PromptServer 尚未就绪则保持待注册，下次导入再试）
+try:
+    from .lib import deepseek_bridge as _deepseek_bridge
+    _deepseek_bridge.register_routes()
 except Exception:
     pass
 

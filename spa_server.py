@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import traceback
@@ -29,6 +30,77 @@ log = logging.getLogger(__name__)
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SPA_HTML_PATH = os.path.join(_PROJECT_ROOT, "js", "spa", "index.html")
+
+# --- FastDirector-Desktop skill 词库目录（deepseek 分镜导入用）---
+# 优先级：环境变量 MINIMAX_REF_SKILL_LIBRARY > custom_nodes 下的同仓目录 > 绝对路径兜底
+_SKILL_LIBRARY_CANDIDATES = [
+    os.environ.get("MINIMAX_REF_SKILL_LIBRARY", ""),
+    os.path.join(_PROJECT_ROOT, "..", "ComfyUI-FastDirector-Desktop", "resources", "skills"),
+    r"D:\workspace\ComfyUI_windows_portable\ComfyUI\custom_nodes\ComfyUI-FastDirector-Desktop\resources\skills",
+]
+_SKILL_LIBRARY_ROOT = next((p for p in _SKILL_LIBRARY_CANDIDATES if p and os.path.isdir(p)), "")
+
+_SKILL_NAMES = (
+    "story-design", "storyboard-design", "h3-prompt-convert",
+    "character-design", "scene-design", "audio-design",
+)
+
+
+def _resolve_skill_dir(name: str) -> str:
+    """按白名单校验 skill 名并返回其目录，防止路径穿越。"""
+    if not name or name not in _SKILL_NAMES:
+        raise ValueError(f"未知 skill：{name or '(空)'}，可用：{', '.join(_SKILL_NAMES)}")
+    if not _SKILL_LIBRARY_ROOT:
+        raise ValueError(
+            "skill 词库目录不存在：请安装 ComfyUI-FastDirector-Desktop，"
+            "或设置环境变量 MINIMAX_REF_SKILL_LIBRARY 指向其 resources/skills 目录"
+        )
+    d = os.path.join(_SKILL_LIBRARY_ROOT, name)
+    if not os.path.isdir(d):
+        raise ValueError(f"skill 目录缺失：{d}")
+    return d
+
+
+@_routes.get(f"{API_PREFIX}/spa/skill_library")
+async def spa_skill_library(request: web.Request) -> web.Response:
+    """FastDirector-Desktop skills 词库：无 name 时返回清单；有 name 时返回 prompt.md 全文。"""
+    try:
+        name = (request.query.get("name") or "").strip()
+        if not name:
+            skills = []
+            if _SKILL_LIBRARY_ROOT:
+                for n in _SKILL_NAMES:
+                    try:
+                        d = _resolve_skill_dir(n)
+                        meta = {}
+                        meta_path = os.path.join(d, "skill.json")
+                        if os.path.isfile(meta_path):
+                            with open(meta_path, "r", encoding="utf-8-sig") as f:
+                                meta = json.load(f) or {}
+                        skills.append({
+                            "name": n,
+                            "description": meta.get("description") or meta.get("title") or "",
+                        })
+                    except ValueError:
+                        skills.append({"name": n, "description": "", "missing": True})
+            return web.json_response({
+                "success": True,
+                "root": _SKILL_LIBRARY_ROOT,
+                "skills": skills,
+            })
+        d = _resolve_skill_dir(name)
+        prompt_path = os.path.join(d, "prompt.md")
+        if not os.path.isfile(prompt_path):
+            return web.json_response(
+                {"success": False, "error": f"skill 缺少 prompt.md：{prompt_path}"}, status=404)
+        with open(prompt_path, "r", encoding="utf-8-sig") as f:
+            prompt_md = f.read()
+        return web.json_response({"success": True, "name": name, "prompt": prompt_md})
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
 def _send_spa_state(node_id: str, state: dict) -> None:
