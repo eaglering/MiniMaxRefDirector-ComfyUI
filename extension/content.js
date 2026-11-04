@@ -80,10 +80,16 @@
     if (!msg || !msg.type) return;
     switch (msg.type) {
       case "ds/ping":
-        sendResponse({ pong: true });
+        // 附带版本：background 据此发现"扩展重载后未刷新的旧标签页"并自动 reload
+        sendResponse({ pong: true, v: chrome.runtime.getManifest().version });
         return;
       case "ds/probe":
         sendResponse(probe());
+        return;
+      case "ds/cancel":
+        // 用户在导入界面点了取消：中止当前 fill 的等待循环
+        cancelFlag = true;
+        sendResponse({ cancelled: true });
         return;
       case "ds/fill":
         handleFill(msg.id, msg.text || "", msg.opts || {});
@@ -116,12 +122,21 @@
     }
   }
 
+  // 从页面 URL 解析当前会话 id：/a/chat/s/<id>（发送首条消息后 DeepSeek 会跳到会话页）
+  function currentChatId() {
+    const m = (location.pathname || "").match(/\/a\/chat\/s\/([0-9A-Za-z_-]+)/);
+    return m ? m[1] : "";
+  }
+
   function reply(id, ok, text, error) {
     if (id === currentFillId) {
       stage(ok ? "replied" : "reply_error", error || "");
       currentFillId = "";
     }
-    chrome.runtime.sendMessage({ type: "ds/reply", id, ok, text: text || "", error: error || "" });
+    chrome.runtime.sendMessage({
+      type: "ds/reply", id, ok, text: text || "", error: error || "",
+      chatId: currentChatId(),
+    });
   }
 
   // ---------- 站内 API ----------
@@ -283,14 +298,35 @@
 
   // ---------- DOM 定位 ----------
 
+  // 输入框候选打分：全页收集可见 textarea / contenteditable，按线索排序，
+  // 避免选到页面里其他可见的文本框（曾出现"找到输入框但页面毫无输入"的错选）
+  function inputCandidates() {
+    const els = [...document.querySelectorAll("textarea, div[contenteditable='true']")];
+    return els
+      .filter((el) => {
+        if (!isVisible(el)) return false;
+        const r = el.getBoundingClientRect();
+        return r.width >= 40 && r.height >= 16;
+      })
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        const id = String(el.id || "").toLowerCase();
+        const cls = String(el.className || "").toLowerCase();
+        const ph = el.getAttribute("placeholder") || "";
+        let score = 0;
+        if (id === "chat-input") score += 100;
+        if (/chat|input|prompt|composer/.test(`${id} ${cls}`)) score += 20;
+        if (ph) score += 10;
+        if (el.tagName === "TEXTAREA") score += 5;
+        score += Math.min(30, Math.round((r.width * r.height) / 4000));
+        return { el, score, tag: el.tagName, id: el.id || "", placeholder: ph, w: Math.round(r.width), h: Math.round(r.height) };
+      })
+      .sort((a, b) => b.score - a.score);
+  }
+
   function findInput() {
-    // 新版：textarea（id 可能是 chat-input 或 class 随机）；旧版/兼容：contenteditable
-    const ta = document.querySelector(
-      "textarea#chat-input, textarea[placeholder], div[contenteditable='true'][role='textbox']"
-    );
-    if (ta) return ta;
-    const ces = [...document.querySelectorAll("div[contenteditable='true']")];
-    return ces.length ? ces[ces.length - 1] : null;
+    const list = inputCandidates();
+    return list.length ? list[0].el : null;
   }
 
   function isVisible(el) {
@@ -354,6 +390,10 @@
     const input = findInput();
     const btn = input ? findSendButton(input) : null;
     const blocks = assistantBlocks();
+    const cands = inputCandidates().slice(0, 5).map((c) => ({
+      tag: c.tag, id: c.id || "", placeholder: (c.placeholder || "").slice(0, 24),
+      size: `${c.w}x${c.h}`, score: c.score,
+    }));
     return {
       ok: true,
       data: {
@@ -361,6 +401,7 @@
         title: document.title,
         inputFound: !!input,
         inputKind: input ? input.tagName : "",
+        inputCandidates: cands,
         sendButtonFound: !!btn,
         sendButtonLabel: btn
           ? (btn.getAttribute("aria-label") || btn.getAttribute("title") || "").slice(0, 40)
@@ -421,6 +462,7 @@
   // opts.noNewChat: true → 在当前会话内发送（会话复用模式，由 background 负责导航）
   async function handleFill(id, text, opts) {
     currentFillId = id;
+    cancelFlag = false;
     stage("fill_start", `${location.pathname} reuse=${!!opts.noNewChat}`);
     try {
       // 1) 默认开新会话（避免上下文污染；失败忽略）
@@ -490,6 +532,12 @@
       while (Date.now() < deadline) {
         await sleep(600);
 
+        // 用户取消：立即中止
+        if (cancelFlag) {
+          reply(id, false, "", "已取消");
+          return;
+        }
+
         // 主通道：SSE 已结束且有正文 → 直接返回（不依赖 DOM）
         if (sse.doneAt && sse.text.trim()) {
           stage("reply_via_sse", `chars=${sse.text.length}`);
@@ -551,7 +599,29 @@
     return null;
   }
 
+  // 等待：经 background SW 计时。页面隐藏时本地 setTimeout 会被浏览器节流到
+  // 最长 1 次/分钟（表现为"卡住"），SW 计时不受影响；SW 不可达时退回本地定时器。
   function sleep(ms) {
-    return new Promise((r) => setTimeout(r, ms));
+    return new Promise((resolve) => {
+      let fallback = null;
+      const finish = () => {
+        if (fallback) clearTimeout(fallback);
+        resolve();
+      };
+      try {
+        chrome.runtime.sendMessage({ type: "ds/wait", ms }, () => {
+          void chrome.runtime.lastError; // SW 无监听等异常：走兜底
+          finish();
+        });
+      } catch {
+        setTimeout(finish, ms);
+        return;
+      }
+      // 兜底：SW 无响应时（异常情况）避免永久挂起；正常路径会先被回包唤醒
+      fallback = setTimeout(finish, Math.min(ms + 8000, 20_000));
+    });
   }
+
+  // 用户取消：由 background 的 ds/cancel 置位，等待循环里检查
+  let cancelFlag = false;
 })();

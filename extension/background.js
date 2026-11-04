@@ -25,6 +25,7 @@ const DEFAULT_BRIDGE_URL = "ws://127.0.0.1:8188/minimax_ref/api/deepseek/bridge"
 const HEARTBEAT_MS = 20_000;
 const EXT_SOURCE = "comfy-minimax-ref";
 const EXT_RESP_SOURCE = "comfy-minimax-ref-ext";
+const EXT_VERSION = chrome.runtime.getManifest().version;
 
 // id → { sendResponse, timer }
 const pending = new Map();
@@ -37,23 +38,69 @@ let lastAttempt = null;
 async function ensureDeepSeekTab() {
   const tabs = await chrome.tabs.query({ url: "https://chat.deepseek.com/*" });
   if (tabs.length > 0) {
-    const active = tabs.find((t) => !t.discarded) || tabs[0];
-    return active;
+    // 用户正在看的（active）标签页优先；不强制激活、不抢焦点——
+    // 隐藏标签页的定时器节流已由 ds/wait（SW 计时）规避，后台操作完全可靠
+    const active = tabs.find((t) => t.active && !t.discarded);
+    if (active) return active;
+    return tabs.find((t) => !t.discarded) || tabs[0];
   }
   return chrome.tabs.create({ url: DEEPSEEK_URL, active: false });
 }
 
-// 等待 content script 就绪（新开/导航后的页面需要加载时间）
+// 等待 content script 就绪（新开/导航后的页面需要加载时间）。
+// 关键：扩展「重新加载」后，已打开的标签页仍运行旧版 content script（不会自动更新），
+// ping 回包带版本号，发现不一致就 reload 该标签页 —— 消除"页面毫无反应"的隐性故障。
 async function waitForContent(tabId, rounds = 30) {
+  let reloaded = false;
   for (let i = 0; i < rounds; i++) {
     try {
-      await chrome.tabs.sendMessage(tabId, { type: "ds/ping" });
-      return true;
+      const resp = await chrome.tabs.sendMessage(tabId, { type: "ds/ping" });
+      if (resp && resp.pong) {
+        if (resp.v && resp.v !== EXT_VERSION && !reloaded) {
+          reloaded = true;
+          await chrome.tabs.reload(tabId);
+          await new Promise((r) => setTimeout(r, 2500));
+          continue;
+        }
+        return true;
+      }
     } catch {
-      await new Promise((r) => setTimeout(r, 1000));
+      // content 未注入或页面正在加载
     }
+    await new Promise((r) => setTimeout(r, 1000));
   }
   return false;
+}
+
+// 阶段流水：runComplete 主链路的关键节点（供「页面自检」与运行中轮询展示）
+function noteStage(stage, detail = "") {
+  if (!lastAttempt) return;
+  lastAttempt.stages.push({ at: Date.now(), stage, detail });
+  if (lastAttempt.stages.length > 40) lastAttempt.stages.shift();
+}
+
+// 用户取消：把所有挂起请求立即以错误回包，并通知 content 停止等待
+function cancelAllPending(reason) {
+  let n = 0;
+  for (const [id, entry] of Array.from(pending.entries())) {
+    pending.delete(id);
+    clearTimeout(entry.timer);
+    try {
+      entry.sendResponse({ source: EXT_RESP_SOURCE, id, ok: false, error: reason });
+    } catch {
+      // 调用方已断开
+    }
+    n++;
+  }
+  noteStage("cancelled", `pending=${n}`);
+  ensureDeepSeekTab()
+    .then((tab) => {
+      if (tab && tab.id != null) {
+        chrome.tabs.sendMessage(tab.id, { type: "ds/cancel" }).catch(() => {});
+      }
+    })
+    .catch(() => {});
+  return n;
 }
 
 async function ensureReadyTab() {
@@ -116,18 +163,21 @@ async function runComplete(id, payload, sendResponse) {
       resolvePending(id, { ok: false, error: "无法打开 chat.deepseek.com 标签页" });
       return;
     }
+    noteStage("tab_ready", `tab=${tab.id}`);
 
     if (sessionMode === "reuse" && chatId) {
       // 复用指定会话：必要时导航到该会话页面（页面重载后 content 重新注入）
       const target = DEEPSEEK_CHAT_URL(chatId);
       const cur = (tab.url || "").split("#")[0].split("?")[0];
       if (cur !== target) {
+        noteStage("navigating", `${target.slice(-32)}`);
         await chrome.tabs.update(tab.id, { url: target });
         const ready = await waitForContent(tab.id, 90);
         if (!ready) {
           resolvePending(id, { ok: false, error: "DeepSeek 会话页面未就绪（未登录或会话不存在）" });
           return;
         }
+        noteStage("nav_done");
         // 会话页需要加载历史消息，留出渲染时间
         await new Promise((r) => setTimeout(r, 1500));
       } else {
@@ -137,14 +187,21 @@ async function runComplete(id, payload, sendResponse) {
           return;
         }
       }
+      noteStage("fill_sent");
       await chrome.tabs.sendMessage(tab.id, { type: "ds/fill", id, text, expectJson, opts: { noNewChat: true } });
     } else {
-      // 默认：每次尽量先点「开启新对话」避免上下文污染
-      const ready = await waitForContent(tab.id);
+      // 默认：新会话模式。先回首页再点「开启新对话」——即使按钮定位失败，
+      // 从首页发送也会自动创建新会话，绝不会污染用户当前打开的会话。
+      if ((tab.url || "").indexOf("/a/chat/s/") >= 0) {
+        noteStage("go_home");
+        await chrome.tabs.update(tab.id, { url: DEEPSEEK_URL });
+      }
+      const ready = await waitForContent(tab.id, 60);
       if (!ready) {
         resolvePending(id, { ok: false, error: "DeepSeek 页面未就绪（未登录或页面加载失败）" });
         return;
       }
+      noteStage("fill_sent");
       await chrome.tabs.sendMessage(tab.id, { type: "ds/fill", id, text, expectJson });
     }
     // 应答由 content script 经 ds/reply 异步回传
@@ -174,7 +231,16 @@ async function sessionOp(msg, sendResponse, contentType, extra) {
 
 async function runDiag(sendResponse) {
   const resp = { source: EXT_RESP_SOURCE, ok: true, data: {} };
+  resp.data.version = EXT_VERSION;
   try {
+    // 列出全部 DeepSeek 标签页：多个标签页时容易"填错页"，诊断时一目了然
+    const all = await chrome.tabs.query({ url: "https://chat.deepseek.com/*" });
+    resp.data.tabs = all.map((t) => ({
+      id: t.id,
+      active: !!t.active,
+      discarded: !!t.discarded,
+      url: (t.url || "").replace("https://chat.deepseek.com", "") || "/",
+    }));
     const tab = await ensureDeepSeekTab();
     resp.data.tabId = tab && tab.id != null ? tab.id : null;
     resp.data.tabUrl = (tab && tab.url) || "";
@@ -260,7 +326,16 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
 
     // 轻量阶段查询（无副作用，供运行中轮询显示进度）
     case "deepseek/attempt":
-      sendResponse({ source: EXT_RESP_SOURCE, ok: true, data: { lastAttempt } });
+      sendResponse({ source: EXT_RESP_SOURCE, ok: true, data: { version: EXT_VERSION, lastAttempt } });
+      return false;
+
+    // 取消：立即回包所有挂起请求并通知 content 停止
+    case "deepseek/cancel":
+      sendResponse({
+        source: EXT_RESP_SOURCE,
+        ok: true,
+        data: { version: EXT_VERSION, cancelled: cancelAllPending("已取消（用户在导入界面点击取消）") },
+      });
       return false;
 
     default:
@@ -268,11 +343,32 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
   }
 });
 
-// content script → SW：回传生成结果
-chrome.runtime.onMessage.addListener((msg) => {
+// content script → SW：回传生成结果 / 阶段上报 / 计时代理
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || !msg.type) return;
+
+  // 计时代理：页面隐藏时本地 setTimeout 会被节流（最长 1 次/分钟），
+  // 由 SW 计时并回包，content 的等待不再受标签页可见性影响
+  if (msg.type === "ds/wait") {
+    const ms = Math.max(0, Math.min(Number(msg.ms) || 0, 10_000));
+    setTimeout(() => {
+      try {
+        sendResponse({ ok: true });
+      } catch {
+        // 页面已关闭
+      }
+    }, ms);
+    return true;
+  }
+
   if (msg.type === "ds/reply" && msg.id) {
-    resolvePending(msg.id, { ok: !!msg.ok, text: msg.text || "", error: msg.error || "" });
+    // chat_id：content 从页面 URL 解析的当前会话 id（新会话模式的取号方式）
+    resolvePending(msg.id, {
+      ok: !!msg.ok,
+      text: msg.text || "",
+      error: msg.error || "",
+      chat_id: msg.chatId || "",
+    });
     return;
   }
   // 阶段上报：记录到 lastAttempt，供「页面自检」展示卡点

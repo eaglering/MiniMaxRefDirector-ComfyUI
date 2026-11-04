@@ -177,8 +177,17 @@ _LazyRoutes.flush()
 async def save_api_config(request: web.Request) -> web.Response:
     """Persist the full API configuration from the Settings panel."""
     try:
-        data = await request.json()
-        config = data.get("config", {})
+        body = await request.read()
+        if not body:
+            # 页面刷新/关闭时被中断的在途保存请求会以空 body 到达，干净拒绝即可
+            return web.json_response(
+                {"success": False, "error": "empty request body"}, status=400)
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return web.json_response(
+                {"success": False, "error": "invalid JSON body"}, status=400)
+        config = (data.get("config") if isinstance(data, dict) else None) or {}
         api_config_manager.save_config(config)
         return web.json_response({"success": True})
     except Exception as e:

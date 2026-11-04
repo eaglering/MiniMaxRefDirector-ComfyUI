@@ -143,7 +143,6 @@ function upsertSubject(entry, type) {
   if (entry.retention) target.retention = String(entry.retention);
   if (entry.relationship) target.relationship = String(entry.relationship);
   if (entry.audioRef) target.audioRef = String(entry.audioRef);
-  if (entry.mediaPrompt) target.mediaPrompt = String(entry.mediaPrompt);
   return true;
 }
 
@@ -162,10 +161,12 @@ function onDeepseekImported(result) {
     if (Array.isArray(shot.camera_motions)) seg.cameraMotions = shot.camera_motions.filter(Boolean);
     if (Array.isArray(shot.shot_sizes)) seg.shotSizes = shot.shot_sizes.filter(Boolean);
     if (Array.isArray(shot.framings)) seg.framings = shot.framings.filter(Boolean);
+    if (Array.isArray(shot.expressions)) seg.expressions = shot.expressions.filter(Boolean);
     // 首/尾帧提示词：自定义字段（parseInitial 保留未知字段，供后续首尾帧图生成使用）
     if (shot.first_frame_prompt) seg.firstFramePrompt = String(shot.first_frame_prompt);
     if (shot.last_frame_prompt) seg.lastFramePrompt = String(shot.last_frame_prompt);
-    if (typeof shot.guide_strength === "number") seg.guide_strength = shot.guide_strength;
+    // 跨镜头衔接引导强度（分镜参数 guideStrength，缺省 22）
+    if (typeof shot.guide_strength === "number") seg.guideStrength = shot.guide_strength;
     if (shot.h3) {
       seg.h3PromptJson = {
         summary: String(shot.h3.summary || ""),
@@ -173,8 +174,6 @@ function onDeepseekImported(result) {
         overall_soundscape: String(shot.h3.overall_soundscape || ""),
         non_diegetic_music: String(shot.h3.non_diegetic_music || ""),
       };
-      if (shot.h3Cn) seg.h3Cn = String(shot.h3Cn);
-      if (shot.h3En) seg.h3En = String(shot.h3En);
     } else {
       seg.h3PromptJson = emptyH3();
     }

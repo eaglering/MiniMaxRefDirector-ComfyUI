@@ -31,18 +31,17 @@ log = logging.getLogger(__name__)
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SPA_HTML_PATH = os.path.join(_PROJECT_ROOT, "js", "spa", "index.html")
 
-# --- FastDirector-Desktop skill 词库目录（deepseek 分镜导入用）---
-# 优先级：环境变量 MINIMAX_REF_SKILL_LIBRARY > custom_nodes 下的同仓目录 > 绝对路径兜底
+# --- skill 词库目录（本项目自带，deepseek 分镜导入用）---
+# 优先级：环境变量 MINIMAX_REF_SKILL_LIBRARY > 项目内 resources/skills
 _SKILL_LIBRARY_CANDIDATES = [
     os.environ.get("MINIMAX_REF_SKILL_LIBRARY", ""),
-    os.path.join(_PROJECT_ROOT, "..", "ComfyUI-FastDirector-Desktop", "resources", "skills"),
-    r"D:\workspace\ComfyUI_windows_portable\ComfyUI\custom_nodes\ComfyUI-FastDirector-Desktop\resources\skills",
+    os.path.join(_PROJECT_ROOT, "resources", "skills"),
 ]
 _SKILL_LIBRARY_ROOT = next((p for p in _SKILL_LIBRARY_CANDIDATES if p and os.path.isdir(p)), "")
 
 _SKILL_NAMES = (
-    "story-design", "storyboard-design", "h3-prompt-convert",
-    "character-design", "scene-design", "audio-design",
+    "story-design", "storyboard-design", "firstframe-design",
+    "character-design", "audio-design",
 )
 
 
@@ -52,8 +51,8 @@ def _resolve_skill_dir(name: str) -> str:
         raise ValueError(f"未知 skill：{name or '(空)'}，可用：{', '.join(_SKILL_NAMES)}")
     if not _SKILL_LIBRARY_ROOT:
         raise ValueError(
-            "skill 词库目录不存在：请安装 ComfyUI-FastDirector-Desktop，"
-            "或设置环境变量 MINIMAX_REF_SKILL_LIBRARY 指向其 resources/skills 目录"
+            "skill 词库目录不存在：请确认 custom_nodes/MiniMaxRefDirector-ComfyUI/resources/skills，"
+            "或设置环境变量 MINIMAX_REF_SKILL_LIBRARY 指向词库目录"
         )
     d = os.path.join(_SKILL_LIBRARY_ROOT, name)
     if not os.path.isdir(d):
@@ -61,9 +60,28 @@ def _resolve_skill_dir(name: str) -> str:
     return d
 
 
+async def _read_json_body(request: web.Request) -> dict:
+    """读取 JSON 请求体。空 body / 非法 JSON / 非对象一律返回 {}
+
+    页面刷新或关闭时，浏览器会中断在途的保存请求，服务端会收到只有
+    头没有 body 的 POST——直接 400 干净返回，不打 traceback 吓人。
+    """
+    try:
+        body = await request.read()
+    except Exception:
+        return {}
+    if not body:
+        return {}
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 @_routes.get(f"{API_PREFIX}/spa/skill_library")
 async def spa_skill_library(request: web.Request) -> web.Response:
-    """FastDirector-Desktop skills 词库：无 name 时返回清单；有 name 时返回 prompt.md 全文。"""
+    """skill 词库：无 name 时返回清单；有 name 时返回该 skill 的 prompt.md 全文。"""
     try:
         name = (request.query.get("name") or "").strip()
         if not name:
@@ -123,7 +141,7 @@ def _send_spa_state(node_id: str, state: dict) -> None:
 async def spa_push(request: web.Request) -> web.Response:
     """入口节点打开页面前推送初始状态（仅落盘，不通知回写）。"""
     try:
-        data = await request.json()
+        data = await _read_json_body(request)
         node_id = str(data.get("node_id") or "")
         state = data.get("state") or {}
         if not node_id:
@@ -156,7 +174,7 @@ async def spa_get_state(request: web.Request) -> web.Response:
 async def spa_save(request: web.Request) -> web.Response:
     """SPA 保存：落盘 + send_sync 通知 ComfyUI 页面按 node_id 回写 widget。"""
     try:
-        data = await request.json()
+        data = await _read_json_body(request)
         node_id = str(data.get("node_id") or "")
         state = data.get("state") or {}
         if not node_id:
@@ -179,7 +197,7 @@ async def spa_get_skills(request: web.Request) -> web.Response:
 @_routes.post(f"{API_PREFIX}/spa/skills")
 async def spa_save_skills(request: web.Request) -> web.Response:
     try:
-        data = await request.json()
+        data = await _read_json_body(request)
         cleaned = spa_store.save_skills(data.get("skills") or {})
         return web.json_response({"success": True, "skills": cleaned})
     except Exception as e:
@@ -214,7 +232,7 @@ async def spa_records(request: web.Request) -> web.Response:
 @_routes.post(f"{API_PREFIX}/spa/records/delete")
 async def spa_records_delete(request: web.Request) -> web.Response:
     try:
-        data = await request.json()
+        data = await _read_json_body(request)
         removed = records_lib.delete_records(data.get("ids") or [])
         return web.json_response({"success": True, "removed": removed})
     except Exception as e:

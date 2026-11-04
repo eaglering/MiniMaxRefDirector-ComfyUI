@@ -225,6 +225,29 @@ export async function deepseekCompleteInSession(
   return String(resp.text || "");
 }
 
+// 在全新会话内完成一次生成（扩展先回首页、点「开启新对话」再发送）。
+// 返回 { text, chatId }：chatId 从发送后的页面 URL 解析，供后续步骤复用该会话。
+export async function deepseekCompleteNewSession(
+  extensionId,
+  { system = "", prompt = "", expectJson = false, timeoutMs = 180_000 }
+) {
+  const resp = await extSend(
+    extensionId,
+    {
+      type: "deepseek/complete",
+      payload: { system, prompt, expectJson, session_mode: "new" },
+    },
+    timeoutMs
+  );
+  if (!resp.ok) {
+    const hint = /超时/.test(resp?.error || "")
+      ? "（可点「页面自检」确认输入框/发送按钮是否可定位）"
+      : "";
+    throw new Error(`${resp?.error || "DeepSeek 桥接调用失败"}${hint}`);
+  }
+  return { text: String(resp.text || ""), chatId: String(resp.chat_id || "") };
+}
+
 // 页面自检：返回 DeepSeek 标签页与页面定位状态，便于快速排查
 export async function deepseekDiag(extensionId) {
   const resp = await extSend(extensionId, { type: "deepseek/diag" }, 60_000);
@@ -236,6 +259,12 @@ export async function deepseekDiag(extensionId) {
 export async function deepseekAttempt(extensionId) {
   const resp = await extSend(extensionId, { type: "deepseek/attempt" }, 8_000);
   return resp.ok ? resp.data || {} : {};
+}
+
+// 取消：让扩展立即中止所有挂起的生成请求（等待回复中的内容脚本也会停）
+export async function deepseekCancel(extensionId) {
+  const resp = await extSend(extensionId, { type: "deepseek/cancel" }, 10_000);
+  return resp.ok ? (resp.data && resp.data.cancelled) || 0 : 0;
 }
 
 // 配置扩展的 ComfyUI WS 桥接地址（后端执行期通道）

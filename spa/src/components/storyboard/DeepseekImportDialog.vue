@@ -6,7 +6,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
-import { deepseekAttempt, deepseekDiag, deepseekListSessions } from "../../utils/llm.js";
+import { deepseekAttempt, deepseekCancel, deepseekDiag, deepseekListSessions } from "../../utils/llm.js";
 import { IMPORT_STEPS, createImportToken, runDeepseekImport } from "../../utils/deepseekImport.js";
 
 const props = defineProps({
@@ -60,9 +60,18 @@ async function runDiag() {
     const d = await deepseekDiag(extId.value);
     const p = d.probe || {};
     const lines = [
+      `扩展版本：v${d.version || "未知"}${d.version && d.version < "1.3.4" ? "（过旧，请在 chrome://extensions 重新加载扩展）" : ""}`,
       `标签页：${d.tabUrl || "（未找到 chat.deepseek.com 标签页）"}`,
+      `DeepSeek 标签页共 ${(d.tabs || []).length} 个：${
+        (d.tabs || []).map((t) => `#${t.id}${t.active ? "（当前）" : t.discarded ? "（已丢弃）" : ""}${t.url}`).join("、") || "-"
+      }${(d.tabs || []).length > 1 ? "——建议关掉多余标签页，只留一个，避免填错页" : ""}`,
       `content 脚本就绪：${d.contentReady ? "是" : "否"}`,
       `输入框：${p.inputFound ? `已找到（${p.inputKind || "?"}）` : "未找到"}`,
+      `输入框候选：${
+        (p.inputCandidates || [])
+          .map((c) => `${c.tag}${c.id ? `#${c.id}` : ""}${c.placeholder ? `“${c.placeholder}”` : ""} ${c.size}（${c.score} 分）`)
+          .join("；") || "无"
+      }`,
       `发送按钮：${p.sendButtonFound ? `已找到${p.sendButtonLabel ? `（${p.sendButtonLabel}）` : ""}` : "未找到"}`,
       `回复区文本块：${p.assistantBlocks ?? 0} 个`,
       `回复流钩子：${p.hookInstalled ? "已注入" : "未注入"}` +
@@ -133,7 +142,12 @@ const stageText = ref("");
 let stageTimer = null;
 const STAGE_LABELS = {
   queued: "已排队",
+  tab_ready: "已连接 DeepSeek 标签页",
+  go_home: "正在回到首页开新会话",
+  navigating: "正在打开会话页面",
+  nav_done: "会话页面已就绪",
   fill_start: "打开会话 / 定位页面",
+  fill_sent: "已派发填充任务",
   input_ready: "已找到输入框",
   written: "已写入输入框",
   sent: "已发送，等待回复",
@@ -148,6 +162,7 @@ const STAGE_LABELS = {
   write_failed: "写入输入框失败",
   send_failed: "发送失败",
   timeout: "等待超时",
+  cancelled: "已取消",
   exception: "页面执行异常",
 };
 
@@ -166,6 +181,7 @@ function startElapsed() {
       const stages = (d && d.lastAttempt && d.lastAttempt.stages) || [];
       const last = stages[stages.length - 1];
       if (last) stageText.value = STAGE_LABELS[last.stage] || last.stage;
+      else if (d && d.version) stageText.value = `扩展 v${d.version}（暂无阶段上报）`;
     } catch {
       // 忽略轮询失败
     }
@@ -268,9 +284,16 @@ async function startImport() {
   }
 }
 
-function cancelImport() {
+async function cancelImport() {
   if (tokenRef.value) tokenRef.value.cancelled = true;
-  addLog("warn", "已请求取消，等待当前请求结束后中止…");
+  addLog("warn", "已请求取消，正在中止当前请求…");
+  try {
+    const n = await deepseekCancel(extId.value);
+    addLog("warn", `已向扩展发送取消（挂起请求 ${n} 个），页面侧等待也会立即停止`);
+  } catch {
+    // 旧版扩展无此消息类型：仍会在当前请求结束后由令牌中止
+    addLog("warn", "扩展未响应取消指令（可能为旧版本），将在当前请求结束后中止");
+  }
 }
 
 function close() {

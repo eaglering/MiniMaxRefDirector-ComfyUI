@@ -1,17 +1,19 @@
 // ===== DeepSeek 分镜导入流水线 =====
 // 在用户选定的 DeepSeek 会话内用 story-design skill 提取故事大纲（利用会话完整
-// 上下文），随后删除本次新增的 skill 输入与模型返回（恢复会话原状），新建一个
-// 会话依次完成分镜 / 主体 / 场景 / 音频 / 首帧提示词，再逐镜循环 h3-prompt-convert
-// 完成 H3 四字段转换。全部经浏览器扩展桥接 chat.deepseek.com，不使用 llama-cpp。
+// 上下文），随后删除本次新增的 skill 输入与模型返回（恢复会话原状）；分镜设计在
+// 一个全新会话内完成（发送后从页面 URL 取得新会话 id），主体设计 / 首帧图提示词 /
+// 音频设计在该新会话内依次进行；H3 转换复用本项目自身的 deepseekGenerateH3 链路
+// （与「分镜属性 → H3 生成」按钮同一套提示词）。全部经浏览器扩展桥接
+// chat.deepseek.com，不使用 llama-cpp。
 //
-// skills 词库来自 FastDirector-Desktop resources/skills（后端 /spa/skill_library）。
+// skills 词库为本项目 resources/skills（后端 /spa/skill_library）。
 
 import { fetchSkillLibrary } from "../api/client.js";
 import {
-  deepseekComplete,
   deepseekCompleteInSession,
+  deepseekCompleteNewSession,
   deepseekDeleteMessages,
-  deepseekNewSession,
+  deepseekGenerateH3,
   deepseekReadSession,
   parseJsonBlock,
 } from "./llm.js";
@@ -19,15 +21,15 @@ import {
 // 进度步骤（与 DeepseekImportDialog 的 el-steps 一一对应）
 export const IMPORT_STEPS = [
   { key: "outline", label: "故事大纲" },
-  { key: "clean", label: "清理会话并新建" },
-  { key: "storyboard", label: "分镜提取" },
-  { key: "subjects", label: "主体与场景" },
+  { key: "clean", label: "清理会话" },
+  { key: "storyboard", label: "分镜设计" },
+  { key: "subjects", label: "主体设计" },
+  { key: "firstframe", label: "首帧图提示词" },
   { key: "audio", label: "音频设计" },
-  { key: "firstframe", label: "首帧提示词" },
-  { key: "h3", label: "H3 循环转换" },
+  { key: "h3", label: "H3 转换" },
 ];
 
-// 取消令牌：dialog 的「取消」按钮置 token.cancelled = true
+// 取消令牌：dialog 的「取消」按钮置 token.cancelled = true（并调 deepseekCancel）
 export function createImportToken() {
   return { cancelled: false };
 }
@@ -39,7 +41,7 @@ function checkCancelled(token) {
 async function loadSkill(name) {
   const res = await fetchSkillLibrary(name);
   if (!res.success || !res.prompt) {
-    throw new Error(res.error || `skill 词库缺失：${name}（请安装 ComfyUI-FastDirector-Desktop）`);
+    throw new Error(res.error || `skill 词库缺失：${name}（resources/skills/${name}/prompt.md）`);
   }
   return res.prompt;
 }
@@ -65,6 +67,15 @@ function storyDigest(outline) {
   return parts.join("\n");
 }
 
+// 大纲中的出场主体清单 → 主体设计的参考输入
+function castDigest(outline) {
+  const list = Array.isArray(outline.subjects) ? outline.subjects : [];
+  if (!list.length) return "（大纲未列出主体，请从剧情中自行归纳）";
+  return list
+    .map((s) => `- ${s.name || "(未命名)"}（${s.type || "Character"}）：${(s.description || "").slice(0, 80)}`)
+    .join("\n");
+}
+
 // 单次会话内生成并解析 JSON（失败时附带原文摘录，便于排查）
 async function genJsonInSession(extId, chatId, prompt) {
   const text = await deepseekCompleteInSession(extId, { prompt, chatId, expectJson: true });
@@ -83,7 +94,7 @@ async function genJsonInSession(extId, chatId, prompt) {
  * @param {object} opts
  *   - extensionId: string            DeepSeek 桥接扩展 ID
  *   - sessionId: string              用户选定的 DeepSeek 会话 id
- *   - timelineDigest: string         当前时间线摘要（供 skills 的 {{timeline_digest}}）
+ *   - timelineDigest: string         当前时间线摘要（供 storyboard-design 的 {{timeline_digest}}）
  *   - existingSubjects: array        现有主体（character-design 的 {{characters}}）
  *   - token: { cancelled: boolean }  取消令牌
  *   - onStep(key, status)            步骤状态回调：running | done | warn | error
@@ -106,105 +117,83 @@ export async function runDeepseekImport(opts) {
   const extId = String(extensionId || "").trim();
   if (!extId) throw new Error("未配置 DeepSeek 桥接扩展 ID（全局参数 → LLM 设置）");
 
-  const charactersDigest = existingSubjects.length
+  const existingDigest = existingSubjects.length
     ? existingSubjects.map((s) => `- ${s.name || "(未命名)"}：${(s.description || "").slice(0, 80)}`).join("\n")
     : "（暂无已有主体）";
 
-  // ---------- 1. 故事大纲（在选定会话内，利用完整上下文） ----------
+  // ---------- 1. 故事大纲：在选定会话内提取（利用完整上下文） ----------
   onStep("outline", "running");
   onLog("info", "读取所选会话消息快照…");
   const snapshot = await deepseekReadSession(extId, sessionId);
   const keepCount = snapshot.count || 0;
-  onLog("info", `会话共 ${keepCount} 条消息，发送 story-design 提取大纲（DeepSeek 生成通常 30-90s）…`);
+  onLog("info", `会话共 ${keepCount} 条消息，提取故事大纲（DeepSeek 生成通常 30-90s）…`);
 
   const storyTpl = await loadSkill("story-design");
   const outlinePrompt = fillTemplate(storyTpl, {
     input:
-      "（提取指令）请通读本会话上方的全部对话内容，把其中用户的创作构想与故事素材" +
-      "按你的角色规范整理输出：以对话中用户表达的故事为准，不要推翻用户设定；" +
-      "若内容零散则补全为完整可拍的故事。",
+      "（提取指令）请通读本会话上方的全部对话内容，按你的任务要求提取用户想拍的故事。" +
+      "以用户表达的内容为准；对话中未被用户采纳的方案不要写入。",
   });
   const outline = await genJsonInSession(extId, sessionId, outlinePrompt);
   if (!outline || !outline.story) throw new Error("故事大纲提取失败：返回 JSON 缺少 story 字段");
-  onLog("success", `大纲完成：${outline.title || "(未命名)"} · ${outline.logline || ""}`);
+  onLog(
+    "success",
+    `大纲完成：${outline.title || "(未命名)"} · 场景 ${(outline.scenes || []).length} 处 · 主体 ${(outline.subjects || []).length} 个`
+  );
   onStep("outline", "done");
 
-  // ---------- 2. 清理会话并新建 ----------
+  // ---------- 2. 清理会话（删除本次新增的两条消息，恢复原状） ----------
   checkCancelled(token);
   onStep("clean", "running");
-  let cleanWarned = false;
   try {
     const del = await deepseekDeleteMessages(extId, sessionId, { keepCount });
     onLog("success", `已删除本次新增的 ${del.deleted ?? "?"} 条消息，原会话恢复原状`);
+    onStep("clean", "done");
   } catch (e) {
-    cleanWarned = true;
+    onStep("clean", "warn");
     onLog("warn", `${e.message || e}（不影响导入，请稍后在 DeepSeek 页面手动删除）`);
   }
-  onLog("info", "新建 DeepSeek 会话…");
-  const newSession = await deepseekNewSession(extId);
-  const chatId = newSession.id;
-  onLog("success", `新会话已创建（${chatId.slice(0, 8)}…）`);
-  onStep("clean", cleanWarned ? "warn" : "done");
 
-  // ---------- 3. 分镜提取 ----------
+  // ---------- 3. 分镜设计（新会话；发送后从页面 URL 取得会话 id） ----------
   checkCancelled(token);
   onStep("storyboard", "running");
-  onLog("info", "在新会话内进行分镜设计（storyboard-design，通常 40-120s）…");
+  onLog("info", "新建 DeepSeek 会话并进行分镜设计（storyboard-design，通常 40-120s）…");
   const sbTpl = await loadSkill("storyboard-design");
   const sbPrompt = fillTemplate(sbTpl, {
     input: storyDigest(outline),
     timeline_digest: timelineDigest,
     frame_rate: opts.frameRate || 24,
   });
-  const sb = await genJsonInSession(extId, chatId, sbPrompt);
+  const sbResp = await deepseekCompleteNewSession(extId, { prompt: sbPrompt, expectJson: true });
+  const chatId = sbResp.chatId;
+  if (!chatId) {
+    throw new Error("分镜设计已完成，但未能从页面取得新会话 id（无法继续后续步骤，请重试）");
+  }
+  onLog("success", `新会话 ${chatId.slice(0, 8)}… 已建立`);
+  const sb = parseJsonBlock(sbResp.text);
   const shots = Array.isArray(sb.segments) && sb.segments.length
     ? sb.segments
     : (Array.isArray(sb) ? sb : null);
   if (!shots) throw new Error("分镜提取失败：返回 JSON 缺少 segments 数组");
-  onLog("success", `分镜提取完成：${shots.length} 个镜头`);
+  onLog("success", `分镜设计完成：${shots.length} 个镜头`);
   onStep("storyboard", "done");
 
-  // ---------- 4. 主体与场景 ----------
+  // ---------- 4. 主体设计（character-design → 主体页签） ----------
   checkCancelled(token);
   onStep("subjects", "running");
-  onLog("info", "角色设计（character-design）…");
+  onLog("info", "主体设计（character-design，通常 30-90s）…");
   const charTpl = await loadSkill("character-design");
   const charPrompt = fillTemplate(charTpl, {
-    input: storyDigest(outline),
-    characters: charactersDigest,
+    input: `${storyDigest(outline)}\n\n大纲列出的出场主体：\n${castDigest(outline)}`,
+    characters: existingDigest,
     timeline_digest: shotListDigest(shots),
   });
   const charRes = await genJsonInSession(extId, chatId, charPrompt);
   const characters = Array.isArray(charRes.subjects) ? charRes.subjects : [];
-  onLog("success", `角色设计完成：${characters.length} 个主体`);
-
-  checkCancelled(token);
-  onLog("info", "场景设计（scene-design）…");
-  const sceneTpl = await loadSkill("scene-design");
-  const scenePrompt = fillTemplate(sceneTpl, {
-    input: storyDigest(outline),
-    timeline_digest: shotListDigest(shots),
-  });
-  const sceneRes = await genJsonInSession(extId, chatId, scenePrompt);
-  const scenes = Array.isArray(sceneRes.subjects) ? sceneRes.subjects : [];
-  onLog("success", `场景设计完成：${scenes.length} 个场景/道具`);
+  onLog("success", `主体设计完成：${characters.length} 个主体`);
   onStep("subjects", "done");
 
-  // ---------- 5. 音频设计 ----------
-  checkCancelled(token);
-  onStep("audio", "running");
-  onLog("info", "音频设计（audio-design）…");
-  const audioTpl = await loadSkill("audio-design");
-  const audioPrompt = fillTemplate(audioTpl, {
-    input: storyDigest(outline),
-    timeline_digest: shotListDigest(shots),
-  });
-  const audioRes = await genJsonInSession(extId, chatId, audioPrompt);
-  const audios = Array.isArray(audioRes.subjects) ? audioRes.subjects : [];
-  onLog("success", `音频设计完成：${audios.length} 条`);
-  onStep("audio", "done");
-
-  // ---------- 6. 首帧提示词 ----------
+  // ---------- 5. 首帧图提示词（firstframe-design，补齐缺失的镜头） ----------
   checkCancelled(token);
   onStep("firstframe", "running");
   const missing = shots
@@ -214,12 +203,13 @@ export async function runDeepseekImport(opts) {
     onLog("success", "分镜表已包含首/尾帧提示词");
     onStep("firstframe", "done");
   } else {
-    onLog("info", `补齐 ${missing.length} 个镜头的首/尾帧提示词…`);
-    const ffPrompt =
-      "请基于本会话上方的分镜表，为下列镜头补写 first_frame_prompt / last_frame_prompt " +
-      "（必须包含环境描述：地点、陈设、天气、光线方向与背景空间关系；相邻镜头首尾衔接）。\n" +
-      missing.map(({ i, s }) => `镜头 ${i + 1}：${(s.prompt || "").slice(0, 120)}`).join("\n") +
-      '\n\n只输出一个 JSON 代码块：{"segments":[{"index":1,"first_frame_prompt":"…","last_frame_prompt":"…"}]}';
+    onLog("info", `补齐 ${missing.length} 个镜头的首/尾帧图提示词…`);
+    const ffTpl = await loadSkill("firstframe-design");
+    const ffPrompt = fillTemplate(ffTpl, {
+      input: missing
+        .map(({ i, s }) => `镜头 ${i + 1}：${(s.prompt || "").slice(0, 160)}`)
+        .join("\n"),
+    });
     const ff = await genJsonInSession(extId, chatId, ffPrompt);
     const fills = Array.isArray(ff.segments) ? ff.segments : [];
     for (const f of fills) {
@@ -234,51 +224,60 @@ export async function runDeepseekImport(opts) {
       onStep("firstframe", "warn");
       onLog("warn", `${still} 个镜头仍缺首帧提示词（导入后可在分镜中手动补充）`);
     } else {
-      onLog("success", "首/尾帧提示词补齐完成");
+      onLog("success", "首/尾帧图提示词补齐完成");
       onStep("firstframe", "done");
     }
   }
 
-  // ---------- 7. H3 循环转换（每镜独立新对话，避免上下文污染） ----------
+  // ---------- 6. 音频设计（audio-design → 音频页签） ----------
+  checkCancelled(token);
+  onStep("audio", "running");
+  onLog("info", "音频设计（audio-design）…");
+  const audioTpl = await loadSkill("audio-design");
+  const audioPrompt = fillTemplate(audioTpl, {
+    input: storyDigest(outline),
+    timeline_digest: shotListDigest(shots),
+  });
+  const audioRes = await genJsonInSession(extId, chatId, audioPrompt);
+  const audios = Array.isArray(audioRes.subjects) ? audioRes.subjects : [];
+  onLog("success", `音频设计完成：${audios.length} 条`);
+  onStep("audio", "done");
+
+  // ---------- 7. H3 转换（复用本项目「分镜属性 → H3 生成」的链路与提示词） ----------
   checkCancelled(token);
   onStep("h3", "running");
-  onLog("info", `H3 提示词转换（h3-prompt-convert），共 ${shots.length} 镜…`);
-  const h3Tpl = await loadSkill("h3-prompt-convert");
+  onLog("info", `H3 提示词转换，共 ${shots.length} 镜（每镜独立新会话）…`);
   const h3Results = new Array(shots.length).fill(null);
   for (let i = 0; i < shots.length; i++) {
     checkCancelled(token);
     const s = shots[i];
-    const controls = [];
-    if (s.duration_seconds) controls.push(`时长约束：${s.duration_seconds} 秒`);
-    if (Array.isArray(s.camera_motions) && s.camera_motions.length)
-      controls.push(`运镜：${s.camera_motions.join(", ")}`);
-    if (Array.isArray(s.shot_sizes) && s.shot_sizes.length)
-      controls.push(`景别：${s.shot_sizes.join(", ")}`);
-    if (Array.isArray(s.framings) && s.framings.length)
-      controls.push(`构图：${s.framings.join(", ")}`);
-    const input =
-      `${s.prompt || ""}` +
-      (controls.length ? `\n（${controls.join("；")}）` : "") +
-      (s.first_frame_prompt ? `\n（首帧参考：${s.first_frame_prompt.slice(0, 120)}）` : "");
-    const prompt = fillTemplate(h3Tpl, { input });
-    try {
-      const resp = await deepseekComplete(extId, { system: "", prompt, expectJson: true });
-      if (!resp.ok) throw new Error(resp.error || "DeepSeek 桥接调用失败");
-      h3Results[i] = parseJsonBlock(resp.text);
+    const res = await deepseekGenerateH3(
+      { mode: "deepseek-proxy", extension_id: extId },
+      {
+        prompt: s.prompt || "",
+        duration_seconds: s.duration_seconds,
+        camera_motion: Array.isArray(s.camera_motions) ? s.camera_motions : [],
+        shot_size: Array.isArray(s.shot_sizes) ? s.shot_sizes : [],
+        framing: Array.isArray(s.framings) ? s.framings : [],
+        expression: Array.isArray(s.expressions) ? s.expressions : [],
+      }
+    );
+    if (res && res.success && res.json_data) {
+      h3Results[i] = res.json_data;
       onLog("success", `镜头 ${i + 1}/${shots.length} H3 转换完成`);
-    } catch (e) {
-      h3Results[i] = { error: e.message || String(e) };
-      onLog("error", `镜头 ${i + 1}/${shots.length} H3 转换失败：${e.message || e}`);
+    } else {
+      h3Results[i] = null;
+      onLog("error", `镜头 ${i + 1}/${shots.length} H3 转换失败：${(res && res.error) || "未知错误"}`);
     }
     onH3Progress(i + 1, shots.length);
   }
-  const okCount = h3Results.filter((r) => r && r.h3).length;
+  const okCount = h3Results.filter(Boolean).length;
   if (!okCount) throw new Error("所有镜头的 H3 转换均失败");
   if (okCount < shots.length) {
     onStep("h3", "warn");
-    onLog("warn", `${shots.length - okCount} 个镜头 H3 转换失败（导入后可单独重试）`);
+    onLog("warn", `${shots.length - okCount} 个镜头 H3 转换失败（导入后可在分镜属性中单独重试）`);
   } else {
-    onLog("success", "H3 循环转换全部完成");
+    onLog("success", "H3 转换全部完成");
     onStep("h3", "done");
   }
 
@@ -287,13 +286,11 @@ export async function runDeepseekImport(opts) {
     logline: outline.logline || "",
     story: outline.story || "",
     characters,
-    scenes,
+    scenes: Array.isArray(outline.scenes) ? outline.scenes : [],
     audios,
     segments: shots.map((s, i) => ({
       ...s,
-      h3: h3Results[i] && h3Results[i].h3 ? h3Results[i].h3 : null,
-      h3Cn: h3Results[i] && h3Results[i].cn ? h3Results[i].cn : "",
-      h3En: h3Results[i] && h3Results[i].en ? h3Results[i].en : "",
+      h3: h3Results[i] || null,
     })),
   };
 }
