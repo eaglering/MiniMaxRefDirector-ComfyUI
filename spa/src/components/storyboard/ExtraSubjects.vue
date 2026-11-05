@@ -77,7 +77,6 @@ function toggle(name) {
   flex: none;
   background: #151821;
   border: 1px solid #222736;
-  border-radius: 10px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;

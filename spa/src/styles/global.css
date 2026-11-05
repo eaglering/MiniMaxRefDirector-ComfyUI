@@ -46,7 +46,7 @@ html.dark {
 
 /* 布局 */
 .mrd-app { height: 100%; display: flex; flex-direction: column; background: var(--mrd-bg-0); }
-.mrd-main { flex: 1; min-height: 0; overflow: auto; padding: 16px; position: relative; }
+.mrd-main { flex: 1; min-height: 0; overflow: auto; padding: 10px; position: relative; }
 
 /* 卡片 */
 .mrd-card {
@@ -71,7 +71,7 @@ html.dark {
 /* Element 细节微调 */
 .el-message-box, .el-dialog { border: 1px solid var(--mrd-border-soft); }
 .el-card { --el-card-bg-color: var(--mrd-bg-2); border-color: var(--mrd-border-soft); }
-.el-tabs__item { font-size: 13px; }
+.el-tabs__item { font-size: 12px; color: #a9b1c3; }
 .el-table { --el-table-header-bg-color: #1a1f2c; --el-table-row-hover-bg-color: #202633; }
 
 /* ===== CodeMirror 提示词编辑器 ===== */

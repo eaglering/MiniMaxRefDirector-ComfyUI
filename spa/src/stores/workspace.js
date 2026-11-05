@@ -1,7 +1,7 @@
 // ===== 工作台中央状态：加载 / 防抖保存 / 状态指示 =====
 import { defineStore } from "pinia";
-import { reactive, ref, toRaw } from "vue";
-import { fetchState, saveState, fetchSkills } from "../api/client.js";
+import { computed, reactive, ref, toRaw } from "vue";
+import { fetchState, saveState, fetchSkills, fetchSkillDict } from "../api/client.js";
 import { genId } from "../utils/media.js";
 
 // 与 js/components/director/shared.js parseInitial 对齐的默认值
@@ -94,6 +94,9 @@ function serializeTimeline(t) {
       const next = out.segments[i + 1];
       if (next && next.videoFile) s.lastFrameFile = next.videoFile;
     }
+    // 独立上传的首帧/尾帧参考视频（与首尾帧图互不关联）：优先作为帧锚点
+    if (s.firstFrameVideo) s.imageFile = s.firstFrameVideo;
+    if (s.lastFrameVideo) s.lastFrameFile = s.lastFrameVideo;
     return s;
   });
   out.audioSegments = [...(out.audioSegments || [])].map((s) => {
@@ -172,6 +175,52 @@ export const useWorkspace = defineStore("workspace", () => {
     expressions: [],
   });
 
+  // ---- 镜头技能词典（SQLite：/spa/skill_dict）----
+  const skillDict = reactive({ loaded: false, loading: false, categories: [], skills: [] });
+
+  // 内置类别名 → segment 字段；新增的自定义类别没有对应字段（field=""）
+  const CATEGORY_FIELD = {
+    "运镜": "cameraMotions",
+    "景别": "shotSizes",
+    "镜头结构": "framings",
+    "微表情": "expressions",
+  };
+
+  async function loadSkillDict(force = false) {
+    if (skillDict.loading || (skillDict.loaded && !force)) return;
+    skillDict.loading = true;
+    try {
+      const res = await fetchSkillDict();
+      if (res.success) {
+        skillDict.categories = res.categories || [];
+        skillDict.skills = res.skills || [];
+        skillDict.loaded = true;
+      }
+    } catch (e) {
+      console.error("[SPA] skill_dict load failed", e);
+    } finally {
+      skillDict.loading = false;
+    }
+  }
+
+  // 按类别分组的技能组：{ id, label, field, items: [{key,label,desc,example,keyword,...}] }
+  const skillGroups = computed(() =>
+    skillDict.categories.map((c) => ({
+      id: CATEGORY_FIELD[c.name] || `cat_${c.id}`,
+      label: c.name,
+      field: CATEGORY_FIELD[c.name] || "",
+      categoryId: c.id,
+      description: c.description,
+      items: skillDict.skills
+        .filter((s) => s.categoryId === c.id)
+        .map((s) => ({
+          ...s,
+          label: s.name,
+          title: s.desc,
+        })),
+    }))
+  );
+
   // ---- 加载 ----
   async function load() {
     if (!nodeId.value) {
@@ -182,6 +231,7 @@ export const useWorkspace = defineStore("workspace", () => {
       const [stateRes, skillsRes] = await Promise.all([
         fetchState(nodeId.value),
         fetchSkills().catch(() => null),
+        loadSkillDict(),
       ]);
       if (!stateRes.success) throw new Error(stateRes.error || "加载失败");
       applyState(stateRes.state || {});
@@ -286,6 +336,7 @@ export const useWorkspace = defineStore("workspace", () => {
   return {
     nodeId, nodeTitle, loaded, loadError, saveStatus, lastSavedAt, updatedAt,
     timeline, widgets, globalPrompt, subjects, subjectNodeId, llm, customSkills,
+    skillDict, skillGroups, loadSkillDict,
     load, reload, markDirty, saveNow, buildState,
   };
 });

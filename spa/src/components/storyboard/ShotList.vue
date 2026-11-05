@@ -108,12 +108,15 @@ function onRemove(seg) {
 
 <style scoped>
 .mrd-shotlist {
-  width: 240px;
-  flex: none;
+  /* 位于分镜页 el-splitter 首栏内：宽度由分栏拖拽决定 */
+  width: 100%;
+  box-sizing: border-box;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 0;
+  padding: 0 8px;
 }
 .mrd-shotlist-head { display: flex; align-items: center; justify-content: space-between; flex: none; }
 .mrd-shotlist-dsi {

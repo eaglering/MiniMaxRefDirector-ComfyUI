@@ -21,7 +21,7 @@
 import { h, render } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
-import { api, app, viewUrl, ICONS, CAMERA_MOTIONS, SHOT_SIZES, FRAMINGS, MICRO_EXPRESSIONS } from "./shared.js";
+import { api, app, viewUrl, ICONS, CAMERA_MOTIONS, SHOT_SIZES, FRAMINGS, MICRO_EXPRESSIONS, loadSkillDict } from "./shared.js";
 import { BodyPortal, RefModal } from "./modal.js";
 import { HighlightedTextarea } from "./highlight.js";
 import { getLocale, t } from "../../i18n.js";
@@ -760,11 +760,13 @@ function NumInput({ def, value, onCommit }) {
   />`;
 }
 
-// --- 微表情词库：内置 + 本地导入扩充（结构同 shared.js MICRO_EXPRESSIONS 条目） ---
+// --- 微表情词库：技能词典（DB）+ 本地导入扩充（结构同 shared.js MICRO_EXPRESSIONS 条目） ---
 // 自定义条目由用户以 <input type=file> 导入 JSON（数组或 {expressions:[...]}），
 // 持久化到 localStorage（用户级、跨弹窗会话），请求生成时以 expression_catalog
-// 携带给后端识别；与内置 key 冲突的自定义条目被忽略（内置优先）。
-const BASE_EXPR_KEYS = new Set(MICRO_EXPRESSIONS.map(m => m.key));
+// 携带给后端识别；与词典 key 冲突的自定义条目被忽略（词典优先）。
+// 注意：MICRO_EXPRESSIONS 为运行时容器（loadSkillDict 异步填充），因此每次调用
+// 现算 key 集合，不能在模块加载期缓存。
+const baseExprKeys = () => new Set(MICRO_EXPRESSIONS.map(m => m.key));
 // 导入弹窗展示的 JSON 格式案例：完整词条数组 / 简写映射
 const EXPR_CASE_FULL = `[
   {
@@ -792,7 +794,7 @@ function loadCustomExpressions() {
       const list = JSON.parse(raw);
       if (Array.isArray(list)) {
         return list
-          .filter(it => it && typeof it === "object" && typeof it.key === "string" && it.key.trim() && !BASE_EXPR_KEYS.has(it.key.trim()))
+          .filter(it => it && typeof it === "object" && typeof it.key === "string" && it.key.trim() && !baseExprKeys().has(it.key.trim()))
           .map(it => ({ key: it.key.trim(), label: String(it.label || it.key), title: String(it.title || it.label || it.key), category: String(it.category || "custom") }));
       }
     }
@@ -846,6 +848,12 @@ export function TransferPanel({ director }) {
   const [retEdit, setRetEdit] = useState(null); // 主体 retention 编辑弹窗：{ name, value }，null 关闭
   const [exprImportOpen, setExprImportOpen] = useState(false); // 微表情词库导入弹窗：先展示格式说明与案例再选文件
   const [exprImportErr, setExprImportErr] = useState(""); // 导入弹窗内就地展示的解析/校验错误
+  const [dictTick, setDictTick] = useState(0); // 技能词典合并计数：loadSkillDict 完成后 +1 触发胶囊重渲染
+  const [ngpTick, setNgpTick] = useState(0); // 「自定义全局提示词」开关计数：数据存 seg.h3NoGlobalPrompt，切换后需显式刷新
+  const [skillDictData, setSkillDictData] = useState({ categories: [], skills: [] }); // 词典原文（添加技能弹窗的类别下拉）
+  const [skillAddOpen, setSkillAddOpen] = useState(false); // 「添加技能」弹窗（提交到 SQLite 词典）
+  const [skillAddErr, setSkillAddErr] = useState(""); // 添加技能弹窗的就地错误
+  const [skillAdd, setSkillAdd] = useState({ categoryId: "", name: "", desc: "", keyword: "", example: "" });
   const [hoverRes, setHoverRes] = useState(null); // 当前 hover 的可编辑资源卡片 key（亮蓝高亮边框提示）
   // 视频素材条：接收后端 minimax_ref_video_progress 通知（status=add_material）。
   // 初始化时从 localStorage 恢复上次会话的素材（key 按节点 id 隔离），刷新页面后保留，
@@ -1576,6 +1584,66 @@ export function TransferPanel({ director }) {
     setExprImportOpen(true);
   }
 
+  // ---------- 镜头技能词典（SQLite /spa/skill_dict） ----------
+  // 挂载后异步拉取词典并合并进四个词表（title=描述 → 胶囊悬停即显示描述）
+  useEffect(() => {
+    let alive = true;
+    loadSkillDict()
+      .then((d) => {
+        if (alive && d) {
+          setSkillDictData(d);
+          setDictTick((t) => t + 1);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 「添加技能」弹窗（类别/名称/描述/触发词/案例 → 入库 SQLite）
+  function openSkillAdd() {
+    setSkillAddErr("");
+    setSkillAdd({ categoryId: "", name: "", desc: "", keyword: "", example: "" });
+    setSkillAddOpen(true);
+  }
+
+  async function submitSkillAdd() {
+    const f = skillAdd;
+    if (!f.categoryId) {
+      setSkillAddErr("请选择类别");
+      return;
+    }
+    if (!f.name.trim() || !f.desc.trim() || !f.keyword.trim() || !f.example.trim()) {
+      setSkillAddErr("名称、描述、触发词、案例均为必填");
+      return;
+    }
+    setSkillAddErr("");
+    try {
+      const res = await api.fetchApi("/minimax_ref/api/spa/skill_dict/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categoryId: Number(f.categoryId),
+          name: f.name.trim(),
+          desc: f.desc.trim(),
+          keyword: f.keyword.trim(),
+          example: f.example.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!data || !data.success) throw new Error((data && data.error) || "保存失败");
+      const d = await loadSkillDict();
+      if (d) {
+        setSkillDictData(d);
+        setDictTick((t) => t + 1);
+      }
+      setSkillAddOpen(false);
+    } catch (err) {
+      setSkillAddErr(String((err && err.message) || err));
+    }
+  }
+
   // 从本地 JSON 导入自定义微表情词库：支持数组 / {expressions:[...]} / 简写形态，
   // 合并进运行时并持久化到 localStorage（与内置 key 冲突的自定义条目被忽略）。
   function pickExpressionFile() {
@@ -1609,13 +1677,13 @@ export function TransferPanel({ director }) {
         list = list
           .filter(it => it && typeof it === "object" && typeof it.key === "string" && it.key.trim() && typeof (it.label || it.key) === "string")
           .map(it => ({ key: it.key.trim(), label: String(it.label || it.key), title: String(it.title || it.label || it.key), category: String(it.category || "custom") }))
-          .filter(it => !BASE_EXPR_KEYS.has(it.key)); // 内置 key 优先，忽略同名自定义
+          .filter(it => !baseExprKeys().has(it.key)); // 词典 key 优先，忽略同名自定义
         if (!list.length) {
           setExprImportErr(t("No valid expression entries found in the imported file"));
           return;
         }
         setCustomExpr(prev => {
-          const next = buildExprCatalog([...prev, ...list]).filter(it => !BASE_EXPR_KEYS.has(it.key));
+          const next = buildExprCatalog([...prev, ...list]).filter(it => !baseExprKeys().has(it.key));
           saveCustomExpressions(next);
           return next;
         });
@@ -1652,7 +1720,7 @@ export function TransferPanel({ director }) {
         camera_motion: effectiveCameras(targetSeg),
         // 微表情（表演提示）：段级多选 key 数组；自定义词条随 expression_catalog 供后端识别
         expression: effectiveExpressions(targetSeg),
-        expression_catalog: buildExprCatalog(customExpr).filter(it => !BASE_EXPR_KEYS.has(it.key)),
+        expression_catalog: buildExprCatalog(customExpr).filter(it => !baseExprKeys().has(it.key)),
         // 景别 / 构图关系（镜头语言）：段级多选 key 数组；空集合不注入，由模型自由决定
         shot_size: effectiveShotSizes(targetSeg),
         framing: effectiveFramings(targetSeg),
@@ -2365,7 +2433,10 @@ export function TransferPanel({ director }) {
     [t("subject_definitions"), bindings.subject_definitions],
     [t("summary"), rightText.summary],
     [t("retention_analysis"), bindings.retention_analysis],
-    [t("detailed_description"), globalPrompt + "\n" + rightText.detailed_description],
+    // 每镜头「自定义全局提示词」开关（seg.h3NoGlobalPrompt，默认关闭=拼接）
+    [t("detailed_description"), (curSeg && curSeg.h3NoGlobalPrompt)
+      ? rightText.detailed_description
+      : globalPrompt + "\n" + rightText.detailed_description],
     [t("overall_soundscape"), rightText.overall_soundscape],
     [t("non_diegetic_music"), rightText.non_diegetic_music],
   ];
@@ -2840,6 +2911,12 @@ export function TransferPanel({ director }) {
                       <div class="mrd-pr-ctl-group">
                         <div class="mrd-pr-ctl-head">
                           <div class="mrd-pr-ctl-name">${t("Camera Motion")}</div>
+                          <span
+                            class="mrd-pr-ctl-import"
+                            style=${{ cursor: "pointer", marginLeft: "8px", fontSize: "10px", color: "#8f7ff0" }}
+                            title=${t("Add a skill to the shared skill dictionary (saved to SQLite, shared with the SPA director)")}
+                            onClick=${openSkillAdd}
+                          >＋ ${t("Add Skill")}</span>
                         </div>
                         <div class="mrd-pr-ctl-items">
                           ${camModeChip}
@@ -2956,7 +3033,29 @@ export function TransferPanel({ director }) {
                   </div>
                   <div class="mrd-pr-split" title=${t("Drag to resize")} onPointerDown=${(e) => startPrSplit(e, 0)}><div class="mrd-pr-split-knob"></div></div>
                   <div class="mrd-pr-field" style=${fieldStyle(1)}>
-                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("detailed_description")}</div>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                      <span>${t("detailed_description")}</span>
+                      <span
+                        title=${t("When enabled, this segment's generation and preview no longer prepend the global prompt")}
+                        style=${{
+                          display: "inline-flex", alignItems: "center", gap: "4px",
+                          fontSize: "10px", lineHeight: "16px", padding: "0 6px",
+                          cursor: "pointer", userSelect: "none", borderRadius: "3px",
+                          color: (curSeg && curSeg.h3NoGlobalPrompt) ? "#c9b8ff" : "#5a6274",
+                          border: "1px solid",
+                          borderColor: (curSeg && curSeg.h3NoGlobalPrompt) ? "#6c5ce7" : "#2c313b",
+                          background: (curSeg && curSeg.h3NoGlobalPrompt) ? "rgba(108,92,231,0.15)" : "transparent",
+                        }}
+                        onClick=${(e) => {
+                          e.stopPropagation();
+                          const seg = curSeg;
+                          if (!seg || !director) return;
+                          seg.h3NoGlobalPrompt = !seg.h3NoGlobalPrompt;
+                          director.commitChanges();
+                          setNgpTick((t) => t + 1);
+                        }}
+                      >⇂ ${t("Custom global prompt")}${(curSeg && curSeg.h3NoGlobalPrompt) ? " ✓" : ""}</span>
+                    </div>
                     <${HighlightedTextarea}
                       taRef=${rightDetailRef}
                       className="mrd-pr-prompt-area"
@@ -3128,6 +3227,70 @@ export function TransferPanel({ director }) {
             disabled=${losslessMergeBusy || !customAudio}
             onClick=${() => runLosslessMerge({ customAudio: customAudio && customAudio.path })}
           >${losslessMergeBusy ? t("Lossless merging…") : t("Merge")}</button>
+        </div>
+      </${RefModal}>
+      <${RefModal}
+        open=${skillAddOpen}
+        title=${t("Add skill to dictionary")}
+        width="520px"
+        height="480px"
+        onClose=${() => { setSkillAddOpen(false); setSkillAddErr(""); }}
+      >
+        <div style=${{ display: "flex", flexDirection: "column", gap: "10px", flex: "1 1 0", minHeight: "0", overflowY: "auto", padding: "2px" }}>
+          ${skillAddErr ? html`<div style=${{ fontSize: "11px", color: "#f87171", lineHeight: 1.5 }}>${skillAddErr}</div>` : null}
+          <label style=${{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0 }}>${t("Category")}</span>
+            <select
+              value=${String(skillAdd.categoryId || "")}
+              onChange=${(e) => setSkillAdd((p) => ({ ...p, categoryId: e.target.value }))}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 6px", fontSize: "12px" }}
+            >
+              <option value="">-- ${t("Select category")} --</option>
+              ${(skillDictData.categories || []).map((c) => html`<option key=${c.id} value=${String(c.id)}>${c.name}</option>`)}
+            </select>
+          </label>
+          <label style=${{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0 }}>${t("Name")}</span>
+            <input
+              value=${skillAdd.name}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, name: e.target.value }))}
+              placeholder=${t("Skill display name, e.g. Handheld shake")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px" }}
+            />
+          </label>
+          <label style=${{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0, paddingTop: "4px" }}>${t("Description")}</span>
+            <textarea
+              rows=${2}
+              value=${skillAdd.desc}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, desc: e.target.value }))}
+              placeholder=${t("Shown when hovering the skill pill (required)")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px", resize: "vertical" }}
+            />
+          </label>
+          <label style=${{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0 }}>${t("Keyword")}</span>
+            <input
+              value=${skillAdd.keyword}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, keyword: e.target.value }))}
+              placeholder=${t("Technical trigger word (e.g. camera motion); use the skill name if none")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px" }}
+            />
+          </label>
+          <label style=${{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0, paddingTop: "4px" }}>${t("Example")}</span>
+            <textarea
+              rows=${2}
+              value=${skillAdd.example}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, example: e.target.value }))}
+              placeholder=${t("A phrase that can be embedded into a shot description (required)")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px", resize: "vertical" }}
+            />
+          </label>
+          <div style=${{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+            <button class="mrd-pr-btn" onClick=${() => { setSkillAddOpen(false); setSkillAddErr(""); }}>${t("Cancel")}</button>
+            <button class="mrd-pr-btn" style=${S.mergeBtnGo} onClick=${submitSkillAdd}>${t("Save to dictionary")}</button>
+          </div>
         </div>
       </${RefModal}>
       <${RefModal}

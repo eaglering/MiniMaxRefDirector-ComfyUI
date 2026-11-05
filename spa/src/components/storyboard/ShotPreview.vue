@@ -42,7 +42,11 @@ const mentionedNames = computed(() => {
   return names;
 });
 
-const visibleSubjects = computed(() => effectiveSubjects.value.filter((s) => !isChildSubject(s)));
+// 只展示"被引用"的主体：prompt/H3 中以 <@名字> / <#名字> 出现，或已在
+// additionSubject 里；已开启本分镜自定义的副本始终显示（便于编辑）。
+const visibleSubjects = computed(() =>
+  effectiveSubjects.value.filter((s) => !isChildSubject(s) && (isReferenced(s) || isCustom(s)))
+);
 
 function dirty() {
   ws.markDirty();
@@ -137,7 +141,11 @@ function isReferenced(s) {
           </div>
         </div>
       </div>
-      <el-empty v-if="!visibleSubjects.length" description="暂无主体" :image-size="70" />
+      <el-empty
+        v-if="!visibleSubjects.length"
+        description="本分镜暂无引用主体：在提示词中用 <@名字> 引用后在此显示"
+        :image-size="70"
+      />
     </el-scrollbar>
 
     <!-- 编辑弹窗 -->

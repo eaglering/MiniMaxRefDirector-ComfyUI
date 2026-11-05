@@ -1,9 +1,11 @@
 <script setup>
-// 导演台分镜页：三栏布局
-// 左 ShotList / 中 PromptPanel + ExtraSubjects / 右 el-tabs（参数 / 预览）
-import { computed, ref } from "vue";
+// 导演台分镜页：el-splitter 三栏可拖拽/折叠分栏（分镜 | 提示词区 | 参数+预览）。
+// 镜头技能 / 用户提示词 / H3 提示词 在 PromptPanel 内部亦为可折叠拖拽分栏；
+// 分镜参数 / 分镜预览 为右侧纵向分栏，窄屏（<1100px）收起走抽屉。
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../stores/workspace.js";
+import { useSplitterMemory } from "../utils/splitter.js";
 import { genId, framesToSeconds, secondsToFrames } from "../utils/media.js";
 import { makeSubject } from "../constants/subject.js";
 import ShotList from "../components/storyboard/ShotList.vue";
@@ -18,6 +20,23 @@ const selectedId = ref("");
 const rightTab = ref("params");
 const rightDrawer = ref(false);
 const showDeepseekImport = ref(false);
+
+// 窄屏（<1100px）隐藏右侧分栏，改用抽屉
+const isNarrow = ref(window.matchMedia("(max-width: 1100px)").matches);
+let mqHandler = null;
+onMounted(() => {
+  const mq = window.matchMedia("(max-width: 1100px)");
+  mqHandler = (e) => (isNarrow.value = e.matches);
+  mq.addEventListener("change", mqHandler);
+});
+onBeforeUnmount(() => {
+  const mq = window.matchMedia("(max-width: 1100px)");
+  if (mqHandler) mq.removeEventListener("change", mqHandler);
+});
+
+// 分栏尺寸记忆（拖拽后写 localStorage，重进页面恢复；size/min/max 数值均为百分比）
+const mainSplit = useSplitterMemory("mrd-sb-split-main", [15, 70, 15]);
+const rightSplit = useSplitterMemory("mrd-sb-split-right", [55, 45]);
 
 const isDeepseek = computed(() => ws.llm.mode === "deepseek-proxy");
 
@@ -198,72 +217,90 @@ function onDeepseekImported(result) {
 </script>
 
 <template>
-  <div class="mrd-storyboard">
-    <ShotList
-      :segments="segments"
-      :selected-id="selected ? selected.id : ''"
-      :display-mode="ws.widgets.display_mode"
-      :frame-rate="ws.widgets.frame_rate"
-      :show-deepseek-import="isDeepseek"
-      @select="id => (selectedId = id)"
-      @change="ws.markDirty()"
-      @add="addShot"
-      @duplicate="duplicateShot"
-      @remove="removeShot"
-      @deepseek-import="showDeepseekImport = true"
-    />
+  <el-splitter class="mrd-storyboard" @resize-end="mainSplit.onResizeEnd">
+    <!-- 分镜列表 -->
+    <el-splitter-panel :size="mainSplit.sizes[0]" min="180px" collapsible>
+      <ShotList
+        :segments="segments"
+        :selected-id="selected ? selected.id : ''"
+        :display-mode="ws.widgets.display_mode"
+        :frame-rate="ws.widgets.frame_rate"
+        :show-deepseek-import="isDeepseek"
+        @select="id => (selectedId = id)"
+        @change="ws.markDirty()"
+        @add="addShot"
+        @duplicate="duplicateShot"
+        @remove="removeShot"
+        @deepseek-import="showDeepseekImport = true"
+      />
+    </el-splitter-panel>
 
-    <div class="mrd-storyboard-center">
-      <template v-if="selected">
-        <PromptPanel :key="`p-${selected.id}`" :segment="selected" />
-        <ExtraSubjects :key="`e-${selected.id}`" :segment="selected" />
-        <div class="mrd-storyboard-meta">
-          分镜 {{ segments.indexOf(selected) + 1 }}/{{ segments.length }} · 总时长约 {{ totalSeconds }}s · 保存后自动写回节点
-          <el-button size="small" text type="primary" class="mrd-open-right" @click="rightDrawer = true">
-            <el-icon><component :is="'Setting'" /></el-icon> 参数/预览
-          </el-button>
-        </div>
-      </template>
-      <el-empty v-else description="添加第一个分镜开始创作" />
-    </div>
+    <!-- 中间：提示词区 / 额外主体 / 状态行 -->
+    <el-splitter-panel :size="mainSplit.sizes[1]" min="640px" collapsible>
+      <div class="mrd-storyboard-center">
+        <template v-if="selected">
+          <PromptPanel :key="`p-${selected.id}`" :segment="selected" />
+          <ExtraSubjects :key="`e-${selected.id}`" :segment="selected" />
+          <div class="mrd-storyboard-meta">
+            分镜 {{ segments.indexOf(selected) + 1 }}/{{ segments.length }} · 总时长约 {{ totalSeconds }}s · 保存后自动写回节点
+            <el-button size="small" text type="primary" class="mrd-open-right" @click="rightDrawer = true">
+              <el-icon><component :is="'Setting'" /></el-icon> 参数/预览
+            </el-button>
+          </div>
+        </template>
+        <el-empty v-else description="添加第一个分镜开始创作" />
+      </div>
+    </el-splitter-panel>
 
-    <!-- 右侧 Tabs：≥1100px 常驻；窄屏走抽屉 -->
-    <div class="mrd-storyboard-right">
-      <el-tabs v-model="rightTab" class="mrd-right-tabs">
-        <el-tab-pane label="分镜参数" name="params">
-          <ShotParams v-if="selected" :key="`sp-${selected.id}`" :segment="selected" :segments="segments" />
-        </el-tab-pane>
-        <el-tab-pane label="分镜预览" name="preview" lazy>
-          <ShotPreview v-if="selected" :key="`sv-${selected.id}`" :segment="selected" :segments="segments" />
-        </el-tab-pane>
-      </el-tabs>
-    </div>
+    <!-- 右侧：分镜参数 / 分镜预览（纵向分栏，可折叠拖拽；窄屏走抽屉） -->
+    <el-splitter-panel v-if="!isNarrow" :size="mainSplit.sizes[2]" min="180px" collapsible>
+      <div class="mrd-storyboard-right">
+        <el-tabs v-model="rightTab" type="border-card" class="mrd-right-tabs">
+          <el-tab-pane label="分镜参数" name="params">
+            <ShotParams v-if="selected" :key="`sp-${selected.id}`" :segment="selected" :segments="segments" />
+          </el-tab-pane>
+          <el-tab-pane label="分镜预览" name="preview" lazy>
+            <ShotPreview v-if="selected" :key="`sv-${selected.id}`" :segment="selected" :segments="segments" />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </el-splitter-panel>
+  </el-splitter>
 
-    <el-drawer v-model="rightDrawer" title="分镜参数 / 预览" size="420px" append-to-body>
-      <el-tabs v-model="rightTab">
-        <el-tab-pane label="分镜参数" name="params">
-          <ShotParams v-if="selected" :segment="selected" :segments="segments" />
-        </el-tab-pane>
-        <el-tab-pane label="分镜预览" name="preview" lazy>
-          <ShotPreview v-if="selected" :segment="selected" :segments="segments" />
-        </el-tab-pane>
-      </el-tabs>
-    </el-drawer>
+  <!-- 窄屏抽屉：分镜参数 / 预览 -->
+  <el-drawer v-model="rightDrawer" title="分镜参数 / 预览" size="420px" append-to-body>
+    <el-tabs v-model="rightTab">
+      <el-tab-pane label="分镜参数" name="params">
+        <ShotParams v-if="selected" :segment="selected" :segments="segments" />
+      </el-tab-pane>
+      <el-tab-pane label="分镜预览" name="preview" lazy>
+        <ShotPreview v-if="selected" :segment="selected" :segments="segments" />
+      </el-tab-pane>
+    </el-tabs>
+  </el-drawer>
 
-    <!-- DeepSeek 分镜导入（仅 deepseek-proxy 模式可见入口） -->
-    <DeepseekImportDialog v-model="showDeepseekImport" @completed="onDeepseekImported" />
-  </div>
+  <!-- DeepSeek 分镜导入（仅 deepseek-proxy 模式可见入口） -->
+  <DeepseekImportDialog v-model="showDeepseekImport" @completed="onDeepseekImported" />
 </template>
 
 <style scoped>
 .mrd-storyboard {
   height: 100%;
-  display: flex;
-  gap: 14px;
   min-height: 0;
 }
+/* 分隔条暗色化：拖拽线 + 折叠箭头（主分栏与右侧纵向分栏共用） */
+.mrd-storyboard :deep(.el-splitter-bar__dragger:before) { background-color: #2a3042; }
+.mrd-storyboard :deep(.el-splitter-bar__dragger:hover:not(.is-disabled):before),
+.mrd-storyboard :deep(.el-splitter-bar__dragger-active:before) { background-color: #6c5ce7; }
+.mrd-storyboard :deep(.el-splitter-bar__collapse-icon) {
+  background: #2a3042;
+  color: #a9b1c3;
+}
+.mrd-storyboard :deep(.el-splitter-bar__collapse-icon:hover) { background-color: #6c5ce7; }
+
 .mrd-storyboard-center {
-  flex: 1;
+  height: 100%;
+  box-sizing: border-box;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -277,27 +314,37 @@ function onDeepseekImported(result) {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 0 10px;
 }
 .mrd-open-right { display: none; }
 .mrd-storyboard-right {
-  width: 360px;
-  flex: none;
+  height: 100%;
   background: #151821;
-  border: 1px solid #222736;
-  border-radius: 10px;
-  padding: 10px 14px 14px;
-  display: flex;
-  flex-direction: column;
   min-height: 0;
 }
-.mrd-right-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.mrd-right-tabs :deep(.el-tabs__content) { flex: 1; min-height: 0; overflow: auto; }
+.mrd-storyboard-right :deep(.el-tabs) { background-color: #151821; border: none; }
+.mrd-storyboard-right :deep(.el-tabs__header) { background-color: #272a33; border-bottom: solid 1px #2a3042; }
+.mrd-storyboard-right :deep(.el-tabs__item.is-active) { background-color: #151821; border-right-color: #2a3042; border-left-color: #2a3042; margin-left: 0; }
+.mrd-right-pane {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mrd-right-pane-title {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: #a9b1c3;
+  padding: 2px 2px 6px;
+}
+.mrd-right-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
 
 @media (max-width: 1100px) {
-  .mrd-storyboard-right { display: none; }
   .mrd-open-right { display: inline-flex; margin-left: auto; }
-}
-@media (min-width: 1100px) and (max-width: 1440px) {
-  .mrd-storyboard-right { width: 320px; }
 }
 </style>

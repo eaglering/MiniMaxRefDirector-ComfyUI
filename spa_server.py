@@ -24,6 +24,7 @@ from aiohttp import web
 from .server import API_PREFIX, _routes
 from .lib import records as records_lib
 from .lib import spa_store
+from .lib import skill_db
 from .lib.llm import list_llm_gguf_files
 
 log = logging.getLogger(__name__)
@@ -113,6 +114,12 @@ async def spa_skill_library(request: web.Request) -> web.Response:
                 {"success": False, "error": f"skill 缺少 prompt.md：{prompt_path}"}, status=404)
         with open(prompt_path, "r", encoding="utf-8-sig") as f:
             prompt_md = f.read()
+        # {{skill_keys}}：镜头技能词典的 key 清单（SQLite 查询注入；无占位符则不处理）
+        if "{{skill_keys}}" in prompt_md:
+            try:
+                prompt_md = prompt_md.replace("{{skill_keys}}", skill_db.skill_keys_text())
+            except Exception:
+                log.warning("[SPA] skill_keys 注入失败", exc_info=True)
         return web.json_response({"success": True, "name": name, "prompt": prompt_md})
     except ValueError as e:
         return web.json_response({"success": False, "error": str(e)}, status=400)
@@ -192,6 +199,54 @@ async def spa_save(request: web.Request) -> web.Response:
 @_routes.get(f"{API_PREFIX}/spa/skills")
 async def spa_get_skills(request: web.Request) -> web.Response:
     return web.json_response({"success": True, "skills": spa_store.load_skills()})
+
+
+# ---------------- 镜头技能词典（SQLite）----------------
+
+@_routes.get(f"{API_PREFIX}/spa/skill_dict")
+async def spa_skill_dict(request: web.Request) -> web.Response:
+    """技能词典全量：{ categories, skills, skillKeysText }（首次访问自动建库+种子迁移）。"""
+    try:
+        return web.json_response({"success": True, **skill_db.skill_dict_snapshot()})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+def _skill_dict_mutation(handler):
+    """写操作统一包装：ValueError → 400，其余 → 500。"""
+    async def _inner(request: web.Request) -> web.Response:
+        try:
+            data = await _read_json_body(request)
+            result = handler(data)
+            return web.json_response({"success": True, **(result or {})})
+        except ValueError as e:
+            return web.json_response({"success": False, "error": str(e)}, status=400)
+        except Exception as e:
+            traceback.print_exc()
+            return web.json_response({"success": False, "error": str(e)}, status=500)
+    return _inner
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_dict/add")
+async def spa_skill_add(request: web.Request) -> web.Response:
+    # 新增技能必填：类别 / 名称 / 描述 / 触发词 / 案例（prompt 可选，默认取描述）
+    return _skill_dict_mutation(lambda d: skill_db.add_skill(d))(request)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_dict/update")
+async def spa_skill_update(request: web.Request) -> web.Response:
+    return _skill_dict_mutation(lambda d: skill_db.update_skill(d))(request)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_dict/delete")
+async def spa_skill_delete(request: web.Request) -> web.Response:
+    return _skill_dict_mutation(lambda d: skill_db.delete_skill(d))(request)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_dict/category/add")
+async def spa_skill_category_add(request: web.Request) -> web.Response:
+    return _skill_dict_mutation(lambda d: skill_db.add_category(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skills")

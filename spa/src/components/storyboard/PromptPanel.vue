@@ -1,13 +1,13 @@
 <script setup>
-// 中间上部：提示词区（左右两列）
-// 左列：技能胶囊 + 用户提示词（CodeMirror，仅 @ 触发；右下角曲线装饰 + 中/英 H3 生成按钮）
-// 右列：H3 提示词四段（同一容器内连续排列，整体占满高度，超出滚动；支持 @ 与 #）
+// 提示词区：el-splitter 可折叠拖拽分栏
+// 左栏（纵向）：镜头技能（SQLite 技能词典，悬停显示描述，弹窗新增技能）/ 用户提示词
+// 右栏：H3 提示词四段（detailed_description 右侧带「自定义全局提示词」开关）
 import { computed, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { SKILL_GROUPS } from "../../data/skills.js";
 import { useWorkspace } from "../../stores/workspace.js";
+import { useSplitterMemory } from "../../utils/splitter.js";
 import { generateH3Prompt } from "../../utils/llm.js";
-import { saveSkills } from "../../api/client.js";
+import { addSkillDict, addSkillCategory } from "../../api/client.js";
 import { framesToSeconds } from "../../utils/media.js";
 import { REF_MENTION_TYPES, mergeSegmentSubjects } from "../../constants/subject.js";
 import PromptEditor from "../common/PromptEditor.vue";
@@ -17,16 +17,14 @@ const props = defineProps({
 });
 const ws = useWorkspace();
 
-const translating = ref(""); // "" | "zh" | "en"
-const customInput = reactive({ visible: false, group: "", value: "" });
+// 分栏尺寸记忆（左右分栏 / 左栏内部纵向，拖拽后写 localStorage）
+const hSplit = useSplitterMemory("mrd-prompt-split-h", [46, 54]);
+const vSplit = useSplitterMemory("mrd-prompt-split-v", [40, 60]);
 
-// 合并内置 + 自定义词条
-const groups = computed(() =>
-  SKILL_GROUPS.map((g) => ({
-    ...g,
-    items: [...g.items, ...(ws.customSkills[g.id] || [])],
-  }))
-);
+const translating = ref(""); // "" | "zh" | "en"
+
+// 技能组：只来自 SQLite 技能词典（workspace.loadSkillDict），无内置回退
+const groups = computed(() => ws.skillGroups);
 
 // 提及候选：本分镜生效主体（全局 + 段级自定义副本按名合并）
 const mentionCandidates = computed(() =>
@@ -42,7 +40,9 @@ function segSkills(field) {
   return props.segment?.[field] || [];
 }
 
-function toggleSkill(field, key) {
+// field="" 的自定义类别没有对应 segment 字段，统一写进 segment.extraSkills
+function toggleSkill(group, key) {
+  const field = group.field || "extraSkills";
   const arr = props.segment[field] || (props.segment[field] = []);
   const idx = arr.indexOf(key);
   if (idx >= 0) arr.splice(idx, 1);
@@ -50,23 +50,62 @@ function toggleSkill(field, key) {
   ws.markDirty();
 }
 
-async function addCustomSkill(groupId) {
-  const label = (customInput.value || "").trim();
-  if (!label) {
-    customInput.visible = false;
+// ---- 新增技能弹窗（类别/名称/描述/触发词/案例） ----
+const addDialog = reactive({
+  visible: false,
+  categoryId: null,
+  name: "",
+  desc: "",
+  keyword: "",
+  example: "",
+  newCategory: "",
+  saving: false,
+});
+
+function openAddDialog(group) {
+  addDialog.categoryId = group?.categoryId ?? null;
+  addDialog.name = "";
+  addDialog.desc = "";
+  addDialog.keyword = "";
+  addDialog.example = "";
+  addDialog.newCategory = "";
+  addDialog.visible = true;
+}
+
+async function submitAddSkill() {
+  if (addDialog.saving) return;
+  if (!addDialog.name.trim() || !addDialog.desc.trim() || !addDialog.keyword.trim() || !addDialog.example.trim()) {
+    ElMessage.warning("名称、描述、触发词、案例均为必填");
     return;
   }
-  const key = `custom_${Date.now().toString(36)}`;
-  if (!Array.isArray(ws.customSkills[groupId])) ws.customSkills[groupId] = [];
-  ws.customSkills[groupId].push({ key, label, title: "" });
-  customInput.value = "";
-  customInput.visible = false;
-  ws.markDirty();
+  addDialog.saving = true;
   try {
-    const res = await saveSkills(JSON.parse(JSON.stringify(ws.customSkills)));
-    if (res.success) Object.assign(ws.customSkills, res.skills);
-  } catch {
-    ElMessage.warning("自定义词条已生效，但持久化失败");
+    let categoryId = addDialog.categoryId;
+    const newCat = addDialog.newCategory.trim();
+    if (newCat) {
+      const catRes = await addSkillCategory({ name: newCat });
+      if (!catRes.success) throw new Error(catRes.error || "新增类别失败");
+      categoryId = catRes.id;
+    }
+    if (!categoryId) {
+      ElMessage.warning("请选择类别");
+      return;
+    }
+    const res = await addSkillDict({
+      categoryId,
+      name: addDialog.name.trim(),
+      desc: addDialog.desc.trim(),
+      keyword: addDialog.keyword.trim(),
+      example: addDialog.example.trim(),
+    });
+    if (!res.success) throw new Error(res.error || "新增技能失败");
+    await ws.loadSkillDict(true);
+    addDialog.visible = false;
+    ElMessage.success(`技能「${addDialog.name.trim()}」已入库`);
+  } catch (e) {
+    ElMessage.error(e.message || String(e));
+  } finally {
+    addDialog.saving = false;
   }
 }
 
@@ -108,7 +147,11 @@ async function generateH3(lang) {
       lang,
       camera_motion: seg.cameraMotions || [],
       expression: seg.expressions || [],
-      expression_catalog: (ws.customSkills.expressions || []),
+      // 微表情 catalog：技能词典加载后用 DB 词条（含 desc），否则回退旧自定义词库
+      expression_catalog:
+        (ws.skillGroups.find((g) => g.label === "微表情")?.items || []).map((s) => ({
+          key: s.key, label: s.label, title: s.desc || "",
+        })) || ws.customSkills.expressions || [],
       shot_size: seg.shotSizes || [],
       framing: seg.framings || [],
     };
@@ -133,77 +176,92 @@ async function generateH3(lang) {
 </script>
 
 <template>
-  <div class="mrd-prompt-panel">
-    <!-- 左列：技能 + 用户提示词 -->
-    <div class="mrd-native-col">
-      <div class="mrd-skills">
-        <div class="mrd-skills-head">
-          <span>镜头技能</span>
-          <el-tooltip content="选中后随生成请求携带，由 LLM 分配到各 [Shot N]；不选 = 由模型自由决定" placement="bottom">
-            <el-icon class="mrd-skills-help"><component :is="'QuestionFilled'" /></el-icon>
-          </el-tooltip>
-        </div>
-        <el-scrollbar class="mrd-skills-scroll">
-          <div v-for="g in groups" :key="g.id" class="mrd-skill-group">
-            <div class="mrd-skill-group-title">{{ g.label }}</div>
-            <div class="mrd-skill-pills">
-              <button
-                v-for="it in g.items"
-                :key="it.key"
-                class="mrd-skill-pill"
-                :class="{ on: segSkills(g.id).includes(it.key) }"
-                :title="it.title || it.label"
-                @click="toggleSkill(g.id, it.key)"
-              >{{ it.label }}</button>
-              <button class="mrd-skill-pill add" title="添加自定义词条" @click="customInput.visible = !customInput.visible; customInput.group = g.id">＋</button>
-              <div v-if="customInput.visible && customInput.group === g.id" class="mrd-skill-custom">
-                <el-input
-                  v-model="customInput.value"
-                  size="small"
-                  placeholder="自定义词条名称"
-                  @keyup.enter="addCustomSkill(g.id)"
-                />
-                <el-button size="small" type="primary" @click="addCustomSkill(g.id)">保存</el-button>
+  <el-splitter class="mrd-prompt-panel" @resize-end="hSplit.onResizeEnd">
+    <!-- 左栏：镜头技能 / 用户提示词（纵向分栏，可折叠拖拽） -->
+    <el-splitter-panel :size="hSplit.sizes[0]" :min="28" collapsible>
+      <el-splitter layout="vertical" @resize-end="vSplit.onResizeEnd">
+        <el-splitter-panel :size="vSplit.sizes[0]" :min="12" collapsible>
+          <div class="mrd-skills">
+            <div class="mrd-skills-head">
+              <span>镜头技能</span>
+              <el-tooltip content="选中后随生成请求携带，由 LLM 分配到各 [Shot N]；不选 = 由模型自由决定" placement="bottom">
+                <el-icon class="mrd-skills-help"><component :is="'QuestionFilled'" /></el-icon>
+              </el-tooltip>
+            </div>
+            <el-scrollbar class="mrd-skills-scroll">
+              <div v-if="!groups.length" class="mrd-skill-empty">
+                {{ ws.skillDict.loading ? "技能词典加载中…" : "技能词典为空或加载失败（重启后端后重试）" }}
               </div>
+              <div v-for="g in groups" :key="g.id" class="mrd-skill-group">
+                <div class="mrd-skill-group-title">
+                  {{ g.label }}
+                  <span v-if="g.description" class="mrd-skill-group-desc">{{ g.description }}</span>
+                </div>
+                <div class="mrd-skill-pills">
+                  <el-tooltip
+                    v-for="it in g.items"
+                    :key="it.key"
+                    effect="dark"
+                    placement="top"
+                    :show-after="250"
+                  >
+                    <template #content>
+                      <div class="mrd-skill-tip">
+                        <div class="mrd-skill-tip-name">{{ it.label }}</div>
+                        <div v-if="it.desc" class="mrd-skill-tip-desc">{{ it.desc }}</div>
+                        <div v-if="it.keyword" class="mrd-skill-tip-kw">触发词：{{ it.keyword }}</div>
+                        <div v-if="it.example" class="mrd-skill-tip-ex">例：{{ it.example }}</div>
+                      </div>
+                    </template>
+                    <button
+                      class="mrd-skill-pill"
+                      :class="{ on: segSkills(g.field || 'extraSkills').includes(it.key) }"
+                      @click="toggleSkill(g, it.key)"
+                    >{{ it.label }}</button>
+                  </el-tooltip>
+                  <button class="mrd-skill-pill add" title="新增技能（入库到技能词典）" @click="openAddDialog(g)">＋</button>
+                </div>
+              </div>
+            </el-scrollbar>
+          </div>
+        </el-splitter-panel>
+        
+        <el-splitter-panel :size="vSplit.sizes[1]" :min="30" collapsible>
+          <div class="mrd-native-card">
+            <div class="mrd-col-title">
+              <div class="mrd-col-title-left">
+                用户提示词
+                <span class="mrd-col-hint">输入 @ 可引用主体</span>
+              </div>
+              <el-button
+                  size="small"
+                  type="primary"
+                  :loading="translating === 'zh'"
+                  :disabled="!!translating && translating !== 'zh'"
+                  :icon="'MagicStick'"
+                  @click="generateH3('zh')"
+                >转H3提示词</el-button>
+            </div>
+            <!-- 输入框下边框：左低右高，中间曲线连接（fill 与编辑器背景同色，视觉上是下边框本身） -->
+            <div class="mrd-curve-shell">
+              <PromptEditor
+                :model-value="segment.prompt"
+                :allow-hash="false"
+                placeholder="原生分镜提示词（可中文，支持 <@主体> 标签）；生成时会自动翻译"
+                :candidates="mentionCandidates"
+                :allowed-types="mentionTypes"
+                only-referencable
+                @update:model-value="v => { segment.prompt = v; ws.markDirty(); }"
+              />
             </div>
           </div>
-        </el-scrollbar>
-      </div>
+        </el-splitter-panel>
+      </el-splitter>
+    </el-splitter-panel>
 
-      <div class="mrd-native-card">
-        <div class="mrd-col-title">
-          <div class="mrd-col-title-left">
-            用户提示词
-            <span class="mrd-col-hint">输入 @ 可引用主体</span>
-          </div>
-          <el-button
-              size="small"
-              type="primary"
-              :loading="translating === 'zh'"
-              :disabled="!!translating && translating !== 'zh'"
-              :icon="'MagicStick'"
-              @click="generateH3('zh')"
-            >转H3提示词</el-button>
-        </div>
-        <!-- 输入框下边框：左低右高，中间曲线连接（fill 与编辑器背景同色，视觉上是下边框本身） -->
-        <div class="mrd-curve-shell">
-          <PromptEditor
-            :model-value="segment.prompt"
-            fill
-            :min-height="120"
-            :allow-hash="false"
-            placeholder="原生分镜提示词（可中文，支持 <@主体> 标签）；生成时会自动翻译"
-            :candidates="mentionCandidates"
-            :allowed-types="mentionTypes"
-            only-referencable
-            @update:model-value="v => { segment.prompt = v; ws.markDirty(); }"
-          />
-        </div>
-      </div>
-    </div>
-
-    <!-- 右列：H3 提示词（整体一个容器） -->
-    <div class="mrd-h3-card">
+    <!-- 右栏：H3 提示词 -->
+    <el-splitter-panel :size="hSplit.sizes[1]" :min="28" collapsible>
+      <div class="mrd-h3-card">
       <div class="mrd-h3-head">
         <span class="mrd-col-title">H3 提示词</span>
         <span class="mrd-col-hint">输入 @ 或 # 可引用主体</span>
@@ -211,7 +269,23 @@ async function generateH3(lang) {
       <el-scrollbar class="mrd-h3-scroll">
         <div class="mrd-h3-body">
           <div v-for="f in H3_FIELDS" :key="f.key" class="mrd-h3-section">
-            <label class="mrd-h3-label">{{ f.label }}</label>
+            <div class="mrd-h3-label-row">
+              <label class="mrd-h3-label">{{ f.label }}</label>
+              <el-tooltip
+                v-if="f.key === 'detailed_description'"
+                content="开启后该镜头生成与预览不再拼接全局提示词（detailed_description 完全由本镜头内容驱动）"
+                placement="top"
+              >
+                <label class="mrd-h3-switch" :class="{ on: !!segment.h3NoGlobalPrompt }">
+                  <el-switch
+                    size="small"
+                    :model-value="!!segment.h3NoGlobalPrompt"
+                    @change="v => { segment.h3NoGlobalPrompt = !!v; ws.markDirty(); }"
+                  />
+                  自定义全局提示词
+                </label>
+              </el-tooltip>
+            </div>
             <PromptEditor
               :model-value="h3[f.key]"
               :min-height="f.minHeight"
@@ -223,48 +297,95 @@ async function generateH3(lang) {
           </div>
         </div>
       </el-scrollbar>
-    </div>
-  </div>
+      </div>
+    </el-splitter-panel>
+  </el-splitter>
+
+  <!-- 新增技能弹窗 -->
+    <el-dialog v-model="addDialog.visible" title="新增镜头技能" width="440px" append-to-body>
+      <div class="mrd-add-skill-form">
+        <div class="mrd-add-skill-row">
+          <span class="mrd-add-skill-label">类别</span>
+          <el-select v-model="addDialog.categoryId" placeholder="选择类别" style="flex:1">
+            <el-option
+              v-for="c in ws.skillDict.categories"
+              :key="c.id"
+              :label="c.name"
+              :value="c.id"
+            />
+          </el-select>
+        </div>
+        <div class="mrd-add-skill-row">
+          <span class="mrd-add-skill-label">新类别</span>
+          <el-input v-model="addDialog.newCategory" size="small" placeholder="留空则使用上面选中的类别；填写则创建新类别" />
+        </div>
+        <div class="mrd-add-skill-row">
+          <span class="mrd-add-skill-label">名称</span>
+          <el-input v-model="addDialog.name" placeholder="技能展示名，如「手持晃动」" />
+        </div>
+        <div class="mrd-add-skill-row">
+          <span class="mrd-add-skill-label">描述</span>
+          <el-input v-model="addDialog.desc" type="textarea" :rows="2" placeholder="悬停胶囊时展示的技能描述（必填）" />
+        </div>
+        <div class="mrd-add-skill-row">
+          <span class="mrd-add-skill-label">触发词</span>
+          <el-input v-model="addDialog.keyword" placeholder="技术触发词（如 camera motion）；无则填名称关键词" />
+        </div>
+        <div class="mrd-add-skill-row">
+          <span class="mrd-add-skill-label">案例</span>
+          <el-input v-model="addDialog.example" type="textarea" :rows="2" placeholder="可直接嵌入镜头描述的示例句（必填）" />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="addDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="addDialog.saving" @click="submitAddSkill">保存到词典</el-button>
+      </template>
+    </el-dialog>
 </template>
 
 <style scoped>
 .mrd-prompt-panel {
   flex: 1;
+  height: 100%;
   min-width: 0;
-  display: flex;
-  gap: 10px;
   min-height: 0;
 }
-/* 左列 */
-.mrd-native-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
+/* 分隔条暗色化：拖拽线 + 折叠箭头（左右分栏与左栏纵向分栏共用） */
+.mrd-prompt-panel :deep(.el-splitter-bar__dragger:before) { background-color: #2a3042; }
+.mrd-prompt-panel :deep(.el-splitter-bar__dragger:hover:not(.is-disabled):before),
+.mrd-prompt-panel :deep(.el-splitter-bar__dragger-active:before) { background-color: #6c5ce7; }
+.mrd-prompt-panel :deep(.el-splitter-bar__collapse-icon) {
+  background: #2a3042;
+  color: #a9b1c3;
 }
+.mrd-prompt-panel :deep(.el-splitter-bar__collapse-icon:hover) { background-color: #6c5ce7; }
 .mrd-skills {
-  flex: none;
-  max-height: 270px;
+  height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   background: #151821;
-  border: 1px solid #222736;
-  border-radius: 10px;
-  padding: 10px;
+  padding: 10px 0;
   overflow: hidden;
 }
 .mrd-skills-head {
   display: flex; align-items: center; justify-content: space-between;
   font-size: 12px; font-weight: 600; color: #a9b1c3;
-  margin-bottom: 8px; flex: none;
+  margin-bottom: 8px; flex: none; padding: 0 10px;
 }
 .mrd-skills-help { color: #4b5266; cursor: help; }
 .mrd-skills-scroll { flex: 1; min-height: 0; }
+.mrd-skill-empty { font-size: 11px; color: #4b5366; padding: 8px 2px; }
 .mrd-skill-group { margin-bottom: 10px; }
-.mrd-skill-group-title { font-size: 11px; color: #6b7488; margin-bottom: 5px; letter-spacing: 0.5px; }
-.mrd-skill-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.mrd-skill-group-title { font-size: 11px; color: #6b7488; margin-bottom: 5px; 
+  letter-spacing: 0.5px; padding: 0 10px; }
+.mrd-skill-group-desc { font-size: 10px; color: #4b5366; margin-left: 6px; letter-spacing: 0; }
+.mrd-skill-tip { max-width: 260px; line-height: 1.5; }
+.mrd-skill-tip-name { font-weight: 600; color: #edeff5; }
+.mrd-skill-tip-desc { color: #b9c0d0; margin-top: 2px; }
+.mrd-skill-tip-kw { color: #8f7ff0; margin-top: 2px; }
+.mrd-skill-tip-ex { color: #77809a; margin-top: 2px; font-style: italic; }
+.mrd-skill-pills { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 10px; }
 .mrd-skill-pill {
   border: 1px solid #2a3042;
   background: #1c202b;
@@ -287,18 +408,18 @@ async function generateH3(lang) {
 
 .mrd-native-card {
   flex: 1;
+  height: 100%;
+  box-sizing: border-box;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
   background: #151821;
-  border: 1px solid #222736;
-  border-radius: 10px;
-  padding: 10px;
+  padding: 10px 0;
 }
 .mrd-col-title {
   font-size: 12px; font-weight: 600; color: #a9b1c3;
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 8px; padding: 0 10px;
 }
 .mrd-col-title-left { 
   flex: 1;
@@ -312,7 +433,8 @@ async function generateH3(lang) {
 }
 /* 编辑器去掉下边框，由下方 SVG 曲线充当底边 */
 .mrd-curve-shell :deep(.mrd-cm-host) {
-  border-radius: 6px 6px 0 0;
+  border: none;
+  background: #10131b;
 }
 .mrd-curve-edge {
   flex: none;
@@ -351,22 +473,42 @@ async function generateH3(lang) {
   flex-direction: column;
   gap: 6px;
   background: #151821;
-  border: 1px solid #222736;
-  border-radius: 10px;
-  padding: 10px;
   height: 100%;
 }
-.mrd-h3-head { flex: none; display: flex; align-items: baseline; gap: 8px; }
+.mrd-h3-head { flex: none; display: flex; align-items: baseline; gap: 8px; padding-top: 10px; }
 .mrd-h3-scroll { flex: 1; min-height: 0; }
 .mrd-h3-body { display: flex; flex-direction: column; padding-right: 4px; }
 .mrd-h3-section {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 4px 0 10px;
+  padding-top: 4px;
   border-bottom: 1px dashed #222736;
 }
 .mrd-h3-section:last-child { border-bottom: none; padding-bottom: 4px; }
+.mrd-h3-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 10px; }
+.mrd-h3-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: #6b7488;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+.mrd-h3-switch.on { color: #8f7ff0; }
+/* 新增技能弹窗 */
+.mrd-add-skill-form { display: flex; flex-direction: column; gap: 10px; }
+.mrd-add-skill-row { display: flex; align-items: flex-start; gap: 10px; }
+.mrd-add-skill-label {
+  flex: none;
+  width: 52px;
+  padding-top: 6px;
+  font-size: 12px;
+  color: #a9b1c3;
+  text-align: right;
+}
 .mrd-h3-label {
   font-size: 11px;
   color: #6b7488;

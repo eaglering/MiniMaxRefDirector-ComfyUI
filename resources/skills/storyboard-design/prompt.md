@@ -23,12 +23,15 @@
 2. `prompt` 是该镜头的画面描述：写清主体、动作、环境、光线与氛围；克制写实、
    有电影感；出现对白时用 `<#角色名:对白>` 格式内嵌；引用已定义主体时用
    `<@角色名>`。
-3. 导演控件只能从下面的 key 列表中选（这些 key 与导演台控件一一对应，留空数组 `[]`
-   表示交给模型自由决定，不要编造列表外的 key）：
-   - `camera_motions`：push_in, pull_back, push_pull, orbit, tracking, aerial, crane, pan, close_up
-   - `shot_sizes`：extreme_wide, wide, full, medium_long, cowboy, medium, medium_close_up, close_up, extreme_close_up
-   - `framings`：over_the_shoulder, two_shot, insert, establishing
-   - `expressions`：gaze_shift, glance_away, stare_hard, blink_slow, brow_raise, brow_furrow, one_brow_rise, lip_press, lip_tighten, micro_smile, lips_part, lip_corner_twitch, breath_catch, exhale_sigh, swallow, head_tilt, head_drop, turn_away, shoulder_tense, hand_still
+3. 导演控件（运镜/景别/镜头结构/微表情）是**可选项**：是否使用、用哪个，由你按镜头
+   语义决定（留空数组 `[]` 表示交给模型自由决定），不要编造词典之外的 key。
+   可选技能词典（来自数据库，按类别分组）：
+
+{{skill_keys}}
+
+   在 `prompt` 正文中引用技能时，使用 `<!类别名称:技能名称>` 格式内嵌（例如
+   `<!运镜:推近 Push-in>`、`<!微表情:抿唇>`），与 `<@主体名>` 标签风格一致；
+   同一镜头的技能引用宜少而准，不要堆砌。
 4. `first_frame_prompt` / `last_frame_prompt` 分别描述该镜头第一画面与结束画面，
    用于首/尾帧参考图生成与跨镜头衔接；**必须包含环境描述**：地点、陈设、天气、
    光线方向与背景空间关系（不能只写主体，无环境信息视为不合格）；相邻镜头首尾
