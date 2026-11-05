@@ -31,23 +31,26 @@ function widgetValue(node, name) {
   return w ? w.value : undefined;
 }
 
-// 沿 config 输入连线找到上游 Subject 节点（可能跨 Reroute，简单遍历一层）
+// 沿 config 输入连线找到上游 Subject 节点（支持多跳 Reroute 透传）
 function findSubjectNode(directorNode) {
   try {
     const input = (directorNode.inputs || []).find((i) => i.name === "config");
     if (!input || input.link == null) return null;
-    const link = app.graph.links[input.link];
-    if (!link) return null;
-    const src = app.graph._nodes_in_order?.find((n) => n.id === link.origin_id)
-      || app.graph._nodes.find((n) => n.id === link.origin_id);
-    if (!src) return null;
-    if (src.type === SUBJECT_TYPE) return src;
-    // Reroute 透传：向上再找一跳
-    const upInput = (src.inputs || [])[0];
-    if (src.type === "Reroute" && upInput && upInput.link != null) {
-      const l2 = app.graph.links[upInput.link];
-      const src2 = l2 && (app.graph._nodes_in_order || app.graph._nodes).find((n) => n.id === l2.origin_id);
-      if (src2?.type === SUBJECT_TYPE) return src2;
+    let linkId = input.link;
+    for (let hops = 0; hops < 10 && linkId != null; hops++) {
+      const link = app.graph.links[linkId];
+      if (!link) return null;
+      const src = app.graph._nodes_in_order?.find((n) => n.id === link.origin_id)
+        || app.graph._nodes.find((n) => n.id === link.origin_id);
+      if (!src) return null;
+      if (src.type === SUBJECT_TYPE) return src;
+      // Reroute 透传（兼容 rgthree 等变体命名）：向上继续找
+      if (/reroute/i.test(src.type || "")) {
+        const upInput = (src.inputs || [])[0];
+        linkId = upInput && upInput.link != null ? upInput.link : null;
+        continue;
+      }
+      return null;
     }
     return null;
   } catch (e) {
@@ -56,7 +59,9 @@ function findSubjectNode(directorNode) {
 }
 
 // 收集打开 SPA 时推送的完整状态
-function collectState(directorNode) {
+// Subject 节点缺失或其 subject_data 为空/损坏时，回退读取磁盘上次的 SPA
+// 暂存状态（/spa/state），避免把空主体推给页面、随后一次保存覆盖掉真实主体。
+async function collectState(directorNode) {
   const subjectNode = findSubjectNode(directorNode);
   const widgets = {};
   for (const name of DIRECTOR_WIDGET_NAMES) {
@@ -87,14 +92,35 @@ function collectState(directorNode) {
   }
   let subjects = { subjects: [] };
   let global_prompt = "";
+  let subjectsFromWidget = false;
   if (subjectNode) {
     const raw = widgetValue(subjectNode, "subject_data");
     try {
-      subjects = raw ? JSON.parse(raw) : { subjects: [] };
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && Array.isArray(parsed.subjects)) {
+        subjects = parsed;
+        subjectsFromWidget = parsed.subjects.length > 0;
+      }
     } catch (e) {
-      subjects = { subjects: [] };
+      console.warn("[SPA] subject_data parse failed, will fallback to saved state", e);
     }
     global_prompt = String(widgetValue(subjectNode, "global_prompt") || "");
+  }
+  let subjectsFallback = false;
+  if (!subjectsFromWidget) {
+    try {
+      const resp = await api.fetchApi(
+        `/minimax_ref/api/spa/state?node_id=${encodeURIComponent(String(directorNode.id))}`);
+      if (resp.ok) {
+        const d = await resp.json();
+        const prev = d?.success ? (d.state || {}) : {};
+        if (Array.isArray(prev.subjects?.subjects) && prev.subjects.subjects.length) {
+          subjects = prev.subjects;
+          subjectsFallback = true;
+          console.warn("[SPA] subject node data empty, restored subjects from saved state");
+        }
+      }
+    } catch (e) { /* 磁盘状态不可用时保持空 */ }
   }
   return {
     node_id: String(directorNode.id),
@@ -103,6 +129,7 @@ function collectState(directorNode) {
     widgets,
     global_prompt,
     subjects,
+    subjects_fallback: subjectsFallback,
     subject_node_id: subjectNode ? String(subjectNode.id) : "",
     llm,
     updated_at: Date.now(),
@@ -165,8 +192,13 @@ function applyStateToNodes(state) {
     ? (app.graph._nodes || []).find((n) => String(n.id) === String(state.subject_node_id) && n.type === SUBJECT_TYPE)
     : findSubjectNode(directorNode);
   if (subjectNode && state.subjects) {
-    updateWidgetValue(subjectNode, subjectNode.widgets?.find((w) => w.name === "subject_data"),
-      JSON.stringify(state.subjects));
+    // 防覆盖：主体数据来自磁盘暂存回退（subjects_fallback）且为空时，
+    // 不回写 subject_data，避免把 widget 里的真实主体清掉
+    const emptyFallback = state.subjects_fallback && !(state.subjects.subjects || []).length;
+    if (!emptyFallback) {
+      updateWidgetValue(subjectNode, subjectNode.widgets?.find((w) => w.name === "subject_data"),
+        JSON.stringify(state.subjects));
+    }
     if (typeof state.global_prompt === "string") {
       updateWidgetValue(subjectNode, subjectNode.widgets?.find((w) => w.name === "global_prompt"),
         state.global_prompt);
@@ -310,7 +342,10 @@ function addSpaLauncher(node) {
     btn.disabled = true;
     setStatus("正在推送节点数据…");
     try {
-      const state = collectState(target);
+      const state = await collectState(target);
+      if (state.subjects_fallback) {
+        setStatus("未读到 Subject 节点数据，已用上次暂存的主体数据", "err");
+      }
       const resp = await api.fetchApi("/minimax_ref/api/spa/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

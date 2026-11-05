@@ -185,15 +185,29 @@ def _get_h3_context_noise_module():
     return None
 
 
+# MiniMaxH3ContextTaperNoise 的 optional 枚举（非法值回退节点默认）
+_DENOISE_PATTERNS = ("poc_chroma_blocks", "gaussian_rgb", "uniform_rgb")
+_DENOISE_GRID_MODES = ("poc_36x64", "block_size")
+
+
 def _denoise_opts(seg_denoise: dict | None) -> dict | None:
-    """规整片段级降噪参数；未启用返回 None（调用方跳过）。"""
+    """规整片段级降噪参数；未启用返回 None（调用方跳过）。
+
+    pattern/grid_mode/block_size 为节点 optional 参数（噪声图样/网格模式/块
+    大小），缺省或非法值回退节点默认 poc_chroma_blocks / poc_36x64 / 16。
+    """
     if not isinstance(seg_denoise, dict) or not seg_denoise.get("enabled"):
         return None
+    pattern = seg_denoise.get("pattern")
+    grid_mode = seg_denoise.get("grid_mode")
     return {
         "alpha": float(seg_denoise.get("alpha", 0.45)),
         "alpha_end": float(seg_denoise.get("alpha_end", 0.10)),
         "ramp": max(1, int(seg_denoise.get("ramp", 3) or 3)),
         "seed": int(seg_denoise.get("seed", 0) or 0),
+        "pattern": pattern if pattern in _DENOISE_PATTERNS else "poc_chroma_blocks",
+        "grid_mode": grid_mode if grid_mode in _DENOISE_GRID_MODES else "poc_36x64",
+        "block_size": min(256, max(1, int(seg_denoise.get("block_size", 16) or 16))),
     }
 
 
@@ -217,9 +231,14 @@ def _denoise_context_frames(frames, ctx_len, opts):
             alpha_end=opts["alpha_end"],
             ramp_frames=opts["ramp"],
             seed=opts["seed"],
+            pattern=opts["pattern"],
+            grid_mode=opts["grid_mode"],
+            block_size=opts["block_size"],
         )
-        log.info("[MiniMaxRefGuide] denoise(frames) tail=%d alpha=%.3f->%.3f ramp=%d",
-                 int(ctx_len), opts["alpha"], opts["alpha_end"], opts["ramp"])
+        log.info("[MiniMaxRefGuide] denoise(frames) tail=%d alpha=%.3f->%.3f ramp=%d "
+                 "pattern=%s grid=%s block=%d",
+                 int(ctx_len), opts["alpha"], opts["alpha_end"], opts["ramp"],
+                 opts["pattern"], opts["grid_mode"], opts["block_size"])
         return out
     except Exception:
         log.warning("[MiniMaxRefGuide] denoise(frames) failed, continuing with "

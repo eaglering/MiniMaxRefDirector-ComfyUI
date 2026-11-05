@@ -219,7 +219,7 @@ function onDeepseekImported(result) {
 <template>
   <el-splitter class="mrd-storyboard" @resize-end="mainSplit.onResizeEnd">
     <!-- 分镜列表 -->
-    <el-splitter-panel :size="mainSplit.sizes[0]" min="180px" collapsible>
+    <el-splitter-panel v-model:size="mainSplit.sizes[0]" :min="240" collapsible>
       <ShotList
         :segments="segments"
         :selected-id="selected ? selected.id : ''"
@@ -236,7 +236,7 @@ function onDeepseekImported(result) {
     </el-splitter-panel>
 
     <!-- 中间：提示词区 / 额外主体 / 状态行 -->
-    <el-splitter-panel :size="mainSplit.sizes[1]" min="640px" collapsible>
+    <el-splitter-panel v-model:size="mainSplit.sizes[1]" :min="640" collapsible>
       <div class="mrd-storyboard-center">
         <template v-if="selected">
           <PromptPanel :key="`p-${selected.id}`" :segment="selected" />
@@ -253,7 +253,7 @@ function onDeepseekImported(result) {
     </el-splitter-panel>
 
     <!-- 右侧：分镜参数 / 分镜预览（纵向分栏，可折叠拖拽；窄屏走抽屉） -->
-    <el-splitter-panel v-if="!isNarrow" :size="mainSplit.sizes[2]" min="180px" collapsible>
+    <el-splitter-panel v-if="!isNarrow" v-model:size="mainSplit.sizes[2]" :min="280" collapsible>
       <div class="mrd-storyboard-right">
         <el-tabs v-model="rightTab" type="border-card" class="mrd-right-tabs">
           <el-tab-pane label="分镜参数" name="params">

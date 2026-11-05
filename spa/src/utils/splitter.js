@@ -1,8 +1,8 @@
 // el-splitter 面板尺寸记忆：拖拽结束把百分比数组写入 localStorage，重进页面恢复
-import { ref } from "vue";
+import { reactive } from "vue";
 
 export function useSplitterMemory(key, fallback) {
-  const sizes = ref(load());
+  const sizes = reactive(load());
 
   function load() {
     try {
@@ -21,9 +21,9 @@ export function useSplitterMemory(key, fallback) {
   function onResizeEnd(index, next) {
     // 面板数量变化时（如窄屏隐藏右栏）不写入，避免破坏记忆
     if (!Array.isArray(next) || next.length !== fallback.length) return;
-    sizes.value = next.slice();
+    sizes.splice(0, sizes.length, ...next);
     try {
-      localStorage.setItem(key, JSON.stringify(sizes.value));
+      localStorage.setItem(key, JSON.stringify([...sizes]));
     } catch {}
   }
 

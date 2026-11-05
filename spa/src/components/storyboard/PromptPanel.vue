@@ -385,7 +385,7 @@ async function generateH3(lang) {
 .mrd-skill-tip-desc { color: #b9c0d0; margin-top: 2px; }
 .mrd-skill-tip-kw { color: #8f7ff0; margin-top: 2px; }
 .mrd-skill-tip-ex { color: #77809a; margin-top: 2px; font-style: italic; }
-.mrd-skill-pills { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 10px; }
+.mrd-skill-pills { display: flex; flex-wrap: wrap; gap: 5px; padding: 5px 10px; }
 .mrd-skill-pill {
   border: 1px solid #2a3042;
   background: #1c202b;

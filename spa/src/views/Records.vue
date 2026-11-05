@@ -7,7 +7,52 @@ import {
 } from "../api/client.js";
 import { formatTime, formatDuration } from "../utils/media.js";
 
-const records = ref([]);
+const records = ref([{
+  id: 1,
+  kind: "generate",
+  created_at: "2025-06-01T12:34:56+08:00",
+  duration_frames: 120,
+  fps: 30,
+  width: 1920,
+  height: 1080,
+  video: "output/test.mp4",
+  image_latent: "output/test.png",
+  clip_audio: "output/test.wav",
+  meta: {
+    width: 1920,
+    height: 1080,
+  },
+}, {
+  id: 2,
+  kind: "generate",
+  created_at: "2025-06-01T12:34:56+08:00",
+  duration_frames: 120,
+  fps: 30,
+  width: 1920,
+  height: 1080,
+  video: "output/test.mp4",
+  image_latent: "output/test.png",
+  clip_audio: "output/test.wav",
+  meta: {
+    width: 1920,
+    height: 1080,
+  },
+}, {
+  id: 3,
+  kind: "generate",
+  created_at: "2025-06-01T12:34:56+08:00",
+  duration_frames: 120,
+  fps: 30,
+  width: 1920,
+  height: 1080,
+  video: "output/test.mp4",
+  image_latent: "output/test.png",
+  clip_audio: "output/test.wav",
+  meta: {
+    width: 1920,
+    height: 1080,
+  },
+}]);
 const loading = ref(false);
 const selection = ref([]);
 const merging = reactive({ active: false, kind: "" });
@@ -31,7 +76,7 @@ async function reload() {
     loading.value = false;
   }
 }
-onMounted(reload);
+// onMounted(reload);
 
 // 记录的视频预览地址：dict（{filename,subfolder,type}）或字符串（output 相对路径）
 function videoUrl(rec) {
@@ -251,7 +296,7 @@ async function onMergeLatents() {
 .mrd-records-title { font-size: 14px; font-weight: 600; color: #edeff5; display: flex; align-items: center; gap: 8px; }
 .mrd-records-count { font-size: 12px; font-weight: 400; color: #6b7488; }
 .mrd-records-actions { display: flex; gap: 8px; }
-.mrd-records-table { flex: 1; min-height: 0; }
+.mrd-records-table { flex: 1; min-height: 0; background-color: #10131b; }
 .mrd-rec-thumb {
   position: relative; width: 110px; height: 62px;
   border-radius: 6px; overflow: hidden;
