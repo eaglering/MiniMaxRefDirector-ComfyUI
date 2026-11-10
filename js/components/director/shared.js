@@ -375,8 +375,8 @@ const MICRO_EXPRESSIONS = [];
 
 // --- 镜头技能词典（SQLite /spa/skill_dict）加载 ---
 // 替换式刷新：清空四个容器后按数据库内容重建（数据库是唯一数据源）。
-// title 用技能描述 → 胶囊悬停即显示描述；微表情条目 category 取自 meta
-// （install 种子的 micro_category），缺省归入 body。词典原文缓存于
+// title 用技能描述 → 胶囊悬停即显示描述；微表情条目 category 取自 groupName
+// （eye/brow/mouth/breath/body），缺省归入 body。词典原文缓存于
 // skillDictData（「添加技能」弹窗的类别下拉）；失败返回 null（容器保持上次内容）。
 let skillDictData = { categories: [], skills: [] };
 
@@ -400,10 +400,8 @@ async function loadSkillDict() {
     for (const s of data.skills || []) {
       const arr = catArr[catName[s.categoryId]];
       if (!arr) continue;
-      let meta = {};
-      try { meta = s.meta ? JSON.parse(s.meta) : {}; } catch (e) { meta = {}; }
       const entry = { key: s.key, label: s.name, title: s.desc || s.name };
-      if (arr === MICRO_EXPRESSIONS) entry.category = meta.micro_category || "body";
+      if (arr === MICRO_EXPRESSIONS) entry.category = s.groupName || "body";
       arr.push(entry);
     }
     skillDictData = { categories: data.categories || [], skills: data.skills || [] };

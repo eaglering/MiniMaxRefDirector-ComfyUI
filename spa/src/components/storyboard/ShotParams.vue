@@ -112,6 +112,36 @@ function setVideoFile(v) {
       />
     </div>
 
+    <!-- 二次采样（seg.secondPass，与旧导演台字段一致；Guide 节点输出 secondPass） -->
+    <div class="mrd-param-row">
+      <div class="mrd-param-label">
+        二次采样
+        <el-tooltip placement="top" content="对应旧导演台「Second Pass / 二次采样 X2」：Guide 节点输出 secondPass 布尔，供工作流下游二采节点接线使用">
+          <el-icon class="mrd-param-help"><component :is="'QuestionFilled'" /></el-icon>
+        </el-tooltip>
+      </div>
+      <el-switch
+        :model-value="!!segment.secondPass"
+        @update:model-value="v => { segment.secondPass = v; dirty(); }"
+        size="small"
+      />
+    </div>
+
+    <!-- 超分放大（seg.upscale，与旧导演台字段一致；Guide 节点输出 upscale） -->
+    <div class="mrd-param-row">
+      <div class="mrd-param-label">
+        超分放大
+        <el-tooltip placement="top" content="对应旧导演台「Flash VSR / 超分放大 #2」：Guide 节点输出 upscale 布尔，供工作流下游超分节点接线使用">
+          <el-icon class="mrd-param-help"><component :is="'QuestionFilled'" /></el-icon>
+        </el-tooltip>
+      </div>
+      <el-switch
+        :model-value="!!segment.upscale"
+        @update:model-value="v => { segment.upscale = v; dirty(); }"
+        size="small"
+      />
+    </div>
+
     <!-- 引导强度 -->
     <div class="mrd-param-row">
       <div class="mrd-param-label">引导强度</div>

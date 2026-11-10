@@ -18,6 +18,20 @@ from .llm import (
 from .path import resolve_input_path
 from .utils import find_index, parse_generated_json
 
+# ── 浏览器桥接站点映射 ─────────────────────────────────────────────────────
+# vlm_mode "deepseek-proxy" / "doubao-proxy" / "qwen-proxy" 共用同一浏览器扩展
+# WS 桥接链路，仅站点适配器不同（lib/deepseek_bridge.py 的 site 参数）。
+_PROXY_SITE_MODES = {
+    "deepseek-proxy": "deepseek",
+    "doubao-proxy": "doubao",
+    "qwen-proxy": "qwen",
+}
+
+
+def _proxy_site(vlm_mode: str) -> str | None:
+    """vlm_mode 为浏览器桥接模式时返回站点（deepseek/doubao/qwen），否则 None。"""
+    return _PROXY_SITE_MODES.get(str(vlm_mode or ""))
+
 try:
     from comfy_api.latest import VideoFromFile
 except ImportError:  # pragma: no cover
@@ -99,9 +113,13 @@ _AUDIO_RELATION_TEXT = {
 }
 
 # ── 镜头技能预设（运行时从技能词典 SQLite 读取，本文件不再内置词条）──────────
-# 技能定义已迁至 install/skill_seed.py（首次建库种子）。运镜/景别/构图/微表情四类
-# 指令构建时通过 _skill_presets() 从数据库读取；统一字段结构：
-#   { name_en, name_zh, desc(英文描述), desc_zh, examples(英文例句), examples_zh(中文例句) }
+# 技能定义已迁至 install/skill_seed.py（首次建库种子 + v0→v1 迁移）。运镜/景别/
+# 构图/微表情四类指令构建时通过 _skill_presets() 从数据库读取，字段结构（按
+# 三段链路「原始提示词 → H3 中文 → H3 英文」精简）：
+#   camera:     { name_zh, name_en, desc_zh, guide(LoRA 写法指南), examples(英文触发短语) }
+#   shotSize:   { name_zh, name_en }        # 中文名直接写入提示词，name_en 供英文对照
+#   framing:    { name_zh, name_en }        # 同上
+#   expression: { name_zh, name_en, desc_zh, examples_zh(中文示例数组), group }
 _PRESET_CATEGORY_FIELDS = ("camera", "shotSize", "framing", "expression")
 
 
@@ -155,13 +173,13 @@ def _normalize_camera_motions(camera_motion) -> list:
 def _camera_motion_note(camera_motion: str | list = "", lang: str = "en") -> str:
     """按（多选）运镜 key 生成注入生成提示词的运镜指令块；空选择返回空串（不注入）。
 
-    lang="zh" 时输出整段中文指令（标题、引导语、描述与例句均为中文），配合中文
-    输出语言，避免注入内容把最终字段带偏成英文；lang 其他值维持英文原版。
-    多选时要求 LLM 依据每个 [Shot N] 的镜头语义（景别/动作/情绪），从所选风格
-    库中为该 Shot 挑选最契合的单一运镜并自然嵌入；不同 Shot 可自然轮换，不堆叠
-    多风格于一镜，所选风格不必全部出现。速度词由模型依镜头节奏自然选择
-    （slow/steady/quick 等），无独立控件。选中 ≤3 类时每类列 3 条示例，
-    >3 类时每类列 1 条，控制注入 token。
+    数据来源为技能词典「运镜」类：guide 为 Camera Motion LoRA 写法指南（星级/
+    建议写法/强度/方向），examples 为英文触发短语。触发词 "camera motion" 必须
+    位于运镜短语开头，且与触发短语一样是 LoRA 技术词：即使输出语言为中文，
+    英文短语也必须原样保留（写成「中文运镜描写（camera motion, slow push-in）」），
+    保证后续中文 → 英文翻译阶段无需二次改写。多选时 LLM 依据每个 [Shot N] 的
+    镜头语义挑选最契合的一种，不同镜头可轮换，不堆叠多风格于一镜，所选不必
+    全部出现。
     """
     keys = _normalize_camera_motions(camera_motion)
     if not keys:
@@ -172,67 +190,61 @@ def _camera_motion_note(camera_motion: str | list = "", lang: str = "en") -> str
     lines = []
     if zh:
         lines.append("## 运镜方向（Camera Motion Direction）")
+        lines.append(
+            "触发词 \"camera motion\" 必须位于运镜短语开头（Camera Motion LoRA 技术词）。"
+            "对每个 [Shot N] 的描述，把运镜写成「中文运镜描写（camera motion, "
+            "<英文触发短语>）」的形式；英文短语从所选风格的触发短语中挑选，"
+            "不得翻译或改写。"
+        )
         if many:
             lines.append(
-                "目标视频的各镜头可选用以下任意运镜风格。对每个 [Shot N] 的描述，"
-                "依据该镜头的景别、动作与情绪，挑选最契合的一种风格，用中文自然写进"
-                "该镜头；不同镜头可轮换风格以贴合内容，同一镜头不要堆叠多种风格，"
-                "所列风格不要求全部出现。"
+                "依据该镜头的景别、动作与情绪挑选最契合的一种风格；不同镜头可轮换，"
+                "同一镜头不要堆叠多种风格，所列风格不要求全部出现。"
             )
-        else:
-            lines.append("目标视频应采用以下这种运镜风格：")
-        examples_limit = 1 if many and len(keys) > 3 else 2
         for key in keys:
             preset = cam_presets[key]
-            name_line = f"- 风格：{preset['name_zh']}（{preset['name_en']}）"
-            lines.append(name_line)
-            if preset["desc_zh"]:
+            lines.append(f"- 风格：{preset['name_zh']}（{preset['name_en']}）")
+            if preset.get("desc_zh"):
                 lines.append(f"  - {preset['desc_zh']}")
-                lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
-                for ex in preset["examples_zh"][:examples_limit]:
-                    lines.append(f"    - {ex}")
-            else:
-                lines.append(f"  - {preset['desc']}")
-                for ex in preset["examples"][:1]:
-                    lines.append(f"    - {ex}")
+            if preset.get("guide"):
+                lines.append(f"  - 写法指南：{preset['guide']}")
+            phrases = preset.get("examples") or []
+            if phrases:
+                lines.append(
+                    "  - 英文触发短语（原样保留，与触发词 camera motion 连用）："
+                    + " / ".join(phrases)
+                )
         lines.append(
-            "- 速度词不固定：依镜头情绪与节奏自然选择（缓慢/平稳/迅捷/逐渐加速等）。"
-        )
-        lines.append(
-            "- 若当前视频生成工作流挂载了 camera motion LoRA，触发词 \"camera motion\" "
-            "必须以英文保留：可将对应英文短语附于运镜句尾，例如“…（camera motion, "
-            "slow push-in on the subject）”；若未挂载 LoRA，仅用中文描写运镜即可。"
+            "- 若未挂载 camera motion LoRA，仅用中文描写运镜即可（省去英文短语）。"
         )
     else:
         lines.append("## Camera Motion Direction")
+        lines.append(
+            'The fixed trigger "camera motion" MUST open the camera-motion phrase '
+            "(Camera Motion LoRA technical vocabulary). For each [Shot N] description, "
+            'write the camera move as "camera motion, <camera phrase>, <shot description>" '
+            "using one of the listed trigger phrases for that shot."
+        )
         if many:
             lines.append(
-                "The target video's shots may use any of the camera motion styles below. "
-                "For each [Shot N] description, choose the single style that best matches "
-                "that shot's framing, action and emotion, then naturally embed one of its "
-                "English camera-motion phrases into that shot. Different shots may switch "
-                "styles to fit their content; do not pile multiple styles into one shot, "
-                "and not every listed style has to be used."
+                "Choose the single style that best matches that shot's framing, action and "
+                "emotion; different shots may switch styles, do not pile multiple styles "
+                "into one shot, and not every listed style has to be used."
             )
-        else:
-            lines.append("The target video should use this camera motion style:")
-        examples_limit = 1 if many and len(keys) > 3 else 3
         for key in keys:
             preset = cam_presets[key]
-            lines.append(f'- Style: {preset["name_en"]}（{preset["name_zh"]}）')
-            lines.append(f"  - {preset['desc']}")
-            lines.append("  - Suitable phrases (pick one per shot, adapt the wording, keep the LoRA trigger):")
-            for ex in preset["examples"][:examples_limit]:
-                lines.append(f"    - {ex}")
+            lines.append(f"- Style: {preset['name_en']}（{preset['name_zh']}）")
+            if preset.get("guide"):
+                lines.append(f"  - Usage guide: {preset['guide']}")
+            phrases = preset.get("examples") or []
+            if phrases:
+                lines.append(
+                    '  - Trigger phrases (verbatim, after "camera motion"): '
+                    + " / ".join(phrases)
+                )
         lines.append(
-            "- Speed words are not fixed: choose the pace that fits each shot's emotion "
-            "and rhythm (e.g. slow / gentle, steady, quick / fast, or progressively "
-            "accelerating) and weave it into the camera-motion phrase."
-        )
-        lines.append(
-            '- The fixed trigger "camera motion" and the camera-motion keywords above are '
-            'technical LoRA vocabulary: even when the output fields are written in Chinese, '
-            'keep these phrases in English exactly as given.'
+            '- The trigger "camera motion" and the phrases above are LoRA vocabulary: '
+            "never translate or paraphrase them."
         )
     return "\n".join(lines) + "\n"
 
@@ -298,11 +310,9 @@ def _normalize_framings(framing) -> list:
 def _shot_size_note(shot_size: str | list = "", lang: str = "en") -> str:
     """按（多选）景别 key 生成注入生成提示词的景别指令块；空选择返回空串（不注入）。
 
-    lang="zh" 时输出整段中文指令与中文例句；lang 其他值维持英文原版。与运镜
-    （LoRA 触发词）不同，景别是通用镜头语汇而非技术触发词：LLM 依据每个 [Shot N]
-    的叙事需求把所选档位按输出语言自然意译（中文即写"近景/中景/远景"等镜头词），
-    同一镜头只用一种景别，不同镜头可沿档位切换（如由远及近推进），不必全部出现。
-    选中 ≤3 类时每类列 3 条示例，>3 类时每类列 1 条，控制注入 token。
+    景别是通用镜头语汇：直接把档位中文名写入镜头描述（如「大远景」「中景」），
+    不展开成长句描述；name_en 仅作为英文翻译阶段的对照映射（保证「大远景」译为
+    extreme wide shot 而非泛化词）。同一镜头只用一种景别，多选时不同镜头可轮换。
     """
     keys = _normalize_shot_sizes(shot_size)
     if not keys:
@@ -315,59 +325,42 @@ def _shot_size_note(shot_size: str | list = "", lang: str = "en") -> str:
         lines.append("## 景别方向（Shot Size Direction）")
         if many:
             lines.append(
-                "对每个 [Shot N] 的描述，必须从下列候选档位中为该镜头选定一种景别，"
-                "并紧接其后用中文自然写明（如“牛仔镜头”“大特写”）。禁止使用候选以外"
-                "的任何景别词（中景、中近景、近景、远景、特写、全景、全身、半身等一律"
-                "不得出现）。同一镜头只保留一种景别；不同镜头轮换使用候选档位，尽量让"
-                "全部候选至少出现一次。若用户输入中出现了与候选不符的景别/取景描述，"
-                "一律按下列档位改写，不得照抄。"
+                "对每个 [Shot N]，从下列档位中选定一种，把该档位的**中文名称直接写入**"
+                "镜头描述（如「大远景」「中景」），不要展开成长句描述；同一镜头只用"
+                "一种，不同镜头可轮换，尽量让全部候选至少出现一次。若用户输入中出现"
+                "其他景别词，一律改写为候选档位。"
             )
         else:
-            lines.append("目标视频的每个镜头都必须采用下列这一种景别：若用户输入中出现其他景别词，一律改写为它。")
-        limit = 1 if many and len(keys) > 3 else 3
+            lines.append(
+                "每个镜头都必须采用下列这一种景别：把中文名称直接写入镜头描述；"
+                "用户输入的其他景别词一律改写为它。"
+            )
         for key in keys:
             preset = size_presets[key]
-            lines.append(f"- 档位：{preset['name_zh']}（{preset['name_en']}）")
-            if preset["desc_zh"]:
-                lines.append(f"  - {preset['desc_zh']}")
-                lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
-                for ex in preset["examples_zh"][:limit]:
-                    lines.append(f"    - {ex}")
-            else:
-                lines.append(f"  - {preset['desc']}")
-                for ex in preset["examples"][:1]:
-                    lines.append(f"    - {ex}")
+            lines.append(f"- 档位：{preset['name_zh']}（英文阶段对照：{preset['name_en']}）")
         lines.append(
-            "- 景别词不是技术标签：请写成自然的镜头语言（如“镜头给到人物的近景”），"
-            "不要写成指令句或光秃秃的列表项。"
+            "- 景别词直接使用中文名称即可，不要改写成其他镜头语汇。"
         )
     else:
         lines.append("## Shot Size Direction")
         if many:
             lines.append(
-                "For each [Shot N] description, choose exactly ONE of the shot sizes listed "
-                "below and name it explicitly in that shot. FORBIDDEN: any unlisted "
-                "shot-size word (wide shot, medium shot, medium close-up, close-up, "
-                "extreme close-up, full shot, etc.) — never reuse shot-size words from the "
-                "user's input if they are not listed. Use only one size per shot, rotate "
-                "through the listed sizes across shots, and aim to cover every listed size "
-                "at least once. If the user input mentions a different shot size, rewrite "
-                "that mention to one of the listed sizes."
+                "For each [Shot N], choose exactly ONE size from the list below and name it "
+                "explicitly in that shot using its English term. Use only one size per shot, "
+                "rotate across shots, and aim to cover every listed size at least once; "
+                "rewrite any other shot-size mention to a listed one."
             )
         else:
-            lines.append("Every shot of the target video MUST use the single shot size below, stated explicitly in that shot. If the user input mentions any other shot size, rewrite it to this one:")
-        limit = 1 if many and len(keys) > 3 else 3
+            lines.append(
+                "Every shot MUST use the single size below, stated explicitly by its English "
+                "term; rewrite any other shot-size mention to it."
+            )
         for key in keys:
             preset = size_presets[key]
             lines.append(f"- Size: {preset['name_en']}（{preset['name_zh']}）")
-            lines.append(f"  - {preset['desc']}")
-            lines.append("  - Suitable phrasings (pick one per shot, paraphrase naturally):")
-            for ex in preset["examples"][:limit]:
-                lines.append(f"    - {ex}")
         lines.append(
-            "- Shot-size words are descriptive, not technical tags: weave them into the "
-            "shot language naturally (e.g. \"the camera settles on a close-up of her\"), "
-            "never as an instruction or a bare list item."
+            "- Use the exact English terms above; they are the canonical mapping for the "
+            "later translation pass."
         )
     return "\n".join(lines) + "\n"
 
@@ -375,9 +368,9 @@ def _shot_size_note(shot_size: str | list = "", lang: str = "en") -> str:
 def _framing_note(framing: str | list = "", lang: str = "en") -> str:
     """按（多选）构图/镜头关系 key 生成注入生成提示词的构图指令块；空选择返回空串。
 
-    lang="zh" 时输出整段中文指令与中文例句；lang 其他值维持英文原版。与景别同为
-    通用镜头语汇（非 LoRA 触发词），仅当镜头内容适用时使用（对话/细节/开场定位），
-    按输出语言意译织入对应镜头描述，切勿强套到用不上的镜头；不必全部出现。
+    镜头结构是通用镜头语汇：仅当镜头内容适用时，把关系镜头的中文名直接写入
+    镜头描述（如「双人镜头」「插入镜头」）；name_en 仅作为英文翻译阶段的对照
+    映射。切勿强套到用不上的镜头；不必全部出现。
     """
     keys = _normalize_framings(framing)
     if not keys:
@@ -389,57 +382,42 @@ def _framing_note(framing: str | list = "", lang: str = "en") -> str:
     if zh:
         lines.append("## 构图与镜头关系方向（Framing Direction）")
         lines.append(
-            "仅当镜头内容适用时使用下列构图/关系镜头，把它们自然织入该镜头的描述"
-            "（可意译成中文镜头语）：过肩与双人同框用于对话或二人互动的场景，插入"
-            "镜头用于交代承载含义的关键细节，建立镜头用于开场交代地点。"
+            "仅当镜头内容适用时，把下列关系镜头的**中文名称直接写入**该镜头描述"
+            "（如「双人镜头」「插入镜头」），不要展开成长句描述：过肩镜头与双人镜头"
+            "用于对话或二人互动的场景，插入镜头用于交代承载含义的关键细节，"
+            "定场镜头用于开场交代地点。"
         )
         if many:
             lines.append(
                 "不同镜头按需轮换，切勿把某个关系强套到用不上的镜头；"
                 "所列关系不要求全部出现。"
             )
-        limit = 1 if many and len(keys) > 3 else 3
         for key in keys:
             preset = framing_presets[key]
-            lines.append(f"- 关系：{preset['name_zh']}（{preset['name_en']}）")
-            if preset["desc_zh"]:
-                lines.append(f"  - {preset['desc_zh']}")
-                lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
-                for ex in preset["examples_zh"][:limit]:
-                    lines.append(f"    - {ex}")
-            else:
-                lines.append(f"  - {preset['desc']}")
-                for ex in preset["examples"][:1]:
-                    lines.append(f"    - {ex}")
+            lines.append(f"- 关系：{preset['name_zh']}（英文阶段对照：{preset['name_en']}）")
         lines.append(
-            "- 关系镜头服务于内容：没有对白或二人互动就不要硬用过肩/双人同框，"
-            "插入与建立镜头同样只在必要时出现。"
+            "- 名称直接使用中文即可，不要改写成其他镜头语汇；没有对白或二人互动就"
+            "不要硬用过肩/双人镜头，插入与定场镜头同样只在必要时出现。"
         )
     else:
         lines.append("## Framing & Shot-Relationship Direction")
         lines.append(
             "Use the relationship framings below only when a shot's content calls for them, "
-            "weaving the chosen one naturally into that shot's description: over-the-shoulder "
-            "and two-shot for dialogue or two-person interaction, an insert for a meaningful "
-            "detail, an establishing view to open a location."
+            "naming the chosen one explicitly in that shot using its English term: "
+            "over-the-shoulder and two-shot for dialogue or two-person interaction, an "
+            "insert for a meaningful detail, an establishing shot to open a location."
         )
         if many:
             lines.append(
                 "Different shots may switch as needed; never force one onto a shot that does "
                 "not need it, and not every listed option has to appear."
             )
-        limit = 1 if many and len(keys) > 3 else 3
         for key in keys:
             preset = framing_presets[key]
             lines.append(f"- Framing: {preset['name_en']}（{preset['name_zh']}）")
-            lines.append(f"  - {preset['desc']}")
-            lines.append("  - Suitable phrasings (pick one per shot, paraphrase naturally):")
-            for ex in preset["examples"][:limit]:
-                lines.append(f"    - {ex}")
         lines.append(
-            "- Framing serves the content: without dialogue or a two-person beat do not force "
-            "an over-the-shoulder or two-shot, and reserve inserts and establishing views for "
-            "moments that truly need them."
+            "- Use the exact English terms above; they are the canonical mapping for the "
+            "later translation pass."
         )
     return "\n".join(lines) + "\n"
 
@@ -520,15 +498,15 @@ def _expression_note(expression: str | list = "", expression_catalog: list | Non
             if key in expr_presets:
                 preset = expr_presets[key]
                 lines.append(f"- Cue：{preset['name_zh']}（{preset['name_en']}）")
-                zh_examples = preset["examples_zh"]
+                if preset.get("desc_zh"):
+                    lines.append(f"  - {preset['desc_zh']}")
+                zh_examples = preset.get("examples_zh") or []
                 if zh_examples:
                     lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
                     for ex in zh_examples[:limit]:
                         lines.append(f"    - {ex}")
                 else:
                     lines.append("  - 请按该 Cue 的含义自然展开成中文表演描写，保持克制简练。")
-                    for ex in preset["examples"][:1]:
-                        lines.append(f"    - {ex}")
             else:
                 custom = extra.get(key, {})
                 label = custom.get("label") or key
@@ -560,17 +538,20 @@ def _expression_note(expression: str | list = "", expression_catalog: list | Non
                 "a shot showing the character in a close or medium shot - place it in the shot "
                 "where it fits best; omitting any selected cue is an unacceptable output."
             )
-        limit = 1 if many and len(keys) > 3 else 2
         for key in keys:
             if key in expr_presets:
                 preset = expr_presets[key]
                 lines.append(f"- Cue: {preset['name_en']}（{preset['name_zh']}）")
-                lines.append(
-                    "  - Suggested phrasings (pick one per shot and paraphrase it naturally "
-                    "into the output language):"
-                )
-                for ex in preset["examples"][:limit]:
-                    lines.append(f"    - {ex}")
+                if preset.get("desc_zh"):
+                    lines.append(
+                        "  - Meaning: {}. Paraphrase it naturally in English, keeping the "
+                        "acting subtle and brief.".format(preset["desc_zh"])
+                    )
+                else:
+                    lines.append(
+                        "  - Paraphrase this cue naturally in English, keeping the acting "
+                        "subtle and brief."
+                    )
             else:
                 custom = extra.get(key, {})
                 label = custom.get("label") or key
@@ -857,9 +838,9 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) ->
                 api_key=options.get("api_key", "ollama"),
                 seed=seed,
             )
-        elif vlm_mode == "deepseek-proxy":
+        elif _proxy_site(vlm_mode):
             generated = generate_prompt_with_deepseek_proxy(
-                prompt=full_prompt, seed=seed,
+                prompt=full_prompt, seed=seed, site=_proxy_site(vlm_mode),
             )
         else:
             return text
@@ -919,9 +900,9 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
                 api_key=options.get("api_key", "ollama"),
                 seed=seed,
             )
-        elif vlm_mode == "deepseek-proxy":
+        elif _proxy_site(vlm_mode):
             generate_text = generate_prompt_with_deepseek_proxy(
-                prompt=full_prompt, seed=seed,
+                prompt=full_prompt, seed=seed, site=_proxy_site(vlm_mode),
             )
         else:
             return json_data
@@ -1010,14 +991,14 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
             seed=seed,
         )
         json_data = parse_generated_json(generate_text)
-    elif vlm_mode == "deepseek-proxy":
+    elif _proxy_site(vlm_mode):
         if image is not None:
             raise ValueError(
-                "deepseek-proxy 不支持参考图（网页会话无法传图）：请改用 api / "
+                f"{vlm_mode} 不支持参考图（网页会话无法传图）：请改用 api / "
                 "ollama / llama-cpp 模式，或移除参考图后重试"
             )
         generate_text = generate_prompt_with_deepseek_proxy(
-            prompt=full_prompt, seed=seed,
+            prompt=full_prompt, seed=seed, site=_proxy_site(vlm_mode),
         )
         json_data = parse_generated_json(generate_text)
     else:

@@ -170,14 +170,19 @@ async def deepseek_complete_async(
     prompt: str = "",
     expect_json: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    site: str = "deepseek",
 ) -> dict:
-    """在 server 事件循环上调用：经 WS 桥接让扩展在 DeepSeek 网页完成一次生成。"""
+    """在 server 事件循环上调用：经 WS 桥接让扩展在目标站点网页完成一次生成。
+
+    site：桥接站点适配器（"deepseek" / "doubao" / "qwen"），扩展 background 按
+    payload.site 分发到对应标签页与 DOM 自动化链路。
+    """
     if not (system or "").strip() and not (prompt or "").strip():
         return {"ok": False, "text": "", "error": "prompt is empty"}
     if not _is_connected():
         return {
             "ok": False, "text": "",
-            "error": "DeepSeek 桥接未连接：请确认浏览器扩展（DeepSeek Bridge）已启用并加载，"
+            "error": "浏览器桥接未连接：请确认浏览器扩展（MiniMaxRefDirector Bridge）已启用并加载，"
                      "且 ComfyUI 地址在扩展可访问范围内（默认 ws://127.0.0.1:8188）",
         }
 
@@ -189,15 +194,18 @@ async def deepseek_complete_async(
         await _ws_send(_state["ws"], {
             "type": "llm_task",
             "id": task_id,
-            "payload": {"system": system or "", "prompt": prompt or "", "expect_json": bool(expect_json)},
+            "payload": {
+                "system": system or "", "prompt": prompt or "",
+                "expect_json": bool(expect_json), "site": str(site or "deepseek"),
+            },
         })
         return await asyncio.wait_for(fut, timeout=timeout_s)
     except asyncio.TimeoutError:
-        return {"ok": False, "text": "", "error": f"DeepSeek 桥接任务超时（{timeout_s:.0f}s）"}
+        return {"ok": False, "text": "", "error": f"浏览器桥接任务超时（{timeout_s:.0f}s，站点 {site}）"}
     except asyncio.CancelledError:
         raise
     except Exception as e:  # 连接中断等
-        return {"ok": False, "text": "", "error": f"DeepSeek 桥接异常：{e}"}
+        return {"ok": False, "text": "", "error": f"浏览器桥接异常：{e}"}
     finally:
         _state["pending"].pop(task_id, None)
 
@@ -223,23 +231,24 @@ def deepseek_complete(
     prompt: str = "",
     expect_json: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    site: str = "deepseek",
 ) -> dict:
     """同步封装：节点执行线程（executor）调用，提交到 server 事件循环后阻塞等待。"""
     import concurrent.futures as cf
 
     loop = _resolve_server_loop()
     if loop is None:
-        return {"ok": False, "text": "", "error": "DeepSeek 桥接不可用：ComfyUI 事件循环未就绪"}
+        return {"ok": False, "text": "", "error": "浏览器桥接不可用：ComfyUI 事件循环未就绪"}
     cfut = asyncio.run_coroutine_threadsafe(
-        deepseek_complete_async(system, prompt, expect_json, timeout_s), loop
+        deepseek_complete_async(system, prompt, expect_json, timeout_s, site), loop
     )
     try:
         return cfut.result(timeout=timeout_s + 30.0)
     except cf.TimeoutError:
         cfut.cancel()
-        return {"ok": False, "text": "", "error": "DeepSeek 桥接任务超时"}
+        return {"ok": False, "text": "", "error": "浏览器桥接任务超时"}
     except Exception as e:
-        return {"ok": False, "text": "", "error": f"DeepSeek 桥接异常：{e}"}
+        return {"ok": False, "text": "", "error": f"浏览器桥接异常：{e}"}
 
 
 def is_connected() -> bool:

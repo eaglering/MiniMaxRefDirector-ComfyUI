@@ -79,7 +79,7 @@ export function fetchConfig() {
 
 // ===== FastDirector-Desktop skill 词库（deepseek 分镜导入用） =====
 // 无 name 时返回词库清单；有 name 时返回该 skill 的 prompt.md 全文
-// （{{skill_keys}} 占位符已由后端从镜头技能词典 SQLite 注入）
+// （skill_keys 注入已废弃：storyboard-design 不再写入技能清单）
 export function fetchSkillLibrary(name = "") {
   return getJSON(`/spa/skill_library${name ? `?name=${encodeURIComponent(name)}` : ""}`);
 }
@@ -99,6 +99,9 @@ export function deleteSkillDict(id) {
 }
 export function addSkillCategory(payload) {
   return postJSON("/spa/skill_dict/category/add", payload);
+}
+export function batchAddSkillDict(payload) {
+  return postJSON("/spa/skill_dict/batch_add", payload);
 }
 
 // ===== LLM（复用现有端点，显式传 opts） =====

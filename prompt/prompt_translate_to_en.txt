@@ -31,6 +31,27 @@ Chinese cue -> required trigger phrase:
 - Global style statements (e.g. 全程采用航拍镜头风格 / 运镜风格为航拍/无人机) must ALSO become a trigger phrase, e.g. `camera motion, aerial drone shots throughout`.
 - Worked example: source `无人机航拍，飞掠过整片海滩，镜头缓缓下降` -> output `camera motion, aerial drone shot flying over the beach, slowly descending`.
 - If a `camera motion, ...` phrase is already present in the source, keep it exactly and never duplicate it. Only apply these rules where the source actually describes camera movement; translate everything else normally and never invent motion where the source has none.
+- Any Chinese term followed by its English gloss in parentheses (e.g. `推近 Push-in（camera motion, slow push-in）`) must keep the gloss verbatim in English — the gloss is technical LoRA vocabulary, not ordinary text.
+
+## Shot size / framing glossary (canonical mapping)
+
+Shot-size and framing names in the source are canonical cinematography terms (written directly in Chinese). Map them to these exact English terms — do not paraphrase or generalize them:
+
+- 大远景 -> `extreme wide shot`
+- 远景 -> `wide shot`
+- 全身 -> `full shot`
+- 中远景 -> `medium long shot`
+- 牛仔镜头 -> `cowboy shot`
+- 中景 -> `medium shot`
+- 中近景 -> `medium close-up`
+- 近景 -> `close-up`
+- 特写 -> `extreme close-up`
+- 过肩镜头 -> `over-the-shoulder shot`
+- 双人镜头 -> `two-shot`
+- 插入镜头 -> `insert shot`
+- 定场镜头 -> `establishing shot`
+
+For any other Chinese cinematography term not listed above, translate it to the standard English cinematography term of the same meaning.
 
 ## Input JSON
 

@@ -827,6 +827,62 @@ const MSCSS = `
     padding: 6px 8px;
     white-space: nowrap;
 }
+/* ---- LLM 设置面板（替代原生 vlm_mode DynamicCombo 行，避免 dict 值显示为 [object Object]）---- */
+.ref-ms-llm {
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.ref-ms-llm-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.ref-ms-llm-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #ddd;
+    letter-spacing: 0.3px;
+}
+.ref-ms-llm select,
+.ref-ms-llm input {
+    background: #2a2a2a;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 11px;
+    min-width: 0;
+}
+.ref-ms-llm select:focus,
+.ref-ms-llm input:focus {
+    outline: none;
+    border-color: #666;
+}
+.ref-ms-llm-head select {
+    margin-left: auto;
+    max-width: 140px;
+}
+.ref-ms-llm-grid {
+    display: grid;
+    grid-template-columns: 62px 1fr;
+    gap: 4px 6px;
+    align-items: center;
+}
+.ref-ms-llm-grid label {
+    font-size: 10.5px;
+    color: #999;
+    white-space: nowrap;
+}
+.ref-ms-llm-hint {
+    font-size: 10.5px;
+    color: #888;
+    line-height: 1.5;
+}
 `;
 
 let styleEl = document.getElementById("minimax-subject-styles");
@@ -1139,6 +1195,78 @@ app.registerExtension({
                 if (subjectCountWidget) hideWidget(subjectCountWidget);
                 if (globalPromptWidget) hideWidget(globalPromptWidget);
 
+                // ---- LLM 设置（vlm_mode DynamicCombo）----
+                // 隐藏原生组合 widget（主 widget 值为合并 dict，原样绘制会显示 [object Object]），
+                // 改由下方 LLMSettings 面板以可读控件呈现与编辑。
+                const VLM_CHILD_FIELDS = ["gguf_name", "mmproj_path", "provider", "api_key", "ollama_model", "ollama_base_url"];
+                const vlmWidget = node.widgets.find(w => w.name === "vlm_mode") || null;
+                // 隐藏前捕获 combo 选项（gguf/mmproj 文件列表、服务商列表），供面板下拉复用
+                const llmOpts = {};
+                for (const f of VLM_CHILD_FIELDS) {
+                    const w = node.widgets.find(w => w.name === "vlm_mode." + f) || node.widgets.find(w => w.name === f);
+                    llmOpts[f] = Array.isArray(w?.options?.values) ? w.options.values.slice() : [];
+                }
+                for (const w of node.widgets) {
+                    if (w === vlmWidget) continue;
+                    const bare = w.name.startsWith("vlm_mode.") ? w.name.slice("vlm_mode.".length) : w.name;
+                    if (VLM_CHILD_FIELDS.includes(bare)) hideWidget(w);
+                }
+                if (vlmWidget) hideWidget(vlmWidget);
+
+                // 读取 vlm 配置（兼容三种 widget 形态：主值 dict / 主值字符串+前缀子 widget / 裸名子 widget）
+                function readVlm() {
+                    const out = { vlm_mode: "deepseek-proxy", gguf_name: "", mmproj_path: "", provider: "", api_key: "", ollama_model: "", ollama_base_url: "" };
+                    const clean = (s) => (s === "None" || s == null) ? "" : String(s);
+                    const findW = (...names) => {
+                        for (const nm of names) {
+                            const w = node.widgets.find(w => w.name === nm);
+                            if (w) return w;
+                        }
+                        return null;
+                    };
+                    const v = vlmWidget ? vlmWidget.value : undefined;
+                    if (v && typeof v === "object" && !Array.isArray(v)) {
+                        out.vlm_mode = v.vlm_mode || out.vlm_mode;
+                        out.gguf_name = clean(v.gguf_name);
+                        out.mmproj_path = clean(v.mmproj_path);
+                        out.provider = clean(v.provider);
+                        out.api_key = clean(v.api_key);
+                        out.ollama_model = clean(v.ollama_model);
+                        out.ollama_base_url = clean(v.ollama_base_url);
+                    } else {
+                        if (typeof v === "string" && v) out.vlm_mode = v;
+                        out.gguf_name = clean(findW("vlm_mode.gguf_name", "gguf_name")?.value);
+                        out.mmproj_path = clean(findW("vlm_mode.mmproj_path", "mmproj_path")?.value);
+                        out.provider = clean(findW("vlm_mode.provider", "provider")?.value);
+                        out.api_key = clean(findW("vlm_mode.api_key", "api_key")?.value);
+                        out.ollama_model = clean(findW("vlm_mode.ollama_model", "ollama_model")?.value);
+                        out.ollama_base_url = clean(findW("vlm_mode.ollama_base_url", "ollama_base_url")?.value);
+                    }
+                    return out;
+                }
+
+                // 写回：统一 dict 形态写主 widget，并同步前缀/裸名子 widget（保持三种读取方一致）
+                function writeVlm(patch) {
+                    const next = { ...readVlm(), ...patch };
+                    const isCombo = (w) => w.type === "combo" || Array.isArray(w.options?.values);
+                    if (vlmWidget) {
+                        vlmWidget.value = { ...next };
+                        if (node.properties) node.properties["vlm_mode"] = vlmWidget.value;
+                        try { vlmWidget.callback?.(vlmWidget.value); } catch (_) { }
+                    }
+                    for (const f of VLM_CHILD_FIELDS) {
+                        const w = node.widgets.find(w => w.name === "vlm_mode." + f) || node.widgets.find(w => w.name === f);
+                        if (!w || w === vlmWidget) continue;
+                        let val = next[f];
+                        if (isCombo(w) && !val) val = "None";
+                        if (w.value !== val) {
+                            w.value = val;
+                            try { w.callback?.(val); } catch (_) { }
+                        }
+                    }
+                    app.graph.setDirtyCanvas(true, false);
+                }
+
                 // --- Build Custom UI ---
                 const wrapper = document.createElement("div");
                 wrapper.className = "ref-ms-wrapper";
@@ -1207,7 +1335,7 @@ app.registerExtension({
                     return el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
                 }
                 function measureWrapperHeight() {
-                    const siblings = [uiEls.globalPrompt, uiEls.tabBar, uiEls.addBtn, uiEls.footer].filter(el => el && el.offsetHeight > 0);
+                    const siblings = [uiEls.llmPanel, uiEls.globalPrompt, uiEls.tabBar, uiEls.addBtn, uiEls.footer].filter(el => el && el.offsetHeight > 0);
                     const listEl = uiEls.subjectList;
                     const listInFlow = !!(listEl && listEl.style.display !== "none");
                     let h = 12; // wrapper padding 6px ×2
@@ -2039,6 +2167,58 @@ app.registerExtension({
                         </div>`;
                 };
 
+                // LLM 设置面板（Preact 组件，值完全由 vlm_mode widget 派生，受控渲染）
+                const LLM_MODES = [
+                    { value: "deepseek-proxy", label: "DeepSeek 代理" },
+                    { value: "llama-cpp", label: "llama-cpp" },
+                    { value: "api", label: "API" },
+                    { value: "ollama", label: "Ollama" },
+                ];
+                const LLMSettings = () => {
+                    const v = readVlm();
+                    const mode = v.vlm_mode || "deepseek-proxy";
+                    const comboVal = (f) => v[f] || "None";
+                    const onCombo = (f) => (e) => writeVlm({ [f]: e.target.value === "None" ? "" : e.target.value });
+                    return html`
+                    <div class="ref-ms-llm" ref=${setUiEl("llmPanel")}>
+                        <div class="ref-ms-llm-head">
+                            <span class="ref-ms-llm-title">${t("LLM Settings")}</span>
+                            <select value=${mode} onChange=${(e) => writeVlm({ vlm_mode: e.target.value })}>
+                                ${LLM_MODES.map((m) => html`<option key=${m.value} value=${m.value}>${m.label}</option>`)}
+                            </select>
+                        </div>
+                        ${mode === "llama-cpp" && html`
+                            <div class="ref-ms-llm-grid">
+                                <label>GGUF</label>
+                                <select value=${comboVal("gguf_name")} onChange=${onCombo("gguf_name")}>
+                                    ${(llmOpts.gguf_name || ["None"]).map((o) => html`<option key=${o} value=${o}>${basename(o)}</option>`)}
+                                </select>
+                                <label>mmproj</label>
+                                <select value=${comboVal("mmproj_path")} onChange=${onCombo("mmproj_path")}>
+                                    ${(llmOpts.mmproj_path || ["None"]).map((o) => html`<option key=${o} value=${o}>${basename(o)}</option>`)}
+                                </select>
+                            </div>`}
+                        ${mode === "api" && html`
+                            <div class="ref-ms-llm-grid">
+                                <label>${t("Provider")}</label>
+                                <select value=${v.provider} onChange=${(e) => writeVlm({ provider: e.target.value })}>
+                                    ${(llmOpts.provider || []).map((o) => html`<option key=${o} value=${o}>${o}</option>`)}
+                                </select>
+                                <label>API Key</label>
+                                <input type="password" value=${v.api_key} onChange=${(e) => writeVlm({ api_key: e.target.value.trim() })} />
+                            </div>`}
+                        ${mode === "ollama" && html`
+                            <div class="ref-ms-llm-grid">
+                                <label>${t("Model")}</label>
+                                <input value=${v.ollama_model} onChange=${(e) => writeVlm({ ollama_model: e.target.value.trim() })} />
+                                <label>URL</label>
+                                <input value=${v.ollama_base_url} onChange=${(e) => writeVlm({ ollama_base_url: e.target.value.trim() })} />
+                            </div>`}
+                        ${mode === "deepseek-proxy" && html`
+                            <div class="ref-ms-llm-hint">${t("Uses the browser extension bridge to chat.deepseek.com (configure the extension ID in the SPA director global params).")}</div>`}
+                    </div>`;
+                };
+
                 // 全局提示输入
                 const GPBox = () => {
                     const taRef = useRef(null);
@@ -2135,6 +2315,7 @@ app.registerExtension({
 
                 // UI 根：全局提示 / tabs / 列表 / 新增 / footer
                 const SubjectEditor = () => html`<${Fragment}>
+                    <${LLMSettings} />
                     <${GPBox} />
                     <${TabsBar} />
                     <${ListBox} />

@@ -611,6 +611,9 @@ export const render = {
       this.ctx.fillRect(cutoffX, 0, width - cutoffX, RULER_HEIGHT);
     }
 
+    // --- 多选模式：绘制各段左下角 checkbox ---
+    if (this._multiMode) this._drawSegmentCheckboxes(this.ctx, width, totalFrames);
+
     // --- Draw Playhead ---
     const playheadX = (this.currentFrame / totalFrames) * width;
 

@@ -853,7 +853,7 @@ export function TransferPanel({ director }) {
   const [skillDictData, setSkillDictData] = useState({ categories: [], skills: [] }); // 词典原文（添加技能弹窗的类别下拉）
   const [skillAddOpen, setSkillAddOpen] = useState(false); // 「添加技能」弹窗（提交到 SQLite 词典）
   const [skillAddErr, setSkillAddErr] = useState(""); // 添加技能弹窗的就地错误
-  const [skillAdd, setSkillAdd] = useState({ categoryId: "", name: "", desc: "", keyword: "", example: "" });
+  const [skillAdd, setSkillAdd] = useState({ categoryId: "", name: "", nameEn: "", desc: "", guide: "", examples: "" });
   const [hoverRes, setHoverRes] = useState(null); // 当前 hover 的可编辑资源卡片 key（亮蓝高亮边框提示）
   // 视频素材条：接收后端 minimax_ref_video_progress 通知（status=add_material）。
   // 初始化时从 localStorage 恢复上次会话的素材（key 按节点 id 隔离），刷新页面后保留，
@@ -1601,10 +1601,21 @@ export function TransferPanel({ director }) {
     };
   }, []);
 
-  // 「添加技能」弹窗（类别/名称/描述/触发词/案例 → 入库 SQLite）
+  // 「添加技能」弹窗（按类别动态字段 → 入库 SQLite；与 lib/skill_db.py 规则一致）
+  const skillAddCat = () =>
+    (skillDictData.categories || []).find((c) => String(c.id) === String(skillAdd.categoryId));
+  const skillAddRules = () => {
+    const name = (skillAddCat() || {}).name || "";
+    return {
+      needNameEn: name === "景别" || name === "镜头结构",
+      needExamples: name === "运镜" || name === "微表情",
+      showGuide: name === "运镜",
+    };
+  };
+
   function openSkillAdd() {
     setSkillAddErr("");
-    setSkillAdd({ categoryId: "", name: "", desc: "", keyword: "", example: "" });
+    setSkillAdd({ categoryId: "", name: "", nameEn: "", desc: "", guide: "", examples: "" });
     setSkillAddOpen(true);
   }
 
@@ -1614,8 +1625,21 @@ export function TransferPanel({ director }) {
       setSkillAddErr("请选择类别");
       return;
     }
-    if (!f.name.trim() || !f.desc.trim() || !f.keyword.trim() || !f.example.trim()) {
-      setSkillAddErr("名称、描述、触发词、案例均为必填");
+    if (!f.name.trim()) {
+      setSkillAddErr("名称为必填（中文名直接写入提示词）");
+      return;
+    }
+    const rules = skillAddRules();
+    if (rules.needNameEn && !f.nameEn.trim()) {
+      setSkillAddErr("该类别必须填写英文写法（英文翻译阶段对照）");
+      return;
+    }
+    if (rules.needExamples && !f.examples.trim()) {
+      setSkillAddErr(
+        (skillAddCat() || {}).name === "微表情"
+          ? "该类别必须填写中文示例（分号分隔）"
+          : "该类别必须填写英文触发短语（分号分隔）"
+      );
       return;
     }
     setSkillAddErr("");
@@ -1626,9 +1650,10 @@ export function TransferPanel({ director }) {
         body: JSON.stringify({
           categoryId: Number(f.categoryId),
           name: f.name.trim(),
+          nameEn: f.nameEn.trim(),
           desc: f.desc.trim(),
-          keyword: f.keyword.trim(),
-          example: f.example.trim(),
+          guide: f.guide.trim(),
+          examples: f.examples.trim(),
         }),
       });
       const data = await res.json();
@@ -3269,24 +3294,39 @@ export function TransferPanel({ director }) {
             />
           </label>
           <label style=${{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
-            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0 }}>${t("Keyword")}</span>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0 }}>${t("English term")}</span>
             <input
-              value=${skillAdd.keyword}
-              onInput=${(e) => setSkillAdd((p) => ({ ...p, keyword: e.target.value }))}
-              placeholder=${t("Technical trigger word (e.g. camera motion); use the skill name if none")}
+              value=${skillAdd.nameEn}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, nameEn: e.target.value }))}
+              placeholder=${skillAddRules().needNameEn ? t("Required: canonical English term (e.g. two-shot)") : t("Optional English term for the translation pass")}
               style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px" }}
             />
           </label>
           <label style=${{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
-            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0, paddingTop: "4px" }}>${t("Example")}</span>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0, paddingTop: "4px" }}>${t("Examples")}</span>
             <textarea
               rows=${2}
-              value=${skillAdd.example}
-              onInput=${(e) => setSkillAdd((p) => ({ ...p, example: e.target.value }))}
-              placeholder=${t("A phrase that can be embedded into a shot description (required)")}
+              value=${skillAdd.examples}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, examples: e.target.value }))}
+              placeholder=${skillAddRules().needExamples
+                ? ((skillAddCat() || {}).name === "微表情"
+                  ? t("Required: Chinese examples separated by ;")
+                  : t("Required: English trigger phrases separated by ;"))
+                : t("Optional: phrases separated by ;")}
               style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px", resize: "vertical" }}
             />
           </label>
+          ${skillAddRules().showGuide ? html`
+          <label style=${{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0, paddingTop: "4px" }}>${t("Guide")}</span>
+            <textarea
+              rows=${2}
+              value=${skillAdd.guide}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, guide: e.target.value }))}
+              placeholder=${t("Optional: usage guide (intensity / direction / star rating)")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px", resize: "vertical" }}
+            />
+          </label>` : null}
           <div style=${{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
             <button class="mrd-pr-btn" onClick=${() => { setSkillAddOpen(false); setSkillAddErr(""); }}>${t("Cancel")}</button>
             <button class="mrd-pr-btn" style=${S.mergeBtnGo} onClick=${submitSkillAdd}>${t("Save to dictionary")}</button>

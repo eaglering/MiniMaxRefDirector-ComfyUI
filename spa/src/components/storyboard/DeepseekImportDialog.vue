@@ -1,18 +1,31 @@
 <script setup>
-// DeepSeek 分镜导入弹窗：两阶段
+// DeepSeek 分镜导入弹窗：两阶段（手动逐步模式，无一键全自动）
 // 阶段一：选择 chat.deepseek.com 会话（列表 / 搜索 / 刷新）
-// 阶段二：导入进度（步骤条 + H3 进度 + 滚动日志 + 取消）
-// 完成后 emit("completed", result)，由 Storyboard.vue 写入分镜 / 主体 / 音频。
+// 阶段二：步骤卡片（故事大纲 → 分镜设计 → 主体设计 → 首帧图 → 音频设计），
+//   每步独立「执行」（在 DeepSeek 会话生成，仅缓存）与「同步」（写入导演台）。
+//   H3 转换不属于导入流程；由用户在分镜属性里按需点「转H3提示词」。
+// 同步后 emit("sync", payload)，由 Storyboard.vue 分类型写入分镜 / 主体 / 音频。
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
 import { deepseekAttempt, deepseekCancel, deepseekDiag, deepseekListSessions } from "../../utils/llm.js";
-import { IMPORT_STEPS, createImportToken, runDeepseekImport } from "../../utils/deepseekImport.js";
+import {
+  IMPORT_STEPS,
+  buildSyncPayload,
+  cleanupImportSessions,
+  createImportState,
+  createImportToken,
+  runAudioStep,
+  runFirstframeStep,
+  runOutlineStep,
+  runStoryboardStep,
+  runSubjectsStep,
+} from "../../utils/deepseekImport.js";
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
 });
-const emit = defineEmits(["update:modelValue", "completed"]);
+const emit = defineEmits(["update:modelValue", "sync"]);
 
 const ws = useWorkspace();
 const extId = computed(() => (ws.llm.extension_id || "").trim());
@@ -62,30 +75,15 @@ async function runDiag() {
     const lines = [
       `扩展版本：v${d.version || "未知"}${d.version && d.version < "1.4.7" ? "（过旧，请在 chrome://extensions 重新加载扩展）" : ""}`,
       `标签页：${d.tabUrl || "（未找到 chat.deepseek.com 标签页）"}`,
-      `DeepSeek 标签页共 ${(d.tabs || []).length} 个：${
-        (d.tabs || []).map((t) => `#${t.id}${t.active ? "（当前）" : t.discarded ? "（已丢弃）" : ""}${t.url}`).join("、") || "-"
-      }${(d.tabs || []).length > 1 ? "——建议关掉多余标签页，只留一个，避免填错页" : ""}`,
+      `DeepSeek 标签页共 ${(d.tabs || []).length} 个`,
       `content 脚本就绪：${d.contentReady ? "是" : "否"}`,
       `页面可见性：${p.visibility || "?"}${p.wasDiscarded ? "（曾被内存节省丢弃）" : ""}`,
       `输入框：${p.inputFound ? `已找到（${p.inputKind || "?"}）` : "未找到"}`,
-      `输入框候选：${
-        (p.inputCandidates || [])
-          .map((c) => `${c.tag}${c.id ? `#${c.id}` : ""}${c.placeholder ? `“${c.placeholder}”` : ""} ${c.size}（${c.score} 分）`)
-          .join("；") || "无"
-      }`,
-      `发送按钮：${p.sendButtonFound ? `已找到${p.sendButtonLabel ? `（${p.sendButtonLabel}）` : ""}` : "未找到"}`,
+      `发送按钮：${p.sendButtonFound ? "已找到" : "未找到"}`,
       `回复区文本块：${p.assistantBlocks ?? 0} 个`,
-      `回复流钩子：${p.hookInstalled ? "已注入" : "未注入"}` +
-        `${p.sseActive ? "（最近一次流进行中）" : ""}${p.sseDone ? `（已捕获 ${p.sseChars} 字符）` : ""}`,
-      `WS 桥接：${d.bridge && d.bridge.connected ? "已连接" : "未连接"}（${(d.bridge && d.bridge.url) || "-"}）`,
+      `回复流钩子：${p.hookInstalled ? "已注入" : "未注入"}`,
+      `WS 桥接：${d.bridge && d.bridge.connected ? "已连接" : "未连接"}`,
     ];
-    if (d.lastAttempt) {
-      lines.push("", `最近一次生成：${d.lastAttempt.promptChars} 字符 / ${d.lastAttempt.sessionMode}`);
-      for (const s of d.lastAttempt.stages || []) {
-        const t = new Date(s.at).toLocaleTimeString();
-        lines.push(`· ${t} ${s.stage}${s.detail ? `（${s.detail}）` : ""}`);
-      }
-    }
     await ElMessageBox.alert(lines.join("<br/>"), "DeepSeek 页面自检", {
       dangerouslyUseHTMLString: true,
       confirmButtonText: "知道了",
@@ -125,22 +123,62 @@ watch(
   }
 );
 
-// ---- 阶段二：导入进度 ----
-const stepStatus = reactive({}); // key → running | done | warn | error
-const logs = ref([]); // { level, time, msg }
-const h3Done = ref(0);
-const h3Total = ref(0);
-const running = ref(false);
+// ---- 阶段二：步骤卡片（执行 / 同步）----
+const stepState = reactive({}); // key → { status, synced, summary }
+const logs = ref([]);
+const runningStep = ref("");
 const runError = ref("");
 const tokenRef = ref(null);
+const stateRef = ref(null);
 const logBoxRef = ref(null);
+const storyboardSynced = ref(false); // 分镜是否已同步（首帧同步依赖已有分镜）
 
-// 已用时：让「长时间等待」可见，避免误判卡死
+function stepOf(key) {
+  if (!stepState[key]) stepState[key] = { status: "idle", synced: false, summary: "" };
+  return stepState[key];
+}
+
+const STEP_RUNNERS = {
+  outline: (state, ctx) => runOutlineStep(state, ctx),
+  storyboard: (state, ctx) => runStoryboardStep(state, ctx),
+  subjects: (state, ctx) => runSubjectsStep(state, ctx),
+  firstframe: (state, ctx) => runFirstframeStep(state, ctx),
+  audio: (state, ctx) => runAudioStep(state, ctx),
+};
+
+function canRun(key) {
+  const st = (k) => stepState[k]?.status;
+  if (runningStep.value) return false;
+  if (key === "storyboard" || key === "subjects" || key === "audio") return st("outline") === "done";
+  if (key === "firstframe") return st("storyboard") === "done";
+  return true;
+}
+function canSync(key) {
+  if (runningStep.value) return false;
+  const s = stepState[key];
+  if (!s || (s.status !== "done" && s.status !== "warn")) return false;
+  if (key === "outline") return false; // 大纲仅缓存，作为后续步骤输入
+  if (key === "firstframe") return storyboardSynced.value;
+  return true;
+}
+function runHint(key) {
+  const st = (k) => stepState[k]?.status;
+  if (runningStep.value) return "有步骤执行中";
+  if ((key === "storyboard" || key === "subjects" || key === "audio") && st("outline") !== "done")
+    return "请先执行「故事大纲」";
+  if (key === "firstframe") {
+    if (st("storyboard") !== "done") return "请先执行「分镜设计」";
+    if (!storyboardSynced.value) return "请先同步分镜，再同步首帧提示词";
+  }
+  if (key === "outline") return "大纲仅缓存，作为后续步骤输入，无需同步";
+  return "";
+}
+
+// 已用时 / 阶段轮询（让「长时间等待」可见）
 const elapsed = ref(0);
 let elapsedTimer = null;
-// 当前阶段（轮询扩展的 ds/stage 流水）
 const stageText = ref("");
-const debugTail = ref([]); // 最近 15 条 SW 事件（含页面消息往返/超时）
+const debugTail = ref([]);
 let stageTimer = null;
 const STAGE_LABELS = {
   queued: "已排队",
@@ -148,28 +186,17 @@ const STAGE_LABELS = {
   tab_alive: "已确保页面可见（小窗）",
   go_home: "正在回到首页开新会话",
   home_ready: "已回到首页",
-  home_timeout: "回首页超时",
   navigating: "正在打开会话页面",
   nav_done: "会话页面已就绪",
-  nav_timeout: "会话页面导航超时",
   content_ready: "页面脚本已就绪",
   content_stale: "页面脚本过旧，已刷新",
-  content_timeout: "等待页面脚本超时",
   input_probe: "等待输入框就绪",
-  input_probe_err: "输入框探测失败，重试",
   write_start: "正在写入输入框",
   write_done: "写入完成，核对回读",
-  write_resp: "写入结果",
-  write_err: "写入消息超时，重试",
   enter_sent: "已回车提交",
-  enter_refused: "回车被拒绝",
-  enter_err: "回车消息超时，重试",
   sent_check: "核对用户消息是否出现",
-  sent_check_err: "核验超时，重试",
-  fill_sent: "已派发填充任务",
   send_retry: "重试发送（点击发送按钮）",
   send_ok: "已确认消息出现在页面，等待回复",
-  check_miss: "页面状态查询失败，重试",
   stream_start: "回复生成中",
   stream_done: "回复生成完毕",
   replied: "已取回回复",
@@ -194,11 +221,10 @@ function startElapsed() {
   elapsedTimer = setInterval(() => {
     elapsed.value += 1;
   }, 1000);
-  const extId = (ws.llm.extension_id || "").trim();
   clearInterval(stageTimer);
   stageTimer = setInterval(async () => {
     try {
-      const d = await deepseekAttempt(extId);
+      const d = await deepseekAttempt(extId.value);
       const stages = (d && d.lastAttempt && d.lastAttempt.stages) || [];
       const last = stages[stages.length - 1];
       if (last) stageText.value = STAGE_LABELS[last.stage] || last.stage;
@@ -219,12 +245,13 @@ function stopElapsed() {
 onBeforeUnmount(stopElapsed);
 
 function resetRun() {
-  for (const k of Object.keys(stepStatus)) delete stepStatus[k];
+  for (const k of Object.keys(stepState)) delete stepState[k];
   logs.value = [];
-  h3Done.value = 0;
-  h3Total.value = 0;
   runError.value = "";
   debugTail.value = [];
+  runningStep.value = "";
+  storyboardSynced.value = false;
+  stateRef.value = null;
 }
 
 function hhmmss(ts) {
@@ -233,7 +260,6 @@ function hhmmss(ts) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-// 一键导出调试包：SPA 日志 + 后台事件流水 + 现场自检（含输入框候选/可见性）
 async function copyDebug() {
   let diag = null;
   try {
@@ -243,7 +269,7 @@ async function copyDebug() {
   }
   const payload = {
     exportedAt: new Date().toISOString(),
-    steps: { ...stepStatus },
+    steps: JSON.parse(JSON.stringify(stepState)),
     spaLogs: logs.value.map((l) => `${l.time} [${l.level}] ${l.msg}`),
     backgroundEvents: (debugTail.value || []).map((e) => `${hhmmss(e.at)} ${e.kind} ${e.detail}`),
     diag,
@@ -270,105 +296,142 @@ function addLog(level, msg) {
   });
 }
 
-function stepElStatus(key) {
-  const st = stepStatus[key];
-  if (st === "running") return "process";
-  if (st === "error") return "error";
-  if (st === "done" || st === "warn") return "finish";
-  return "wait";
-}
-
-function stepDesc(key) {
-  const st = stepStatus[key];
-  if (st === "running") return "进行中…";
-  if (st === "warn") return "部分完成";
-  if (st === "done") return "已完成";
+function summarize(key, result) {
+  if (key === "outline") {
+    const o = result || {};
+    return `${o.title || "(未命名)"} · 主体 ${(o.subjects || []).length} · 场景 ${(o.scenes || []).length}`;
+  }
+  if (key === "storyboard") return `${(result || []).length} 个镜头（未同步）`;
+  if (key === "subjects") return `${(result || []).length} 个主体`;
+  if (key === "firstframe") return `更新 ${(result || []).length} 个镜头的帧提示词`;
+  if (key === "audio") return `${(result || []).length} 条音频`;
   return "";
 }
 
-const h3Percent = computed(() =>
-  h3Total.value ? Math.round((h3Done.value / h3Total.value) * 100) : 0
-);
-
-async function startImport() {
-  if (!selectedId.value || running.value) return;
-  phase.value = "run";
-  running.value = true;
-  runError.value = "";
-  startElapsed();
-  const token = createImportToken();
-  tokenRef.value = token;
-
-  const segs = ws.timeline.segments || [];
-  const fps = ws.widgets.frame_rate || 24;
-  const digest = segs.length
-    ? segs
-        .map(
-          (s, i) =>
-            `${i + 1}. [约${Math.round((s.length || 0) / fps)}s] ${(
-              s.prompt || s.h3PromptJson?.summary || ""
-            ).slice(0, 60)}`
-        )
-        .join("\n")
-    : "（当前时间线为空）";
-
-  try {
-    const result = await runDeepseekImport({
+async function runStep(step) {
+  const key = step.key;
+  if (!canRun(key) || !selectedId.value) return;
+  if (!stateRef.value) {
+    const segs = ws.timeline.segments || [];
+    const fps = ws.widgets.frame_rate || 24;
+    const digest = segs.length
+      ? segs
+          .map(
+            (s, i) =>
+              `${i + 1}. [约${Math.round((s.length || 0) / fps)}s] ${(
+                s.prompt || s.h3PromptJson?.summary || ""
+              ).slice(0, 60)}`
+          )
+          .join("\n")
+      : "（当前时间线为空）";
+    stateRef.value = createImportState({
       extensionId: extId.value,
       sessionId: selectedId.value,
       timelineDigest: digest,
       frameRate: fps,
       existingSubjects: ws.subjects.subjects || [],
-      token,
-      onStep: (key, status) => {
-        stepStatus[key] = status;
-      },
-      onLog: addLog,
-      onH3Progress: (d, t) => {
-        h3Done.value = d;
-        h3Total.value = t;
-      },
     });
-    addLog("success", "导入流水线完成，正在写入导演台…");
-    emit("completed", result);
-    ElMessage.success(`DeepSeek 分镜导入完成：${result.segments.length} 个分镜`);
-    running.value = false;
-    stopElapsed();
-    emit("update:modelValue", false);
+  }
+  const state = stateRef.value;
+  const token = createImportToken();
+  tokenRef.value = token;
+  runningStep.value = key;
+  const st = stepOf(key);
+  st.status = "running";
+  runError.value = "";
+  startElapsed();
+  try {
+    const result = await STEP_RUNNERS[key](state, { token, onLog: addLog });
+    st.status = "done";
+    st.synced = false;
+    st.summary = summarize(key, result);
   } catch (e) {
-    running.value = false;
-    stopElapsed();
+    st.status = "error";
     runError.value = e.message || String(e);
     addLog("error", runError.value);
+  } finally {
+    runningStep.value = "";
+    stopElapsed();
+    tokenRef.value = null;
   }
 }
 
-async function cancelImport() {
+async function syncStep(step) {
+  const key = step.key;
+  if (!canSync(key) || !stateRef.value) return;
+  if (key === "storyboard" && storyboardSynced.value) {
+    try {
+      await ElMessageBox.confirm(
+        "分镜已同步过一次。再次同步将把本次缓存的全部分镜作为新分镜追加到时间线（可能产生重复镜头）。继续？",
+        "重复同步确认",
+        { type: "warning", confirmButtonText: "继续追加", cancelButtonText: "取消" }
+      );
+    } catch {
+      return;
+    }
+  }
+  const payload = buildSyncPayload(stateRef.value, key);
+  if (!payload) return;
+  emit("sync", payload);
+  stepOf(key).synced = true;
+  if (key === "storyboard") {
+    storyboardSynced.value = true;
+    stepOf("firstframe").synced = false;
+  }
+  addLog("success", `「${step.label}」已同步到导演台`);
+}
+
+async function cleanupSessions() {
+  if (!stateRef.value || !stateRef.value.createdSessions.length) {
+    ElMessage.info("本次导入尚未新建 DeepSeek 会话（大纲复用你选定的会话）");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `删除本次导入新建的 ${stateRef.value.createdSessions.length} 个 DeepSeek 会话？删除后不可恢复。`,
+      "清理会话",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "保留" }
+    );
+  } catch {
+    return;
+  }
+  const n = await cleanupImportSessions(stateRef.value, addLog);
+  ElMessage.success(n ? `已清理 ${n} 个会话` : "没有会话被删除（见日志）");
+}
+
+async function cancelStep() {
   if (tokenRef.value) tokenRef.value.cancelled = true;
   addLog("warn", "已请求取消，正在中止当前请求…");
   try {
     const n = await deepseekCancel(extId.value);
     addLog("warn", `已向扩展发送取消（挂起请求 ${n} 个），页面侧等待也会立即停止`);
   } catch {
-    // 旧版扩展无此消息类型：仍会在当前请求结束后由令牌中止
     addLog("warn", "扩展未响应取消指令（可能为旧版本），将在当前请求结束后中止");
   }
 }
 
 function close() {
-  if (running.value) return;
+  if (runningStep.value) return;
   emit("update:modelValue", false);
+}
+
+function stepBadge(st) {
+  if (st.status === "running") return { text: "执行中", cls: "running" };
+  if (st.status === "error") return { text: "失败", cls: "error" };
+  if (st.status === "done" && st.synced) return { text: "已同步", cls: "synced" };
+  if (st.status === "done" || st.status === "warn") return { text: "已完成", cls: "done" };
+  return { text: "未执行", cls: "idle" };
 }
 </script>
 
 <template>
   <el-dialog
     :model-value="modelValue"
-    :title="phase === 'select' ? 'DeepSeek 分镜导入 · 选择会话' : 'DeepSeek 分镜导入 · 执行中'"
-    :width="phase === 'select' ? 560 : 660"
+    :title="phase === 'select' ? 'DeepSeek 分镜导入 · 选择会话' : 'DeepSeek 分镜导入 · 逐步执行'"
+    :width="phase === 'select' ? 560 : 680"
     append-to-body
-    :close-on-click-modal="phase === 'select' && !running"
-    :show-close="!running"
+    :close-on-click-modal="phase === 'select' && !runningStep"
+    :show-close="!runningStep"
     class="mrd-dsi-dialog"
     @update:model-value="v => (v ? null : close())"
   >
@@ -401,7 +464,7 @@ function close() {
         :closable="false"
         show-icon
         class="mrd-dsi-alert"
-        title="选择一个包含你创作构想的 DeepSeek 会话：导入将在该会话内提取故事大纲（该会话会新增 2 条消息，DeepSeek 无法删除单条消息），随后在新会话中完成分镜 / 主体 / 音频 / 首帧 / H3 全套提取。"
+        title="选择一个包含你创作构想的 DeepSeek 会话：导入将在该会话内提取故事大纲（该会话会新增 2 条消息），随后每个步骤由你手动「执行 / 同步」逐步确认。建议控制导入频率，避免短时间高频自动化操作。"
       />
 
       <div class="mrd-dsi-list">
@@ -427,48 +490,64 @@ function close() {
       <div class="mrd-dsi-footer">
         <el-button class="mrd-dsi-diag" :loading="diagLoading" @click="runDiag">页面自检</el-button>
         <el-button @click="close">取消</el-button>
-        <el-button type="primary" :disabled="!selectedId || !isDeepseek" @click="startImport">
-          开始导入
+        <el-button type="primary" :disabled="!selectedId || !isDeepseek" @click="phase = 'run'">
+          下一步：逐步导入
         </el-button>
       </div>
     </div>
 
-    <!-- 阶段二：执行进度 -->
+    <!-- 阶段二：步骤卡片（执行 / 同步） -->
     <div v-else class="mrd-dsi-run">
-      <div class="mrd-dsi-run-grid">
-        <el-steps direction="vertical" :space="44" class="mrd-dsi-steps">
-          <el-step
-            v-for="st in IMPORT_STEPS"
-            :key="st.key"
-            :title="st.label"
-            :status="stepElStatus(st.key)"
-            :description="stepDesc(st.key)"
-          />
-        </el-steps>
-
-        <div class="mrd-dsi-run-side">
-          <div class="mrd-dsi-h3box">
-            <div class="mrd-dsi-h3-label">H3 循环转换</div>
-            <el-progress
-              type="dashboard"
-              :percentage="h3Percent"
-              :width="108"
-              :color="h3Percent >= 100 ? '#4ade80' : '#6c5ce7'"
-            >
-              <template #default>
-                <span class="mrd-dsi-h3-count">{{ h3Done }}/{{ h3Total || "–" }}</span>
-                <span class="mrd-dsi-h3-sub">分镜</span>
-              </template>
-            </el-progress>
-          </div>
-          <el-button v-if="running" type="danger" plain @click="cancelImport">取消导入</el-button>
-          <el-button v-else type="primary" @click="close">关闭</el-button>
+      <div class="mrd-dsi-toolbar-row">
+        <span class="mrd-dsi-toolbar-hint">每步先「执行」在 DeepSeek 生成，确认后再「同步」写入导演台</span>
+        <div class="mrd-dsi-toolbar-btns">
+          <el-button size="small" :icon="'Delete'" :disabled="!!runningStep" @click="cleanupSessions">清理会话</el-button>
+          <el-button v-if="runningStep" size="small" type="danger" plain @click="cancelStep">取消执行</el-button>
+          <el-button v-else size="small" @click="phase = 'select'">返回选会话</el-button>
           <el-button link type="info" size="small" @click="copyDebug">复制调试日志</el-button>
-          <div class="mrd-dsi-elapsed">
-            已用时 {{ elapsed }}s<span v-if="stageText"> · {{ stageText }}</span>
+        </div>
+      </div>
+
+      <div class="mrd-dsi-steps">
+        <div v-for="(st, idx) in IMPORT_STEPS" :key="st.key" class="mrd-dsi-step" :class="{ running: runningStep === st.key }">
+          <div class="mrd-dsi-step-head">
+            <span class="mrd-dsi-step-idx">{{ idx + 1 }}</span>
+            <div class="mrd-dsi-step-titles">
+              <span class="mrd-dsi-step-label">{{ st.label }}</span>
+              <span class="mrd-dsi-step-hint">{{ st.hint }}</span>
+            </div>
+            <span class="mrd-dsi-step-badge" :class="stepBadge(stepState[st.key] || {}).cls">
+              {{ stepBadge(stepState[st.key] || {}).text }}
+            </span>
+          </div>
+          <div v-if="(stepState[st.key] || {}).summary" class="mrd-dsi-step-summary">
+            {{ stepState[st.key].summary }}
+          </div>
+          <div class="mrd-dsi-step-actions">
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              :disabled="!canRun(st.key)"
+              :title="runHint(st.key)"
+              @click="runStep(st)"
+            >
+              {{ stepState[st.key]?.status === "running" ? "执行中…" : "执行" }}
+            </el-button>
+            <el-button
+              size="small"
+              type="success"
+              plain
+              :disabled="!canSync(st.key)"
+              @click="syncStep(st)"
+            >
+              同步
+            </el-button>
           </div>
         </div>
       </div>
+
+      <div class="mrd-dsi-elapsed" v-if="runningStep">已用时 {{ elapsed }}s<span v-if="stageText"> · {{ stageText }}</span></div>
 
       <div ref="logBoxRef" class="mrd-dsi-logbox">
         <div v-for="(l, i) in logs" :key="i" class="mrd-dsi-log" :class="`lv-${l.level}`">
@@ -488,14 +567,7 @@ function close() {
         </div>
       </details>
 
-      <el-alert
-        v-if="runError"
-        type="error"
-        :closable="false"
-        show-icon
-        :title="runError"
-        class="mrd-dsi-alert"
-      />
+      <el-alert v-if="runError" type="error" :closable="false" show-icon :title="runError" class="mrd-dsi-alert" />
     </div>
   </el-dialog>
 </template>
@@ -561,37 +633,66 @@ function close() {
 .mrd-dsi-diag { margin-right: auto; }
 .mrd-dsi-elapsed { font-size: 11px; color: #6b7488; }
 
-.mrd-dsi-run { display: flex; flex-direction: column; gap: 12px; }
-.mrd-dsi-run-grid { display: flex; gap: 18px; align-items: stretch; }
-.mrd-dsi-steps { flex: 1; min-width: 0; }
-.mrd-dsi-steps :deep(.el-step__title) { font-size: 13px; color: #a9b1c3; }
-.mrd-dsi-steps :deep(.el-step__title.is-process) { color: #edeff5; font-weight: 600; }
-.mrd-dsi-steps :deep(.el-step__title.is-finish) { color: #c3c9d9; }
-.mrd-dsi-steps :deep(.el-step__description) { font-size: 11px; }
-.mrd-dsi-steps :deep(.el-step__head.is-finish .el-step__icon) {
-  animation: mrd-dsi-pop 0.28s ease;
+.mrd-dsi-run { display: flex; flex-direction: column; gap: 10px; }
+.mrd-dsi-toolbar-row { display: flex; align-items: center; gap: 10px; }
+.mrd-dsi-toolbar-hint { flex: 1; min-width: 0; font-size: 11.5px; color: #6b7488; }
+.mrd-dsi-toolbar-btns { display: flex; align-items: center; gap: 8px; }
+
+.mrd-dsi-steps { display: flex; flex-direction: column; gap: 8px; }
+.mrd-dsi-step {
+  padding: 10px 12px;
+  border: 1px solid #222736;
+  border-radius: 10px;
+  background: #151821;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
-@keyframes mrd-dsi-pop {
-  0% { transform: scale(0.7); }
-  60% { transform: scale(1.12); }
-  100% { transform: scale(1); }
+.mrd-dsi-step.running {
+  border-color: #6c5ce7;
+  box-shadow: 0 0 0 1px rgba(108, 92, 231, 0.4), 0 0 14px rgba(108, 92, 231, 0.15);
 }
-.mrd-dsi-run-side {
+.mrd-dsi-step-head { display: flex; align-items: center; gap: 10px; }
+.mrd-dsi-step-idx {
   flex: none;
-  width: 170px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.35);
 }
-.mrd-dsi-h3box { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.mrd-dsi-h3-label { font-size: 12px; color: #a9b1c3; }
-.mrd-dsi-h3-count { font-size: 16px; font-weight: 700; color: #edeff5; }
-.mrd-dsi-h3-sub { font-size: 10.5px; color: #6b7488; margin-left: 4px; }
+.mrd-dsi-step-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mrd-dsi-step-label { font-size: 13px; font-weight: 600; color: #edeff5; }
+.mrd-dsi-step-hint { font-size: 11px; color: #6b7488; }
+.mrd-dsi-step-badge {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  border: 1px solid #2a3042;
+  color: #6b7488;
+}
+.mrd-dsi-step-badge.running { color: #a78bfa; border-color: rgba(167, 139, 250, 0.5); background: rgba(167, 139, 250, 0.1); }
+.mrd-dsi-step-badge.done { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.08); }
+.mrd-dsi-step-badge.synced { color: #4ade80; border-color: #4ade80; background: rgba(74, 222, 128, 0.14); }
+.mrd-dsi-step-badge.error { color: #f87171; border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.08); }
+.mrd-dsi-step-summary {
+  margin: 8px 0 0 32px;
+  font-size: 11.5px;
+  color: #9aa3b2;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: rgba(108, 92, 231, 0.07);
+}
+.mrd-dsi-step-actions { display: flex; gap: 8px; margin: 8px 0 0 32px; }
+
 .mrd-dsi-logbox {
-  max-height: 220px;
-  min-height: 120px;
+  max-height: 200px;
+  min-height: 110px;
   overflow: auto;
   padding: 8px 10px;
   border: 1px solid #222736;

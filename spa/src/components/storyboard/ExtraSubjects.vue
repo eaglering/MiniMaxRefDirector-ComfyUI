@@ -13,9 +13,12 @@ const ws = useWorkspace();
 
 // 可候选：本分镜生效主体（全局 + 段级自定义副本按名合并）
 const candidates = computed(() =>
-  mergeSegmentSubjects(ws.subjects.subjects, props.segment.subjectsOverride).filter(
-    (s) => (s.name || "").trim() !== ""
+{
+  console.log(ws.subjects.subjects, props.segment.subjectsOverride);
+  return mergeSegmentSubjects(ws.subjects.subjects, props.segment.subjectsOverride).filter(
+    (s) => (s.name || "").trim() !== "" && s.relationship.trim() !== ""
   )
+}
 );
 
 // 本分镜提示词中已 @ 提及的主体名（无需重复勾选）
@@ -57,6 +60,7 @@ function toggle(name) {
             on: selectedNames().includes(s.name),
             mentioned: mentionedNames.has((s.name || '').trim()),
           }"
+          :disabled="mentionedNames.has((s.name || '').trim())"
           :title="mentionedNames.has((s.name || '').trim()) ? '已在提示词中提及' : s.description || s.name"
           @click="toggle(s.name)"
         >

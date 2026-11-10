@@ -114,12 +114,6 @@ async def spa_skill_library(request: web.Request) -> web.Response:
                 {"success": False, "error": f"skill 缺少 prompt.md：{prompt_path}"}, status=404)
         with open(prompt_path, "r", encoding="utf-8-sig") as f:
             prompt_md = f.read()
-        # {{skill_keys}}：镜头技能词典的 key 清单（SQLite 查询注入；无占位符则不处理）
-        if "{{skill_keys}}" in prompt_md:
-            try:
-                prompt_md = prompt_md.replace("{{skill_keys}}", skill_db.skill_keys_text())
-            except Exception:
-                log.warning("[SPA] skill_keys 注入失败", exc_info=True)
         return web.json_response({"success": True, "name": name, "prompt": prompt_md})
     except ValueError as e:
         return web.json_response({"success": False, "error": str(e)}, status=400)
@@ -230,7 +224,8 @@ def _skill_dict_mutation(handler):
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/add")
 async def spa_skill_add(request: web.Request) -> web.Response:
-    # 新增技能必填：类别 / 名称 / 描述 / 触发词 / 案例（prompt 可选，默认取描述）
+    # 新增技能：类别 / 名称必填；运镜需英文触发短语、景别与镜头结构需英文写法、
+    # 微表情需中文示例（按类别校验，见 lib/skill_db.py _CATEGORY_RULES）
     return _skill_dict_mutation(lambda d: skill_db.add_skill(d))(request)
 
 
@@ -247,6 +242,12 @@ async def spa_skill_delete(request: web.Request) -> web.Response:
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/category/add")
 async def spa_skill_category_add(request: web.Request) -> web.Response:
     return _skill_dict_mutation(lambda d: skill_db.add_category(d))(request)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_dict/batch_add")
+async def spa_skill_batch_add(request: web.Request) -> web.Response:
+    # 批量导入技能词条：{categoryId?, newCategory?, items:[{name, nameEn?, desc?, guide?, examples?}]}
+    return _skill_dict_mutation(lambda d: skill_db.batch_add_skills(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skills")

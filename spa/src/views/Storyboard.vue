@@ -80,11 +80,14 @@ function defaultSegment() {
   };
 }
 
+const shotListRef = ref(null);
+
 function addShot() {
   const seg = defaultSegment();
   segments.value.push(seg);
   selectedId.value = seg.id;
   ws.markDirty();
+  shotListRef.value?.refreshGlobalRange();
 }
 
 async function duplicateShot(id) {
@@ -97,6 +100,7 @@ async function duplicateShot(id) {
   relayout();
   selectedId.value = copy.id;
   ws.markDirty();
+  shotListRef.value?.refreshGlobalRange();
   ElMessage.success("已复制分镜");
 }
 
@@ -123,6 +127,7 @@ async function removeShot(id) {
     selectedId.value = segments.value[Math.min(idx, segments.value.length - 1)]?.id || "";
   }
   ws.markDirty();
+  shotListRef.value?.refreshGlobalRange();
 }
 
 function relayout() {
@@ -133,6 +138,72 @@ function relayout() {
   }
 }
 
+// ---- 多选联动：全局参数 / 批量删除 ----
+// 跨度计算（含未选中间隙）：Start=最早选中分镜开始；End=最晚选中分镜结束
+// 全局范围更新提示节流（Ctrl 选择/增删分镜可能连续触发，避免消息刷屏）
+let lastRangeToastAt = 0;
+function notifyRangeUpdated(prefix, s, e) {
+  const now = Date.now();
+  if (now - lastRangeToastAt < 800) return;
+  lastRangeToastAt = now;
+  ElMessage.success(`${prefix}: Start ${s}s / End ${e}s / 时长 ${Math.round((e - s) * 100) / 100}s`);
+}
+// 时间范围写回：秒/帧双单位同步（节点端 start_frame/end_frame/duration_frames
+// 在 display_mode=frames 时是权威输入，必须一并更新）
+function syncRangeWidgets(startFrame, endFrame) {
+  const fps = ws.widgets.frame_rate || 24;
+  const sf = Math.round(startFrame);
+  const ef = Math.max(sf + 1, Math.round(endFrame));
+  const s = framesToSeconds(sf, fps);
+  const e = framesToSeconds(ef, fps);
+  ws.widgets.start_second = s;
+  ws.widgets.end_second = e;
+  ws.widgets.duration_seconds = Math.max(0, Math.round((e - s) * 100) / 100);
+  ws.widgets.start_frame = sf;
+  ws.widgets.end_frame = ef;
+  ws.widgets.duration_frames = Math.max(1, ef - sf);
+  ws.markDirty();
+  return { s, e };
+}
+function applySpanRange({ startFrame, endFrame }) {
+  const { s, e } = syncRangeWidgets(startFrame, endFrame);
+  notifyRangeUpdated("已按选中分镜更新全局", s, e);
+}
+// 全不选：使用单个选中分镜的 Start/End
+function applySegmentRange(id) {
+  const seg = segments.value.find((s) => s.id === id);
+  if (!seg) return;
+  const { s, e } = syncRangeWidgets(seg.start || 0, (seg.start || 0) + (seg.length || 0));
+  notifyRangeUpdated("已按当前分镜更新全局", s, e);
+}
+async function removeMany(ids) {
+  const set = new Set(ids || []);
+  if (!set.size) return;
+  if (set.size >= segments.value.length) {
+    ElMessage.warning("至少保留一个分镜");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${set.size} 个分镜？`,
+      "批量删除分镜",
+      { confirmButtonText: "删除", cancelButtonText: "取消", type: "warning" }
+    );
+  } catch {
+    return;
+  }
+  for (let i = segments.value.length - 1; i >= 0; i--) {
+    if (set.has(segments.value[i].id)) segments.value.splice(i, 1);
+  }
+  relayout();
+  if (set.has(selectedId.value)) {
+    selectedId.value = segments.value[0]?.id || "";
+  }
+  ws.markDirty();
+  shotListRef.value?.refreshGlobalRange();
+  ElMessage.success(`已删除 ${set.size} 个分镜`);
+}
+
 const totalSeconds = computed(() =>
   framesToSeconds(
     segments.value.reduce((a, s) => a + (s.length || 0), 0),
@@ -140,9 +211,33 @@ const totalSeconds = computed(() =>
   )
 );
 
-// ---- DeepSeek 分镜导入结果写入 ----
+// ---- DeepSeek 分镜导入结果写入（手动逐步「同步」）----
 function emptyH3() {
   return { summary: "", detailed_description: "", overall_soundscape: "", non_diegetic_music: "" };
+}
+
+// 单个分镜 shot → segment 的公共字段映射（storyboard 同步与首次新增共用）
+function applyShotToSegment(seg, shot) {
+  seg.prompt = String(shot.prompt || "");
+  if (Array.isArray(shot.camera_motions)) seg.cameraMotions = shot.camera_motions.filter(Boolean);
+  if (Array.isArray(shot.shot_sizes)) seg.shotSizes = shot.shot_sizes.filter(Boolean);
+  if (Array.isArray(shot.framings)) seg.framings = shot.framings.filter(Boolean);
+  if (Array.isArray(shot.expressions)) seg.expressions = shot.expressions.filter(Boolean);
+  // 首/尾帧提示词：自定义字段（parseInitial 保留未知字段，供后续首尾帧图生成使用）
+  if (shot.first_frame_prompt) seg.firstFramePrompt = String(shot.first_frame_prompt);
+  if (shot.last_frame_prompt) seg.lastFramePrompt = String(shot.last_frame_prompt);
+  // 跨镜头衔接引导强度（分镜参数 guideStrength，缺省 22）
+  if (typeof shot.guide_strength === "number") seg.guideStrength = shot.guide_strength;
+  if (shot.h3) {
+    seg.h3PromptJson = {
+      summary: String(shot.h3.summary || ""),
+      detailed_description: String(shot.h3.detailed_description || ""),
+      overall_soundscape: String(shot.h3.overall_soundscape || ""),
+      non_diegetic_music: String(shot.h3.non_diegetic_music || ""),
+    };
+  } else {
+    seg.h3PromptJson = emptyH3();
+  }
 }
 
 // 主体同名更新、否则新增（与 skills 的「同名会被更新覆盖」约定一致）
@@ -165,53 +260,64 @@ function upsertSubject(entry, type) {
   return true;
 }
 
-function onDeepseekImported(result) {
-  const fps = ws.widgets.frame_rate || 24;
-  let added = 0;
-  let firstNewId = "";
-
-  for (const shot of result.segments || []) {
-    const seg = defaultSegment();
-    seg.length = secondsToFrames(
-      Number(shot.duration_seconds) > 0 ? Number(shot.duration_seconds) : 5,
-      fps
-    );
-    seg.prompt = String(shot.prompt || "");
-    if (Array.isArray(shot.camera_motions)) seg.cameraMotions = shot.camera_motions.filter(Boolean);
-    if (Array.isArray(shot.shot_sizes)) seg.shotSizes = shot.shot_sizes.filter(Boolean);
-    if (Array.isArray(shot.framings)) seg.framings = shot.framings.filter(Boolean);
-    if (Array.isArray(shot.expressions)) seg.expressions = shot.expressions.filter(Boolean);
-    // 首/尾帧提示词：自定义字段（parseInitial 保留未知字段，供后续首尾帧图生成使用）
-    if (shot.first_frame_prompt) seg.firstFramePrompt = String(shot.first_frame_prompt);
-    if (shot.last_frame_prompt) seg.lastFramePrompt = String(shot.last_frame_prompt);
-    // 跨镜头衔接引导强度（分镜参数 guideStrength，缺省 22）
-    if (typeof shot.guide_strength === "number") seg.guideStrength = shot.guide_strength;
-    if (shot.h3) {
-      seg.h3PromptJson = {
-        summary: String(shot.h3.summary || ""),
-        detailed_description: String(shot.h3.detailed_description || ""),
-        overall_soundscape: String(shot.h3.overall_soundscape || ""),
-        non_diegetic_music: String(shot.h3.non_diegetic_music || ""),
-      };
-    } else {
-      seg.h3PromptJson = emptyH3();
-    }
-    segments.value.push(seg);
-    if (!firstNewId) firstNewId = seg.id;
-    added++;
-  }
-
-  let subjectsAdded = 0;
-  for (const c of result.characters || []) if (upsertSubject(c, "Subject")) subjectsAdded++;
-  for (const sc of result.scenes || []) if (upsertSubject(sc, "Picture")) subjectsAdded++;
-  for (const a of result.audios || []) if (upsertSubject(a, "Audio")) subjectsAdded++;
-
+function afterSyncWrites(firstNewId) {
   relayout();
   if (firstNewId) selectedId.value = firstNewId;
   ws.markDirty();
+  shotListRef.value?.refreshGlobalRange();
   ws.saveNow();
-  if (subjectsAdded) {
-    ElMessage.info(`已写入 ${added} 个分镜与 ${subjectsAdded} 个主体条目（主体管理页查看）`);
+}
+
+// DeepseekImportDialog 的分类型同步载荷：
+//   { type: "storyboard", segments }   追加新分镜
+//   { type: "subjects", characters, scenes }
+//   { type: "firstframe", frames }     按 index 回写已有分镜的帧提示词
+//   { type: "audio", audios }
+function onDeepseekSync(payload) {
+  const type = payload && payload.type;
+  if (type === "storyboard") {
+    const fps = ws.widgets.frame_rate || 24;
+    let added = 0;
+    let firstNewId = "";
+    for (const shot of payload.segments || []) {
+      const seg = defaultSegment();
+      seg.length = secondsToFrames(
+        Number(shot.duration_seconds) > 0 ? Number(shot.duration_seconds) : 5,
+        fps
+      );
+      applyShotToSegment(seg, shot);
+      segments.value.push(seg);
+      if (!firstNewId) firstNewId = seg.id;
+      added++;
+    }
+    afterSyncWrites(firstNewId);
+    if (added) ElMessage.success(`已同步 ${added} 个分镜`);
+  } else if (type === "subjects") {
+    let added = 0;
+    for (const c of payload.characters || []) if (upsertSubject(c, "Subject")) added++;
+    for (const sc of payload.scenes || []) if (upsertSubject(sc, "Picture")) added++;
+    afterSyncWrites("");
+    if (added) ElMessage.success(`已同步 ${added} 个主体条目（主体管理页查看）`);
+    else ElMessage.info("本次没有产生新的主体条目");
+  } else if (type === "firstframe") {
+    let updated = 0;
+    for (const f of payload.frames || []) {
+      const seg = segments.value[f.index - 1];
+      if (!seg) continue;
+      if (f.first_frame_prompt) seg.firstFramePrompt = String(f.first_frame_prompt);
+      if (f.last_frame_prompt) seg.lastFramePrompt = String(f.last_frame_prompt);
+      updated++;
+    }
+    ws.markDirty();
+    ws.saveNow();
+    if (updated) ElMessage.success(`已回写 ${updated} 个分镜的首/尾帧提示词`);
+    else ElMessage.info("没有可回写的分镜（请先同步分镜）");
+  } else if (type === "audio") {
+    let added = 0;
+    for (const a of payload.audios || []) if (upsertSubject(a, "Audio")) added++;
+    afterSyncWrites("");
+    if (added) ElMessage.success(`已同步 ${added} 条音频条目`);
+    else ElMessage.info("本次没有产生新的音频条目");
   }
 }
 </script>
@@ -221,6 +327,7 @@ function onDeepseekImported(result) {
     <!-- 分镜列表 -->
     <el-splitter-panel v-model:size="mainSplit.sizes[0]" :min="240" collapsible>
       <ShotList
+        ref="shotListRef"
         :segments="segments"
         :selected-id="selected ? selected.id : ''"
         :display-mode="ws.widgets.display_mode"
@@ -231,6 +338,9 @@ function onDeepseekImported(result) {
         @add="addShot"
         @duplicate="duplicateShot"
         @remove="removeShot"
+        @apply-span="applySpanRange"
+        @apply-segment="applySegmentRange"
+        @remove-many="removeMany"
         @deepseek-import="showDeepseekImport = true"
       />
     </el-splitter-panel>
@@ -280,7 +390,7 @@ function onDeepseekImported(result) {
   </el-drawer>
 
   <!-- DeepSeek 分镜导入（仅 deepseek-proxy 模式可见入口） -->
-  <DeepseekImportDialog v-model="showDeepseekImport" @completed="onDeepseekImported" />
+  <DeepseekImportDialog v-model="showDeepseekImport" @sync="onDeepseekSync" />
 </template>
 
 <style scoped>

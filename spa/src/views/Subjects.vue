@@ -22,7 +22,7 @@ const visibleOfTab = computed(() =>
 const visibleCount = computed(() => subjects.value.filter((s) => !isChildSubject(s)).length);
 
 function addSubject() {
-  subjects.value.push(makeSubject(activeTab.value));
+  subjects.value.unshift(makeSubject(activeTab.value));
   ws.markDirty();
   nextTick(() => {
     listRef.value?.scrollTo?.({ top: listRef.value.scrollHeight, behavior: "smooth" });
@@ -133,7 +133,7 @@ function onDragLeave() {
       </div>
       <div class="mrd-subjects-actions">
         <span class="mrd-drop-hint">支持拖放图片 / 音频 / 视频到页面直接新建</span>
-        <el-button type="primary" size="small" :icon="'Plus'" @click="addSubject">新增{{ SUBJECT_TYPE_LABELS[activeTab] }}主体</el-button>
+        <el-button type="primary" size="small" :icon="'Plus'" @click="addSubject">新增{{ SUBJECT_TYPE_LABELS[activeTab] }}</el-button>
       </div>
     </div>
 

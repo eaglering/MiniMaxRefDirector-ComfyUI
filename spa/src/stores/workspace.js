@@ -151,6 +151,12 @@ export const useWorkspace = defineStore("workspace", () => {
     frame_rate: 24,
     start_second: 0,
     end_second: 5,
+    // 时间范围双单位（与节点 start_frame/end_frame/duration_frames 对齐），
+    // 由分镜页时间线跨度自动同步，全局参数页只读展示
+    duration_seconds: 5,
+    start_frame: 0,
+    end_frame: 120,
+    duration_frames: 120,
     guide_strength: "",
     inpaint_audio: true,
     override_audio: false,
@@ -159,7 +165,7 @@ export const useWorkspace = defineStore("workspace", () => {
   const subjects = reactive({ subjects: [] });
   const subjectNodeId = ref("");
   const llm = reactive({
-    mode: "llama-cpp",
+    mode: "deepseek-proxy",
     gguf_path: "",
     mmproj_path: "",
     provider: "",
@@ -257,6 +263,7 @@ export const useWorkspace = defineStore("workspace", () => {
       subjects.subjects = state.subjects.subjects;
     }
     if (state.llm) Object.assign(llm, state.llm);
+    if (!llm.mode) llm.mode = "deepseek-proxy";
     updatedAt.value = state.updated_at || 0;
   }
 

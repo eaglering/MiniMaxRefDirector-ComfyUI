@@ -17,9 +17,48 @@
 //    注册 {type:"register"} → 接收 {type:"llm_task", id, payload} →
 //    走 content 填充链路 → 回传 {type:"llm_result", id, ok, text, error}。
 
-const DEEPSEEK_URL = "https://chat.deepseek.com/";
-// 会话页真实路径为 /a/chat/s/<session_id>（旧版曾为 /a/<id>）
-const DEEPSEEK_CHAT_URL = (id) => `https://chat.deepseek.com/a/chat/s/${id}`;
+// ---------------- 多站点适配（deepseek / doubao / qwen） ----------------
+// 三类网页对话站共用同一桥接协议与 DOM 自动化链路，仅站点元数据不同：
+// 标签页匹配、首页、会话页 URL 结构由 SITES 定义；消息 payload.site 决定路由
+// （缺省 deepseek，兼容旧调用方）。豆包/千问的会话列表/删除暂不支持，
+// content script 会返回明确错误。
+const SITES = {
+  deepseek: {
+    id: "deepseek",
+    name: "DeepSeek",
+    host: "chat.deepseek.com",
+    home: "https://chat.deepseek.com/",
+    pattern: "https://chat.deepseek.com/*",
+    homePath: "/",
+    chatUrl: (id) => `https://chat.deepseek.com/a/chat/s/${id}`,
+    chatPath: (id) => `/a/chat/s/${id}`,
+  },
+  doubao: {
+    id: "doubao",
+    name: "豆包",
+    host: "www.doubao.com",
+    home: "https://www.doubao.com/",
+    pattern: "https://www.doubao.com/*",
+    homePath: "/",
+    chatUrl: (id) => `https://www.doubao.com/chat/${id}`,
+    chatPath: (id) => `/chat/${id}`,
+  },
+  qwen: {
+    id: "qwen",
+    name: "千问",
+    host: "tongyi.aliyun.com",
+    home: "https://tongyi.aliyun.com/",
+    pattern: "https://tongyi.aliyun.com/*",
+    homePath: "/",
+    chatUrl: (id) => `https://tongyi.aliyun.com/qianwen/chat/${id}`,
+    chatPath: (id) => `/qianwen/chat/${id}`,
+  },
+};
+
+function siteOf(payload) {
+  const key = String((payload && payload.site) || "deepseek").toLowerCase();
+  return SITES[key] || SITES.deepseek;
+}
 const REQUEST_TIMEOUT_MS = 290_000; // MV3 SW 5 分钟存活上限内
 const REPLY_TIMEOUT_MS = 240_000; // 等待回复总时长
 const NO_SIGNAL_MS = 90_000; // 无任何回复信号的快速失败阈值
@@ -87,16 +126,19 @@ let lastAttempt = null;
 
 // ---------------- DeepSeek 标签页管理 ----------------
 
-async function ensureDeepSeekTab() {
-  const tabs = await chrome.tabs.query({ url: "https://chat.deepseek.com/*" });
+async function ensureSiteTab(site) {
+  const tabs = await chrome.tabs.query({ url: site.pattern });
   if (tabs.length > 0) {
     // 用户正在看的（active）标签页优先
     const active = tabs.find((t) => t.active && !t.discarded);
     if (active) return active;
     return tabs.find((t) => !t.discarded) || tabs[0];
   }
-  return chrome.tabs.create({ url: DEEPSEEK_URL, active: false });
+  return chrome.tabs.create({ url: site.home, active: false });
 }
+
+// 兼容旧调用（诊断/取消等默认 DeepSeek）
+const ensureDeepSeekTab = () => ensureSiteTab(SITES.deepseek);
 
 // 保证填充期间页面"活着"：隐藏标签页会被 Chrome 冻结（JS 完全停摆）或重度节流，
 // 表现为流程卡在某一步。若目标标签页当前不可见，把它挪进一个不抢焦点的小侧窗——
@@ -226,21 +268,24 @@ function cancelAllPending(reason) {
     n++;
   }
   noteStage("cancelled", `pending=${n}`);
-  ensureDeepSeekTab()
-    .then((tab) => {
-      if (tab && tab.id != null) {
-        sendTab(tab.id, { type: "ds/cancel" }, 4000).catch(() => {});
-      }
-    })
-    .catch(() => {});
+  // 通知全部站点标签页停止等待（取消应覆盖任意站点）
+  for (const site of Object.values(SITES)) {
+    ensureSiteTab(site)
+      .then((tab) => {
+        if (tab && tab.id != null) {
+          sendTab(tab.id, { type: "ds/cancel" }, 4000).catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }
   return n;
 }
 
-async function ensureReadyTab() {
-  const tab = await ensureDeepSeekTab();
-  if (!tab || tab.id == null) throw new Error("无法打开 chat.deepseek.com 标签页");
+async function ensureReadyTab(site = SITES.deepseek) {
+  const tab = await ensureSiteTab(site);
+  if (!tab || tab.id == null) throw new Error(`无法打开 ${site.host} 标签页`);
   const ok = await waitForContent(tab.id);
-  if (!ok) throw new Error("DeepSeek 页面未就绪（未登录或页面加载失败）");
+  if (!ok) throw new Error(`${site.name} 页面未就绪（未登录或页面加载失败）`);
   return tab;
 }
 
@@ -291,9 +336,11 @@ async function runComplete(id, payload, sendResponse) {
   };
 
   try {
-    const tab = await ensureDeepSeekTab();
+    const site = siteOf(payload);
+    noteStage("site", `${site.id} (${site.host})`);
+    const tab = await ensureSiteTab(site);
     if (!tab || tab.id == null) {
-      resolvePending(id, { ok: false, error: "无法打开 chat.deepseek.com 标签页" });
+      resolvePending(id, { ok: false, error: `无法打开 ${site.host} 标签页` });
       return;
     }
     noteStage("tab_ready", `tab=${tab.id}`);
@@ -302,8 +349,8 @@ async function runComplete(id, payload, sendResponse) {
 
     if (sessionMode === "reuse" && chatId) {
       // 复用指定会话：必要时导航到该会话页面（页面重载后 content 重新注入）
-      const target = DEEPSEEK_CHAT_URL(chatId);
-      const wantPath = `/a/chat/s/${chatId}`;
+      const target = site.chatUrl(chatId);
+      const wantPath = site.chatPath(chatId);
       const cur = (tab.url || "").split("#")[0].split("?")[0];
       if (cur !== target) {
         noteStage("navigating", `${wantPath.slice(-32)}`);
@@ -314,7 +361,7 @@ async function runComplete(id, payload, sendResponse) {
         const navOk = await waitForPath(tab.id, wantPath, 90);
         noteStage(navOk ? "nav_done" : "nav_timeout", wantPath);
         if (!navOk) {
-          resolvePending(id, { ok: false, error: "DeepSeek 会话页面未就绪（未登录或会话不存在）" });
+          resolvePending(id, { ok: false, error: `${site.name} 会话页面未就绪（未登录或会话不存在）` });
           return;
         }
         // 会话页需要加载历史消息，留出渲染时间
@@ -322,34 +369,34 @@ async function runComplete(id, payload, sendResponse) {
       } else {
         const ready = await waitForContent(tab.id);
         if (!ready) {
-          resolvePending(id, { ok: false, error: "DeepSeek 页面未就绪（未登录或页面加载失败）" });
+          resolvePending(id, { ok: false, error: `${site.name} 页面未就绪（未登录或页面加载失败）` });
           return;
         }
       }
       noteStage("fill_sent");
-      await driveFillAndCollect(tab.id, id, text, { noNewChat: true, expectJson });
+      await driveFillAndCollect(tab.id, id, text, { noNewChat: true, expectJson, siteName: site.name });
     } else {
       // 默认：新会话模式。先回首页（首页发送会自动创建新会话），绝不污染
-      // 用户当前会话。同样必须等 path 真的变成 "/" 再动手。
+      // 用户当前会话。同样必须等 path 真的变成首页路径再动手。
       const curPath = (tab.url || "").replace(/^https?:\/\/[^/]+/, "") || "/";
-      if (curPath !== "/") {
+      if (curPath !== site.homePath) {
         noteStage("go_home", `from=${curPath}`);
-        await chrome.tabs.update(tab.id, { url: DEEPSEEK_URL });
-        const navOk = await waitForPath(tab.id, "/", 90);
+        await chrome.tabs.update(tab.id, { url: site.home });
+        const navOk = await waitForPath(tab.id, site.homePath, 90);
         noteStage(navOk ? "home_ready" : "home_timeout");
         if (!navOk) {
-          resolvePending(id, { ok: false, error: "回到 DeepSeek 首页超时（页面未加载完或网络异常）" });
+          resolvePending(id, { ok: false, error: `回到 ${site.name} 首页超时（页面未加载完或网络异常）` });
           return;
         }
         await swSleep(800);
       }
       const ready = await waitForContent(tab.id, 30);
       if (!ready) {
-        resolvePending(id, { ok: false, error: "DeepSeek 页面未就绪（未登录或页面加载失败）" });
+        resolvePending(id, { ok: false, error: `${site.name} 页面未就绪（未登录或页面加载失败）` });
         return;
       }
       noteStage("fill_sent");
-      await driveFillAndCollect(tab.id, id, text, { noNewChat: false, expectJson });
+      await driveFillAndCollect(tab.id, id, text, { noNewChat: false, expectJson, siteName: site.name });
     }
   } catch (e) {
     resolvePending(id, { ok: false, error: `桥接调用失败：${e.message || e}` });
@@ -363,7 +410,7 @@ async function runComplete(id, payload, sendResponse) {
 // 扩展消息则能随时唤醒页面同步执行。因此页面只做同步动作立即回包，
 // 所有计时/重试/轮询/判定都在本 SW 完成（SW 有闹钟保活，不受页面影响）。
 
-async function driveFillAndCollect(tabId, id, text, { noNewChat, expectJson }) {
+async function driveFillAndCollect(tabId, id, text, { noNewChat, expectJson, siteName = "DeepSeek" }) {
   // marker：提示词里的一段特征文本，用于判定"页面上真的出现了这条用户消息"。
   // 注意去掉 Markdown 记号（#/*/` 等）——渲染后的用户消息里不会保留这些字符，
   // 否则 marker 永远匹配不上。
@@ -394,7 +441,7 @@ async function driveFillAndCollect(tabId, id, text, { noNewChat, expectJson }) {
   if (!ready) {
     resolvePending(id, {
       ok: false,
-      error: "等待 DeepSeek 输入框就绪超时（页面可能未加载完或未登录）。请点「页面自检」查看输入框候选",
+      error: `等待 ${siteName} 输入框就绪超时（页面可能未加载完或未登录）。请点「页面自检」查看输入框候选`,
     });
     return;
   }
@@ -427,7 +474,7 @@ async function driveFillAndCollect(tabId, id, text, { noNewChat, expectJson }) {
   if (!written) {
     resolvePending(id, {
       ok: false,
-      error: "写入 DeepSeek 输入框失败：回读内容与提示词不一致（页面可能正在重渲染）。请手动在该页面粘贴一次确认可输入",
+      error: `写入 ${siteName} 输入框失败：回读内容与提示词不一致（页面可能正在重渲染）。请手动在该页面粘贴一次确认可输入`,
     });
     return;
   }
@@ -497,7 +544,7 @@ async function driveFillAndCollect(tabId, id, text, { noNewChat, expectJson }) {
       ok: false,
       error:
         "发送未生效：已回车并点击发送按钮，但输入框未清空或页面上始终没有出现这条消息。" +
-        "请在 DeepSeek 页面手动发送一次确认页面可用",
+        `请在 ${siteName} 页面手动发送一次确认页面可用`,
     });
     return;
   }
@@ -569,22 +616,23 @@ async function driveFillAndCollect(tabId, id, text, { noNewChat, expectJson }) {
       resolvePending(id, {
         ok: false,
         error:
-          "发送后 90s 内未检测到 DeepSeek 回复流（未登录 / 被风控 / 页面接口变更）。" +
-          "请在 chat.deepseek.com 手动发一条消息确认可正常回复",
+          `发送后 90s 内未检测到 ${siteName} 回复流（未登录 / 被风控 / 页面接口变更）。` +
+          `请在 ${siteName} 页面手动发一条消息确认可正常回复`,
       });
       return;
     }
   }
   noteStage("timeout");
-  resolvePending(id, { ok: false, error: "等待 DeepSeek 回复超时（生成过久或页面接口已变更）" });
+  resolvePending(id, { ok: false, error: `等待 ${siteName} 回复超时（生成过久或页面接口已变更）` });
 }
 
 // ---------------- 会话管理（转发给 content script 的站内 API） ----------------
 
 async function sessionOp(msg, sendResponse, contentType, extra) {
   const resp = { source: EXT_RESP_SOURCE, id: msg.id || "" };
+  const site = siteOf(msg.payload || {});
   try {
-    const tab = await ensureReadyTab();
+    const tab = await ensureReadyTab(site);
     const result = await sendTab(tab.id, { type: contentType, ...extra }, 30_000);
     if (!result || typeof result !== "object") {
       sendResponse({ ...resp, ok: false, error: "扩展返回异常" });
@@ -602,14 +650,22 @@ async function runDiag(sendResponse) {
   const resp = { source: EXT_RESP_SOURCE, ok: true, data: {} };
   resp.data.version = EXT_VERSION;
   try {
-    // 列出全部 DeepSeek 标签页：多个标签页时容易"填错页"，诊断时一目了然
-    const all = await chrome.tabs.query({ url: "https://chat.deepseek.com/*" });
-    resp.data.tabs = all.map((t) => ({
-      id: t.id,
-      active: !!t.active,
-      discarded: !!t.discarded,
-      url: (t.url || "").replace("https://chat.deepseek.com", "") || "/",
-    }));
+    // 列出全部受支持站点的标签页：多个标签页时容易"填错页"，诊断时一目了然
+    const tabs = [];
+    for (const site of Object.values(SITES)) {
+      const all = await chrome.tabs.query({ url: site.pattern });
+      for (const t of all) {
+        tabs.push({
+          id: t.id,
+          site: site.id,
+          siteName: site.name,
+          active: !!t.active,
+          discarded: !!t.discarded,
+          url: (t.url || "").replace(`https://${site.host}`, "") || "/",
+        });
+      }
+    }
+    resp.data.tabs = tabs;
     const tab = await ensureDeepSeekTab();
     resp.data.tabId = tab && tab.id != null ? tab.id : null;
     resp.data.tabUrl = (tab && tab.url) || "";

@@ -81,13 +81,20 @@ export function deepseekComplete(extensionId, { system, prompt, expectJson = fal
 }
 
 // H3 提示词生成模板（对齐后端 generate_h3_prompt 的产出结构）
+// 技能规则与后端 lib/prompt.py 四类指令块一致：
+//   运镜 = 英文触发短语原样保留且以触发词 camera motion 开头（LoRA 技术词，不翻译）；
+//   景别 / 镜头结构 = 中文名直接写入（英文输出时用对照英文名）；
+//   微表情 = 从中文示例数组挑一句自然融入，不写技能名。
 const DEEPSEEK_H3_SYSTEM = `You are a video prompt engineer. Convert the user's native-language shot description into an H3 prompt JSON object with EXACTLY these keys:
 {"summary": string, "detailed_description": string, "overall_soundscape": string, "non_diegetic_music": string}
 Rules:
 - Respond with ONLY the JSON object, no markdown fences, no extra text.
 - Preserve any <@Name> / <#Name:dialogue> / <d>dialogue</d> tags verbatim.
 - detailed_description must break the shot into [Shot 1], [Shot 2] ... beats with timestamps.
-- Write in the same language style as the input unless told otherwise.`;
+- Write in the same language style as the input unless told otherwise.
+- Camera motion: the trigger "camera motion" and English trigger phrases below are Camera Motion LoRA technical vocabulary — never translate or paraphrase them. Write the move as 中文运镜描写（camera motion, <trigger phrase>）for Chinese output, or "camera motion, <trigger phrase>, ..." for English output; the trigger MUST open the phrase.
+- Shot size / framing: write the provided Chinese names verbatim (e.g. 大远景, 双人镜头); for English output use the provided English term instead.
+- Micro expressions: pick ONE provided Chinese example and weave it naturally into the acting; do not write the skill name as a tag.`;
 
 function h3Brief(text, n = 120) {
   return String(text || "").replace(/\s+/g, " ").slice(0, n);
@@ -112,10 +119,15 @@ export async function deepseekGenerateH3(opts, payload) {
   }
   const parts = [];
   if (payload?.duration_seconds) parts.push(`Duration: ${payload.duration_seconds}s.`);
-  if (payload?.camera_motion?.length) parts.push(`Camera motions: ${payload.camera_motion.join(", ")}.`);
-  if (payload?.shot_size?.length) parts.push(`Shot sizes: ${payload.shot_size.join(", ")}.`);
-  if (payload?.framing?.length) parts.push(`Framing: ${payload.framing.join(", ")}.`);
-  if (payload?.expression?.length) parts.push(`Micro expressions: ${payload.expression.join(", ")}.`);
+  // 技能词典注入块（PromptPanel 按 /spa/skill_dict 渲染，对齐后端四类指令块）；
+  // 旧版本扩展 / 旧调用方未传 skill_notes 时退化为仅列技能名。
+  if (payload?.skill_notes) parts.push(`Skill dictionary notes:\n${payload.skill_notes}`);
+  else {
+    if (payload?.camera_motion?.length) parts.push(`Camera motions: ${payload.camera_motion.join(", ")}.`);
+    if (payload?.shot_size?.length) parts.push(`Shot sizes: ${payload.shot_size.join(", ")}.`);
+    if (payload?.framing?.length) parts.push(`Framing: ${payload.framing.join(", ")}.`);
+    if (payload?.expression?.length) parts.push(`Micro expressions: ${payload.expression.join(", ")}.`);
+  }
   parts.push(`Shot description:\n${payload?.prompt || ""}`);
 
   // 同一批 H3 转换共用一个会话：首镜走新会话，后续镜头传入 chat_id 直接追问，

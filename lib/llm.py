@@ -652,33 +652,35 @@ _DEEPSEEK_LOCK = threading.Lock()
 
 def generate_prompt_with_deepseek_proxy(
     prompt: str = "", image=None, seed: int = 42, timeout_s: float = 290.0,
+    site: str = "deepseek",
 ) -> str:
-    """Generate text via the DeepSeek web-chat bridge (browser extension over WS).
+    """Generate text via the web-chat bridge (browser extension over WS).
 
     与 generate_prompt_with_api / ollama / llama 同一契约：返回生成的原始文本
     str，出错 raise（ValueError / RuntimeError）。仅支持纯文本——image 非 None
     时抛 ValueError（网页会话无法传图，请改用 api / ollama / llama-cpp）。
     seed 仅为接口对齐（网页会话无法固定采样种子，忽略）。
     timeout_s 默认 290s：受扩展 MV3 Service Worker 单请求存活上限约束。
+    site：桥接站点（"deepseek" / "doubao" / "qwen"，即扩展多站点适配器）。
     """
     if image is not None:
         raise ValueError(
-            "deepseek-proxy 不支持图片输入（网页会话无法传图）："
+            f"{site}-proxy 不支持图片输入（网页会话无法传图）："
             "请改用 api / ollama / llama-cpp 模式"
         )
     if not (prompt or "").strip():
-        raise ValueError("[llm] deepseek-proxy: prompt is empty")
+        raise ValueError(f"[llm] {site}-proxy: prompt is empty")
 
     from .deepseek_bridge import deepseek_complete  # 惰性导入，规避导入顺序问题
 
     with _DEEPSEEK_LOCK:
         result = deepseek_complete(
-            system="", prompt=prompt, expect_json=False, timeout_s=timeout_s,
+            system="", prompt=prompt, expect_json=False, timeout_s=timeout_s, site=site,
         )
     if not result.get("ok"):
         raise RuntimeError(
-            f"[llm] deepseek-proxy bridge failed: {result.get('error') or 'unknown error'}"
+            f"[llm] {site}-proxy bridge failed: {result.get('error') or 'unknown error'}"
         )
     generated_text = str(result.get("text") or "")
-    log.info("[llm] deepseek-proxy generated (first 200 chars): %s", generated_text[:200])
+    log.info("[llm] %s-proxy generated (first 200 chars): %s", site, generated_text[:200])
     return generated_text

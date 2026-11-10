@@ -121,7 +121,6 @@ function isReferenced(s) {
           :key="s.uid"
           class="mrd-preview-card"
           :class="{ referenced: isReferenced(s), custom: isCustom(s) }"
-          @click="openEditor(s)"
         >
           <div class="mrd-preview-thumb">
             <img v-if="thumb(s)" :src="thumb(s)" alt="" />
@@ -131,13 +130,15 @@ function isReferenced(s) {
           </div>
           <div class="mrd-preview-name">{{ s.name || "(未命名)" }}</div>
           <div class="mrd-preview-desc">{{ (s.description || "").slice(0, 40) }}</div>
-          <div class="mrd-preview-foot" @click.stop>
+          <div class="mrd-preview-foot">
             <el-switch
               size="small"
               :model-value="isCustom(s)"
               @change="v => onToggleCustom(s, v)"
             />
-            <span class="mrd-preview-edit"><el-icon><component :is="'EditPen'" /></el-icon> 编辑</span>
+            <span class="mrd-preview-edit" @click="openEditor(s)">
+              <el-icon><component :is="'EditPen'" /></el-icon> 编辑
+            </span>
           </div>
         </div>
       </div>

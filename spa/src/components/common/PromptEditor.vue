@@ -74,11 +74,16 @@ function thumbOf(subject) {
 }
 
 class SubjectChip extends WidgetType {
-  constructor(name, dialogue, candidates, onEdit) {
+  constructor(name, dialogue, isHash, candidates, onEdit, from, to) {
     super();
     this.name = name;
     this.dialogue = dialogue || "";
+    this.isHash = !!isHash;
     this.onEdit = onEdit;
+    // 双击编辑弹窗直接使用 token 的精确 from/to（posAtDOM 对 replace widget 返回
+    // 的位置不稳定，会导致总是弹出最后一个引用的编辑浮层）
+    this.from = from;
+    this.to = to;
     const s = (candidates || []).find((x) => (x.name || "").trim() === name);
     this.thumb = thumbOf(s);
     this.type = s?.type || "";
@@ -117,7 +122,8 @@ class SubjectChip extends WidgetType {
     wrap.addEventListener("dblclick", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.onEdit?.(wrap);
+      // 回传 widget 自身（含 from/to），不再用 posAtDOM 反推
+      this.onEdit?.(this);
     });
     return wrap;
   }
@@ -127,7 +133,7 @@ class SubjectChip extends WidgetType {
   }
 }
 
-const TOKEN_RE = /<@([^>\n]*)>|<#([^:>\n]*)(?::([^>\n]*))?>|<d>([\s\S]*?)<\/d>/g;
+const TOKEN_RE = /<@([^>\n]*)>|<#([^:>\n]*)(?::([^>\n]*))?>|<!([^:>\n]*)(?::([^>\n]*))?>|<d>([\s\S]*?)<\/d>/g;
 
 function buildDeco(view) {
   const text = view.state.doc.toString();
@@ -139,14 +145,17 @@ function buildDeco(view) {
     const to = from + m[0].length;
     if (m[0].startsWith("<@")) {
       decos.push(Decoration.replace({
-        widget: new SubjectChip((m[1] || "").trim(), "", props.candidates, handleChipEdit),
+        widget: new SubjectChip((m[1] || "").trim(), "", false, props.candidates, handleChipEdit, from, to),
       }).range(from, to));
       atomic.push(Decoration.replace({}).range(from, to));
     } else if (m[0].startsWith("<#")) {
       decos.push(Decoration.replace({
-        widget: new SubjectChip((m[2] || "").trim(), (m[3] || "").trim(), props.candidates, handleChipEdit),
+        widget: new SubjectChip((m[2] || "").trim(), (m[3] || "").trim(), true, props.candidates, handleChipEdit, from, to),
       }).range(from, to));
       atomic.push(Decoration.replace({}).range(from, to));
+    } else if (m[0].startsWith("<!")) {
+      // <!镜头结构:定场镜头> 指令标签：保留原文本，绿色系 mark 高亮（区别于 <d> 黄色与主体 chip）
+      decos.push(Decoration.mark({ class: "cm-shot-tag" }).range(from, to));
     } else {
       decos.push(Decoration.mark({ class: "cm-d-tag" }).range(from, to));
     }
@@ -244,6 +253,12 @@ const darkTheme = EditorView.theme(
       backgroundColor: "rgba(255, 213, 79, 0.12)",
       borderRadius: "2px",
     },
+    // <!镜头结构:定场镜头> 指令标签（绿色系，与 <d> 黄色区分）
+    ".cm-shot-tag": {
+      color: "#4ade80",
+      backgroundColor: "rgba(74, 222, 128, 0.12)",
+      borderRadius: "2px",
+    },
   },
   { dark: true }
 );
@@ -307,31 +322,29 @@ function accept(item) {
 }
 
 // ---- chip 引用编辑 ----
-function handleChipEdit(dom) {
+// chip 参数为 SubjectChip widget 实例（dblclick 回传），from/to 为 token 精确位置
+function handleChipEdit(chip) {
   const view = viewRef.value;
-  if (!view) return;
-  let pos = 0;
-  try {
-    pos = view.posAtDOM(dom);
-  } catch {
-    return;
-  }
+  if (!view || !chip || typeof chip.from !== "number" || typeof chip.to !== "number") return;
   const text = view.state.doc.toString();
-  const start = Math.max(text.lastIndexOf("<@", pos), text.lastIndexOf("<#", pos));
-  if (start < 0) return;
-  const rest = text.slice(start);
-  const mHash = /^<#([^:>\n]*)(?::([^>\n]*))?>/.exec(rest);
-  const mAt = /^<@([^>\n]*)>/.exec(rest);
+  // 快照校验：widget 可能已过期（文本被外部改写），区段内容不再是标签则放弃
+  const seg = text.slice(chip.from, chip.to);
+  const mHash = /^<#([^:>\n]*)(?::([^>\n]*))?>$/.exec(seg);
+  const mAt = /^<@([^>\n]*)>$/.exec(seg);
   const isHash = !!mHash;
   const m = isHash ? mHash : mAt;
   if (!m) return;
   const name = (m[1] || "").trim();
-  const rect = dom.getBoundingClientRect();
+  const rect = chip.dom?.getBoundingClientRect?.() || {
+    left: window.innerWidth / 2 - 140,
+    top: window.innerHeight / 2 - 60,
+    bottom: window.innerHeight / 2,
+  };
   const POP_H = isHash ? 168 : 116;
   const belowFits = rect.bottom + POP_H + 8 <= window.innerHeight;
   chipEdit.visible = true;
-  chipEdit.from = start;
-  chipEdit.to = start + m[0].length;
+  chipEdit.from = chip.from;
+  chipEdit.to = chip.to;
   chipEdit.name = name;
   chipEdit.dialogue = isHash ? (m[2] || "") : "";
   chipEdit.isHash = isHash;

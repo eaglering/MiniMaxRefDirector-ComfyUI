@@ -24,9 +24,14 @@ _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 # 引号保护：半角 "..." 与全角 \u201c...\u201d \u2018...\u2019（台词/标语/歌名等保持原语言）。
 # 注意：不含半角单引号 '...'，避免与英文撇号（don't / it's）冲突。
 _PROTECTED_FRAGMENT_RE = re.compile(
-    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
+    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019"
+    r"|[（(][^（）()]*camera motion[^（）()]*[）)]",
     re.DOTALL,
 )
+
+# 运镜短语片段：「中文运镜描写（camera motion, slow push-in）」中的括号段。
+# README 使用指南：Camera Motion LoRA 的触发词 "camera motion" 必须位于提示词开头。
+_CAMERA_MOTION_FRAGMENT_RE = re.compile(r"[（(][^（）()]*camera motion[^（）()]*[）)]")
 
 
 def _needs_translate(prompt: str) -> bool:
@@ -68,7 +73,30 @@ def _translate_prompt_to_en(prompt: str, opts: dict) -> str:
         return prompt
     for token, original in placeholders.items():
         translated = translated.replace(token, original)
-    return translated
+    # 5. Camera Motion LoRA：触发词 "camera motion" 必须位于英文提示词开头
+    #    （README 使用指南）。若源文含运镜短语而译文把它弄丢，回退原文；
+    #    若在句中出现但不在开头，则把该短语提到句首（避免触发词位置不达标）。
+    return _ensure_camera_motion_prefix(prompt, translated)
+
+
+def _ensure_camera_motion_prefix(src: str, translated: str) -> str:
+    """保证运镜短语（camera motion, ...）位于英文提示词开头；无运镜源文则原样返回。"""
+    m = _CAMERA_MOTION_FRAGMENT_RE.search(src)
+    if not m:
+        return translated
+    phrase = m.group(0).strip("（）()").strip()  # 如 camera motion, slow push-in
+    if not phrase.lower().startswith("camera motion"):
+        return translated
+    if _CAMERA_MOTION_FRAGMENT_RE.search(translated) is None:
+        # 译文丢失运镜短语 → 整体回退原文（不凭空造短语）
+        return src
+    if translated.lstrip().lower().startswith("camera motion"):
+        return translated
+    # 从译文中移除该短语片段（避免重复），再把触发词短语提到开头
+    moved = _CAMERA_MOTION_FRAGMENT_RE.sub("", translated, count=1)
+    moved = moved.strip()
+    moved = moved.lstrip("，,、 ").strip()
+    return f"{phrase}, {moved}" if moved else phrase
 
 
 class MiniMaxRefDirector(io.ComfyNode):

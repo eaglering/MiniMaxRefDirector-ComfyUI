@@ -64,7 +64,20 @@
   // 注意隔离世界看不到页面全局变量，不能用 window.__mrdDsHook 判断。
   let hookAlive = false;
 
-  // ---- 站内 API 端点（同源 fetch，带 cookie）----
+  // ---- 站点适配（host → 会话 URL 结构 / 会话管理 API）----
+  // DOM 自动化链路（输入框写入/回车/回复读取）跨站点通用（textarea 与
+  // contenteditable 双策略 + 通用 markdown 回复块），只有"会话页 URL 结构"与
+  // "会话管理站内 API"因站而异。豆包/千问暂不支持扩展侧会话列表/删除
+  //（导入流程不依赖它们：大纲会话由用户在网页里选，分镜设计新会话 id 由
+  // 页面 URL 自动获取），对应消息返回明确错误。
+  const HOST = location.hostname;
+  const SITE = HOST.indexOf("doubao.com") >= 0
+    ? { id: "doubao", name: "豆包", chatIdRe: /\/chat\/([0-9A-Za-z_-]+)/, sessionApi: false }
+    : (HOST.indexOf("tongyi.aliyun.com") >= 0 || HOST.indexOf("qwen.ai") >= 0)
+      ? { id: "qwen", name: "千问", chatIdRe: /\/(?:qianwen\/)?chat\/([0-9A-Za-z_-]+)/, sessionApi: false }
+      : { id: "deepseek", name: "DeepSeek", chatIdRe: /\/a\/chat\/s\/([0-9A-Za-z_-]+)/, sessionApi: true };
+
+  // ---- 站内 API 端点（仅 DeepSeek；同源 fetch，带 cookie）----
   // 路径与响应结构对齐 linuxfight/deepseek4free（pkg/api/instance.go、models/chat.go）。
   // 若 DeepSeek 改版导致失效，可在 chat.deepseek.com 页面打开 DevTools → Network
   // 面板观察真实请求后修改以下常量。
@@ -111,9 +124,23 @@
         sendResponse(checkState(msg.id || ""));
         return;
       case "ds/list_sessions":
+        if (!SITE.sessionApi) {
+          sendResponse({
+            ok: false,
+            error: `${SITE.name} 网页版暂不支持扩展侧会话列表，请在该网页内手动选择会话（手动导入模式下会话由用户在弹窗第一步选择）`,
+          });
+          return;
+        }
         handleApi(sendResponse, listSessions);
         return true;
       case "ds/delete_session":
+        if (!SITE.sessionApi) {
+          sendResponse({
+            ok: false,
+            error: `${SITE.name} 网页版暂不支持扩展侧删除会话，请在该网页内手动管理（建议保留会话，不清理更安全）`,
+          });
+          return;
+        }
         handleApi(sendResponse, () => deleteSession(msg.chat_id));
         return true;
     }
@@ -128,9 +155,10 @@
     }
   }
 
-  // 从页面 URL 解析当前会话 id：/a/chat/s/<id>（发送首条消息后 DeepSeek 会跳到会话页）
+  // 从页面 URL 解析当前会话 id（发送首条消息后各站会跳到会话页）：
+  // DeepSeek /a/chat/s/<id>；豆包 /chat/<id>；千问 /(qianwen/)chat/<id>
   function currentChatId() {
-    const m = (location.pathname || "").match(/\/a\/chat\/s\/([0-9A-Za-z_-]+)/);
+    const m = (location.pathname || "").match(SITE.chatIdRe);
     return m ? m[1] : "";
   }
 

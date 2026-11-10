@@ -61,6 +61,13 @@ export const REF_UPLOAD_CHILD_TYPES = {
   Audio: ["Audio"],
 };
 
+export const REF_UPLOAD_CHILD_ACCEPT_TYPES = {
+  Subject: ["image/*", "video/*"],
+  Picture: ["image/*"],
+  Video: ["image/*", "video/*"],
+  Audio: ["audio/*"],
+}
+
 // 各类型子主体容量上限
 export const REF_CHILD_CAP = { Picture: 9, Video: 3, Audio: 1 };
 

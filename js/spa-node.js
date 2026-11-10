@@ -16,9 +16,12 @@ const DIRECTOR_TYPE = "MiniMaxRefDirector";
 const SUBJECT_TYPE = "MiniMaxRefSubject";
 
 // SPA 保存状态里携带、需要写回导演节点的 widget 名单
+// 时间范围秒/帧双单位都推送：display_mode=frames 时节点以 *_frame 为权威输入
 const DIRECTOR_WIDGET_NAMES = [
   "outpu_resolution", "million_pixels", "display_mode", "frame_rate",
-  "start_second", "end_second", "guide_strength",
+  "start_second", "end_second", "duration_seconds",
+  "start_frame", "end_frame", "duration_frames",
+  "guide_strength",
   "inpaint_audio", "override_audio",
 ];
 
@@ -68,7 +71,7 @@ async function collectState(directorNode) {
     const v = widgetValue(directorNode, name);
     if (v !== undefined) widgets[name] = v;
   }
-  const llm = { mode: "llama-cpp" };
+  const llm = { mode: "deepseek-proxy" };
   if (subjectNode) {
     const vlm = widgetValue(subjectNode, "vlm_mode");
     if (vlm && typeof vlm === "object") {
