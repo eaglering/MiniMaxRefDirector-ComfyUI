@@ -1,58 +1,50 @@
-# H3 技能链路与运镜格式说明
+# H3 技能注入与英文保真链路
 
-本文档梳理「分镜原始提示词 → H3 中文提示词 → H3 英文提示词」三段链路中分镜技能的注入时机、推荐格式与保真机制，并给出 DeepSeek 浏览器桥接（手动逐步导入）的封号风险分析与使用建议。
-
-## 一、三段链路与技能注入时机
+> 数据模型、render_mode 语义与新增类别步骤见 `docs/skill-notes-design.md`。
 
 ```
-① 分镜原始提示词（中文）
-   含 <!类别:名称> 技能引用、<@主体名> 标签、导演控件 key
-        │  点「转H3提示词」← 此时才注入所选技能的词典内容
+① 分镜选择（seg.skills = {类别名: [key]}）
         ▼
-② H3 中文四字段
-   summary / detailed_description / overall_soundscape / non_diegetic_music
-        │  工作流执行时 director.py 翻译（掩码保护片段 → 整段翻译 → 还原）
+② 后端渲染 skill_notes（/spa/skill_notes，唯一实现）
         ▼
-③ H3 英文提示词（最终给视频模型的）
-   camera motion, <英文运镜短语>, <主体/场景…> 开头结构
+③ H3 中文四字段（summary / detailed_description / overall_soundscape / non_diegetic_music）
+        ▼
+④ H3 英文提示词（翻译阶段掩码 <!技术词> → 译后还原）
 ```
 
-- **① → ②**：技能只在点击「转H3提示词」时注入（转化方法与旧导演台一致，即
-  `lib/prompt.py generate_h3_prompt` 的四类指令块；deepseek-proxy 路径由
-  `spa/src/utils/llm.js` 的 `DEEPSEEK_H3_SYSTEM` + `skill_notes` 注入块等价实现）。
-  注入内容按类别：
-  - **运镜**：给出所选类型的英文触发短语与写法指南（星级 / slow-aggressive 强度 /
-    方向词），要求中文 H3 中写成「中文运镜描写（camera motion, slow push-in）」。
-  - **景别 / 镜头结构**：直接把中文名写入镜头描述（大远景、双人镜头），不展开成长句。
-  - **微表情**：从该技能的中文示例数组挑一句自然织入表演描写，不写技能名。
-- **② → ③**：英文翻译阶段的保真机制：
-  - `director.py _PROTECTED_FRAGMENT_RE` 把 `<@...>/<#...>/<d>...</d>`、引号内容与
-    **运镜括号段（camera motion, ...）** 一并掩码为占位符，模型看不到原文、
-    从源头杜绝改写，翻译后按序还原。
-  - `prompt/prompt_translate_to_en.txt` 附运镜保真规则（中文运镜改写为
-    `camera motion, ...` 触发短语）与景别/镜头结构中英对照表（大远景→extreme
-    wide shot、双人镜头→two-shot 等），避免误译成泛化词。
-  - 翻译后 `_ensure_camera_motion_prefix` 校验：运镜短语在译文中丢失则回退原文；
-    在句中出现但不在开头则移到句首 —— 满足 Camera Motion LoRA「触发词必须位于
-    提示词开头」的要求。
+- **① → ②**：分镜上只存「类别名 + 技能 key」。后端 `lib/skill_notes.py` 按类别
+  `render_mode` 渲染注入块；服务端模式（api / ollama / llama-cpp）与网页桥接
+  （deepseek / doubao / qianwen）共用这份文本，前端不再自己拼。
+  - `camera` 运镜：风格 + 描述 + 写法指南 + 英文触发短语；
+  - `term` 景别/镜头结构：中文名直接写入 + `name_en` 对照；
+  - `example` 微表情：每镜挑一句示例自然融入，不写技能名；
+  - `descriptive` 人物/打斗/特效：描述 + 参考短语自然融入；
+  - `block` 风格/效果：整段内容近似原样附加。
+  - 已删除的技能：渲染跳过并返回 warnings，界面提示，不中断生成。
+- **② → ③**：通用模板 `resources/skills/h3-prompt-builder/prompt.md` 统一组装
+  （`{{skills_guide}} / {{skill_notes}} / {{user_input}} / {{lang_note}} …`）。
+  模板**不申明触发词写法**：`camera motion` 是否置首由用户写在全局提示词里。
+- **③ → ④**：`protect_keywords=1` 的类别（内置为运镜）其技术词在 skill_notes 中
+  写成 `<!slow push-in>`；翻译前掩码为占位符，译后只保留内文，因此英文阶段
+  不会被翻译/改写。术语型（景别/镜头结构）走 `glossary`（中文名 → name_en）。
+  纯英文提示词不翻译时也会剥离 `<!…>` 标记。
 
-## 二、推荐格式（保证英文转化正确）
+## 一、推荐格式（保证英文转化正确）
 
-分镜原始提示词中用标签标注技能：`<!运镜:推近 Push-in>`、`<!微表情:轻叹>`；
-运镜触发词也可手动写入全局提示词（camera_motion：slow push-in / slow orbit），
-作为全片运镜约束优先于镜头选择。
-
-| 阶段 | 运镜 | 景别 / 镜头结构 | 微表情 |
+| 阶段 | 运镜（camera） | 景别（term） | 微表情（example） |
 |---|---|---|---|
-| ① 原始提示词 | `<!运镜:推近 Push-in>` | `<!景别:大远景>` | `<!微表情:轻叹>` |
-| ② H3 中文 | 中文运镜描写**（camera motion, slow push-in）** ← 英文短语在中文阶段就落地 | 大远景 / 双人镜头 | 中文示例句自然织入 |
-| ③ H3 英文 | `camera motion, slow push-in, <主体/场景…>`（触发词开头） | extreme wide shot / two-shot（对照表映射） | 自然意译 |
+| ① 分镜选择 | `seg.skills["运镜"] = ["push_in"]` | `seg.skills["景别"] = ["wide"]` | `seg.skills["微表情"] = ["sigh"]` |
+| ② skill_notes | `英文触发短语：<!slow push-in> / <!dolly in>` | `大远景（英文对照：extreme wide shot）` | `示例：长长地呼出一口气 / 垂首` |
+| ③ H3 中文 | 中文运镜描写 + `<!slow push-in>` | 直接写「大远景」 | 中文示例句自然织入 |
+| ④ H3 英文 | `slow push-in`（内文原样，标记剥除） | `extreme wide shot`（glossary） | 自然意译 |
 
-关键原则：**英文运镜短语在 ② 阶段就原样落地**（英文是 LoRA 技术词，不参与
-翻译），③ 阶段只做掩码保护与位置校验，避免「中文→英文二次改写」失真。
+关键原则：**技术词在 ② 阶段就以 `<!…>` 标记保护**，④ 阶段只做掩码与还原，
+不做任何二次改写；触发词规则（例如 `camera motion` 放在开头）由全局提示词控制。
 
-## 三、DeepSeek 桥接（手动逐步导入）的封号风险分析
+## 二、网页桥接分镜导入（DeepSeek / 豆包 / 千问）的封号风险分析
 
+三种桥接站点共用同一导入流程与扩展链路（`payload.site` 路由）；豆包/千问暂不支持
+扩展侧会话列表/删除，导入第一步手动粘贴会话链接或留空自动新建。
 一键全自动导入已被移除，每个步骤由用户手动「执行 / 同步」。风险变化：
 
 **显著降低的部分**
@@ -75,11 +67,11 @@
 - 不强制清理会话：让新会话自然留在账户里，反而更像正常使用。
 - 需要大批量生成时优先考虑 LLM 设置里的 API / Ollama 等本地或服务端模式。
 
-## 四、技能词典字段（SQLite skills 表）
+## 三、技能词典字段（SQLite skills / skill_categories）
 
-- 运镜：`guide`（写法指南：星级/强度/方向，内容来自 README 使用指南）+
-  `examples`（英文触发短语数组）。
-- 景别 / 镜头结构：仅 `name`（中文名直接写入）+ `name_en`（英文翻译对照）。
-- 微表情：`examples`（中文示例数组，最终使用）+ `group_name`
-  （eye/brow/mouth/breath/body，旧导演台分组）。
-- 旧字段 `prompt / example / keyword / meta` 已在 v0→v1 迁移中移除。
+- `skill_categories`：`name / description / sort / render_mode / protect_keywords`。
+  新增类别只需选注入方式，无需改代码。
+- `skills`：`name`（中文名）、`name_en`（英文对照）、`desc`（描述/片段内容）、
+  `guide`（写法指南）、`examples`（分号分隔数组）、`group_name`（旧导演台分组）。
+- 旧字段 `prompt / example / keyword / meta` 已在 v0→v1 移除；
+  `render_mode / protect_keywords` 由 v1→v2 迁移补齐。

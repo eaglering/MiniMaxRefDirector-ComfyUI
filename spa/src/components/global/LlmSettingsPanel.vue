@@ -12,7 +12,7 @@ const ws = useWorkspace();
 const LLM_MODES = [
   { value: "deepseek-proxy", label: "DeepSeek 代理" },
   { value: "doubao-proxy", label: "豆包代理" },
-  { value: "qwen-proxy", label: "千问代理" },
+  { value: "qianwen-proxy", label: "千问代理" },
   { value: "llama-cpp", label: "llama-cpp" },
   { value: "api", label: "API" },
   { value: "ollama", label: "Ollama" },
@@ -27,15 +27,18 @@ const BRIDGE_SITES = {
   },
   "doubao-proxy": {
     name: "豆包",
-    web: "https://www.doubao.com/",
-    hint: "doubao-proxy 通过浏览器扩展调用 www.doubao.com 网页版豆包。使用与 DeepSeek 桥接同一个扩展（需更新到支持多站点的版本），填写扩展 ID 并登录豆包网页后即可使用。",
+    web: "https://www.doubao.com/chat/",
+    hint: "doubao-proxy 通过浏览器扩展调用豆包网页版（会话地址 https://www.doubao.com/chat/）。使用与 DeepSeek 桥接同一个扩展（需更新到支持多站点的版本），填写扩展 ID 并登录豆包网页后即可使用。分镜导入与 DeepSeek 一致；豆包暂不支持扩展侧会话列表，导入时手动填会话链接或留空自动新建。",
   },
-  "qwen-proxy": {
+  "qianwen-proxy": {
     name: "千问",
-    web: "https://tongyi.aliyun.com/",
-    hint: "qwen-proxy 通过浏览器扩展调用通义千问网页版（tongyi.aliyun.com）。使用与 DeepSeek 桥接同一个扩展（需更新到支持多站点的版本），填写扩展 ID 并登录千问网页后即可使用。",
+    web: "https://www.qianwen.com/",
+    hint: "qianwen-proxy 通过浏览器扩展调用千问网页版（会话地址 https://www.qianwen.com/chat/）。使用与 DeepSeek 桥接同一个扩展（需更新到支持多站点的版本），填写扩展 ID 并登录千问网页后即可使用。分镜导入与 DeepSeek 一致；千问暂不支持扩展侧会话列表，导入时手动填会话链接或留空自动新建。",
   },
 };
+
+// 兼容旧配置值 qwen-proxy
+const NORMALIZED_MODE = (mode) => (mode === "qwen-proxy" ? "qianwen-proxy" : mode);
 
 const ggufFiles = ref([]);
 const mmprojFiles = ref([]);
@@ -62,7 +65,7 @@ onMounted(async () => {
   } catch { /* ignore */ }
 });
 
-const bridgeSite = computed(() => BRIDGE_SITES[ws.llm.mode] || null);
+const bridgeSite = computed(() => BRIDGE_SITES[NORMALIZED_MODE(ws.llm.mode)] || null);
 const isBridgeMode = computed(() => !!bridgeSite.value);
 
 const defaultBridgeUrl = computed(() =>

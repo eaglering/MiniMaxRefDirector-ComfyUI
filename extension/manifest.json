@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "MiniMax Ref Director — Web Chat Bridge",
-  "version": "1.5.0",
-  "description": "Bridge between the MiniMax Director SPA page and supported web chats (chat.deepseek.com / www.doubao.com / tongyi.aliyun.com): routes H3 prompt generation / translation requests into the web chat, manages DeepSeek sessions for storyboard import, and exposes a WebSocket bridge to ComfyUI backend.",
+  "version": "1.6.0",
+  "description": "Bridge between the MiniMax Director SPA page and supported web chats (chat.deepseek.com / www.doubao.com / www.qianwen.com): routes H3 prompt generation / translation requests into the web chat, manages DeepSeek sessions for storyboard import, and exposes a WebSocket bridge to ComfyUI backend.",
   "permissions": ["tabs", "storage", "alarms"],
   "host_permissions": [
     "https://chat.deepseek.com/*",
     "https://www.doubao.com/*",
+    "https://www.qianwen.com/*",
     "https://tongyi.aliyun.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
@@ -19,6 +20,7 @@
       "matches": [
         "https://chat.deepseek.com/*",
         "https://www.doubao.com/*",
+        "https://www.qianwen.com/*",
         "https://tongyi.aliyun.com/*"
       ],
       "js": ["page-hook.js"],
@@ -29,6 +31,7 @@
       "matches": [
         "https://chat.deepseek.com/*",
         "https://www.doubao.com/*",
+        "https://www.qianwen.com/*",
         "https://tongyi.aliyun.com/*"
       ],
       "js": ["content.js"],

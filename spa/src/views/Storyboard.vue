@@ -5,6 +5,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../stores/workspace.js";
+import { PROXY_SITES, SITE_LABELS } from "../utils/llm.js";
 import { useSplitterMemory } from "../utils/splitter.js";
 import { genId, framesToSeconds, secondsToFrames } from "../utils/media.js";
 import { makeSubject } from "../constants/subject.js";
@@ -38,7 +39,9 @@ onBeforeUnmount(() => {
 const mainSplit = useSplitterMemory("mrd-sb-split-main", [15, 70, 15]);
 const rightSplit = useSplitterMemory("mrd-sb-split-right", [55, 45]);
 
-const isDeepseek = computed(() => ws.llm.mode === "deepseek-proxy");
+// 分镜导入入口：三种网页桥接模式（DeepSeek / 豆包 / 千问代理）均可用
+const importSite = computed(() => PROXY_SITES[ws.llm.mode] || "");
+const isDeepseek = computed(() => !!importSite.value);
 
 const segments = computed(() => ws.timeline.segments);
 
@@ -68,10 +71,8 @@ function defaultSegment() {
     type: "text",
     autoEndFrame: true,
     h3PromptJson: { summary: "", detailed_description: "", overall_soundscape: "", non_diegetic_music: "" },
-    cameraMotions: [],
-    expressions: [],
-    shotSizes: [],
-    framings: [],
+    // 镜头技能选择：{ 类别名: [key] }（类别来自技能词典，可动态扩展）
+    skills: {},
     retention: {},
     additionSubject: [],
     imageFile: "",
@@ -217,12 +218,26 @@ function emptyH3() {
 }
 
 // 单个分镜 shot → segment 的公共字段映射（storyboard 同步与首次新增共用）
+// 技能选择统一写入 seg.skills；DeepSeek 导入仍可能返回旧字段，这里映射为内置类别名
+const LEGACY_SHOT_SKILLS = {
+  camera_motions: "运镜",
+  shot_sizes: "景别",
+  framings: "镜头结构",
+  expressions: "微表情",
+};
+
 function applyShotToSegment(seg, shot) {
   seg.prompt = String(shot.prompt || "");
-  if (Array.isArray(shot.camera_motions)) seg.cameraMotions = shot.camera_motions.filter(Boolean);
-  if (Array.isArray(shot.shot_sizes)) seg.shotSizes = shot.shot_sizes.filter(Boolean);
-  if (Array.isArray(shot.framings)) seg.framings = shot.framings.filter(Boolean);
-  if (Array.isArray(shot.expressions)) seg.expressions = shot.expressions.filter(Boolean);
+  const skills = (shot.skills && typeof shot.skills === "object" && !Array.isArray(shot.skills))
+    ? { ...shot.skills }
+    : { ...(seg.skills || {}) };
+  for (const [field, cat] of Object.entries(LEGACY_SHOT_SKILLS)) {
+    const keys = Array.isArray(shot[field]) ? shot[field].filter(Boolean) : [];
+    if (keys.length) {
+      skills[cat] = Array.from(new Set([...(skills[cat] || []), ...keys]));
+    }
+  }
+  seg.skills = skills;
   // 首/尾帧提示词：自定义字段（parseInitial 保留未知字段，供后续首尾帧图生成使用）
   if (shot.first_frame_prompt) seg.firstFramePrompt = String(shot.first_frame_prompt);
   if (shot.last_frame_prompt) seg.lastFramePrompt = String(shot.last_frame_prompt);
@@ -333,6 +348,7 @@ function onDeepseekSync(payload) {
         :display-mode="ws.widgets.display_mode"
         :frame-rate="ws.widgets.frame_rate"
         :show-deepseek-import="isDeepseek"
+        :import-site-label="SITE_LABELS[importSite] || 'DeepSeek'"
         @select="id => (selectedId = id)"
         @change="ws.markDirty()"
         @add="addShot"
@@ -389,7 +405,7 @@ function onDeepseekSync(payload) {
     </el-tabs>
   </el-drawer>
 
-  <!-- DeepSeek 分镜导入（仅 deepseek-proxy 模式可见入口） -->
+  <!-- 网页分镜导入（DeepSeek / 豆包 / 千问代理模式可见入口） -->
   <DeepseekImportDialog v-model="showDeepseekImport" @sync="onDeepseekSync" />
 </template>
 

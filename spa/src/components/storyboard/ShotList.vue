@@ -10,6 +10,7 @@ const props = defineProps({
   displayMode: { type: String, default: "seconds" },
   frameRate: { type: Number, default: 24 },
   showDeepseekImport: { type: Boolean, default: false },
+  importSiteLabel: { type: String, default: "DeepSeek" },
 });
 const emit = defineEmits([
   "select", "change", "add", "duplicate", "remove", "deepseek-import",
@@ -403,7 +404,7 @@ function setDuration(seg, val) {
       plain
       :icon="'ChatDotRound'"
       @click="emit('deepseek-import')"
-    >DeepSeek 分镜导入</el-button>
+    >{{ importSiteLabel }} 分镜导入</el-button>
 
     <el-scrollbar class="mrd-shotlist-scroll">
       <TransitionGroup name="mrd-shot" tag="div" class="mrd-shotlist-items">

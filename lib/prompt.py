@@ -16,14 +16,16 @@ from .llm import (
     generate_prompt_with_ollama,
 )
 from .path import resolve_input_path
+from .skill_notes import render_skill_notes, resolve_legacy_selections
 from .utils import find_index, parse_generated_json
 
 # ── 浏览器桥接站点映射 ─────────────────────────────────────────────────────
-# vlm_mode "deepseek-proxy" / "doubao-proxy" / "qwen-proxy" 共用同一浏览器扩展
-# WS 桥接链路，仅站点适配器不同（lib/deepseek_bridge.py 的 site 参数）。
+# vlm_mode "deepseek-proxy" / "doubao-proxy" / "qianwen-proxy"（别名 qwen-proxy）
+# 共用同一浏览器扩展 WS 桥接链路，仅站点适配器不同（lib/deepseek_bridge.py site）
 _PROXY_SITE_MODES = {
     "deepseek-proxy": "deepseek",
     "doubao-proxy": "doubao",
+    "qianwen-proxy": "qwen",
     "qwen-proxy": "qwen",
 }
 
@@ -112,466 +114,9 @@ _AUDIO_RELATION_TEXT = {
     "weak_reference": "Only broad similarity in category or atmosphere from {n} is retained.",
 }
 
-# ── 镜头技能预设（运行时从技能词典 SQLite 读取，本文件不再内置词条）──────────
-# 技能定义已迁至 install/skill_seed.py（首次建库种子 + v0→v1 迁移）。运镜/景别/
-# 构图/微表情四类指令构建时通过 _skill_presets() 从数据库读取，字段结构（按
-# 三段链路「原始提示词 → H3 中文 → H3 英文」精简）：
-#   camera:     { name_zh, name_en, desc_zh, guide(LoRA 写法指南), examples(英文触发短语) }
-#   shotSize:   { name_zh, name_en }        # 中文名直接写入提示词，name_en 供英文对照
-#   framing:    { name_zh, name_en }        # 同上
-#   expression: { name_zh, name_en, desc_zh, examples_zh(中文示例数组), group }
-_PRESET_CATEGORY_FIELDS = ("camera", "shotSize", "framing", "expression")
-
-
-def _skill_presets() -> dict:
-    """从技能词典（SQLite）读取四类预设；数据库不可用时回退 install/skill_seed.py 种子。"""
-    try:
-        from .skill_db import category_presets
-
-        presets = category_presets()
-        if isinstance(presets, dict) and presets.get("camera"):
-            return presets
-    except Exception:
-        pass
-    try:
-        from ..install.skill_seed import fallback_presets
-
-        return fallback_presets()
-    except Exception:
-        return {k: {} for k in _PRESET_CATEGORY_FIELDS}
-
-
-def _normalize_camera_motions(camera_motion) -> list:
-    """归一化运镜参数为合法 key 列表（顺序稳定、去重）。
-
-    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
-    未知 key 与重复值忽略。合法 key 来自技能词典（SQLite）的运镜类。
-    """
-    presets = _skill_presets()["camera"]
-    if camera_motion is None:
-        return []
-    if isinstance(camera_motion, str):
-        keys = [camera_motion] if camera_motion.strip() else []
-    elif isinstance(camera_motion, (list, tuple)):
-        keys = list(camera_motion)
-    else:
-        return []
-    seen = set()
-    result = []
-    for k in keys:
-        if not isinstance(k, str):
-            continue
-        key = k.strip()
-        if not key or key == "auto" or key in seen:
-            continue
-        if key in presets:
-            seen.add(key)
-            result.append(key)
-    return result
-
-
-def _camera_motion_note(camera_motion: str | list = "", lang: str = "en") -> str:
-    """按（多选）运镜 key 生成注入生成提示词的运镜指令块；空选择返回空串（不注入）。
-
-    数据来源为技能词典「运镜」类：guide 为 Camera Motion LoRA 写法指南（星级/
-    建议写法/强度/方向），examples 为英文触发短语。触发词 "camera motion" 必须
-    位于运镜短语开头，且与触发短语一样是 LoRA 技术词：即使输出语言为中文，
-    英文短语也必须原样保留（写成「中文运镜描写（camera motion, slow push-in）」），
-    保证后续中文 → 英文翻译阶段无需二次改写。多选时 LLM 依据每个 [Shot N] 的
-    镜头语义挑选最契合的一种，不同镜头可轮换，不堆叠多风格于一镜，所选不必
-    全部出现。
-    """
-    keys = _normalize_camera_motions(camera_motion)
-    if not keys:
-        return ""
-    cam_presets = _skill_presets()["camera"]
-    many = len(keys) > 1
-    zh = lang == "zh"
-    lines = []
-    if zh:
-        lines.append("## 运镜方向（Camera Motion Direction）")
-        lines.append(
-            "触发词 \"camera motion\" 必须位于运镜短语开头（Camera Motion LoRA 技术词）。"
-            "对每个 [Shot N] 的描述，把运镜写成「中文运镜描写（camera motion, "
-            "<英文触发短语>）」的形式；英文短语从所选风格的触发短语中挑选，"
-            "不得翻译或改写。"
-        )
-        if many:
-            lines.append(
-                "依据该镜头的景别、动作与情绪挑选最契合的一种风格；不同镜头可轮换，"
-                "同一镜头不要堆叠多种风格，所列风格不要求全部出现。"
-            )
-        for key in keys:
-            preset = cam_presets[key]
-            lines.append(f"- 风格：{preset['name_zh']}（{preset['name_en']}）")
-            if preset.get("desc_zh"):
-                lines.append(f"  - {preset['desc_zh']}")
-            if preset.get("guide"):
-                lines.append(f"  - 写法指南：{preset['guide']}")
-            phrases = preset.get("examples") or []
-            if phrases:
-                lines.append(
-                    "  - 英文触发短语（原样保留，与触发词 camera motion 连用）："
-                    + " / ".join(phrases)
-                )
-        lines.append(
-            "- 若未挂载 camera motion LoRA，仅用中文描写运镜即可（省去英文短语）。"
-        )
-    else:
-        lines.append("## Camera Motion Direction")
-        lines.append(
-            'The fixed trigger "camera motion" MUST open the camera-motion phrase '
-            "(Camera Motion LoRA technical vocabulary). For each [Shot N] description, "
-            'write the camera move as "camera motion, <camera phrase>, <shot description>" '
-            "using one of the listed trigger phrases for that shot."
-        )
-        if many:
-            lines.append(
-                "Choose the single style that best matches that shot's framing, action and "
-                "emotion; different shots may switch styles, do not pile multiple styles "
-                "into one shot, and not every listed style has to be used."
-            )
-        for key in keys:
-            preset = cam_presets[key]
-            lines.append(f"- Style: {preset['name_en']}（{preset['name_zh']}）")
-            if preset.get("guide"):
-                lines.append(f"  - Usage guide: {preset['guide']}")
-            phrases = preset.get("examples") or []
-            if phrases:
-                lines.append(
-                    '  - Trigger phrases (verbatim, after "camera motion"): '
-                    + " / ".join(phrases)
-                )
-        lines.append(
-            '- The trigger "camera motion" and the phrases above are LoRA vocabulary: '
-            "never translate or paraphrase them."
-        )
-    return "\n".join(lines) + "\n"
-
-
-def _normalize_shot_sizes(shot_size) -> list:
-    """归一化景别参数为合法 key 列表（顺序稳定、去重）。
-
-    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
-    未知 key 与重复值忽略。合法 key 来自技能词典（SQLite）的景别类。
-    """
-    presets = _skill_presets()["shotSize"]
-    if shot_size is None:
-        return []
-    if isinstance(shot_size, str):
-        keys = [shot_size] if shot_size.strip() else []
-    elif isinstance(shot_size, (list, tuple)):
-        keys = list(shot_size)
-    else:
-        return []
-    seen = set()
-    result = []
-    for k in keys:
-        if not isinstance(k, str):
-            continue
-        key = k.strip()
-        if not key or key == "auto" or key in seen:
-            continue
-        if key in presets:
-            seen.add(key)
-            result.append(key)
-    return result
-
-
-def _normalize_framings(framing) -> list:
-    """归一化构图/镜头关系参数为合法 key 列表（顺序稳定、去重）。
-
-    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
-    未知 key 与重复值忽略。合法 key 来自技能词典（SQLite）的镜头结构类。
-    """
-    presets = _skill_presets()["framing"]
-    if framing is None:
-        return []
-    if isinstance(framing, str):
-        keys = [framing] if framing.strip() else []
-    elif isinstance(framing, (list, tuple)):
-        keys = list(framing)
-    else:
-        return []
-    seen = set()
-    result = []
-    for k in keys:
-        if not isinstance(k, str):
-            continue
-        key = k.strip()
-        if not key or key == "auto" or key in seen:
-            continue
-        if key in presets:
-            seen.add(key)
-            result.append(key)
-    return result
-
-
-def _shot_size_note(shot_size: str | list = "", lang: str = "en") -> str:
-    """按（多选）景别 key 生成注入生成提示词的景别指令块；空选择返回空串（不注入）。
-
-    景别是通用镜头语汇：直接把档位中文名写入镜头描述（如「大远景」「中景」），
-    不展开成长句描述；name_en 仅作为英文翻译阶段的对照映射（保证「大远景」译为
-    extreme wide shot 而非泛化词）。同一镜头只用一种景别，多选时不同镜头可轮换。
-    """
-    keys = _normalize_shot_sizes(shot_size)
-    if not keys:
-        return ""
-    size_presets = _skill_presets()["shotSize"]
-    many = len(keys) > 1
-    zh = lang == "zh"
-    lines = []
-    if zh:
-        lines.append("## 景别方向（Shot Size Direction）")
-        if many:
-            lines.append(
-                "对每个 [Shot N]，从下列档位中选定一种，把该档位的**中文名称直接写入**"
-                "镜头描述（如「大远景」「中景」），不要展开成长句描述；同一镜头只用"
-                "一种，不同镜头可轮换，尽量让全部候选至少出现一次。若用户输入中出现"
-                "其他景别词，一律改写为候选档位。"
-            )
-        else:
-            lines.append(
-                "每个镜头都必须采用下列这一种景别：把中文名称直接写入镜头描述；"
-                "用户输入的其他景别词一律改写为它。"
-            )
-        for key in keys:
-            preset = size_presets[key]
-            lines.append(f"- 档位：{preset['name_zh']}（英文阶段对照：{preset['name_en']}）")
-        lines.append(
-            "- 景别词直接使用中文名称即可，不要改写成其他镜头语汇。"
-        )
-    else:
-        lines.append("## Shot Size Direction")
-        if many:
-            lines.append(
-                "For each [Shot N], choose exactly ONE size from the list below and name it "
-                "explicitly in that shot using its English term. Use only one size per shot, "
-                "rotate across shots, and aim to cover every listed size at least once; "
-                "rewrite any other shot-size mention to a listed one."
-            )
-        else:
-            lines.append(
-                "Every shot MUST use the single size below, stated explicitly by its English "
-                "term; rewrite any other shot-size mention to it."
-            )
-        for key in keys:
-            preset = size_presets[key]
-            lines.append(f"- Size: {preset['name_en']}（{preset['name_zh']}）")
-        lines.append(
-            "- Use the exact English terms above; they are the canonical mapping for the "
-            "later translation pass."
-        )
-    return "\n".join(lines) + "\n"
-
-
-def _framing_note(framing: str | list = "", lang: str = "en") -> str:
-    """按（多选）构图/镜头关系 key 生成注入生成提示词的构图指令块；空选择返回空串。
-
-    镜头结构是通用镜头语汇：仅当镜头内容适用时，把关系镜头的中文名直接写入
-    镜头描述（如「双人镜头」「插入镜头」）；name_en 仅作为英文翻译阶段的对照
-    映射。切勿强套到用不上的镜头；不必全部出现。
-    """
-    keys = _normalize_framings(framing)
-    if not keys:
-        return ""
-    framing_presets = _skill_presets()["framing"]
-    many = len(keys) > 1
-    zh = lang == "zh"
-    lines = []
-    if zh:
-        lines.append("## 构图与镜头关系方向（Framing Direction）")
-        lines.append(
-            "仅当镜头内容适用时，把下列关系镜头的**中文名称直接写入**该镜头描述"
-            "（如「双人镜头」「插入镜头」），不要展开成长句描述：过肩镜头与双人镜头"
-            "用于对话或二人互动的场景，插入镜头用于交代承载含义的关键细节，"
-            "定场镜头用于开场交代地点。"
-        )
-        if many:
-            lines.append(
-                "不同镜头按需轮换，切勿把某个关系强套到用不上的镜头；"
-                "所列关系不要求全部出现。"
-            )
-        for key in keys:
-            preset = framing_presets[key]
-            lines.append(f"- 关系：{preset['name_zh']}（英文阶段对照：{preset['name_en']}）")
-        lines.append(
-            "- 名称直接使用中文即可，不要改写成其他镜头语汇；没有对白或二人互动就"
-            "不要硬用过肩/双人镜头，插入与定场镜头同样只在必要时出现。"
-        )
-    else:
-        lines.append("## Framing & Shot-Relationship Direction")
-        lines.append(
-            "Use the relationship framings below only when a shot's content calls for them, "
-            "naming the chosen one explicitly in that shot using its English term: "
-            "over-the-shoulder and two-shot for dialogue or two-person interaction, an "
-            "insert for a meaningful detail, an establishing shot to open a location."
-        )
-        if many:
-            lines.append(
-                "Different shots may switch as needed; never force one onto a shot that does "
-                "not need it, and not every listed option has to appear."
-            )
-        for key in keys:
-            preset = framing_presets[key]
-            lines.append(f"- Framing: {preset['name_en']}（{preset['name_zh']}）")
-        lines.append(
-            "- Use the exact English terms above; they are the canonical mapping for the "
-            "later translation pass."
-        )
-    return "\n".join(lines) + "\n"
-
-
-def _normalize_expressions(expression, expression_catalog: list | None = None) -> list:
-    """归一化微表情参数为合法 key 列表（顺序稳定、去重）。
-
-    兼容 str 单值 / list 多选 / None；"" / "auto" / None → []（不注入）；
-    未知 key 与重复值忽略。合法 key = 技能词典（SQLite）微表情类，或前端本地
-    导入并经 expression_catalog 携带的自定义词条（{key,label,title}）。
-    """
-    if expression is None:
-        return []
-    if isinstance(expression, str):
-        keys = [expression] if expression.strip() else []
-    elif isinstance(expression, (list, tuple)):
-        keys = list(expression)
-    else:
-        return []
-    extra_keys: set = set()
-    if expression_catalog:
-        for it in expression_catalog:
-            if isinstance(it, dict) and isinstance(it.get("key"), str) and it["key"].strip():
-                extra_keys.add(it["key"].strip())
-    expr_presets = _skill_presets()["expression"]
-    seen: set = set()
-    result = []
-    for k in keys:
-        if not isinstance(k, str):
-            continue
-        key = k.strip()
-        if not key or key == "auto" or key in seen:
-            continue
-        if key in expr_presets or key in extra_keys:
-            seen.add(key)
-            result.append(key)
-    return result
-
-
-def _expression_note(expression: str | list = "", expression_catalog: list | None = None, lang: str = "en") -> str:
-    """按（多选）微表情 key 生成注入生成提示词的表演指令块；空选择返回空串（不注入）。
-
-    lang="zh" 时输出整段中文指令与中文例句，配合中文输出语言；lang 其他值维持
-    英文原版。与 _camera_motion_note 不同：微表情是表演描写而非 LoRA 触发词，允许
-    并鼓励按输出语言自然意译。多选时为强约束：LLM 依据每个 [Shot N] 的人物状态与
-    情绪把所选 Cue 分配织入对应镜头表演描述，单镜头最多自然组合 1-2 个克制细节，
-    每个选中的 Cue 在 detailed_description 全文中必须至少出现一次，禁止夸张哑剧化。
-    选中 ≤3 类时每类列 2 条示例，>3 类时每类列 1 条，控制注入 token。自定义词条
-    （expression_catalog 中非内置 key）无固定例句，指示模型按 label/title 自然展开。
-    """
-    keys = _normalize_expressions(expression, expression_catalog)
-    if not keys:
-        return ""
-    many = len(keys) > 1
-    zh = lang == "zh"
-    extra: dict = {}
-    if expression_catalog:
-        for it in expression_catalog:
-            if isinstance(it, dict) and isinstance(it.get("key"), str) and it["key"].strip():
-                extra[it["key"].strip()] = it
-    expr_presets = _skill_presets()["expression"]
-    lines = []
-    if zh:
-        lines.append("## 微表情与表演方向（Micro-expression & Acting Direction）")
-        lines.append(
-            "对每个出现人物近景或中景的 [Shot N]，把下列所选微表情/肢体细节自然地织入"
-            "该人物的表演描述——克制而写实，像真正的电影表演，而非夸张的哑剧。"
-        )
-        if many:
-            lines.append(
-                "按各镜头的情绪与节奏分配使用：单镜头最多自然组合两个细微细节"
-                "（例如“别开视线”时“嘴角轻微绷紧”）。"
-                "硬性底线：每个选中的 Cue 至少在一个出现该人物近景/中景的镜头中"
-                "自然体现一次（放在情绪最契合的镜头即可），遗漏任一选中 Cue 视为不合格。"
-            )
-        limit = 1 if many and len(keys) > 3 else 2
-        for key in keys:
-            if key in expr_presets:
-                preset = expr_presets[key]
-                lines.append(f"- Cue：{preset['name_zh']}（{preset['name_en']}）")
-                if preset.get("desc_zh"):
-                    lines.append(f"  - {preset['desc_zh']}")
-                zh_examples = preset.get("examples_zh") or []
-                if zh_examples:
-                    lines.append("  - 可直接写入镜头的中文示例（每镜挑一句，措辞可微调）：")
-                    for ex in zh_examples[:limit]:
-                        lines.append(f"    - {ex}")
-                else:
-                    lines.append("  - 请按该 Cue 的含义自然展开成中文表演描写，保持克制简练。")
-            else:
-                custom = extra.get(key, {})
-                label = custom.get("label") or key
-                desc = custom.get("title") or label
-                lines.append(f"- Cue：{label}")
-                lines.append(
-                    "  - 请把该提示（大意：{}）自然展开成中文表演描写，保持克制简练。"
-                    .format(desc)
-                )
-        lines.append(
-            "不要把任一 Cue 强塞进每一个镜头或每一处近景，整体表演保持自然，"
-            "也不要把 Cue 写成技术标签或指令性的句子。"
-            "唯一下限：所有选中的 Cue 必须各自在 detailed_description 全文中出现至少一次；"
-            "若写完发现某 Cue 无处安放，回到情绪最契合的镜头补一处克制描写，不得省略。"
-        )
-    else:
-        lines.append("## Micro-expression & Acting Direction")
-        lines.append(
-            "For every [Shot N] that shows a human character in a close or medium shot, weave "
-            "the selected micro-expression / body-language cues below into that character's "
-            "acting description - naturally and sparingly, as a restrained film performance "
-            "rather than exaggerated pantomime."
-        )
-        if many:
-            lines.append(
-                "Distribute the cues across shots by each shot's emotion and rhythm. A shot may "
-                "combine at most two subtle cues when the beat calls for it (e.g. a glance away "
-                "with a faint lip tighten), but EVERY selected cue MUST appear at least once in "
-                "a shot showing the character in a close or medium shot - place it in the shot "
-                "where it fits best; omitting any selected cue is an unacceptable output."
-            )
-        for key in keys:
-            if key in expr_presets:
-                preset = expr_presets[key]
-                lines.append(f"- Cue: {preset['name_en']}（{preset['name_zh']}）")
-                if preset.get("desc_zh"):
-                    lines.append(
-                        "  - Meaning: {}. Paraphrase it naturally in English, keeping the "
-                        "acting subtle and brief.".format(preset["desc_zh"])
-                    )
-                else:
-                    lines.append(
-                        "  - Paraphrase this cue naturally in English, keeping the acting "
-                        "subtle and brief."
-                    )
-            else:
-                custom = extra.get(key, {})
-                label = custom.get("label") or key
-                desc = custom.get("title") or label
-                lines.append(f"- Cue: {label}")
-                lines.append(
-                    "  - Suggested phrasings: describe this cue naturally in the output "
-                    "language (e.g. {}) keeping the acting subtle and brief.".format(desc)
-                )
-        lines.append(
-            "Do not force any cue into every shot or every close-up; keep the overall "
-            "performance natural, and never write the cue as a technical tag or instruction. "
-            "One hard requirement: every selected cue must appear at least once somewhere in "
-            "the detailed_description (each in the shot where it fits best). If you finish and "
-            "a cue has no home, add one restrained mention to the most fitting shot rather than "
-            "dropping it."
-        )
-    return "\n".join(lines) + "\n"
-
-
+# ── 技能注入（lib/skill_notes.py）───────────────────────────────────────────
+# 技能定义在 SQLite（类别 render_mode 决定注入方式）；指令块渲染只有一份实现，
+# 服务端三种模式与三种网页桥接共用，本文件不再内置任何类别专用规则。
 def _load_h3_skills_template(lang: str = "en") -> str:
     """Load the custom H3 skills template (four-field output) for the given language.
 
@@ -582,17 +127,14 @@ def _load_h3_skills_template(lang: str = "en") -> str:
         return f.read()
 
 
-def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> str:
-    """Build the full prompt sent to the local GGUF VLM.
+def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "", camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> str:
+    """用通用模板（resources/skills/h3-prompt-builder/prompt.md）组装 H3 生成提示词。
 
-    Includes the custom skills guide, the required JSON output format
-    (summary / detailed_description / overall_soundscape / non_diegetic_music)
-    and the <@角色名称> / <#角色名称:对话内容> placeholder rules. When a reference
-    image is provided it is NOT treated as a first frame; instead its contents
-    are merged into "detailed_description" together with the user's input.
-    camera_motion: 运镜 key 或 key 列表（见技能词典「运镜」类），空/"auto"/
-    未知值不注入；多选时指令 LLM 为每个 [Shot N] 依镜头语义挑最契合的一种自然
-    嵌入英文运镜短语（不同 Shot 可轮换风格），速度词由模型自然写。
+    - skills：四字段写作指南（prompt/minimaxh3_custom_ref2v_prompt_writing*.txt）
+    - skill_notes：分镜技能注入块（lib/skill_notes.py 渲染；服务端与桥接共用同一份）
+    - camera_motion / expression / shot_size / framing：**已废弃**，仅在 skill_notes
+      为空时按类别 render_mode 反查并渲染一次，保证旧调用方（旧导演台 / 旧客户端）不炸
+    - 模板与注入块均不申明触发词写法：camera motion 等触发词由用户写在全局提示词中
     """
     image_note = ""
     if has_image:
@@ -636,42 +178,67 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
             "text/dialogue may keep their original language.\n"
         )
 
-    camera_note = _camera_motion_note(camera_motion, lang=lang)
-    expression_note = _expression_note(expression, expression_catalog, lang=lang)
-    shot_note = _shot_size_note(shot_size, lang=lang)
-    framing_note = _framing_note(framing, lang=lang)
+    notes = str(skill_notes or "").strip()
+    if not notes:
+        selections = resolve_legacy_selections(
+            camera_motion=camera_motion, expression=expression,
+            shot_size=shot_size, framing=framing,
+        )
+        if selections:
+            notes = render_skill_notes(selections, lang="en" if lang == "en" else "zh")["notes"]
 
-    return f"""You are an expert video prompt writer. Follow the skills guide below.
+    return (
+        _load_h3_builder_template()
+        .replace("{{skills_guide}}", skills.strip())
+        .replace("{{skill_notes}}", notes or "（本镜头未选择技能，按用户输入自由创作）")
+        .replace("{{image_note}}", image_note)
+        .replace("{{lang_note}}", lang_note)
+        .replace("{{duration_note}}", duration_note)
+        .replace("{{user_input}}", prompt)
+    )
+
+
+_H3_BUILDER_TEMPLATE_PATH = os.path.join(
+    os.path.dirname(_PROMPT_DIR), "resources", "skills", "h3-prompt-builder", "prompt.md")
+_H3_BUILDER_TEMPLATE_CACHE: dict[str, str] = {}
+
+# 模板缺失时的最小兜底（内容与 resources 模板保持同样占位语义）
+_H3_BUILDER_FALLBACK = """You are an expert video prompt writer.
 
 ## Skills Guide
-{skills}
+{{skills_guide}}
 
-## Task
-Rewrite the user's input prompt into a full-reference video prompt.
+## Selected Skills (skill_notes)
+{{skill_notes}}
 
 ## Output Format
-Output ONLY a JSON object with exactly these keys:
-  - "summary": string
-  - "detailed_description": string
-  - "overall_soundscape": string
-  - "non_diegetic_music": string
-## Placeholder Rules
-In "summary": wrap every character name as <@角色名称>, e.g. <@Zhang San>. The summary is a plain summary and does not contain dialogue.
-In "detailed_description", "overall_soundscape" and "non_diegetic_music":
-1. Wrap every character name as <@角色名称>, e.g. <@Zhang San>. This applies even if the user wrote the name as a bare word (e.g. "小李做了什么" must become "<@小李>做了什么").
-2. Wrap every dialogue as <#角色名称:对话内容>, e.g. <#Zhang San:Hello!> or <#李四:你好！>.
-3. Keep character names and dialogue in their original language, never translate them.
+Output ONLY a JSON object with exactly these keys: "summary", "detailed_description",
+"overall_soundscape", "non_diegetic_music". Fragments wrapped as `<!...>` are technical
+keywords: keep the inner text verbatim and never translate or rewrite them.
+{{image_note}}{{lang_note}}
 
-## "summary" Format
-Write one short paragraph summarizing the target video and its reference relationships. It begins with a square-bracketed task-type prefix, e.g. "[reference generation]" or "[video editing + reference generation + audio reuse]". Choose task types according to the actual role each reference asset plays in the target video: keyframe completion (an image is a concrete frame anchor), reference generation (an asset provides generation guidance), video editing (a source video is directly modified), video continuation (new content continues from a source video), audio reuse (the same audio signal is reused in full or in part), audio reference (only the audio's characteristics are referenced). When multiple relationships hold, combine task types with " + " and do not repeat a type. The summary describes the main subjects and shot flow using <@角色名称> placeholders, e.g. <@Zhang San>, without introducing content beyond the user's input and without quoting any dialogue.
+## User Input Prompt
+{{duration_note}}{{user_input}}
 
-## Strictness
-- "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".
-- Strictly follow the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue beyond the user's input.
-{image_note}{lang_note}{camera_note}{expression_note}## User Input Prompt
-{duration_note}{prompt}
-{shot_note}{framing_note}
-Output ONLY the JSON object. Do not add any text before or after it."""
+Output ONLY the JSON object.
+"""
+
+
+def _load_h3_builder_template() -> str:
+    """加载通用 H3 技能文档模板（进程内缓存；缺失时回退内置最小模板）。"""
+    cached = _H3_BUILDER_TEMPLATE_CACHE.get("tpl")
+    if cached is not None:
+        return cached
+    try:
+        with open(_H3_BUILDER_TEMPLATE_PATH, "r", encoding="utf-8-sig") as f:
+            tpl = f.read()
+    except OSError as exc:
+        log.warning(
+            "[MiniMaxRefDirector] h3-prompt-builder template missing (%s): %s",
+            _H3_BUILDER_TEMPLATE_PATH, exc)
+        tpl = _H3_BUILDER_FALLBACK
+    _H3_BUILDER_TEMPLATE_CACHE["tpl"] = tpl
+    return tpl
 
 
 # 生成h3提示词
@@ -685,13 +252,13 @@ _H3_DEFAULT_OPTIONS: dict = {
 }
 
 
-# 翻译时禁止改写的片段：<@主体名>、<#主体名:对白>、<d>[语言]对白</d>，
-# 以及双引号（含全角引号）包裹的内容（台词/标语/歌名等）。
+# 翻译时禁止改写的片段：<!技术词>（技能关键词保护，仅 protect_keywords=1 的类别）、
+# <@主体名>、<#主体名:对白>、<d>[语言]对白</d>，以及双引号（含全角引号）包裹的内容。
 # 对白是视频实际发声内容、主体名可能含中文，均必须保持原语言。
 # 引号保护：半角 "..." 与全角 \u201c...\u201d \u2018...\u2019。
 # 注意：不含半角单引号 '...'，避免与英文撇号（don't / it's）冲突。
 _PROTECTED_FRAGMENT_RE = re.compile(
-    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
+    r"<![^>]*>|<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
     re.DOTALL,
 )
 # 占位符使用 PUA 私有区字符（U+E000 与 U+F8FF）+ 序号，几乎不可能出现在正常文本或模型输出中
@@ -713,90 +280,41 @@ def _mask_protected(text: str) -> tuple[str, dict[str, str]]:
     return _PROTECTED_FRAGMENT_RE.sub(_repl, text), placeholders
 
 
-def _unmask_protected(text: str, placeholders: dict[str, str]) -> str:
-    """将占位符还原为原始片段。"""
+# 技能注入块的技术词标记：<!slow push-in>（仅 protect_keywords=1 的类别产生）
+_PROTECT_MARK_RE = re.compile(r"^<!([^>]*)>$", re.DOTALL)
+
+
+def unmask_protected_text(text: str, placeholders: dict[str, str]) -> str:
+    """将占位符还原为原始片段；<!技术词> 只保留内文（标记本身不进最终提示词）。"""
     for token, original in placeholders.items():
-        text = text.replace(token, original)
+        mark = _PROTECT_MARK_RE.match(original)
+        text = text.replace(token, mark.group(1).strip() if mark else original)
     return text
 
 
-# Camera-motion 保真规则（中→英翻译指令共用）：下游若挂载 Camera Motion LoRA，必须把
-# 源文中的摄影机运动改写为 "camera motion, ..." 触发短语（技术词，不得意译成普通动词）。
-# 本常量文本镜像同步到 prompt/prompt_translate_to_en.txt 的 "## Camera motion fidelity" 小节，
-# 修改时请保持两处一致。
-_TRANSLATE_CAMERA_MOTION_RULES = (
-    "\n\n## Camera motion fidelity (MANDATORY)\n"
-    "The translated prompt is consumed by a downstream Camera Motion LoRA that "
-    "activates ONLY on the literal English token sequence \"camera motion, ...\". "
-    "Whenever the source text describes camera movement or a global camera style, "
-    "you MUST rewrite it as the matching \"camera motion, ...\" trigger phrase "
-    "listed below, never as plain verbs (\"aerial drone shot\", \"the camera slowly "
-    "descends\" or \"dolly in\" alone do NOT activate the LoRA).\n"
-    "Chinese cue -> required trigger phrase:\n"
-    "- 推近/拉近/前移 -> \"camera motion, slow push-in on the subject\".\n"
-    "- 拉远/后移 -> \"camera motion, slow pull-back revealing the surroundings\".\n"
-    "- 推拉结合/先推后拉 -> \"camera motion, push-in then pull-back in one flowing move\".\n"
-    "- 环绕/绕行/盘旋 -> \"camera motion, slow 360-degree orbit around the subject\".\n"
-    "- 跟拍/跟随/手持 -> \"camera motion, tracking shot following the subject\".\n"
-    "- 航拍/无人机/俯拍/高空 -> \"camera motion, aerial drone shot flying over the scene\".\n"
-    "- 升降/升起/仰起/落下/俯仰 -> \"camera motion, slow tilt from the feet up to the face\".\n"
-    "- 摇镜/扫过/横摇 -> \"camera motion, slow pan across the full scene\".\n"
-    "- 特写/微距 -> \"camera motion, extreme close-up on the subject's face\".\n"
-    "- Keep the framing target and speed in the phrase when the source names them "
-    "(拉近至中景 -> \"camera motion, push-in to a medium shot\"; 缓缓/缓慢 -> slow, "
-    "快速 -> quick, 平稳 -> steady).\n"
-    "- Global style statements (e.g. 全程采用航拍镜头风格 / 运镜风格为航拍/无人机) "
-    "must ALSO become a trigger phrase, e.g. \"camera motion, aerial drone shots "
-    "throughout\".\n"
-    "- Worked example: source \"无人机航拍，飞掠过整片海滩，镜头缓缓下降\" -> output "
-    "\"camera motion, aerial drone shot flying over the beach, slowly descending\".\n"
-    "- If a \"camera motion, ...\" phrase is already present in the source, keep it "
-    "exactly and never duplicate it. Only apply these rules where the source actually "
-    "describes camera movement; translate everything else normally and never invent "
-    "motion where the source has none.\n"
-)
+# 兼容旧调用名
+_unmask_protected = unmask_protected_text
 
 
-# 运镜 cue 检测（中英）：命中任一 cue 才注入 Camera motion fidelity 规则。
-# 中文 cue 均为运镜/镜头动词；英文 cue 用单词边界匹配。漏判代价大（运镜被意译），
-# 误判代价小（仅多注入一段规则，规则本身禁止无中生有），故宁可放宽。
-_CAMERA_CUE_RE = re.compile(
-    r"推近|拉近|前移|推上|推镜|推进|拉远|后移|拉开|拉镜|推拉|先推后拉|环绕|绕行|盘旋|环拍|"
-    r"跟拍|跟随|手持|航拍|无人机|俯拍|高空|升降|升起|仰起|落下|俯仰|摇镜|摇向|横摇|横移|平移|"
-    r"特写|微距|运镜|镜头缓缓|镜头缓慢|镜头拉近|镜头推近|镜头下降|镜头摇|"
-    r"缓慢(?:推|拉|环绕|移动|下降|上升|摇)|缓缓(?:推|拉|环绕|移动|下降|上升|摇)"
-    r"|push(?:es|ed|ing)?[- ]?in|pull(?:s|ed|ing)?[- ]?back|dolly(?:ing|es|ed)?|"
-    r"orbit(?:s|ing|ed)?|tracking(?: shot)?|handheld|aerial|drone|crane(?:s|ing|ed)? shot|"
-    r"\btilt(?:s|ing|ed)?\b|\bpan(?:s|ning|ned)?\b|close[- ]?up|\bmacro\b|zoom(?:s|ing|ed)?|"
-    r"camera motion|camera moves",
-    re.IGNORECASE,
-)
-
-
-def _has_camera_cue(text: str) -> bool:
-    """源文本是否含运镜描写 cue（中英文）。决定是否注入 Camera motion fidelity 规则。"""
-    return bool(text) and bool(_CAMERA_CUE_RE.search(text))
-
-
-# prompt_translate_to_en.txt 中 "## Camera motion fidelity" 小节
-# （介于标题与 "## Input JSON" 之间），源文无运镜 cue 时整体移除
-_CAMERA_FIDELITY_SECTION_RE = re.compile(
-    r"\n\n## Camera motion fidelity\n.*?\n\n## Input JSON", re.DOTALL
-)
-
-
-def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) -> str:
+def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int, glossary: dict | None = None) -> str:
     """将整段视频提示词文本翻译为英文。
 
-    调用方负责将禁止改写的片段（主体名/对白）掩码为占位符（如 MASKED_0），
+    调用方负责将禁止改写的片段（技术词/主体名/对白）掩码为占位符（如 MASKED_0），
     翻译后还原；本函数在指令中提示模型原样保留占位符 token。翻译失败回退原文，
     不抛出异常、不中断流程。
-    指令中追加 _TRANSLATE_CAMERA_MOTION_RULES：中文源文里的运镜描写会被改写为
-    "camera motion, ..." 触发短语，保证下游 Camera Motion LoRA 的触发词不被翻译丢失。
+    glossary: 术语型（term）技能的中文名 → name_en 对照，注入翻译指令保证
+    「大远景」等词汇译为标准英文；空字典时不追加该小节。
+    不做任何触发词申明：运镜触发词写法由用户写在全局提示词中，技术词靠掩码保真。
     """
     try:
-        # 源文含运镜描写时才注入 camera fidelity 规则，其余翻译不带这段指令
-        rules_block = _TRANSLATE_CAMERA_MOTION_RULES if _has_camera_cue(text) else ""
+        terms = ""
+        if isinstance(glossary, dict) and glossary:
+            terms = (
+                "\n- Terminology (canonical mapping): translate these source names to the "
+                "exact English term; do not paraphrase or generalize them.\n"
+                + "\n".join(f"  - {zh} -> {en}" for zh, en in glossary.items() if str(zh).strip())
+                + "\n"
+            )
         full_prompt = (
             "You are a professional video prompt translator. Translate the following "
             "video prompt text into fluent, natural English.\n\n"
@@ -809,12 +327,11 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) ->
             "or rephrase any section heading or section.\n"
             "- Keep every placeholder token such as MASKED_0 exactly as-is, at the "
             "same position and in the same order. Never translate, delete, or reorder them.\n"
+            "- If a fragment is still wrapped as <!...> (protected technical keyword), "
+            "keep the inner text verbatim and output it WITHOUT the wrapper.\n"
             "- Output only the translated text, with no extra commentary.\n"
-            "- Apply the camera-fidelity instruction block below by rewriting "
-            "camera-motion descriptions INSIDE the text; never append such phrases "
-            "after the translation and never quote the instruction block itself."
-            + rules_block
-            + "\n\n## Text to translate\n\n"
+            + terms
+            + "\n## Text to translate\n\n"
             + text
             + "\n\nTranslated text:"
         )
@@ -854,15 +371,14 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int) ->
         return text
 
 
-def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, seed: int) -> dict:
-    """将四字段提示词翻译为英文。
+def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, seed: int, glossary: dict | None = None) -> dict:
+    """将四字段提示词翻译为英文（预留接口；当前编码链路由 director.py 调用文本翻译）。
 
     读取 prompt_translate_to_en.txt 组装翻译 skill，复用 llm.py 的生成函数
     （image=None 纯文本模式）。翻译保留 [Shot N] / At MM:SS.mmm / <@...> / <#...>
-    等固定标签，字段名不变；角色名与对白内容保持原语言（对白是视频实际发声内容，
-    不可改写）。实现上先对 <@...> / <#...> / <d>...</d> 做占位符掩码，模型只看到
-    无意义占位符、从源头杜绝改写，翻译后还原。若模型破坏/丢失了占位符，则该字段
-    整体回退原文。翻译失败或解析失败时回退原 dict，不抛出异常、不中断流程。
+    等固定标签，字段名不变；角色名与对白内容保持原语言。实现上先对 <!技术词> /
+    <@...> / <#...> / <d>...</d> 做占位符掩码，翻译后还原（<!…> 只留内文）。
+    glossary 为术语型技能的中英对照（写入模板 {{GLOSSARY}}）。
     """
     try:
         # 掩码保护片段：翻译前替换为 PUA 占位符，翻译后还原
@@ -878,10 +394,13 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
         input_json = json.dumps(masked, ensure_ascii=False, indent=2)
         with open(_TRANSLATE_TO_EN_TEMPLATE_PATH, "r", encoding="utf-8") as f:
             skill = f.read()
-        full_prompt = skill.replace("{{INPUT_JSON}}", input_json)
-        # 四字段源文均无运镜描写：移除 Camera motion fidelity 小节，避免多余 token
-        if not _has_camera_cue(" ".join(str(v) for v in masked.values() if isinstance(v, str))):
-            full_prompt = _CAMERA_FIDELITY_SECTION_RE.sub("\n\n## Input JSON", full_prompt)
+        terms = ""
+        if isinstance(glossary, dict) and glossary:
+            terms = "\n".join(
+                f"- {zh} -> `{en}`" for zh, en in glossary.items() if str(zh).strip())
+        full_prompt = (skill
+                       .replace("{{GLOSSARY}}", terms or "(none — use standard cinematography English)")
+                       .replace("{{INPUT_JSON}}", input_json))
         if vlm_mode == "api":
             generate_text = generate_prompt_with_api(
                 image=None, prompt=full_prompt, provider=options.get("provider", "GLM"),
@@ -925,7 +444,7 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
         return json_data
 
 
-def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en", camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> dict:
+def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "", selections: dict | None = None, camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> dict:
     """Generate an H3 full-reference prompt JSON.
 
     options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
@@ -952,24 +471,30 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     by the model, with a language tag such as [Chinese] or [English] before the
     dialogue text. No mapping is returned. 输出语言由所选 skills 模板决定：
     lang="zh" 中文模板强制中文，其余语言英文模板强制英文。
-    camera_motion: 运镜 key 或 key 列表（见技能词典「运镜」类），空/"auto"/
-    未知值不注入，其余值向最终 prompt 追加 "## Camera Motion Direction" 指令块。
-    多选时 LLM 依据每个 [Shot N] 的镜头语义为该 Shot 挑选最契合的单一运镜并自然
-    嵌入对应英文运镜短语（中文输出时运镜短语仍保留英文，属 LoRA 技术词），不同
-    Shot 可轮换风格；速度词（slow/steady/quick 等）由模型依镜头节奏自然写出。
+
+    skill_notes: 已渲染好的技能注入块（lib/skill_notes.py 输出，推荐由调用方传入）
+    selections:  {类别名: [技能 key]}，仅当 skill_notes 为空时现渲染
+    camera_motion / expression / shot_size / framing: **已废弃**，仅当 skill_notes 与
+    selections 都为空时按类别 render_mode 反查渲染一次（兼容旧导演台 / 旧客户端）
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
     image = load_image_tensor(image_path) if image_path else None
     skills = _load_h3_skills_template(lang)
-    full_prompt = _build_h3_prompt(skills, prompt, image is not None, duration_seconds, lang,
-                                   camera_motion=camera_motion, expression=expression,
-                                   expression_catalog=expression_catalog,
-                                   shot_size=shot_size, framing=framing)
-    _dbg_note = (_shot_size_note(shot_size, lang=lang) or "").strip() or (_framing_note(framing, lang=lang) or "").strip()
-    if _dbg_note:
-        _head = "\n".join(_dbg_note.splitlines()[:4])
-        print(f"[MiniMaxRefDirector debug] shot/framing note INJECTED ({len(_dbg_note)} chars):\n{_head}", flush=True)
+    notes = str(skill_notes or "").strip()
+    if not notes and isinstance(selections, dict) and selections:
+        notes = render_skill_notes(selections, lang="en" if lang == "en" else "zh")["notes"]
+    full_prompt = _build_h3_prompt(
+        skills, prompt, image is not None, duration_seconds, lang,
+        skill_notes=notes,
+        camera_motion=camera_motion, expression=expression,
+        expression_catalog=expression_catalog,
+        shot_size=shot_size, framing=framing,
+    )
+    if notes:
+        _head = "\n".join(notes.splitlines()[:4])
+        log.info(
+            "[MiniMaxRefDirector] skill_notes injected (%d chars):\n%s", len(notes), _head)
     if vlm_mode == "api":
         generate_text = generate_prompt_with_api(
             image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),

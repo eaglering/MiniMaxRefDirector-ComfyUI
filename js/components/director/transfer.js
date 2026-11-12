@@ -832,10 +832,10 @@ export function TransferPanel({ director }) {
   const [editorOpen, setEditorOpen] = useState(false); // 统一弹窗（Segment Prompt / H3 Prompt / 添加主体）
   const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
-  const [camTick, setCamTick] = useState(0); // 运镜 UI 刷新计数：数据存 seg.cameraMotions / timeline.defaultCameraMotions，修改后需显式 setState 才重渲染
+  const [camTick, setCamTick] = useState(0); // 运镜 UI 刷新计数：数据存 seg.skills["运镜"] / timeline.defaultCameraMotions
   const [customExpr, setCustomExpr] = useState(() => loadCustomExpressions()); // 本地导入的自定义微表情词条（不含内置）
-  const [exprTick, setExprTick] = useState(0); // 微表情 UI 刷新计数：数据存 seg.expressions / customExpr
-  const [dirTick, setDirTick] = useState(0); // 景别/构图 UI 刷新计数：数据存 seg.shotSizes / seg.framings
+  const [exprTick, setExprTick] = useState(0); // 微表情 UI 刷新计数：数据存 seg.skills["微表情"]
+  const [dirTick, setDirTick] = useState(0); // 景别/构图 UI 刷新计数：数据存 seg.skills["景别"] / ["镜头结构"]
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [copiedH3, setCopiedH3] = useState(false); // H3 提示词预览“复制”按钮的已复制反馈
@@ -950,7 +950,7 @@ export function TransferPanel({ director }) {
       director._transferSetSeg = (seg) => {
         setCurSeg(seg);
         setAutoEndOn(!!(seg && seg.autoEndFrame));
-        // 运镜无需单独恢复 state：UI 直接读取 seg.cameraMotions（无则继承
+        // 运镜无需单独恢复 state：UI 直接读取 seg.skills["运镜"]（无则继承
         // timeline.defaultCameraMotions），setCurSeg 已触发该分段的重渲染
         // 切换 segment 时加载该 segment 独立的 H3 prompt JSON（右侧）。
         // 同一 segment 的 UI 刷新（如生成首帧成功后回推）不重置右侧内容。
@@ -1437,6 +1437,30 @@ export function TransferPanel({ director }) {
     }
   }
 
+  // ---- 技能选择：统一存 seg.skills = { 类别名: [key] }（类别动态扩展） ----
+  // 内置四类沿用下列别名；自定义类别（人物主体/打斗/特效等）由 SKILL_GROUPS 渲染。
+  const SKILL_CAT_CAMERA = "运镜";
+  const SKILL_CAT_SHOT = "景别";
+  const SKILL_CAT_FRAMING = "镜头结构";
+  const SKILL_CAT_EXPR = "微表情";
+  const BUILTIN_SKILL_CATS = [SKILL_CAT_CAMERA, SKILL_CAT_SHOT, SKILL_CAT_FRAMING, SKILL_CAT_EXPR];
+
+  function segSkillList(seg, cat) {
+    const v = seg && seg.skills ? seg.skills[cat] : undefined;
+    return Array.isArray(v) ? v : [];
+  }
+
+  function hasSegSkillOverride(seg, cat) {
+    return !!(seg && seg.skills && Object.prototype.hasOwnProperty.call(seg.skills, cat));
+  }
+
+  function setSegSkillList(seg, cat, list) {
+    if (!seg) return;
+    if (!seg.skills || typeof seg.skills !== "object") seg.skills = {};
+    if (Array.isArray(list) && list.length) seg.skills[cat] = list;
+    else delete seg.skills[cat];
+  }
+
   // 时间线级全局默认运镜集合（可为空数组 = 全片运镜自由，由模型决定）
   function globalCameras() {
     return (director && Array.isArray(director.timeline?.defaultCameraMotions))
@@ -1444,138 +1468,80 @@ export function TransferPanel({ director }) {
       : [];
   }
 
-  // 当前分段实际生效的运镜集合：存在显式覆盖数组（可为空 = 本段不指定）则用它，
-  // 否则继承全局默认。空集合 = 运镜自由（后端不注入指令，防回归）。
+  // 当前分段实际生效的运镜集合：seg.skills[运镜] 存在（可为空）则用它，否则继承全局默认
   function effectiveCameras(seg) {
-    if (seg && Array.isArray(seg.cameraMotions)) return seg.cameraMotions;
+    if (hasSegSkillOverride(seg, SKILL_CAT_CAMERA)) return segSkillList(seg, SKILL_CAT_CAMERA);
     return globalCameras();
   }
 
   // 运镜多选 toggle：继承态点击任意类别 → 以「全局集合 ± 该类别」进入本段覆盖
-  // （所见即所得）；覆盖态点击 → 增删该类别，可清空为「本段不指定」。
-  // 改动写入 seg.cameraMotions，随 timeline_data 持久化。
   function toggleCameraMotion(key) {
     const seg = curSeg;
     if (!seg || !director) return;
     let next;
-    if (Array.isArray(seg.cameraMotions)) {
-      next = seg.cameraMotions.includes(key)
-        ? seg.cameraMotions.filter(k => k !== key)
-        : [...seg.cameraMotions, key];
+    if (hasSegSkillOverride(seg, SKILL_CAT_CAMERA)) {
+      const cur = segSkillList(seg, SKILL_CAT_CAMERA);
+      next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
     } else {
       const glob = globalCameras();
       next = glob.includes(key) ? glob.filter(k => k !== key) : [...glob, key];
     }
-    seg.cameraMotions = next;
+    setSegSkillList(seg, SKILL_CAT_CAMERA, next);
     setCamTick(n => n + 1);
     director.commitChanges();
   }
 
-  // 清除本段自定义运镜 → 删除覆盖字段，回到继承全局默认
+  // 清除本段自定义运镜 → 删除覆盖，回到继承全局默认
   function resetCameraMotion() {
     const seg = curSeg;
     if (!seg || !director) return;
-    delete seg.cameraMotions;
+    setSegSkillList(seg, SKILL_CAT_CAMERA, []);
     setCamTick(n => n + 1);
     director.commitChanges();
   }
 
-  // 当前分段实际生效的微表情集合：仅段级选择（无全局继承）；空集合 = 表演自然自由
-  // （后端不注入指令，防回归）。
-  function effectiveExpressions(seg) {
-    return (seg && Array.isArray(seg.expressions)) ? seg.expressions : [];
-  }
+  // 微表情 / 景别 / 镜头结构 / 自定义类别：仅段级选择，空集合 = 该类自由
+  function effectiveExpressions(seg) { return segSkillList(seg, SKILL_CAT_EXPR); }
+  function effectiveShotSizes(seg) { return segSkillList(seg, SKILL_CAT_SHOT); }
+  function effectiveFramings(seg) { return segSkillList(seg, SKILL_CAT_FRAMING); }
 
-  // 微表情多选 toggle：点击即在本段增删该表演提示，改动写入 seg.expressions，
-  // 随 timeline_data 持久化；可清空为「本段表演自由」。
-  function toggleExpression(key) {
+  function toggleSegSkill(cat, key) {
     const seg = curSeg;
     if (!seg || !director) return;
-    let next;
-    if (Array.isArray(seg.expressions)) {
-      next = seg.expressions.includes(key)
-        ? seg.expressions.filter(k => k !== key)
-        : [...seg.expressions, key];
-    } else {
-      next = [key];
+    const cur = segSkillList(seg, cat);
+    const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
+    setSegSkillList(seg, cat, next);
+    if (cat === SKILL_CAT_EXPR) setExprTick(n => n + 1);
+    else setDirTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  function resetSegSkill(cat) {
+    const seg = curSeg;
+    if (!seg || !director) return;
+    setSegSkillList(seg, cat, []);
+    if (cat === SKILL_CAT_EXPR) setExprTick(n => n + 1);
+    else setDirTick(n => n + 1);
+    director.commitChanges();
+  }
+
+  function toggleExpression(key) { toggleSegSkill(SKILL_CAT_EXPR, key); }
+  function resetExpressions() { resetSegSkill(SKILL_CAT_EXPR); }
+  function toggleShotSize(key) { toggleSegSkill(SKILL_CAT_SHOT, key); }
+  function resetShotSizes() { resetSegSkill(SKILL_CAT_SHOT); }
+  function toggleFraming(key) { toggleSegSkill(SKILL_CAT_FRAMING, key); }
+  function resetFramings() { resetSegSkill(SKILL_CAT_FRAMING); }
+
+  // 供旧 UI 与 H3 请求使用：把 seg.skills 规范成 {类别名: [key]}
+  function segSelections(seg) {
+    const out = {};
+    const skills = seg && seg.skills;
+    if (!skills || typeof skills !== "object") return out;
+    for (const [cat, keys] of Object.entries(skills)) {
+      const list = Array.isArray(keys) ? keys.filter(k => typeof k === "string" && k) : [];
+      if (list.length) out[cat] = list;
     }
-    seg.expressions = next;
-    setExprTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 清除本段微表情选择 → 删除字段，回到表演自由
-  function resetExpressions() {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    delete seg.expressions;
-    setExprTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 当前分段实际生效的景别集合：仅段级选择（无全局继承）；空集合 = 景别自由
-  // （后端不注入指令，防回归）。
-  function effectiveShotSizes(seg) {
-    return (seg && Array.isArray(seg.shotSizes)) ? seg.shotSizes : [];
-  }
-
-  // 景别多选 toggle：点击即在本段增删该档位，改动写入 seg.shotSizes，
-  // 随 timeline_data 持久化；可清空为「本段景别自由」。
-  function toggleShotSize(key) {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    let next;
-    if (Array.isArray(seg.shotSizes)) {
-      next = seg.shotSizes.includes(key)
-        ? seg.shotSizes.filter(k => k !== key)
-        : [...seg.shotSizes, key];
-    } else {
-      next = [key];
-    }
-    seg.shotSizes = next;
-    setDirTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 清除本段景别选择 → 删除字段，回到景别自由
-  function resetShotSizes() {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    delete seg.shotSizes;
-    setDirTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 当前分段实际生效的构图关系集合：仅段级选择（无全局继承）；空集合 = 构图自由
-  function effectiveFramings(seg) {
-    return (seg && Array.isArray(seg.framings)) ? seg.framings : [];
-  }
-
-  // 构图关系多选 toggle：点击即在本段增删该关系，改动写入 seg.framings，
-  // 随 timeline_data 持久化；可清空为「本段构图自由」。
-  function toggleFraming(key) {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    let next;
-    if (Array.isArray(seg.framings)) {
-      next = seg.framings.includes(key)
-        ? seg.framings.filter(k => k !== key)
-        : [...seg.framings, key];
-    } else {
-      next = [key];
-    }
-    seg.framings = next;
-    setDirTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 清除本段构图选择 → 删除字段，回到构图自由
-  function resetFramings() {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    delete seg.framings;
-    setDirTick(n => n + 1);
-    director.commitChanges();
+    return out;
   }
 
   // 打开微表情词库导入弹窗：先展示 JSON 格式说明与案例，再引导选择本地文件导入。
@@ -1601,15 +1567,16 @@ export function TransferPanel({ director }) {
     };
   }, []);
 
-  // 「添加技能」弹窗（按类别动态字段 → 入库 SQLite；与 lib/skill_db.py 规则一致）
+  // 「添加技能」弹窗（按类别注入方式 render_mode 动态字段；与后端 _RENDER_MODE_RULES 一致）
   const skillAddCat = () =>
     (skillDictData.categories || []).find((c) => String(c.id) === String(skillAdd.categoryId));
   const skillAddRules = () => {
-    const name = (skillAddCat() || {}).name || "";
+    const mode = (skillAddCat() || {}).renderMode || "descriptive";
     return {
-      needNameEn: name === "景别" || name === "镜头结构",
-      needExamples: name === "运镜" || name === "微表情",
-      showGuide: name === "运镜",
+      needNameEn: mode === "term",
+      needExamples: mode === "camera" || mode === "example",
+      showGuide: mode === "camera" || mode === "descriptive",
+      mode,
     };
   };
 
@@ -1636,8 +1603,8 @@ export function TransferPanel({ director }) {
     }
     if (rules.needExamples && !f.examples.trim()) {
       setSkillAddErr(
-        (skillAddCat() || {}).name === "微表情"
-          ? "该类别必须填写中文示例（分号分隔）"
+        rules.mode === "example"
+          ? "该类别必须填写示例（分号分隔）"
           : "该类别必须填写英文触发短语（分号分隔）"
       );
       return;
@@ -1742,13 +1709,9 @@ export function TransferPanel({ director }) {
         image_path: firstFramePath(),
         duration_seconds: durSecs > 0 ? durSecs : 0,
         lang,
-        camera_motion: effectiveCameras(targetSeg),
-        // 微表情（表演提示）：段级多选 key 数组；自定义词条随 expression_catalog 供后端识别
-        expression: effectiveExpressions(targetSeg),
-        expression_catalog: buildExprCatalog(customExpr).filter(it => !baseExprKeys().has(it.key)),
-        // 景别 / 构图关系（镜头语言）：段级多选 key 数组；空集合不注入，由模型自由决定
-        shot_size: effectiveShotSizes(targetSeg),
-        framing: effectiveFramings(targetSeg),
+        // 技能注入：统一 {类别名: [key]}，由后端 lib/skill_notes.py 渲染（与 SPA 一致）；
+        // 空字典 = 本段不指定技能，后端不注入任何指令
+        selections: segSelections(targetSeg),
       });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",
@@ -2907,7 +2870,7 @@ export function TransferPanel({ director }) {
                后续新增功能（转场、节奏、表演参考等）直接在该列追加分组，不挤占右侧两列提示词编辑区。 */
             curSeg && curSeg.type !== "audio"
               ? (() => {
-                  const hasOverride = Array.isArray(curSeg.cameraMotions);
+                  const hasOverride = hasSegSkillOverride(curSeg, SKILL_CAT_CAMERA);
                   const effCams = effectiveCameras(curSeg);
                   const nChips = effCams.length;
                   const effExpr = effectiveExpressions(curSeg);
@@ -2928,6 +2891,12 @@ export function TransferPanel({ director }) {
                   const shotModeChip = effShot.length === 0
                     ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#12312c", border: "1px solid #2f6a5e", borderRadius: "3px", color: "#7fd6c3", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("No shot size selected; the model freely writes the shot scale for every shot")}>${t("None (model decides freely)")}</span>`
                     : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#1b463e", border: "1px solid #3f9c8a", borderRadius: "3px", color: "#8fe0d0", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("This segment has its own shot-size selection; click × to clear it and leave the framing to the model")}>${t("Segment custom")} (${effShot.length})<span title=${t("Reset shot-size selection")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#8fe0d0" }} onClick=${(e) => { e.stopPropagation(); resetShotSizes(); }}>×</span></span>`;
+                  // 自定义类别（人物主体 / 打斗 / 特效…）：由技能词典动态渲染，
+                  // 选择同样写入 seg.skills[类别名]
+                  const extraSkillGroups = (skillDictData?.categories || [])
+                    .filter((c) => !BUILTIN_SKILL_CATS.includes(c.name));
+                  const extraSkillItems = (catId) =>
+                    (skillDictData?.skills || []).filter((s) => s.categoryId === catId);
                   const framModeChip = effFram.length === 0
                     ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#33290f", border: "1px solid #6e5a20", borderRadius: "3px", color: "#d9c27f", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("No framing selected; the model freely writes the composition for every shot")}>${t("None (model decides freely)")}</span>`
                     : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#4a3c14", border: "1px solid #a8893f", borderRadius: "3px", color: "#ecd9a0", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("This segment has its own framing selection; click × to clear it and leave the composition to the model")}>${t("Segment custom")} (${effFram.length})<span title=${t("Reset framing selection")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#ecd9a0" }} onClick=${(e) => { e.stopPropagation(); resetFramings(); }}>×</span></span>`;
@@ -2992,6 +2961,28 @@ export function TransferPanel({ director }) {
                           })}
                         </div>
                       </div>
+                      ${extraSkillGroups.map((cat) => {
+                        const items = extraSkillItems(cat.id);
+                        const chosen = segSkillList(curSeg, cat.name);
+                        if (!items.length) return null;
+                        return html`
+                          <hr class="mrd-pr-hr" />
+                          <div class="mrd-pr-ctl-group">
+                            <div class="mrd-pr-ctl-head">
+                              <div class="mrd-pr-ctl-name">${t(cat.name)}</div>
+                              ${chosen.length
+                                ? html`<span class="mrd-pr-ctl-import" title=${t("Clear this category")} onClick=${(e) => { e.stopPropagation(); resetSegSkill(cat.name); }}>×</span>`
+                                : null}
+                            </div>
+                            <div class="mrd-pr-ctl-items">
+                              ${items.map((sk) => {
+                                const active = chosen.includes(sk.key);
+                                return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: active ? "#2f4a7a" : "#23262e", border: "1px solid " + (active ? "#6c9bff" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#a9c1e8", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${sk.desc || sk.name} onClick=${() => toggleSegSkill(cat.name, sk.key)}>${t(sk.name)}</span>`;
+                              })}
+                            </div>
+                          </div>
+                        `;
+                      })}
                     </div>
                   `;
                 })()

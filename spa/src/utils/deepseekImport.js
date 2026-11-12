@@ -1,13 +1,14 @@
-// ===== DeepSeek 分镜导入流水线（手动逐步模式）=====
+// ===== 网页分镜导入流水线（手动逐步模式；站点无关）=====
 // 不再提供一键全自动导入：每个步骤（故事大纲 → 分镜设计 → 主体设计 → 首帧图
 // 提示词 → 音频设计）独立「执行」「同步」，由用户逐步确认后再写入导演台。
-// - 「执行」= 在 DeepSeek 会话内生成该步骤结果，仅缓存到 ImportState；
+// - 「执行」= 在桥接站点的网页会话内生成该步骤结果，仅缓存到 ImportState；
 // - 「同步」= 由调用方（DeepseekImportDialog）把缓存结果写入 workspace。
 // 分镜设计不再注入任何技能清单（skill_keys 已废弃）；H3 转换不属于导入流程，
 // 由用户在分镜属性里按需点「转H3提示词」。
-// 会话 id 跨步骤复用：故事大纲在用户选定会话内提取，其余步骤在分镜设计新建的
-// 会话内追问；是否删除本次新建会话改为「清理会话」独立操作（默认不自动删除）。
-// 全部经浏览器扩展桥接 chat.deepseek.com，不使用 llama-cpp。
+// 会话 id 跨步骤复用：故事大纲在用户选定会话内提取（豆包/千问可手动填会话
+// 链接/ID 或留空自动新建），其余步骤在分镜设计新建的会话内追问；是否删除本次
+// 新建会话改为「清理会话」独立操作（仅 DeepSeek 支持，默认不自动删除）。
+// 全部经浏览器扩展桥接（deepseek / doubao / qianwen），不使用 llama-cpp。
 //
 // skills 词库为本项目 resources/skills（后端 /spa/skill_library）。
 
@@ -104,13 +105,13 @@ async function parseJsonOrRetry(text, { reask, onLog, what = "DeepSeek" }) {
 }
 
 // 单次会话内生成并解析 JSON（失败自动追问一次）
-async function genJsonInSession(extId, chatId, prompt, what = "DeepSeek", onLog = null) {
-  const text = await deepseekCompleteInSession(extId, { prompt, chatId, expectJson: true });
+async function genJsonInSession(extId, chatId, prompt, what = "网页会话", onLog = null, site = "deepseek") {
+  const text = await deepseekCompleteInSession(extId, { prompt, chatId, expectJson: true, site });
   return parseJsonOrRetry(text, {
     what,
     onLog,
     reask: (hint) =>
-      deepseekCompleteInSession(extId, { prompt: `${prompt}\n\n${hint}`, chatId, expectJson: true }),
+      deepseekCompleteInSession(extId, { prompt: `${prompt}\n\n${hint}`, chatId, expectJson: true, site }),
   });
 }
 
@@ -118,7 +119,8 @@ async function genJsonInSession(extId, chatId, prompt, what = "DeepSeek", onLog 
  * 创建导入步骤共享状态。
  * @param {object} opts
  *   - extensionId: string          桥接扩展 ID
- *   - sessionId: string            用户选定的 DeepSeek 会话 id（故事大纲提取用）
+ *   - site: string                 桥接站点（deepseek / doubao / qwen）
+ *   - sessionId: string            用户选定的会话 id（故事大纲提取用；空 = 自动新建）
  *   - timelineDigest: string       当前时间线摘要
  *   - frameRate: number            帧率
  *   - existingSubjects: array      现有主体
@@ -126,6 +128,7 @@ async function genJsonInSession(extId, chatId, prompt, what = "DeepSeek", onLog 
 export function createImportState(opts = {}) {
   return {
     extId: String(opts.extensionId || "").trim(),
+    site: String(opts.site || "deepseek"),
     sessionId: String(opts.sessionId || ""),
     timelineDigest: opts.timelineDigest || "（当前时间线为空）",
     frameRate: opts.frameRate || 24,
@@ -141,22 +144,50 @@ export function createImportState(opts = {}) {
 
 /**
  * 步骤 1：故事大纲 —— 在用户选定会话内提取（利用会话完整上下文）。
+ * 未选定会话（豆包/千问手动模式可留空）时自动新建会话并记录到 createdSessions。
  * 结果仅缓存到 state.outline，不写入导演台。
  */
 export async function runOutlineStep(state, { token = null, onLog = () => {} } = {}) {
   if (!state.extId) throw new Error("未配置桥接扩展 ID（全局参数 → LLM 设置）");
   checkCancelled(token);
-  onLog("info", "在所选会话内提取故事大纲（DeepSeek 生成通常 30-90s）…");
+  onLog("info", "在所选会话内提取故事大纲（网页生成通常 30-90s）…");
   const storyTpl = await loadSkill("story-design");
   const outlinePrompt = fillTemplate(storyTpl, {
     input:
       "（提取指令）请通读本会话上方的全部对话内容，按你的任务要求提取用户想拍的故事。" +
       "以用户表达的内容为准；对话中未被用户采纳的方案不要写入。",
   });
+  if (!state.sessionId) {
+    // 手动模式未填会话：自动新建大纲会话（后续步骤在同会话/分镜会话内追问）
+    const resp = await deepseekCompleteNewSession(state.extId, {
+      prompt: outlinePrompt,
+      expectJson: true,
+      site: state.site,
+    });
+    if (!resp.chatId) {
+      throw new Error("大纲已生成，但未能从页面取得新会话 id（无法继续后续步骤，请重试）");
+    }
+    state.sessionId = resp.chatId;
+    state.createdSessions.push(resp.chatId);
+    onLog("info", `已自动新建大纲会话 ${resp.chatId.slice(0, 8)}…`);
+    const outline = await parseJsonOrRetry(resp.text, {
+      what: "故事大纲",
+      onLog,
+      reask: (hint) =>
+        deepseekCompleteInSession(state.extId, {
+          prompt: `${outlinePrompt}\n\n${hint}`,
+          chatId: state.sessionId,
+          expectJson: true,
+          site: state.site,
+        }),
+    });
+    return finishOutline(state, outline, onLog);
+  }
   const outlineText = await deepseekCompleteInSession(state.extId, {
     prompt: outlinePrompt,
     chatId: state.sessionId,
     expectJson: true,
+    site: state.site,
   });
   const outline = await parseJsonOrRetry(outlineText, {
     what: "故事大纲",
@@ -166,8 +197,13 @@ export async function runOutlineStep(state, { token = null, onLog = () => {} } =
         prompt: `${outlinePrompt}\n\n${hint}`,
         chatId: state.sessionId,
         expectJson: true,
+        site: state.site,
       }),
   });
+  return finishOutline(state, outline, onLog);
+}
+
+function finishOutline(state, outline, onLog) {
   if (!outline || !outline.story) throw new Error("故事大纲提取失败：返回 JSON 缺少 story 字段");
   state.outline = outline;
   onLog(
@@ -185,14 +221,18 @@ export async function runStoryboardStep(state, { token = null, onLog = () => {} 
   if (!state.extId) throw new Error("未配置桥接扩展 ID（全局参数 → LLM 设置）");
   if (!state.outline) throw new Error("请先执行「故事大纲」步骤");
   checkCancelled(token);
-  onLog("info", "新建 DeepSeek 会话并进行分镜设计（storyboard-design，通常 40-120s）…");
+  onLog("info", "新建会话并进行分镜设计（storyboard-design，通常 40-120s）…");
   const sbTpl = await loadSkill("storyboard-design");
   const sbPrompt = fillTemplate(sbTpl, {
     input: storyDigest(state.outline),
     timeline_digest: state.timelineDigest,
     frame_rate: state.frameRate,
   });
-  const sbResp = await deepseekCompleteNewSession(state.extId, { prompt: sbPrompt, expectJson: true });
+  const sbResp = await deepseekCompleteNewSession(state.extId, {
+    prompt: sbPrompt,
+    expectJson: true,
+    site: state.site,
+  });
   const chatId = sbResp.chatId;
   if (!chatId) {
     throw new Error("分镜设计已完成，但未能从页面取得新会话 id（无法继续后续步骤，请重试）");
@@ -210,6 +250,7 @@ export async function runStoryboardStep(state, { token = null, onLog = () => {} 
         prompt: `${sbPrompt}\n\n${hint}`,
         chatId,
         expectJson: true,
+        site: state.site,
       }),
   });
   const shots = Array.isArray(sb.segments) && sb.segments.length
@@ -238,7 +279,7 @@ export async function runSubjectsStep(state, { token = null, onLog = () => {} } 
     characters: existingDigest,
     timeline_digest: shotListDigest(state.shots),
   });
-  const charRes = await genJsonInSession(state.extId, chatId, charPrompt, "主体设计", onLog);
+  const charRes = await genJsonInSession(state.extId, chatId, charPrompt, "主体设计", onLog, state.site);
   state.characters = Array.isArray(charRes.subjects) ? charRes.subjects : [];
   onLog("success", `主体设计完成：${state.characters.length} 个主体`);
   return state.characters;
@@ -266,7 +307,7 @@ export async function runFirstframeStep(state, { token = null, onLog = () => {} 
       .map(({ i, s }) => `镜头 ${i + 1}：${(s.prompt || "").slice(0, 160)}`)
       .join("\n"),
   });
-  const ff = await genJsonInSession(state.extId, chatId, ffPrompt, "首帧图提示词", onLog);
+  const ff = await genJsonInSession(state.extId, chatId, ffPrompt, "首帧图提示词", onLog, state.site);
   const fills = Array.isArray(ff.segments) ? ff.segments : [];
   const updated = [];
   for (const f of fills) {
@@ -299,7 +340,7 @@ export async function runAudioStep(state, { token = null, onLog = () => {} } = {
     input: storyDigest(state.outline),
     timeline_digest: shotListDigest(state.shots),
   });
-  const audioRes = await genJsonInSession(state.extId, chatId, audioPrompt, "音频设计", onLog);
+  const audioRes = await genJsonInSession(state.extId, chatId, audioPrompt, "音频设计", onLog, state.site);
   state.audios = Array.isArray(audioRes.subjects) ? audioRes.subjects : [];
   onLog("success", `音频设计完成：${state.audios.length} 条`);
   return state.audios;
@@ -348,13 +389,13 @@ export async function cleanupImportSessions(state, onLog = () => {}) {
   let removed = 0;
   for (const cid of state.createdSessions) {
     try {
-      await deepseekDeleteSession(state.extId, cid);
+      await deepseekDeleteSession(state.extId, cid, state.site);
       removed += 1;
     } catch (e) {
       onLog("warn", `删除会话 ${String(cid).slice(0, 8)}… 失败：${e.message || e}`);
     }
   }
   state.createdSessions = state.createdSessions.slice(removed);
-  if (removed) onLog("success", `已清理本次新建的 ${removed} 个 DeepSeek 会话`);
+  if (removed) onLog("success", `已清理本次新建的 ${removed} 个会话`);
   return removed;
 }

@@ -22,7 +22,7 @@
   const HOST = location.hostname;
   const SITES = HOST.indexOf("doubao.com") >= 0
     ? { id: "doubao", match: (u) => u.indexOf("samantha/chat") >= 0, parse: parseGenericLine }
-    : (HOST.indexOf("tongyi.aliyun.com") >= 0 || HOST.indexOf("qwen.ai") >= 0)
+    : (HOST.indexOf("qianwen.com") >= 0 || HOST.indexOf("tongyi.aliyun.com") >= 0 || HOST.indexOf("qwen.ai") >= 0)
       ? { id: "qwen", match: (u) => u.indexOf("/dialog/conversation") >= 0 || u.indexOf("/conversation") >= 0, parse: parseGenericLine }
       : { id: "deepseek", match: (u) => u.indexOf("/api/v0/chat/completion") >= 0, parse: parseDeepseekLine };
 

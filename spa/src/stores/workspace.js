@@ -21,6 +21,41 @@ function defaultTimeline() {
   };
 }
 
+// 旧分镜字段 → 通用技能选择（seg.skills = { 类别名: [key] }）
+// 自定义类别历史上没有对应字段，因此迁移只涉及四个内置类别名。
+const LEGACY_SKILL_FIELD = {
+  cameraMotions: "运镜",
+  shotSizes: "景别",
+  framings: "镜头结构",
+  expressions: "微表情",
+};
+
+function migrateSegmentSkills(rest) {
+  const skills = (rest.skills && typeof rest.skills === "object" && !Array.isArray(rest.skills))
+    ? { ...rest.skills }
+    : {};
+  const push = (cat, keys) => {
+    const list = Array.isArray(keys) ? keys.filter((k) => typeof k === "string" && k.trim()) : [];
+    if (!list.length) return;
+    skills[cat] = Array.from(new Set([...(skills[cat] || []), ...list]));
+  };
+  // 旧的单值字段先并入（cameraMotion / expression)
+  if (typeof rest.cameraMotion === "string" && rest.cameraMotion && rest.cameraMotion !== "auto") {
+    push("运镜", [rest.cameraMotion]);
+  }
+  if (typeof rest.expression === "string" && rest.expression.trim() && rest.expression !== "auto") {
+    push("微表情", [rest.expression.trim()]);
+  }
+  for (const [field, cat] of Object.entries(LEGACY_SKILL_FIELD)) {
+    push(cat, rest[field]);
+    delete rest[field];
+  }
+  delete rest.cameraMotion;
+  delete rest.expression;
+  rest.skills = skills;
+  return rest;
+}
+
 function parseInitial(jsonStr) {
   const parsed = defaultTimeline();
   try {
@@ -36,17 +71,7 @@ function parseInitial(jsonStr) {
       if (Array.isArray(p.segments)) {
         parsed.segments = p.segments.map((s) => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s || {};
-          if (rest.cameraMotions === undefined && typeof rest.cameraMotion === "string" && rest.cameraMotion && rest.cameraMotion !== "auto") {
-            rest.cameraMotions = [rest.cameraMotion];
-          }
-          delete rest.cameraMotion;
-          if (Array.isArray(rest.expressions)) {
-            rest.expressions = rest.expressions.filter((k) => typeof k === "string" && k.trim());
-          } else if (typeof rest.expression === "string" && rest.expression.trim() && rest.expression !== "auto") {
-            rest.expressions = [rest.expression.trim()];
-          }
-          delete rest.expression;
-          return rest;
+          return migrateSegmentSkills(rest);
         });
       }
       if (Array.isArray(p.audioSegments)) {
@@ -184,14 +209,6 @@ export const useWorkspace = defineStore("workspace", () => {
   // ---- 镜头技能词典（SQLite：/spa/skill_dict）----
   const skillDict = reactive({ loaded: false, loading: false, categories: [], skills: [] });
 
-  // 内置类别名 → segment 字段；新增的自定义类别没有对应字段（field=""）
-  const CATEGORY_FIELD = {
-    "运镜": "cameraMotions",
-    "景别": "shotSizes",
-    "镜头结构": "framings",
-    "微表情": "expressions",
-  };
-
   async function loadSkillDict(force = false) {
     if (skillDict.loading || (skillDict.loaded && !force)) return;
     skillDict.loading = true;
@@ -209,12 +226,15 @@ export const useWorkspace = defineStore("workspace", () => {
     }
   }
 
-  // 按类别分组的技能组：{ id, label, field, items: [{key,label,desc,example,keyword,...}] }
+  // 按类别分组的技能组：{ id, label, categoryName, renderMode, protectKeywords, items }
+  // 选择统一写入 seg.skills[categoryName]（类别名 UNIQUE，可无限扩展）
   const skillGroups = computed(() =>
     skillDict.categories.map((c) => ({
-      id: CATEGORY_FIELD[c.name] || `cat_${c.id}`,
+      id: `cat_${c.id}`,
       label: c.name,
-      field: CATEGORY_FIELD[c.name] || "",
+      categoryName: c.name,
+      renderMode: c.renderMode || "descriptive",
+      protectKeywords: !!c.protectKeywords,
       categoryId: c.id,
       description: c.description,
       items: skillDict.skills
@@ -226,6 +246,18 @@ export const useWorkspace = defineStore("workspace", () => {
         })),
     }))
   );
+
+  // 分镜技能选择（只保留有选中项的类别，避免 timeline 里存一堆空数组）
+  function segmentSelections(seg) {
+    const out = {};
+    const skills = seg?.skills;
+    if (!skills || typeof skills !== "object") return out;
+    for (const [cat, keys] of Object.entries(skills)) {
+      const list = Array.isArray(keys) ? keys.filter((k) => typeof k === "string" && k) : [];
+      if (list.length) out[cat] = list;
+    }
+    return out;
+  }
 
   // ---- 加载 ----
   async function load() {
@@ -264,6 +296,8 @@ export const useWorkspace = defineStore("workspace", () => {
     }
     if (state.llm) Object.assign(llm, state.llm);
     if (!llm.mode) llm.mode = "deepseek-proxy";
+    // 兼容旧配置值：qwen-proxy → qianwen-proxy（桥接仍支持两种写法）
+    if (llm.mode === "qwen-proxy") llm.mode = "qianwen-proxy";
     updatedAt.value = state.updated_at || 0;
   }
 
@@ -343,7 +377,7 @@ export const useWorkspace = defineStore("workspace", () => {
   return {
     nodeId, nodeTitle, loaded, loadError, saveStatus, lastSavedAt, updatedAt,
     timeline, widgets, globalPrompt, subjects, subjectNodeId, llm, customSkills,
-    skillDict, skillGroups, loadSkillDict,
+    skillDict, skillGroups, loadSkillDict, segmentSelections,
     load, reload, markDirty, saveNow, buildState,
   };
 });

@@ -317,18 +317,32 @@ function parseInitial(jsonStr) {
       if (Array.isArray(p.segments)) {
         parsed.segments = p.segments.map(s => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
-          // 迁移旧版单值运镜字段（cameraMotion）→ 多选数组（cameraMotions），并清理残留
-          if (rest.cameraMotions === undefined && typeof rest.cameraMotion === "string" && rest.cameraMotion && rest.cameraMotion !== "auto") {
-            rest.cameraMotions = [rest.cameraMotion];
+          // 技能选择迁移：旧四个固定字段（cameraMotions / shotSizes / framings / expressions）
+          // → 通用 map seg.skills = { 类别名: [key] }，迁移后删除旧键
+          const skills = (rest.skills && typeof rest.skills === "object" && !Array.isArray(rest.skills))
+            ? { ...rest.skills } : {};
+          const pushSkill = (cat, keys) => {
+            const list = Array.isArray(keys) ? keys.filter(k => typeof k === "string" && k.trim()) : [];
+            if (!list.length) return;
+            skills[cat] = Array.from(new Set([...(skills[cat] || []), ...list]));
+          };
+          if (typeof rest.cameraMotion === "string" && rest.cameraMotion && rest.cameraMotion !== "auto") {
+            pushSkill("运镜", [rest.cameraMotion]);
           }
+          if (typeof rest.expression === "string" && rest.expression.trim() && rest.expression !== "auto") {
+            pushSkill("微表情", [rest.expression.trim()]);
+          }
+          pushSkill("运镜", rest.cameraMotions);
+          pushSkill("景别", rest.shotSizes);
+          pushSkill("镜头结构", rest.framings);
+          pushSkill("微表情", rest.expressions);
+          delete rest.cameraMotions;
+          delete rest.shotSizes;
+          delete rest.framings;
+          delete rest.expressions;
           delete rest.cameraMotion;
-          // 段级微表情多选（表演提示）：归一化为字符串 key 数组；兼容旧单值 expression → 数组
-          if (Array.isArray(rest.expressions)) {
-            rest.expressions = rest.expressions.filter(k => typeof k === "string" && k.trim());
-          } else if (typeof rest.expression === "string" && rest.expression.trim() && rest.expression !== "auto") {
-            rest.expressions = [rest.expression.trim()];
-          }
           delete rest.expression;
+          rest.skills = skills;
           return rest;
         });
       }
@@ -373,6 +387,10 @@ const SHOT_SIZES = [];
 const FRAMINGS = [];
 const MICRO_EXPRESSIONS = [];
 
+// 动态类别容器：由 loadSkillDict 按数据库类别重建（含自定义类别 / renderMode /
+// 关键词保护开关），旧 UI 的四段固定胶囊保持可用，新增类别走 SKILL_GROUPS 渲染。
+const SKILL_GROUPS = [];
+
 // --- 镜头技能词典（SQLite /spa/skill_dict）加载 ---
 // 替换式刷新：清空四个容器后按数据库内容重建（数据库是唯一数据源）。
 // title 用技能描述 → 胶囊悬停即显示描述；微表情条目 category 取自 groupName
@@ -397,12 +415,26 @@ async function loadSkillDict() {
     SHOT_SIZES.length = 0;
     FRAMINGS.length = 0;
     MICRO_EXPRESSIONS.length = 0;
+    SKILL_GROUPS.length = 0;
+    for (const c of data.categories || []) {
+      SKILL_GROUPS.push({
+        id: `cat_${c.id}`,
+        name: c.name,
+        renderMode: c.renderMode || "descriptive",
+        protectKeywords: !!c.protectKeywords,
+        items: [],
+      });
+    }
+    const groupByName = {};
+    for (const g of SKILL_GROUPS) groupByName[g.name] = g;
     for (const s of data.skills || []) {
-      const arr = catArr[catName[s.categoryId]];
-      if (!arr) continue;
+      const cat = catName[s.categoryId] || "";
       const entry = { key: s.key, label: s.name, title: s.desc || s.name };
-      if (arr === MICRO_EXPRESSIONS) entry.category = s.groupName || "body";
-      arr.push(entry);
+      if (cat === "微表情") entry.category = s.groupName || "body";
+      const group = groupByName[cat];
+      if (group) group.items.push(entry);
+      const arr = catArr[cat];
+      if (arr) arr.push(entry);
     }
     skillDictData = { categories: data.categories || [], skills: data.skills || [] };
     return skillDictData;
@@ -412,4 +444,4 @@ async function loadSkillDict() {
   }
 }
 
-export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl, CAMERA_MOTIONS, SHOT_SIZES, FRAMINGS, MICRO_EXPRESSIONS, loadSkillDict };
+export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl, CAMERA_MOTIONS, SHOT_SIZES, FRAMINGS, MICRO_EXPRESSIONS, SKILL_GROUPS, loadSkillDict };

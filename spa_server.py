@@ -4,6 +4,8 @@
 - GET  /spa/state         读取某导演节点暂存状态
 - POST /spa/save          SPA 保存：落盘 + send_sync 通知 ComfyUI 页面回写 widget
 - GET/POST /spa/skills    自定义 skill 词条读写
+- GET  /spa/skill_dict    技能词典（类别含 render_mode / protect_keywords）
+- POST /spa/skill_notes   技能选择 → skill_notes 渲染（服务端与桥接共用）
 - GET  /spa/llm_files     models/llm 下 GGUF / mmproj 文件列表
 - GET  /spa/records       视频生成记录列表
 - POST /spa/records/delete 删除记录
@@ -23,6 +25,7 @@ from aiohttp import web
 
 from .server import API_PREFIX, _routes
 from .lib import records as records_lib
+from .lib import skill_notes
 from .lib import spa_store
 from .lib import skill_db
 from .lib.llm import list_llm_gguf_files
@@ -224,8 +227,8 @@ def _skill_dict_mutation(handler):
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/add")
 async def spa_skill_add(request: web.Request) -> web.Response:
-    # 新增技能：类别 / 名称必填；运镜需英文触发短语、景别与镜头结构需英文写法、
-    # 微表情需中文示例（按类别校验，见 lib/skill_db.py _CATEGORY_RULES）
+    # 新增技能：类别 / 名称必填；字段要求按类别注入方式 render_mode 校验
+    # （见 lib/skill_db.py _RENDER_MODE_RULES）
     return _skill_dict_mutation(lambda d: skill_db.add_skill(d))(request)
 
 
@@ -241,7 +244,34 @@ async def spa_skill_delete(request: web.Request) -> web.Response:
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/category/add")
 async def spa_skill_category_add(request: web.Request) -> web.Response:
+    # {name, renderMode: camera|term|example|descriptive|block, protectKeywords, description?, sort?}
     return _skill_dict_mutation(lambda d: skill_db.add_category(d))(request)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_dict/category/update")
+async def spa_skill_category_update(request: web.Request) -> web.Response:
+    # {id, name?, description?, renderMode?, protectKeywords?, sort?}
+    return _skill_dict_mutation(lambda d: skill_db.update_category(d))(request)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_notes")
+async def spa_skill_notes(request: web.Request) -> web.Response:
+    """把分镜选择的技能渲染成 skill_notes（服务端与三种网页桥接共用同一实现）。
+
+    body: {selections: {类别名: [技能 key]}, lang?: "zh"|"en"}
+    返回 {success, notes, protected, glossary, warnings}
+    """
+    try:
+        data = await _read_json_body(request)
+        selections = data.get("selections")
+        if isinstance(data.get("skills"), dict) and selections is None:
+            selections = data.get("skills")
+        lang = str(data.get("lang") or "zh").lower()
+        result = skill_notes.render_skill_notes(selections or {}, lang="en" if lang == "en" else "zh")
+        return web.json_response({"success": True, **result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/batch_add")

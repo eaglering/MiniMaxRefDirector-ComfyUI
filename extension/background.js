@@ -37,21 +37,21 @@ const SITES = {
     id: "doubao",
     name: "豆包",
     host: "www.doubao.com",
-    home: "https://www.doubao.com/",
+    home: "https://www.doubao.com/chat/",
     pattern: "https://www.doubao.com/*",
-    homePath: "/",
+    homePath: "/chat",
     chatUrl: (id) => `https://www.doubao.com/chat/${id}`,
     chatPath: (id) => `/chat/${id}`,
   },
   qwen: {
     id: "qwen",
     name: "千问",
-    host: "tongyi.aliyun.com",
-    home: "https://tongyi.aliyun.com/",
-    pattern: "https://tongyi.aliyun.com/*",
-    homePath: "/",
-    chatUrl: (id) => `https://tongyi.aliyun.com/qianwen/chat/${id}`,
-    chatPath: (id) => `/qianwen/chat/${id}`,
+    host: "www.qianwen.com",
+    home: "https://www.qianwen.com/chat/",
+    pattern: "https://www.qianwen.com/*",
+    homePath: "/chat",
+    chatUrl: (id) => `https://www.qianwen.com/chat/${id}`,
+    chatPath: (id) => `/chat/${id}`,
   },
 };
 
@@ -201,6 +201,9 @@ async function ensureAliveTab(tab) {
 // chrome.tabs.update 返回时旧文档仍在运行，此时填充会写到即将卸载的旧页面上，
 // 导航完成后文本被一并丢弃（日志表现为 pathChanged=true 但 sse=false）。
 async function waitForPath(tabId, wantPath, rounds = 90) {
+  // 归一化末尾斜杠：豆包/千问首页为 /chat/，站点可能重定向为 /chat
+  const norm = (p) => (p && p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p || "");
+  const want = norm(wantPath);
   let last = "";
   for (let i = 0; i < rounds; i++) {
     let r = null;
@@ -209,9 +212,9 @@ async function waitForPath(tabId, wantPath, rounds = 90) {
     } catch {
       // content 尚未注入（整页重载中）
     }
-    const p = (r && r.path) || "";
+    const p = norm((r && r.path) || "");
     if (p) last = p;
-    if (p === wantPath) {
+    if (p === want) {
       dbg("nav_confirmed", `path=${p} rounds=${i}`);
       return true;
     }
@@ -378,7 +381,8 @@ async function runComplete(id, payload, sendResponse) {
     } else {
       // 默认：新会话模式。先回首页（首页发送会自动创建新会话），绝不污染
       // 用户当前会话。同样必须等 path 真的变成首页路径再动手。
-      const curPath = (tab.url || "").replace(/^https?:\/\/[^/]+/, "") || "/";
+      const normPath = (p) => (p && p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p || "/");
+      const curPath = normPath((tab.url || "").replace(/^https?:\/\/[^/]+/, "") || "/");
       if (curPath !== site.homePath) {
         noteStage("go_home", `from=${curPath}`);
         await chrome.tabs.update(tab.id, { url: site.home });
@@ -628,9 +632,9 @@ async function driveFillAndCollect(tabId, id, text, { noNewChat, expectJson, sit
 
 // ---------------- 会话管理（转发给 content script 的站内 API） ----------------
 
-async function sessionOp(msg, sendResponse, contentType, extra) {
+async function sessionOp(msg, sendResponse, contentType, extra, siteKey) {
   const resp = { source: EXT_RESP_SOURCE, id: msg.id || "" };
-  const site = siteOf(msg.payload || {});
+  const site = siteOf({ site: siteKey || (msg.payload || {}).site });
   try {
     const tab = await ensureReadyTab(site);
     const result = await sendTab(tab.id, { type: contentType, ...extra }, 30_000);
@@ -704,11 +708,11 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
       return true; // 异步 sendResponse
 
     case "deepseek/list_sessions":
-      sessionOp(msg, sendResponse, "ds/list_sessions", {}).catch(() => {});
+      sessionOp(msg, sendResponse, "ds/list_sessions", {}, (msg.payload || {}).site).catch(() => {});
       return true;
 
     case "deepseek/delete_session":
-      sessionOp(msg, sendResponse, "ds/delete_session", { chat_id: msg.chat_id }).catch(() => {});
+      sessionOp(msg, sendResponse, "ds/delete_session", { chat_id: msg.chat_id }, (msg.payload || {}).site).catch(() => {});
       return true;
 
     case "deepseek/set_bridge_url": {

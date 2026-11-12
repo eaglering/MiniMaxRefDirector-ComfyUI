@@ -3,11 +3,17 @@
 技能定义（运镜/景别/镜头结构/微表情）的唯一静态来源：lib/skill_db.py 首次创建
 skills.db 时读取本模块写入数据库，并写 .lock 标记；之后一律以数据库为准
 （界面编辑 / 新增技能都落库），lock 存在则不再重复初始化。
-lib/prompt.py 在数据库不可用时也会回退到本模块的 fallback_presets()。
+
+内置类别同时声明「注入方式」（render_mode）与「关键词保护」（protect_keywords）：
+- 运镜 → camera + protect_keywords=1（英文触发短语用 <!…> 保护，翻译阶段原样保留）
+- 景别 / 镜头结构 → term（中文名直写 + name_en 对照，翻译阶段按 glossary 还原）
+- 微表情 → example（每镜挑一句示例自然融入）
+自定义类别（人物主体 / 打斗 / 特效 / 风格…）在界面创建时选择这五种之一即可，
+渲染与校验逻辑见 lib/skill_notes.py 与 lib/skill_db.py。
 
 字段精简原则（按三段链路「原始提示词 → H3 中文 → H3 英文」的实际使用）：
-- 运镜：name（中文展示名）+ name_en + desc（中文一句话）+ guide（Camera Motion
-  LoRA 写法指南：星级/建议写法/强度/方向）+ examples（英文触发短语数组）。
+- 运镜：name（中文展示名）+ name_en + desc（中文一句话）+ guide（写法指南：
+  星级/建议写法/强度/方向）+ examples（英文触发短语数组）。
 - 景别 / 镜头结构：仅 name（中文名直接写入提示词，如「大远景」「双人镜头」）+
   name_en（英文阶段对照映射，保证翻译为 extreme wide shot / two shot 而非泛化词）。
 - 微表情：name（如「轻叹」）+ name_en + desc + examples（中文示例数组，最终使用）
@@ -85,12 +91,11 @@ _CAMERA_MOTION = {
     },
 }
 
-# 运镜类别说明（写进 skill_categories.description，含 LoRA 触发词核心规则）
+# 运镜类别说明（写进 skill_categories.description，仅作界面说明）
+# 触发词写法由用户在「全局提示词」中自行申明，skill_notes 不再注入该规则。
 CAMERA_CATEGORY_DESC = (
-    "Camera Motion LoRA 运镜触发词库。触发词 \"camera motion\" 必须放在提示词开头，"
-    "后接具体运镜与场景：camera motion, [主体], [场景], [运镜描述], [光线/风格], [画质]。"
-    "更舒缓加 slow（slow push-in），更强烈用 aggressive（aggressive push-in / dynamic handheld）；"
-    "指定方向：push-in from left / orbit right / pan left。"
+    "Camera Motion LoRA 运镜触发词库。触发词写法规矩（例如 camera motion 置于开头）"
+    "请在全局提示词中自行申明；此处只维护运镜风格、写法指南与英文触发短语。"
 )
 
 # ── 景别（中文名直接写入提示词；name_en 供英文阶段对照）────────────────────
@@ -189,12 +194,29 @@ GROUP_TO_CATEGORY = {
     "expressions": "微表情",
 }
 
-# 类别名 → 生成链路指令构建用的字段名（lib/prompt.py _skill_presets 的 key）
+# 类别名 → 生成链路指令构建用的字段名（legacy 兼容层：lib/skill_db.py category_presets）
 CATEGORY_FIELD = {
     "运镜": "camera",
     "景别": "shotSize",
     "镜头结构": "framing",
     "微表情": "expression",
+}
+
+# ── 注入方式（skill_categories.render_mode）────────────────────────────────
+# 决定该类别技能如何进入 skill_notes：
+#   camera      运镜类：列风格 + 英文触发短语（受 protect_keywords 保护，不做触发词申明）
+#   term        术语类：中文名直接写入镜头描述，英文阶段按 name_en 对照（景别 / 镜头结构）
+#   example     示例类：从示例数组挑一句自然融入，不写技能名（微表情）
+#   descriptive 描述类：desc + 示例短语自然融入（人物主体 / 打斗 / 特效等扩展类别）
+#   block       片段类：整段内容近似原样进入提示词（风格 / 特殊效果预置）
+RENDER_MODES = ("camera", "term", "example", "descriptive", "block")
+
+# 内置类别 → (render_mode, protect_keywords)
+BUILTIN_CATEGORY_RENDER = {
+    "运镜": ("camera", 1),
+    "景别": ("term", 0),
+    "镜头结构": ("term", 0),
+    "微表情": ("example", 0),
 }
 
 
@@ -219,12 +241,16 @@ def build_builtin_categories() -> list:
     micro = [_skill_row(k, d, group=d.get("group") or "") for k, d in _MICRO_EXPRESSION.items()]
     return [
         {"name": "运镜", "field": "camera",
+         "render_mode": "camera", "protect_keywords": 1,
          "description": CAMERA_CATEGORY_DESC, "skills": camera},
         {"name": "景别", "field": "shotSize",
+         "render_mode": "term", "protect_keywords": 0,
          "description": SHOT_SIZE_CATEGORY_DESC, "skills": shot},
         {"name": "镜头结构", "field": "framing",
+         "render_mode": "term", "protect_keywords": 0,
          "description": FRAMING_CATEGORY_DESC, "skills": framing},
         {"name": "微表情", "field": "expression",
+         "render_mode": "example", "protect_keywords": 0,
          "description": MICRO_CATEGORY_DESC, "skills": micro},
     ]
 

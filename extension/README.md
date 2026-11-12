@@ -1,12 +1,20 @@
-# MiniMax Ref Director — DeepSeek Bridge（浏览器扩展）
+# MiniMax Ref Director — Web Chat Bridge（浏览器扩展）
 
-deepseek-proxy LLM 模式的桥接扩展，两条通道并存：
+deepseek-proxy / doubao-proxy / qianwen-proxy 三种 LLM 模式共用的桥接扩展，两条通道并存：
 
-1. **页面外部消息通道**：SPA 导演台页面（全局参数 → LLM 设置 → DeepSeek 代理）
+1. **页面外部消息通道**：SPA 导演台页面（全局参数 → LLM 设置 → DeepSeek / 豆包 / 千问代理）
    通过 `chrome.runtime.sendMessage` 调用本扩展，完成 H3 提示词生成 / 翻译 / 分镜导入；
 2. **ComfyUI WebSocket 直连通道**：扩展后台 Service Worker 主动连接 ComfyUI
    桥接端点并注册，ComfyUI 工作流执行期间后端 Python 随时下发 LLM 任务（H3 提示词、
    资源整理等），无需打开任何 ComfyUI 页面。
+
+支持的站点（消息 `payload.site` 决定路由，缺省 deepseek）：
+
+| site | 站点 | 会话地址 |
+|---|---|---|
+| `deepseek` | DeepSeek | https://chat.deepseek.com/ |
+| `doubao` | 豆包 | https://www.doubao.com/chat/ |
+| `qwen` | 千问 | https://www.qianwen.com/chat/ |
 
 ## 安装（Chrome / Edge）
 
@@ -16,7 +24,7 @@ deepseek-proxy LLM 模式的桥接扩展，两条通道并存：
 2. 打开右上角「开发者模式」。
 3. 点「加载已解压的扩展程序」，选择本目录（`extension/`）。
 4. 加载完成后，在扩展卡片上复制 **ID**（形如 `abcdefghijklmnopabcdefghijklmnop`）。
-5. 打开 ComfyUI 的 SPA 导演台 → 全局参数 → LLM 设置 → 选「DeepSeek 代理」，粘贴扩展 ID。
+5. 打开 ComfyUI 的 SPA 导演台 → 全局参数 → LLM 设置 → 选「DeepSeek / 豆包 / 千问代理」，粘贴扩展 ID。
 
 ## 非本机访问时补充授权
 
@@ -47,10 +55,11 @@ deepseek-proxy LLM 模式的桥接扩展，两条通道并存：
 
 ## 使用须知
 
-- 使用前请在浏览器中**登录 chat.deepseek.com**（扩展会复用已打开的 DeepSeek
-  标签页，没有则自动新开一个后台标签页）。
+- 使用前请在浏览器中**登录对应站点网页**（DeepSeek / 豆包 / 千问；扩展会复用
+  已打开的站点标签页，没有则自动新开一个后台标签页）。
 - `deepseek/complete` 默认每次先点「开启新对话」再发送，避免上下文污染；
   `session_mode: "reuse"` + `chat_id` 时导航到指定会话内发送（导入流水线使用）。
+  会话页 URL 结构：DeepSeek `/a/chat/s/<id>`、豆包 `/chat/<id>`、千问 `/chat/<id>`。
 - 请求超时上限约 4 分钟（MV3 Service Worker 存活期限制）。
 - DeepSeek 页面结构变更可能导致填充失败；content.js 内置 textarea 与
   contenteditable 两套输入策略尽力兼容。
@@ -77,9 +86,9 @@ deepseek-proxy LLM 模式的桥接扩展，两条通道并存：
 
 | type | 附加字段 | 说明 |
 |---|---|---|
-| `deepseek/complete` | `payload: { system, prompt, expectJson, session_mode?, chat_id? }` | 生成完成。`session_mode:"reuse"` 时在 `chat_id` 会话内发送 |
-| `deepseek/list_sessions` | — | 列出 chat.deepseek.com 全部会话（站内 API） |
-| `deepseek/delete_session` | `chat_id` | 删除整个会话（导入结束后清理本次新建的会话） |
+| `deepseek/complete` | `payload: { site?, system, prompt, expectJson, session_mode?, chat_id? }` | 生成完成。`session_mode:"reuse"` 时在 `chat_id` 会话内发送；`site` 决定目标网页 |
+| `deepseek/list_sessions` | `payload: { site? }` | 列出站点会话（站内 API，仅 DeepSeek 支持；豆包/千问返回明确错误） |
+| `deepseek/delete_session` | `chat_id`, `payload: { site? }` | 删除整个会话（仅 DeepSeek 支持） |
 | `deepseek/set_bridge_url` | `url` | 配置 ComfyUI WS 桥接地址并立即重连 |
 | `deepseek/bridge_status` | — | 查询 WS 桥接连接状态 |
 

@@ -7,7 +7,7 @@ import { ElMessage } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
 import { useSplitterMemory } from "../../utils/splitter.js";
 import { generateH3Prompt } from "../../utils/llm.js";
-import { addSkillDict, addSkillCategory, batchAddSkillDict } from "../../api/client.js";
+import { addSkillDict, addSkillCategory, fetchSkillNotes } from "../../api/client.js";
 import { framesToSeconds } from "../../utils/media.js";
 import { REF_MENTION_TYPES, mergeSegmentSubjects } from "../../constants/subject.js";
 import PromptEditor from "../common/PromptEditor.vue";
@@ -36,30 +36,44 @@ const mentionTypes = computed(() => {
   return [...all];
 });
 
-function segSkills(field) {
-  return props.segment?.[field] || [];
+// 技能选择统一存 seg.skills = { 类别名: [key] }（类别动态扩展，无固定字段）
+function segSkills(categoryName) {
+  return props.segment?.skills?.[categoryName] || [];
 }
 
-// field="" 的自定义类别没有对应 segment 字段，统一写进 segment.extraSkills
 function toggleSkill(group, key) {
-  const field = group.field || "extraSkills";
-  const arr = props.segment[field] || (props.segment[field] = []);
+  const seg = props.segment;
+  if (!seg.skills || typeof seg.skills !== "object") seg.skills = {};
+  const cat = group.categoryName;
+  const arr = seg.skills[cat] || (seg.skills[cat] = []);
   const idx = arr.indexOf(key);
   if (idx >= 0) arr.splice(idx, 1);
   else arr.push(key);
+  if (!arr.length) delete seg.skills[cat];
   ws.markDirty();
 }
 
-// ---- 新增技能弹窗（按类别动态字段：nameEn/guide/examples） ----
-// 类别规则与后端 lib/skill_db.py _CATEGORY_RULES 对齐：
-//   运镜=名称+英文触发短语（指南可选）；景别/镜头结构=中文名+英文写法；
-//   微表情=名称+中文示例数组；自定义类别=名称+描述。
-const CATEGORY_RULES = {
-  "运镜": { needNameEn: false, needExamples: true, showGuide: true, exLabel: "英文触发短语", exZh: false },
-  "景别": { needNameEn: true, needExamples: false, showGuide: false, exLabel: "", exZh: false },
-  "镜头结构": { needNameEn: true, needExamples: false, showGuide: false, exLabel: "", exZh: false },
-  "微表情": { needNameEn: false, needExamples: true, showGuide: false, exLabel: "中文示例", exZh: true },
+// ---- 新增技能弹窗（按类别注入方式 render_mode 动态字段） ----
+// 规则与后端 lib/skill_db.py _RENDER_MODE_RULES 对齐，新增类别无需改前端：
+//   camera 运镜：名称+英文触发短语（指南可选）
+//   term 术语：中文名+英文写法（景别 / 镜头结构）
+//   example 示例：名称+示例数组，每镜挑一句（微表情）
+//   descriptive 描述：名称+描述/短语（人物主体 / 打斗 / 特效）
+//   block 片段：名称+整段内容（风格 / 效果预置）
+const RENDER_MODE_RULES = {
+  camera: { needNameEn: false, needExamples: true, showGuide: true, exLabel: "英文触发短语", exZh: false },
+  term: { needNameEn: true, needExamples: false, showGuide: false, exLabel: "", exZh: false },
+  example: { needNameEn: false, needExamples: true, showGuide: false, exLabel: "中文示例", exZh: true },
+  descriptive: { needNameEn: false, needExamples: false, showGuide: true, exLabel: "参考短语", exZh: false },
+  block: { needNameEn: false, needExamples: false, showGuide: false, exLabel: "内容片段", exZh: false },
 };
+const RENDER_MODE_OPTIONS = [
+  { value: "descriptive", label: "描述型（人物/打斗/特效等，自然融入）" },
+  { value: "camera", label: "运镜型（英文触发短语）" },
+  { value: "term", label: "术语型（中文名 + 英文对照）" },
+  { value: "example", label: "示例型（每镜挑一句示例）" },
+  { value: "block", label: "片段型（整段内容近似原样）" },
+];
 const addDialog = reactive({
   visible: false,
   categoryId: null,
@@ -69,12 +83,15 @@ const addDialog = reactive({
   guide: "",
   examples: "",
   newCategory: "",
+  newCategoryMode: "descriptive",
+  newCategoryProtect: false,
   saving: false,
 });
 
 const addDialogRules = computed(() => {
   const cat = ws.skillDict.categories.find((c) => c.id === addDialog.categoryId);
-  return (cat && CATEGORY_RULES[cat.name]) || { needNameEn: false, needExamples: false, showGuide: false, exLabel: "", exZh: false };
+  const mode = cat ? (cat.renderMode || "descriptive") : addDialog.newCategoryMode;
+  return RENDER_MODE_RULES[mode] || RENDER_MODE_RULES.descriptive;
 });
 
 function openAddDialog(group) {
@@ -85,6 +102,8 @@ function openAddDialog(group) {
   addDialog.guide = "";
   addDialog.examples = "";
   addDialog.newCategory = "";
+  addDialog.newCategoryMode = group?.renderMode || "descriptive";
+  addDialog.newCategoryProtect = false;
   addDialog.visible = true;
 }
 
@@ -107,7 +126,11 @@ async function submitAddSkill() {
     let categoryId = addDialog.categoryId;
     const newCat = addDialog.newCategory.trim();
     if (newCat) {
-      const catRes = await addSkillCategory({ name: newCat });
+      const catRes = await addSkillCategory({
+        name: newCat,
+        renderMode: addDialog.newCategoryMode,
+        protectKeywords: addDialog.newCategoryProtect,
+      });
       if (!catRes.success) throw new Error(catRes.error || "新增类别失败");
       categoryId = catRes.id;
     }
@@ -134,75 +157,6 @@ async function submitAddSkill() {
   }
 }
 
-// ---- 技能词典批量导入（每行一条：名称 | 英文写法 | 示例1；示例2 | 描述(可选)） ----
-const batchDialog = reactive({
-  visible: false,
-  categoryId: null,
-  newCategory: "",
-  text: "",
-  saving: false,
-});
-
-function openBatchDialog(group) {
-  batchDialog.categoryId = group?.categoryId ?? null;
-  batchDialog.newCategory = "";
-  batchDialog.text = "";
-  batchDialog.visible = true;
-}
-
-const batchItems = computed(() => {
-  const out = [];
-  for (const line of batchDialog.text.split(/\r?\n/)) {
-    const s = line.trim();
-    if (!s || s.startsWith("#")) continue; // 空行 / 注释行跳过
-    const parts = s.split(/\t|\|/).map((x) => x.trim());
-    const name = parts[0] || "";
-    if (!name) continue;
-    out.push({
-      name,
-      nameEn: parts[1] || "",
-      examples: parts[2] || "",
-      desc: parts[3] || "",
-    });
-  }
-  return out;
-});
-
-async function submitBatchImport() {
-  if (batchDialog.saving) return;
-  if (!batchDialog.newCategory.trim() && !batchDialog.categoryId) {
-    ElMessage.warning("请选择类别或填写新类别");
-    return;
-  }
-  if (!batchItems.value.length) {
-    ElMessage.warning("未解析到有效词条（每行格式：名称 | 英文写法 | 示例1；示例2 | 描述）");
-    return;
-  }
-  batchDialog.saving = true;
-  try {
-    const res = await batchAddSkillDict({
-      categoryId: batchDialog.categoryId || 0,
-      newCategory: batchDialog.newCategory.trim(),
-      items: batchItems.value,
-    });
-    if (!res.success) throw new Error(res.error || "批量导入失败");
-    await ws.loadSkillDict(true);
-    batchDialog.visible = false;
-    if (res.failed?.length) {
-      const f = res.failed[0];
-      ElMessage.warning(
-        `导入完成：成功 ${res.added} 条，失败 ${res.failed.length} 条；首条失败「${f.name}」：${f.error}`
-      );
-    } else {
-      ElMessage.success(`批量导入完成：新增 ${res.added} 条技能`);
-    }
-  } catch (e) {
-    ElMessage.error(e.message || String(e));
-  } finally {
-    batchDialog.saving = false;
-  }
-}
-
 // ---- H3 提示词四段 ----
 const H3_FIELDS = [
   { key: "summary", label: "summary", minHeight: 56 },
@@ -226,62 +180,8 @@ function ensureH3() {
 const h3 = computed(() => ensureH3());
 
 // ---- 原生 → H3 生成（中 / 英） ----
-// 点「转H3提示词」时才使用分镜技能：把该镜头所选技能的词典内容渲染成注入块
-// （对齐后端 generate_h3_prompt 的四类指令块，转化方法与旧导演台一致）。
-function buildSkillNotes() {
-  const seg = props.segment;
-  const cats = new Map(ws.skillDict.categories.map((c) => [c.id, c.name]));
-  const byCat = {};
-  for (const s of ws.skillDict.skills || []) {
-    const cat = cats.get(s.categoryId);
-    if (cat) (byCat[cat] = byCat[cat] || []).push(s);
-  }
-  const pick = (cat, keys) => (byCat[cat] || []).filter((s) => (keys || []).includes(s.key));
-  const lines = [];
-  const cam = pick("运镜", seg.cameraMotions || []);
-  if (cam.length) {
-    lines.push("## 运镜方向");
-    for (const s of cam) {
-      lines.push(`- 风格：${s.name}（${s.nameEn || s.name}）`);
-      if (s.desc) lines.push(`  - ${s.desc}`);
-      if (s.guide) lines.push(`  - 写法指南：${s.guide}`);
-      if (s.examples?.length) {
-        lines.push(`  - 英文触发短语（原样保留，与触发词 camera motion 连用）：${s.examples.join(" / ")}`);
-      }
-    }
-    lines.push(
-      "- 触发词 camera motion 必须位于运镜短语开头，写成「中文运镜描写（camera motion, <英文触发短语>）」；英文短语不得翻译或改写。"
-    );
-  }
-  const sizes = pick("景别", seg.shotSizes || []);
-  if (sizes.length) {
-    lines.push("## 景别方向");
-    for (const s of sizes) {
-      lines.push(`- 档位：${s.name}（英文阶段对照：${s.nameEn || s.name}）——把中文名直接写入镜头描述`);
-    }
-  }
-  const framings = pick("镜头结构", seg.framings || []);
-  if (framings.length) {
-    lines.push("## 构图与镜头关系方向");
-    for (const s of framings) {
-      lines.push(`- 关系：${s.name}（英文阶段对照：${s.nameEn || s.name}）——仅当内容适用时把中文名直接写入该镜头`);
-    }
-  }
-  const exprs = pick("微表情", seg.expressions || []);
-  if (exprs.length) {
-    lines.push("## 微表情与表演方向");
-    for (const s of exprs) {
-      lines.push(`- Cue：${s.name}（${s.nameEn || s.name}）`);
-      if (s.examples?.length) {
-        lines.push(`  - 中文示例（每镜挑一句自然融入，不写技能名）：${s.examples.join(" / ")}`);
-      } else if (s.desc) {
-        lines.push(`  - 按含义自然展开：${s.desc}`);
-      }
-    }
-  }
-  return lines.join("\n");
-}
-
+// 技能注入块由后端 /spa/skill_notes 统一渲染（服务端与三种网页桥接共用）；
+// 分镜选择统一来自 seg.skills = { 类别名: [key] }，已删除的技能会被跳过并提示。
 async function generateH3(lang) {
   const seg = props.segment;
   if (!(seg.prompt || "").trim()) {
@@ -290,22 +190,22 @@ async function generateH3(lang) {
   }
   translating.value = lang;
   try {
+    const selections = ws.segmentSelections(seg);
+    let skillNotes = "";
+    if (Object.keys(selections).length) {
+      const nr = await fetchSkillNotes(selections, lang);
+      if (!nr.success) throw new Error(nr.error || "技能注入块渲染失败");
+      skillNotes = nr.notes || "";
+      if (nr.warnings?.length) ElMessage.warning(nr.warnings.join("；"));
+    }
     const payload = {
       prompt: seg.prompt,
       image_path: seg.imageFile || "",
       duration_seconds: framesToSeconds(seg.length, ws.widgets.frame_rate),
       lang,
-      camera_motion: seg.cameraMotions || [],
-      expression: seg.expressions || [],
-      // 微表情 catalog：技能词典加载后用 DB 词条（含 desc），否则回退旧自定义词库
-      expression_catalog:
-        (ws.skillGroups.find((g) => g.label === "微表情")?.items || []).map((s) => ({
-          key: s.key, label: s.label, title: s.desc || "",
-        })) || ws.customSkills.expressions || [],
-      shot_size: seg.shotSizes || [],
-      framing: seg.framings || [],
-      // 技能词典注入块（deepseek-proxy 路径使用；服务端路径由 generate_h3_prompt 注入）
-      skill_notes: buildSkillNotes(),
+      // 后端唯一渲染源；同时带 selections 供服务端模式直接使用
+      skill_notes: skillNotes,
+      selections,
     };
     const res = await generateH3Prompt(ws.llm, payload);
     if (!res.success) {
@@ -339,8 +239,6 @@ async function generateH3(lang) {
               <el-tooltip content="选中后随生成请求携带，由 LLM 分配到各 [Shot N]；不选 = 由模型自由决定" placement="bottom">
                 <el-icon class="mrd-skills-help"><component :is="'QuestionFilled'" /></el-icon>
               </el-tooltip>
-              <span class="mrd-skills-head-gap"></span>
-              <el-button size="small" text type="primary" @click="openBatchDialog()">批量导入</el-button>
             </div>
             <el-scrollbar class="mrd-skills-scroll">
               <div v-if="!groups.length" class="mrd-skill-empty">
@@ -349,6 +247,7 @@ async function generateH3(lang) {
               <div v-for="g in groups" :key="g.id" class="mrd-skill-group">
                 <div class="mrd-skill-group-title">
                   {{ g.label }}
+                  <span v-if="g.protectKeywords" class="mrd-skill-badge">关键词保护</span>
                   <span v-if="g.description" class="mrd-skill-group-desc">{{ g.description }}</span>
                 </div>
                 <div class="mrd-skill-pills">
@@ -372,7 +271,7 @@ async function generateH3(lang) {
                     </template>
                     <button
                       class="mrd-skill-pill"
-                      :class="{ on: segSkills(g.field || 'extraSkills').includes(it.key) }"
+                      :class="{ on: segSkills(g.categoryName).includes(it.key) }"
                       @click="toggleSkill(g, it.key)"
                     >{{ it.label }}</button>
                   </el-tooltip>
@@ -459,66 +358,11 @@ async function generateH3(lang) {
   </el-splitter>
 
   <!-- 新增技能弹窗 -->
-    <el-dialog v-model="addDialog.visible" title="新增镜头技能" width="440px" append-to-body>
-      <div class="mrd-add-skill-form">
-        <div class="mrd-add-skill-row">
-          <span class="mrd-add-skill-label">类别</span>
-          <el-select v-model="addDialog.categoryId" placeholder="选择类别" style="flex:1">
-            <el-option
-              v-for="c in ws.skillDict.categories"
-              :key="c.id"
-              :label="c.name"
-              :value="c.id"
-            />
-          </el-select>
-        </div>
-        <div class="mrd-add-skill-row">
-          <span class="mrd-add-skill-label">新类别</span>
-          <el-input v-model="addDialog.newCategory" size="small" placeholder="留空则使用上面选中的类别；填写则创建新类别" />
-        </div>
-        <div class="mrd-add-skill-row">
-          <span class="mrd-add-skill-label">名称</span>
-          <el-input v-model="addDialog.name" placeholder="中文名直接写入提示词，如「大远景」「轻叹」" />
-        </div>
-        <div class="mrd-add-skill-row">
-          <span class="mrd-add-skill-label">英文写法</span>
-          <el-input
-            v-model="addDialog.nameEn"
-            :placeholder="addDialogRules.needNameEn ? '必填：英文标准写法（如 extreme wide shot / two-shot）' : '可选：英文写法（供英文翻译阶段对照）'"
-          />
-        </div>
-        <div class="mrd-add-skill-row">
-          <span class="mrd-add-skill-label">描述</span>
-          <el-input v-model="addDialog.desc" type="textarea" :rows="2" placeholder="悬停胶囊时展示的技能描述（可选）" />
-        </div>
-        <div v-if="addDialogRules.showGuide" class="mrd-add-skill-row">
-          <span class="mrd-add-skill-label">写法指南</span>
-          <el-input v-model="addDialog.guide" type="textarea" :rows="2" placeholder="可选：星级 / 强度 / 方向写法，如「★★★ 最稳。建议 slow push-in / dolly in」" />
-        </div>
-        <div v-if="addDialogRules.needExamples || addDialogRules.showGuide" class="mrd-add-skill-row">
-          <span class="mrd-add-skill-label">示例</span>
-          <el-input
-            v-model="addDialog.examples"
-            type="textarea"
-            :rows="2"
-            :placeholder="addDialogRules.needExamples
-              ? (addDialogRules.exZh ? '必填：中文示例（分号分隔），如「长长地呼出一口气；轻叹一声」' : '必填：英文触发短语（分号分隔），如 slow push-in；dolly in')
-              : '可选：英文触发短语（分号分隔）'"
-          />
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="addDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="addDialog.saving" @click="submitAddSkill">保存到词典</el-button>
-      </template>
-    </el-dialog>
-
-  <!-- 技能词典批量导入弹窗 -->
-  <el-dialog v-model="batchDialog.visible" title="批量导入镜头技能" width="520px" append-to-body>
+  <el-dialog v-model="addDialog.visible" title="新增镜头技能" width="440px" append-to-body>
     <div class="mrd-add-skill-form">
       <div class="mrd-add-skill-row">
         <span class="mrd-add-skill-label">类别</span>
-        <el-select v-model="batchDialog.categoryId" placeholder="选择类别" style="flex:1" clearable>
+        <el-select v-model="addDialog.categoryId" placeholder="选择类别" style="flex:1">
           <el-option
             v-for="c in ws.skillDict.categories"
             :key="c.id"
@@ -529,26 +373,55 @@ async function generateH3(lang) {
       </div>
       <div class="mrd-add-skill-row">
         <span class="mrd-add-skill-label">新类别</span>
-        <el-input v-model="batchDialog.newCategory" size="small" placeholder="留空则使用上面选中的类别；填写则创建新类别（同名复用）" />
+        <el-input v-model="addDialog.newCategory" size="small" placeholder="留空则使用上面选中的类别；填写则创建新类别" />
+      </div>
+      <template v-if="addDialog.newCategory.trim()">
+        <div class="mrd-add-skill-row">
+          <span class="mrd-add-skill-label">注入方式</span>
+          <el-select v-model="addDialog.newCategoryMode" size="small" style="flex:1">
+            <el-option v-for="m in RENDER_MODE_OPTIONS" :key="m.value" :label="m.label" :value="m.value" />
+          </el-select>
+        </div>
+        <div class="mrd-add-skill-row">
+          <span class="mrd-add-skill-label">关键词保护</span>
+          <el-switch v-model="addDialog.newCategoryProtect" size="small" />
+          <span class="mrd-add-skill-hint">开：技术词用 &lt;!…&gt; 包裹，翻译阶段原样保留（如运镜）</span>
+        </div>
+      </template>
+      <div class="mrd-add-skill-row">
+        <span class="mrd-add-skill-label">名称</span>
+        <el-input v-model="addDialog.name" placeholder="中文名直接写入提示词，如「大远景」「轻叹」" />
       </div>
       <div class="mrd-add-skill-row">
-        <span class="mrd-add-skill-label">词条</span>
+        <span class="mrd-add-skill-label">英文写法</span>
         <el-input
-          v-model="batchDialog.text"
-          type="textarea"
-          :rows="10"
-          placeholder="每行一条：名称 | 英文写法 | 示例1；示例2 | 描述(可选)&#10;以 | 或 Tab 分隔；# 开头为注释行&#10;例：大远景 | extreme wide shot&#10;例：轻叹 | Soft sigh | 长长地呼出一口气；轻叹一声&#10;例：慢速推近 | | slow push-in | 缓慢向前推进"
+          v-model="addDialog.nameEn"
+          :placeholder="addDialogRules.needNameEn ? '必填：英文标准写法（如 extreme wide shot / two-shot）' : '可选：英文写法（供英文翻译阶段对照）'"
         />
       </div>
-      <div class="mrd-batch-preview">
-        已解析 <b>{{ batchItems.length }}</b> 条有效词条（名称必填；英文写法/示例按类别必填）
+      <div class="mrd-add-skill-row">
+        <span class="mrd-add-skill-label">描述</span>
+        <el-input v-model="addDialog.desc" type="textarea" :rows="2" placeholder="悬停胶囊时展示的技能描述（可选）" />
+      </div>
+      <div v-if="addDialogRules.showGuide" class="mrd-add-skill-row">
+        <span class="mrd-add-skill-label">写法指南</span>
+        <el-input v-model="addDialog.guide" type="textarea" :rows="2" placeholder="可选：星级 / 强度 / 方向写法，如「★★★ 最稳。建议 slow push-in / dolly in」" />
+      </div>
+      <div v-if="addDialogRules.needExamples || addDialogRules.showGuide" class="mrd-add-skill-row">
+        <span class="mrd-add-skill-label">示例</span>
+        <el-input
+          v-model="addDialog.examples"
+          type="textarea"
+          :rows="2"
+          :placeholder="addDialogRules.needExamples
+            ? (addDialogRules.exZh ? '必填：中文示例（分号分隔），如「长长地呼出一口气；轻叹一声」' : '必填：英文触发短语（分号分隔），如 slow push-in；dolly in')
+            : '可选：英文触发短语（分号分隔）'"
+        />
       </div>
     </div>
     <template #footer>
-      <el-button @click="batchDialog.visible = false">取消</el-button>
-      <el-button type="primary" :loading="batchDialog.saving" :disabled="!batchItems.length" @click="submitBatchImport">
-        导入 {{ batchItems.length || "" }} 条
-      </el-button>
+      <el-button @click="addDialog.visible = false">取消</el-button>
+      <el-button type="primary" :loading="addDialog.saving" @click="submitAddSkill">保存到词典</el-button>
     </template>
   </el-dialog>
 </template>
@@ -593,6 +466,10 @@ async function generateH3(lang) {
 .mrd-skill-group-title { font-size: 11px; color: #6b7488; margin-bottom: 5px; 
   letter-spacing: 0.5px; padding: 0 10px; }
 .mrd-skill-group-desc { font-size: 10px; color: #4b5366; margin-left: 6px; letter-spacing: 0; }
+.mrd-skill-badge {
+  margin-left: 5px; font-size: 10px; color: #f0b46a; letter-spacing: 0;
+  border: 1px solid rgba(240, 180, 106, 0.4); border-radius: 8px; padding: 0 5px;
+}
 .mrd-skill-tip { max-width: 260px; line-height: 1.5; }
 .mrd-skill-tip-name { font-weight: 600; color: #0f1831; }
 .mrd-skill-tip-desc { color: #a4abb9; margin-top: 2px; }
@@ -722,6 +599,7 @@ async function generateH3(lang) {
   color: #a9b1c3;
   text-align: right;
 }
+.mrd-add-skill-hint { flex: 1; font-size: 11px; color: #6b7488; padding-top: 4px; line-height: 1.4; }
 .mrd-h3-label {
   font-size: 11px;
   color: #6b7488;

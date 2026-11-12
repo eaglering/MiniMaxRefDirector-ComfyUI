@@ -1,18 +1,29 @@
-// ===== LLM 调用分发：deepseek-proxy 走浏览器扩展桥接，其余走服务端 =====
+// ===== LLM 调用分发：网页桥接（deepseek / doubao / qianwen）走浏览器扩展，其余走服务端 =====
 import { generatePromptJson } from "../api/client.js";
+
+// vlm_mode → 桥接站点（同一扩展，多站点适配；qianwen-proxy 为对外名，qwen-proxy 兼容旧配置）
+export const PROXY_SITES = {
+  "deepseek-proxy": "deepseek",
+  "doubao-proxy": "doubao",
+  "qianwen-proxy": "qwen",
+  "qwen-proxy": "qwen",
+};
+
+export const SITE_LABELS = { deepseek: "DeepSeek", doubao: "豆包", qwen: "千问" };
 
 /**
  * 生成 H3 提示词 JSON。
  * @param {object} opts LLM 配置 {mode, gguf_path, mmproj_path, provider, api_key,
  *   ollama_model, ollama_base_url, extension_id}
- * @param {object} payload {prompt, duration_seconds, lang, camera_motion, expression,
- *   shot_size, framing, image_path, expression_catalog}
+ * @param {object} payload {prompt, duration_seconds, lang, image_path,
+ *   skill_notes, selections, chat_id}
  * @returns {Promise<{success:boolean, json_data?:object, error?:string}>}
  */
 export async function generateH3Prompt(opts, payload) {
   const mode = opts?.mode || "llama-cpp";
-  if (mode === "deepseek-proxy") {
-    return deepseekGenerateH3(opts, payload);
+  const site = PROXY_SITES[mode];
+  if (site) {
+    return webChatGenerateH3(opts, payload, site);
   }
   // 服务端三种模式：显式透传 opts
   const body = {
@@ -44,10 +55,10 @@ export function deepseekAvailable(extensionId) {
   }
 }
 
-export function deepseekComplete(extensionId, { system, prompt, expectJson = false, timeoutMs = 300000 }) {
+export function deepseekComplete(extensionId, { system, prompt, expectJson = false, site = "deepseek", timeoutMs = 300000 }) {
   return new Promise((resolve) => {
     if (!deepseekAvailable(extensionId)) {
-      resolve({ ok: false, error: "未配置 DeepSeek 桥接扩展 ID 或浏览器不支持" });
+      resolve({ ok: false, error: "未配置浏览器桥接扩展 ID 或浏览器不支持" });
       return;
     }
     const id = `req${++_reqSeq}`;
@@ -55,13 +66,13 @@ export function deepseekComplete(extensionId, { system, prompt, expectJson = fal
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        resolve({ ok: false, error: "DeepSeek 请求超时" });
+        resolve({ ok: false, error: "桥接请求超时" });
       }
     }, timeoutMs);
     try {
       chrome.runtime.sendMessage(
         extensionId,
-        { source: "comfy-minimax-ref", type: "deepseek/complete", id, payload: { system, prompt, expectJson } },
+        { source: "comfy-minimax-ref", type: "deepseek/complete", id, payload: { site, system, prompt, expectJson } },
         (resp) => {
           if (settled) return;
           settled = true;
@@ -80,21 +91,22 @@ export function deepseekComplete(extensionId, { system, prompt, expectJson = fal
   });
 }
 
-// H3 提示词生成模板（对齐后端 generate_h3_prompt 的产出结构）
-// 技能规则与后端 lib/prompt.py 四类指令块一致：
-//   运镜 = 英文触发短语原样保留且以触发词 camera motion 开头（LoRA 技术词，不翻译）；
-//   景别 / 镜头结构 = 中文名直接写入（英文输出时用对照英文名）；
-//   微表情 = 从中文示例数组挑一句自然融入，不写技能名。
-const DEEPSEEK_H3_SYSTEM = `You are a video prompt engineer. Convert the user's native-language shot description into an H3 prompt JSON object with EXACTLY these keys:
+// H3 提示词生成模板（对齐后端 generate_h3_prompt 的产出结构与通用 skill_notes 语义）
+// 不预设技能类别，也不申明触发词写法（触发词规则由用户在全局提示词中自行申明）：
+//   - skill_notes 的每一节按其引导语自然融入 detailed_description；
+//   - <!技术词> 片段（如 <!slow push-in>）必须连包裹符原样保留，不得翻译/改写；
+//   - 其余类别（术语 / 示例 / 描述 / 片段）按节内说明使用，不罗列成清单。
+const WEB_CHAT_H3_SYSTEM = `You are a video prompt engineer. Convert the user's native-language shot description into an H3 prompt JSON object with EXACTLY these keys:
 {"summary": string, "detailed_description": string, "overall_soundscape": string, "non_diegetic_music": string}
 Rules:
 - Respond with ONLY the JSON object, no markdown fences, no extra text.
 - Preserve any <@Name> / <#Name:dialogue> / <d>dialogue</d> tags verbatim.
 - detailed_description must break the shot into [Shot 1], [Shot 2] ... beats with timestamps.
 - Write in the same language style as the input unless told otherwise.
-- Camera motion: the trigger "camera motion" and English trigger phrases below are Camera Motion LoRA technical vocabulary — never translate or paraphrase them. Write the move as 中文运镜描写（camera motion, <trigger phrase>）for Chinese output, or "camera motion, <trigger phrase>, ..." for English output; the trigger MUST open the phrase.
-- Shot size / framing: write the provided Chinese names verbatim (e.g. 大远景, 双人镜头); for English output use the provided English term instead.
-- Micro expressions: pick ONE provided Chinese example and weave it naturally into the acting; do not write the skill name as a tag.`;
+- Skill notes (if provided) are guidance, not text to copy: merge their intent into the shot description and never output bullet lists, section headings, or skill names as tags.
+- Fragments wrapped as <!...> (e.g. <!slow push-in>) are protected technical keywords: keep the inner text verbatim in its original language/spelling, keep the <!...> wrapper in this stage, and never translate, reorder, or paraphrase them.`;
+// 旧名保留，避免外部脚本引用失效
+const DEEPSEEK_H3_SYSTEM = WEB_CHAT_H3_SYSTEM;
 
 function h3Brief(text, n = 120) {
   return String(text || "").replace(/\s+/g, " ").slice(0, n);
@@ -112,22 +124,26 @@ function parseH3(text) {
   }
 }
 
+// 旧名兼容：deepseek 桥接入口
 export async function deepseekGenerateH3(opts, payload) {
+  return webChatGenerateH3(opts, payload, "deepseek");
+}
+
+// 网页会话桥接（deepseek / doubao / qwen）：技能注入块由后端 /spa/skill_notes 渲染后传入
+export async function webChatGenerateH3(opts, payload, site = "deepseek") {
   const extId = (opts?.extension_id || "").trim();
+  const label = SITE_LABELS[site] || site;
   if (!deepseekAvailable(extId)) {
-    return { success: false, error: "deepseek-proxy 未配置：请在全局参数页填写 DeepSeek 桥接扩展 ID" };
+    return {
+      success: false,
+      error: `${label} 桥接未配置：请在全局参数页填写浏览器桥接扩展 ID`,
+    };
   }
   const parts = [];
   if (payload?.duration_seconds) parts.push(`Duration: ${payload.duration_seconds}s.`);
-  // 技能词典注入块（PromptPanel 按 /spa/skill_dict 渲染，对齐后端四类指令块）；
-  // 旧版本扩展 / 旧调用方未传 skill_notes 时退化为仅列技能名。
-  if (payload?.skill_notes) parts.push(`Skill dictionary notes:\n${payload.skill_notes}`);
-  else {
-    if (payload?.camera_motion?.length) parts.push(`Camera motions: ${payload.camera_motion.join(", ")}.`);
-    if (payload?.shot_size?.length) parts.push(`Shot sizes: ${payload.shot_size.join(", ")}.`);
-    if (payload?.framing?.length) parts.push(`Framing: ${payload.framing.join(", ")}.`);
-    if (payload?.expression?.length) parts.push(`Micro expressions: ${payload.expression.join(", ")}.`);
-  }
+  // 技能注入块（后端唯一渲染源）；旧调用方未传 skill_notes 时按 selections 提示
+  if (payload?.skill_notes) parts.push(`Skill notes:\n${payload.skill_notes}`);
+  else if (payload?.selections) parts.push(`Selected skills: ${JSON.stringify(payload.selections)}`);
   parts.push(`Shot description:\n${payload?.prompt || ""}`);
 
   // 同一批 H3 转换共用一个会话：首镜走新会话，后续镜头传入 chat_id 直接追问，
@@ -137,7 +153,8 @@ export async function deepseekGenerateH3(opts, payload) {
     const prompt = parts.join("\n") + (extra || "");
     if (sessionChat) {
       const text = await deepseekCompleteInSession(extId, {
-        system: DEEPSEEK_H3_SYSTEM,
+        site,
+        system: WEB_CHAT_H3_SYSTEM,
         prompt,
         chatId: sessionChat,
         expectJson: true,
@@ -145,11 +162,12 @@ export async function deepseekGenerateH3(opts, payload) {
       return { text: String(text || ""), chatId: sessionChat };
     }
     const resp = await deepseekComplete(extId, {
-      system: DEEPSEEK_H3_SYSTEM,
+      site,
+      system: WEB_CHAT_H3_SYSTEM,
       prompt,
       expectJson: true,
     });
-    if (!resp.ok) throw new Error(resp.error || "DeepSeek 桥接调用失败");
+    if (!resp.ok) throw new Error(resp.error || `${label} 桥接调用失败`);
     return { text: String(resp.text || ""), chatId: resp.chat_id || "" };
   };
 
@@ -180,7 +198,7 @@ export async function deepseekGenerateH3(opts, payload) {
   if (!json_data) {
     return {
       success: false,
-      error: `DeepSeek 返回内容无法解析为 H3 JSON（原文摘录：${h3Brief(text)}…）`,
+      error: `${label} 返回内容无法解析为 H3 JSON（原文摘录：${h3Brief(text)}…）`,
       chatId: sessionChat,
     };
   }
@@ -200,7 +218,7 @@ export async function deepseekGenerateH3(opts, payload) {
 function extSend(extensionId, msg, timeoutMs = 90_000) {
   return new Promise((resolve) => {
     if (!deepseekAvailable(extensionId)) {
-      resolve({ ok: false, error: "未配置 DeepSeek 桥接扩展 ID 或浏览器不支持" });
+      resolve({ ok: false, error: "未配置浏览器桥接扩展 ID 或浏览器不支持" });
       return;
     }
     const id = `req${++_reqSeq}`;
@@ -208,7 +226,7 @@ function extSend(extensionId, msg, timeoutMs = 90_000) {
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        resolve({ ok: false, error: "DeepSeek 扩展响应超时" });
+        resolve({ ok: false, error: "桥接扩展响应超时" });
       }
     }, timeoutMs);
     try {
@@ -238,17 +256,23 @@ function unwrapData(resp) {
   return resp.data ?? null;
 }
 
-// 列出 chat.deepseek.com 的全部会话 → [{ id, title, updatedAt }]
-export async function deepseekListSessions(extensionId) {
-  const resp = await extSend(extensionId, { type: "deepseek/list_sessions" });
+// 列出指定站点的全部会话 → [{ id, title, updatedAt }]
+// 仅 DeepSeek 支持扩展侧会话列表；豆包/千问由扩展返回明确错误（前端走手动输入）
+export async function deepseekListSessions(extensionId, site = "deepseek") {
+  const resp = await extSend(extensionId, { type: "deepseek/list_sessions", payload: { site } });
   const data = unwrapData(resp);
   if (!data) throw new Error(resp?.error || "获取会话列表失败");
   return Array.isArray(data) ? data : [];
 }
 
 // 删除整个会话（导入结束后清理本次新建的会话）→ { chatId }
-export async function deepseekDeleteSession(extensionId, chatId) {
-  const resp = await extSend(extensionId, { type: "deepseek/delete_session", chat_id: chatId }, 30_000);
+// 仅 DeepSeek 支持；豆包/千问由扩展返回明确错误
+export async function deepseekDeleteSession(extensionId, chatId, site = "deepseek") {
+  const resp = await extSend(
+    extensionId,
+    { type: "deepseek/delete_session", chat_id: chatId, payload: { site } },
+    30_000
+  );
   if (!resp.ok) throw new Error(resp?.error || "删除会话失败");
   return { chatId };
 }
@@ -256,36 +280,38 @@ export async function deepseekDeleteSession(extensionId, chatId) {
 // 在指定会话内完成一次生成（session_mode: "reuse"，扩展负责导航到该会话）
 export async function deepseekCompleteInSession(
   extensionId,
-  { system = "", prompt = "", chatId = "", expectJson = false, timeoutMs = 300_000 }
+  { system = "", prompt = "", chatId = "", expectJson = false, site = "deepseek", timeoutMs = 300_000 }
 ) {
   const resp = await extSend(
     extensionId,
     {
       type: "deepseek/complete",
-      payload: { system, prompt, expectJson, session_mode: "reuse", chat_id: chatId },
+      payload: { site, system, prompt, expectJson, session_mode: "reuse", chat_id: chatId },
     },
     timeoutMs
   );
   if (!resp.ok) {
+    const label = SITE_LABELS[site] || site;
     const hint = /超时/.test(resp?.error || "")
       ? "（可点「页面自检」确认输入框/发送按钮是否可定位）"
       : "";
-    throw new Error(`${resp?.error || "DeepSeek 桥接调用失败"}${hint}`);
+    throw new Error(`${resp?.error || `${label} 桥接调用失败`}${hint}`);
   }
   return String(resp.text || "");
 }
 
-// 在全新会话内完成一次生成（扩展先回首页、点「开启新对话」再发送）。
+// 在全新会话内完成一次生成（扩展先回站点首页、点「开启新对话」再发送）。
 // 返回 { text, chatId }：chatId 从发送后的页面 URL 解析，供后续步骤复用该会话。
 export async function deepseekCompleteNewSession(
   extensionId,
-  { system = "", prompt = "", expectJson = false, timeoutMs = 300_000 }
+  { system = "", prompt = "", expectJson = false, site = "deepseek", timeoutMs = 300_000 }
 ) {
+  const label = SITE_LABELS[site] || site;
   const resp = await extSend(
     extensionId,
     {
       type: "deepseek/complete",
-      payload: { system, prompt, expectJson, session_mode: "new" },
+      payload: { site, system, prompt, expectJson, session_mode: "new" },
     },
     timeoutMs
   );
@@ -293,7 +319,7 @@ export async function deepseekCompleteNewSession(
     const hint = /超时/.test(resp?.error || "")
       ? "（可点「页面自检」确认输入框/发送按钮是否可定位）"
       : "";
-    throw new Error(`${resp?.error || "DeepSeek 桥接调用失败"}${hint}`);
+    throw new Error(`${resp?.error || `${label} 桥接调用失败`}${hint}`);
   }
   return { text: String(resp.text || ""), chatId: String(resp.chat_id || "") };
 }

@@ -293,13 +293,16 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         vlm_mode = data.get("vlm_mode", "llama-cpp")
         seed = data.get("seed", 42)
         lang = data.get("lang", "en")
-        # 运镜可为 str 单值（兼容旧客户端）或 list 多选（空列表 = 不注入）；后端归一化兜底
+        # 技能注入：优先用调用方已渲染好的 skill_notes（前端经 /spa/skill_notes 取），
+        # 否则按 selections（{类别名: [key]}）在服务端现渲染。
+        # 以下四个字段为旧契约，仅在 skill_notes / selections 都为空时兜底转换。
+        skill_notes = str(data.get("skill_notes") or "")
+        selections = data.get("selections")
+        if not isinstance(selections, dict):
+            selections = None
         camera_motion = data.get("camera_motion", "")
-        # 微表情（表演提示）多选：list[str]（空 = 不注入）；expression_catalog 携带前端
-        # 本地导入的自定义词条（{key,label,title}），供后端识别自定义 key 并注入描述
         expression = data.get("expression", "")
         expression_catalog = data.get("expression_catalog", []) or []
-        # 景别 / 构图关系多选：list[str]（空 = 不注入，由模型自由决定）；后端归一化兜底
         shot_size = data.get("shot_size", "")
         framing = data.get("framing", "")
         try:
@@ -329,18 +332,19 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             # model / base_url 允许为空：generate_prompt_with_ollama 会回落
             # API 管理器 ollama 服务配置 / 内置默认值（http://localhost:11434）
             pass
-        elif vlm_mode == "deepseek-proxy":
-            # 经浏览器扩展 WS 桥接调用 chat.deepseek.com 网页会话（纯文本）
+        elif vlm_mode in ("deepseek-proxy", "doubao-proxy", "qianwen-proxy", "qwen-proxy"):
+            # 经浏览器扩展 WS 桥接调用对应站点网页会话（纯文本，不支持传图）
             if image_path:
                 return web.json_response(
                     {"success": False,
-                     "error": "deepseek-proxy 不支持参考图（网页会话无法传图）：请改用 api / ollama / llama-cpp，或移除参考图"},
+                     "error": f"{vlm_mode} 不支持参考图（网页会话无法传图）：请改用 api / ollama / llama-cpp，或移除参考图"},
                     status=400,
                 )
         work = lambda: generate_h3_prompt(
             prompt=prompt, image_path=image_path, seed=seed,
             vlm_mode=vlm_mode, options=options,
             duration_seconds=duration_seconds, lang=lang,
+            skill_notes=skill_notes, selections=selections,
             camera_motion=camera_motion, expression=expression,
             expression_catalog=expression_catalog,
             shot_size=shot_size, framing=framing,

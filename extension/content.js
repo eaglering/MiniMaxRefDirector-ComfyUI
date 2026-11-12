@@ -73,7 +73,7 @@
   const HOST = location.hostname;
   const SITE = HOST.indexOf("doubao.com") >= 0
     ? { id: "doubao", name: "豆包", chatIdRe: /\/chat\/([0-9A-Za-z_-]+)/, sessionApi: false }
-    : (HOST.indexOf("tongyi.aliyun.com") >= 0 || HOST.indexOf("qwen.ai") >= 0)
+    : (HOST.indexOf("qianwen.com") >= 0 || HOST.indexOf("tongyi.aliyun.com") >= 0 || HOST.indexOf("qwen.ai") >= 0)
       ? { id: "qwen", name: "千问", chatIdRe: /\/(?:qianwen\/)?chat\/([0-9A-Za-z_-]+)/, sessionApi: false }
       : { id: "deepseek", name: "DeepSeek", chatIdRe: /\/a\/chat\/s\/([0-9A-Za-z_-]+)/, sessionApi: true };
 

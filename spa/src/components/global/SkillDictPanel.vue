@@ -1,23 +1,43 @@
 <script setup>
-// 全局参数 · 分镜技能词典管理面板（运镜/景别/镜头结构/微表情 + 自定义类别）
-// 按类别动态字段：运镜=名称+英文写法+指南+英文触发短语；景别/镜头结构=中文名+英文写法；
-// 微表情=名称+中文示例数组；自定义类别=名称+描述。支持新增 / 编辑 / 删除 / 批量导入。
+// 全局参数 · 分镜技能词典管理面板
+// 类别驱动（render_mode 决定注入方式与必填字段），可无限扩展：
+//   camera 运镜 / term 术语 / example 示例 / descriptive 描述 / block 片段
+// protect_keywords=1 的类别，其技术词在 skill_notes 中用 <!技术词> 保护（如运镜）
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
 import {
-  addSkillDict, addSkillCategory, batchAddSkillDict, deleteSkillDict, updateSkillDict,
+  addSkillDict, addSkillCategory, batchAddSkillDict, deleteSkillDict,
+  updateSkillDict, updateSkillCategory,
 } from "../../api/client.js";
 
 const ws = useWorkspace();
 
-// 类别字段规则（与后端 lib/skill_db.py _CATEGORY_RULES 对齐）
-const CATEGORY_RULES = {
-  "运镜": { needNameEn: false, needExamples: true, exLabel: "英文触发短语（分号分隔，如 slow push-in；dolly in）", showGuide: true, exLang: "en" },
-  "景别": { needNameEn: true, needExamples: false, showGuide: false },
-  "镜头结构": { needNameEn: true, needExamples: false, showGuide: false },
-  "微表情": { needNameEn: false, needExamples: true, exLabel: "中文示例（分号分隔，如 长长地呼出一口气；轻叹一声）", showGuide: false, exLang: "zh" },
+// 注入方式规则（与后端 lib/skill_db.py _RENDER_MODE_RULES 对齐）
+const RENDER_MODE_RULES = {
+  camera: {
+    needNameEn: false, needExamples: true, showGuide: true, exLang: "en",
+    exLabel: "英文触发短语（分号分隔，如 slow push-in；dolly in）",
+  },
+  term: { needNameEn: true, needExamples: false, showGuide: false },
+  example: {
+    needNameEn: false, needExamples: true, showGuide: false, exLang: "zh",
+    exLabel: "示例（分号分隔，如 长长地呼出一口气；轻叹一声）",
+  },
+  descriptive: {
+    needNameEn: false, needExamples: false, showGuide: true, exLang: "en",
+    exLabel: "参考短语（可选，分号分隔）",
+  },
+  block: { needNameEn: false, needExamples: false, showGuide: false },
 };
+const RENDER_MODE_OPTIONS = [
+  { value: "descriptive", label: "描述型 · 人物/打斗/特效等，自然融入" },
+  { value: "camera", label: "运镜型 · 英文触发短语（建议开启关键词保护）" },
+  { value: "term", label: "术语型 · 中文名 + 英文对照（景别/构图）" },
+  { value: "example", label: "示例型 · 每镜挑一句示例（微表情）" },
+  { value: "block", label: "片段型 · 整段内容近似原样（风格/效果）" },
+];
+const MODE_LABEL = { camera: "运镜", term: "术语", example: "示例", descriptive: "描述", block: "片段" };
 
 const activeCatId = ref(null);
 const activeCat = computed(() =>
@@ -25,10 +45,8 @@ const activeCat = computed(() =>
   || ws.skillDict.categories[0]
   || null
 );
-const rules = computed(() =>
-  (activeCat.value && CATEGORY_RULES[activeCat.value.name]) || { needNameEn: false, needExamples: false, showGuide: false }
-);
-const isBuiltin = computed(() => !!(activeCat.value && CATEGORY_RULES[activeCat.value.name]));
+const activeMode = computed(() => activeCat.value?.renderMode || "descriptive");
+const rules = computed(() => RENDER_MODE_RULES[activeMode.value] || RENDER_MODE_RULES.descriptive);
 
 const catSkills = computed(() =>
   activeCat.value ? ws.skillDict.skills.filter((s) => s.categoryId === activeCat.value.id) : []
@@ -36,14 +54,15 @@ const catSkills = computed(() =>
 
 onMounted(() => ws.loadSkillDict());
 
-// ---- 表格列（按类别动态）----
+// ---- 表格列（按注入方式动态）----
 const columns = computed(() => {
-  const name = activeCat.value?.name || "";
-  const cols = [{ prop: "name", label: "名称" }];
-  if (isBuiltin.value) cols.push({ prop: "nameEn", label: "英文写法" });
-  if (name === "运镜") cols.push({ prop: "guide", label: "写法指南" });
-  if (name === "运镜" || name === "微表情") cols.push({ prop: "examples", label: name === "运镜" ? "触发短语" : "中文示例" });
-  if (!isBuiltin.value) cols.push({ prop: "desc", label: "描述" });
+  const mode = activeMode.value;
+  const cols = [{ prop: "name", label: "名称" }, { prop: "nameEn", label: "英文写法" }];
+  cols.push({ prop: "desc", label: mode === "block" ? "内容片段" : "描述" });
+  if (mode === "camera" || mode === "descriptive") cols.push({ prop: "guide", label: "写法指南" });
+  if (mode === "camera" || mode === "example" || mode === "descriptive") {
+    cols.push({ prop: "examples", label: mode === "example" ? "示例" : "短语" });
+  }
   return cols;
 });
 
@@ -52,27 +71,60 @@ function cellText(row, prop) {
   return row[prop] || "—";
 }
 
-// ---- 新增 / 编辑弹窗（按类别动态字段）----
-const dialog = reactive({
-  visible: false,
-  editing: null, // 编辑时为词条对象
-  categoryId: null,
-  name: "",
-  nameEn: "",
-  desc: "",
-  guide: "",
-  examples: "", // 分号分隔
-  saving: false,
+// ---- 类别新增 / 编辑 ----
+const catDialog = reactive({
+  visible: false, editing: null, name: "", description: "",
+  renderMode: "descriptive", protectKeywords: false, saving: false,
 });
 
-const dialogRules = computed(() => {
-  const cat = ws.skillDict.categories.find((c) => c.id === dialog.categoryId);
-  return (cat && CATEGORY_RULES[cat.name]) || { needNameEn: false, needExamples: false, showGuide: false };
+function openCategory(editing = null) {
+  catDialog.editing = editing;
+  catDialog.name = editing?.name || "";
+  catDialog.description = editing?.description || "";
+  catDialog.renderMode = editing?.renderMode || "descriptive";
+  catDialog.protectKeywords = !!editing?.protectKeywords;
+  catDialog.visible = true;
+}
+
+async function submitCategory() {
+  if (catDialog.saving) return;
+  if (!catDialog.name.trim()) {
+    ElMessage.warning("类别名称不能为空");
+    return;
+  }
+  catDialog.saving = true;
+  try {
+    const payload = {
+      name: catDialog.name.trim(),
+      description: catDialog.description.trim(),
+      renderMode: catDialog.renderMode,
+      protectKeywords: catDialog.protectKeywords,
+    };
+    const res = catDialog.editing
+      ? await updateSkillCategory({ id: catDialog.editing.id, ...payload })
+      : await addSkillCategory(payload);
+    if (!res.success) throw new Error(res.error || "保存类别失败");
+    await ws.loadSkillDict(true);
+    catDialog.visible = false;
+    ElMessage.success(catDialog.editing ? "类别已更新" : `类别「${catDialog.name.trim()}」已创建`);
+  } catch (e) {
+    ElMessage.error(e.message || String(e));
+  } finally {
+    catDialog.saving = false;
+  }
+}
+
+// ---- 技能新增 / 编辑 ----
+const dialog = reactive({
+  visible: false, editing: null, categoryId: null,
+  name: "", nameEn: "", desc: "", guide: "", examples: "", saving: false,
 });
-const dialogIsBuiltin = computed(() => {
+
+const dialogMode = computed(() => {
   const cat = ws.skillDict.categories.find((c) => c.id === dialog.categoryId);
-  return !!(cat && CATEGORY_RULES[cat.name]);
+  return cat?.renderMode || "descriptive";
 });
+const dialogRules = computed(() => RENDER_MODE_RULES[dialogMode.value] || RENDER_MODE_RULES.descriptive);
 
 function openAdd() {
   dialog.editing = null;
@@ -163,16 +215,11 @@ const batchItems = computed(() => {
   const out = [];
   for (const line of batch.text.split(/\r?\n/)) {
     const s = line.trim();
-    if (!s || s.startsWith("#")) continue; // 空行 / 注释行跳过
+    if (!s || s.startsWith("#")) continue;
     const parts = s.split(/\t|\|/).map((x) => x.trim());
     const name = parts[0] || "";
     if (!name) continue;
-    out.push({
-      name,
-      nameEn: parts[1] || "",
-      examples: parts[2] || "",
-      desc: parts[3] || "",
-    });
+    out.push({ name, nameEn: parts[1] || "", examples: parts[2] || "", desc: parts[3] || "" });
   }
   return out;
 });
@@ -189,10 +236,7 @@ async function submitBatch() {
   }
   batch.saving = true;
   try {
-    const res = await batchAddSkillDict({
-      categoryId: batch.categoryId,
-      items: batchItems.value,
-    });
+    const res = await batchAddSkillDict({ categoryId: batch.categoryId, items: batchItems.value });
     if (!res.success) throw new Error(res.error || "批量导入失败");
     await ws.loadSkillDict(true);
     batch.visible = false;
@@ -214,8 +258,10 @@ async function submitBatch() {
   <section class="mrd-card mrd-section">
     <h3 class="mrd-section-title"><el-icon><component :is="'Grid'" /></el-icon>分镜技能</h3>
     <p class="mrd-skill-sub">
-      运镜类保留 Camera Motion LoRA 触发词库（触发词 camera motion 必须置于提示词开头）；
-      景别与镜头结构直接使用中文名称；微表情使用中文示例数组。
+      技能按「注入方式」进入 skill_notes：运镜用英文触发短语，术语型直接写中文名并在英文阶段
+      按对照还原，示例型每镜挑一句，描述/片段型自然融入镜头描述。开启「关键词保护」的类别
+      （内置为运镜）其技术词会以 &lt;!技术词&gt; 包裹，翻译阶段原样保留。
+      触发词写法（如 camera motion 置于开头）请在全局提示词中自行申明。
     </p>
 
     <div class="mrd-skill-tabs">
@@ -223,14 +269,23 @@ async function submitBatch() {
         v-for="c in ws.skillDict.categories" :key="c.id"
         class="mrd-skill-tab" :class="{ active: activeCat?.id === c.id }"
         @click="activeCatId = c.id"
-      >{{ c.name }}</button>
+      >
+        {{ c.name }}
+        <span v-if="c.protectKeywords" class="mrd-skill-tab-badge">保护</span>
+      </button>
       <div class="mrd-skill-actions">
+        <el-button size="small" :icon="'Plus'" @click="openCategory(null)">新建类别</el-button>
+        <el-button size="small" :icon="'EditPen'" :disabled="!activeCat" @click="openCategory(activeCat)">编辑类别</el-button>
         <el-button size="small" :icon="'Plus'" @click="openAdd">添加技能</el-button>
         <el-button size="small" :icon="'Upload'" @click="openBatch">批量导入</el-button>
       </div>
     </div>
 
-    <p v-if="activeCat?.description" class="mrd-skill-cat-desc">{{ activeCat.description }}</p>
+    <p v-if="activeCat" class="mrd-skill-cat-desc">
+      <el-tag size="small" effect="plain">{{ MODE_LABEL[activeMode] || activeMode }}</el-tag>
+      <el-tag v-if="activeCat.protectKeywords" size="small" effect="plain" type="warning">关键词保护</el-tag>
+      <span v-if="activeCat.description">{{ activeCat.description }}</span>
+    </p>
 
     <el-table :data="catSkills" size="small" class="mrd-skill-table" :key="activeCat?.id">
       <el-table-column
@@ -250,7 +305,33 @@ async function submitBatch() {
       </template>
     </el-table>
 
-    <!-- 新增 / 编辑弹窗 -->
+    <!-- 类别弹窗：注入方式 / 关键词保护 -->
+    <el-dialog v-model="catDialog.visible" :title="catDialog.editing ? '编辑类别' : '新建类别'" width="480px" append-to-body>
+      <div class="mrd-field">
+        <label>类别名称（分镜选择按类别名存储，重命名会影响已有选择）</label>
+        <el-input v-model="catDialog.name" placeholder="如：人物主体 / 打斗 / 特效" />
+      </div>
+      <div class="mrd-field">
+        <label>注入方式</label>
+        <el-select v-model="catDialog.renderMode" style="width: 100%">
+          <el-option v-for="m in RENDER_MODE_OPTIONS" :key="m.value" :label="m.label" :value="m.value" />
+        </el-select>
+      </div>
+      <div class="mrd-field mrd-field-row">
+        <label>关键词保护（技术词用 &lt;!…&gt; 包裹，翻译阶段原样保留）</label>
+        <el-switch v-model="catDialog.protectKeywords" />
+      </div>
+      <div class="mrd-field">
+        <label>类别说明（可选，展示于分镜技能区）</label>
+        <el-input v-model="catDialog.description" type="textarea" :rows="2" />
+      </div>
+      <template #footer>
+        <el-button @click="catDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="catDialog.saving" @click="submitCategory">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 新增 / 编辑技能弹窗 -->
     <el-dialog v-model="dialog.visible" :title="dialog.editing ? '编辑技能' : '添加技能'" width="560px" append-to-body>
       <div class="mrd-field">
         <label>类别</label>
@@ -262,21 +343,20 @@ async function submitBatch() {
         <label>名称（中文名直接写入提示词）</label>
         <el-input v-model="dialog.name" placeholder="如：大远景 / 双人镜头 / 轻叹 / 推近 Push-in" />
       </div>
-      <div v-if="dialogIsBuiltin" class="mrd-field">
+      <div class="mrd-field">
         <label>英文写法{{ dialogRules.needNameEn ? "（必填，英文翻译阶段对照）" : "（可选）" }}</label>
         <el-input v-model="dialog.nameEn" placeholder="如：extreme wide shot / two-shot / Soft sigh" />
       </div>
-      <div v-if="!dialogIsBuiltin || dialogRules.showGuide" class="mrd-field">
-        <label>描述{{ dialogIsBuiltin ? "（可选）" : "" }}</label>
-        <el-input v-model="dialog.desc" placeholder="一句话说明" />
+      <div class="mrd-field">
+        <label>描述{{ dialogMode === "block" ? "（片段型：整段内容会近似原样进入提示词）" : "（可选，悬停提示 / 融入说明）" }}</label>
+        <el-input v-model="dialog.desc" :type="dialogMode === 'block' ? 'textarea' : 'text'" :rows="2" placeholder="一句话说明" />
       </div>
       <div v-if="dialogRules.showGuide" class="mrd-field">
         <label>写法指南（可选：星级 / 强度 / 方向写法）</label>
         <el-input v-model="dialog.guide" type="textarea" :rows="2" placeholder="如：★★★ 最稳。建议写法：slow push-in / dolly in；更舒缓加 slow。" />
       </div>
       <div v-if="dialogRules.needExamples || dialogRules.showGuide" class="mrd-field">
-        <label v-if="dialogRules.needExamples">{{ dialogRules.exLabel }}</label>
-        <label v-else>英文触发短语（可选，分号分隔）</label>
+        <label>{{ dialogRules.exLabel || "参考短语（可选，分号分隔）" }}</label>
         <el-input v-model="dialog.examples" type="textarea" :rows="2"
           :placeholder="dialogRules.exLang === 'zh' ? '长长地呼出一口气；轻叹一声' : 'slow push-in；dolly in；push in'" />
       </div>
@@ -331,13 +411,19 @@ async function submitBatch() {
   color: #fff; border-color: #6c5ce7;
   background: rgba(108, 92, 231, 0.18);
 }
+.mrd-skill-tab-badge {
+  margin-left: 5px; font-size: 10px; color: #f0b46a;
+  border: 1px solid rgba(240, 180, 106, 0.4); border-radius: 8px; padding: 0 5px;
+}
 .mrd-skill-actions { margin-left: auto; display: flex; gap: 8px; }
 .mrd-skill-cat-desc {
   margin: 0 0 10px; font-size: 11.5px; color: #8b93a7; line-height: 1.7;
   padding: 8px 12px; border-radius: 8px; background: rgba(108, 92, 231, 0.08);
+  display: flex; align-items: center; gap: 8px;
 }
 .mrd-skill-table { width: 100%; }
 .mrd-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.mrd-field-row { flex-direction: row; align-items: center; justify-content: space-between; }
 .mrd-field > label { font-size: 12px; color: #a9b1c3; }
 .mrd-field-hint { font-size: 11.5px; color: #6b7488; margin: 4px 0 0; }
 </style>

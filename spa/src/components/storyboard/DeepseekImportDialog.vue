@@ -1,14 +1,15 @@
 <script setup>
-// DeepSeek 分镜导入弹窗：两阶段（手动逐步模式，无一键全自动）
-// 阶段一：选择 chat.deepseek.com 会话（列表 / 搜索 / 刷新）
+// 网页分镜导入弹窗（DeepSeek / 豆包 / 千问）：两阶段（手动逐步模式，无一键全自动）
+// 阶段一：选择桥接站点会话 —— DeepSeek 走扩展侧会话列表；豆包/千问手动粘贴
+//   会话链接 / ID（可留空，导入时自动新建大纲会话）
 // 阶段二：步骤卡片（故事大纲 → 分镜设计 → 主体设计 → 首帧图 → 音频设计），
-//   每步独立「执行」（在 DeepSeek 会话生成，仅缓存）与「同步」（写入导演台）。
+//   每步独立「执行」（在站点网页会话生成，仅缓存）与「同步」（写入导演台）。
 //   H3 转换不属于导入流程；由用户在分镜属性里按需点「转H3提示词」。
 // 同步后 emit("sync", payload)，由 Storyboard.vue 分类型写入分镜 / 主体 / 音频。
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
-import { deepseekAttempt, deepseekCancel, deepseekDiag, deepseekListSessions } from "../../utils/llm.js";
+import { PROXY_SITES, SITE_LABELS, deepseekAttempt, deepseekCancel, deepseekDiag, deepseekListSessions } from "../../utils/llm.js";
 import {
   IMPORT_STEPS,
   buildSyncPayload,
@@ -29,7 +30,11 @@ const emit = defineEmits(["update:modelValue", "sync"]);
 
 const ws = useWorkspace();
 const extId = computed(() => (ws.llm.extension_id || "").trim());
-const isDeepseek = computed(() => ws.llm.mode === "deepseek-proxy");
+const site = computed(() => PROXY_SITES[ws.llm.mode] || "");
+const siteLabel = computed(() => SITE_LABELS[site.value] || site.value || "");
+const isBridgeSite = computed(() => !!site.value);
+// 仅 DeepSeek 支持扩展侧会话列表 / 删除；豆包/千问手动填会话且不可清理
+const supportsList = computed(() => site.value === "deepseek");
 
 // ---- 阶段一：会话选择 ----
 const phase = ref("select"); // select | run
@@ -38,6 +43,16 @@ const loading = ref(false);
 const loadError = ref("");
 const keyword = ref("");
 const selectedId = ref("");
+// 手动模式（豆包/千问）：粘贴会话链接（如 https://www.doubao.com/chat/xxx）或会话 ID
+const manualInput = ref("");
+const manualId = computed(() => {
+  const raw = String(manualInput.value || "").trim();
+  if (!raw) return "";
+  const m = raw.match(/\/chat\/([0-9A-Za-z_-]+)/i) || raw.match(/\/a\/chat\/s\/([0-9A-Za-z_-]+)/i);
+  if (m) return m[1];
+  // 允许直接粘贴纯 ID
+  return /^[0-9A-Za-z_-]{6,}$/.test(raw) ? raw : "";
+});
 
 const filtered = computed(() => {
   const k = keyword.value.trim().toLowerCase();
@@ -47,13 +62,14 @@ const filtered = computed(() => {
 
 async function loadSessions() {
   if (!extId.value) {
-    loadError.value = "未配置 DeepSeek 桥接扩展 ID：请到「全局参数 → LLM 设置」填写";
+    loadError.value = "未配置浏览器桥接扩展 ID：请到「全局参数 → LLM 设置」填写";
     return;
   }
+  if (!supportsList.value) return; // 手动模式无需拉列表
   loading.value = true;
   loadError.value = "";
   try {
-    sessions.value = await deepseekListSessions(extId.value);
+    sessions.value = await deepseekListSessions(extId.value, site.value);
   } catch (e) {
     loadError.value = e.message || String(e);
   } finally {
@@ -61,11 +77,11 @@ async function loadSessions() {
   }
 }
 
-// 页面自检：确认 DeepSeek 标签页里输入框/发送按钮是否可定位（DOM 改版排查）
+// 页面自检：确认站点标签页里输入框/发送按钮是否可定位（DOM 改版排查）
 const diagLoading = ref(false);
 async function runDiag() {
   if (!extId.value) {
-    ElMessage.warning("请先填写 DeepSeek 桥接扩展 ID（全局参数 → LLM 设置）");
+    ElMessage.warning("请先填写浏览器桥接扩展 ID（全局参数 → LLM 设置）");
     return;
   }
   diagLoading.value = true;
@@ -73,9 +89,9 @@ async function runDiag() {
     const d = await deepseekDiag(extId.value);
     const p = d.probe || {};
     const lines = [
-      `扩展版本：v${d.version || "未知"}${d.version && d.version < "1.4.7" ? "（过旧，请在 chrome://extensions 重新加载扩展）" : ""}`,
-      `标签页：${d.tabUrl || "（未找到 chat.deepseek.com 标签页）"}`,
-      `DeepSeek 标签页共 ${(d.tabs || []).length} 个`,
+      `扩展版本：v${d.version || "未知"}${d.version && d.version < "1.6.0" ? "（过旧，请在 chrome://extensions 重新加载扩展）" : ""}`,
+      `标签页：${d.tabUrl || "（未找到站点标签页）"}`,
+      `桥接站点标签页共 ${(d.tabs || []).length} 个`,
       `content 脚本就绪：${d.contentReady ? "是" : "否"}`,
       `页面可见性：${p.visibility || "?"}${p.wasDiscarded ? "（曾被内存节省丢弃）" : ""}`,
       `输入框：${p.inputFound ? `已找到（${p.inputKind || "?"}）` : "未找到"}`,
@@ -84,7 +100,7 @@ async function runDiag() {
       `回复流钩子：${p.hookInstalled ? "已注入" : "未注入"}`,
       `WS 桥接：${d.bridge && d.bridge.connected ? "已连接" : "未连接"}`,
     ];
-    await ElMessageBox.alert(lines.join("<br/>"), "DeepSeek 页面自检", {
+    await ElMessageBox.alert(lines.join("<br/>"), `${siteLabel.value} 页面自检`, {
       dangerouslyUseHTMLString: true,
       confirmButtonText: "知道了",
     });
@@ -117,6 +133,7 @@ watch(
       phase.value = "select";
       selectedId.value = "";
       keyword.value = "";
+      manualInput.value = "";
       resetRun();
       loadSessions();
     }
@@ -182,7 +199,7 @@ const debugTail = ref([]);
 let stageTimer = null;
 const STAGE_LABELS = {
   queued: "已排队",
-  tab_ready: "已连接 DeepSeek 标签页",
+  tab_ready: "已连接站点标签页",
   tab_alive: "已确保页面可见（小窗）",
   go_home: "正在回到首页开新会话",
   home_ready: "已回到首页",
@@ -310,7 +327,9 @@ function summarize(key, result) {
 
 async function runStep(step) {
   const key = step.key;
-  if (!canRun(key) || !selectedId.value) return;
+  if (!canRun(key) || !isBridgeSite.value) return;
+  // DeepSeek 必须先选会话；豆包/千问可留空（自动新建大纲会话）
+  if (supportsList.value && !selectedId.value) return;
   if (!stateRef.value) {
     const segs = ws.timeline.segments || [];
     const fps = ws.widgets.frame_rate || 24;
@@ -326,7 +345,8 @@ async function runStep(step) {
       : "（当前时间线为空）";
     stateRef.value = createImportState({
       extensionId: extId.value,
-      sessionId: selectedId.value,
+      site: site.value,
+      sessionId: supportsList.value ? selectedId.value : manualId.value,
       timelineDigest: digest,
       frameRate: fps,
       existingSubjects: ws.subjects.subjects || [],
@@ -382,13 +402,17 @@ async function syncStep(step) {
 }
 
 async function cleanupSessions() {
+  if (!supportsList.value) {
+    ElMessage.info(`${siteLabel.value} 网页版暂不支持扩展侧删除会话，请在该网页内手动管理`);
+    return;
+  }
   if (!stateRef.value || !stateRef.value.createdSessions.length) {
-    ElMessage.info("本次导入尚未新建 DeepSeek 会话（大纲复用你选定的会话）");
+    ElMessage.info("本次导入尚未新建会话（大纲复用你选定的会话）");
     return;
   }
   try {
     await ElMessageBox.confirm(
-      `删除本次导入新建的 ${stateRef.value.createdSessions.length} 个 DeepSeek 会话？删除后不可恢复。`,
+      `删除本次导入新建的 ${stateRef.value.createdSessions.length} 个会话？删除后不可恢复。`,
       "清理会话",
       { type: "warning", confirmButtonText: "删除", cancelButtonText: "保留" }
     );
@@ -427,7 +451,7 @@ function stepBadge(st) {
 <template>
   <el-dialog
     :model-value="modelValue"
-    :title="phase === 'select' ? 'DeepSeek 分镜导入 · 选择会话' : 'DeepSeek 分镜导入 · 逐步执行'"
+    :title="phase === 'select' ? `${siteLabel} 分镜导入 · 选择会话` : `${siteLabel} 分镜导入 · 逐步执行`"
     :width="phase === 'select' ? 560 : 680"
     append-to-body
     :close-on-click-modal="phase === 'select' && !runningStep"
@@ -437,17 +461,17 @@ function stepBadge(st) {
   >
     <!-- 阶段一：会话选择 -->
     <div v-if="phase === 'select'" class="mrd-dsi-select">
-      <div class="mrd-dsi-toolbar">
+      <div v-if="supportsList" class="mrd-dsi-toolbar">
         <el-input v-model="keyword" placeholder="搜索会话标题…" clearable :prefix-icon="'Search'" class="mrd-dsi-search" />
         <el-button :icon="'Refresh'" :loading="loading" @click="loadSessions">刷新</el-button>
       </div>
 
       <el-alert
-        v-if="!isDeepseek"
+        v-if="!isBridgeSite"
         type="warning"
         :closable="false"
         show-icon
-        title="当前 LLM 模式不是 DeepSeek 代理：请在「全局参数 → LLM 设置」切换后再导入"
+        title="当前 LLM 模式不支持网页桥接导入：请在「全局参数 → LLM 设置」切换为 DeepSeek / 豆包 / 千问代理后再导入"
         class="mrd-dsi-alert"
       />
       <el-alert
@@ -459,15 +483,24 @@ function stepBadge(st) {
         class="mrd-dsi-alert"
       />
       <el-alert
+        v-else-if="supportsList"
+        type="info"
+        :closable="false"
+        show-icon
+        class="mrd-dsi-alert"
+        title="选择一个包含你创作构想的会话：导入将在该会话内提取故事大纲（该会话会新增 2 条消息），随后每个步骤由你手动「执行 / 同步」逐步确认。建议控制导入频率，避免短时间高频自动化操作。"
+      />
+      <el-alert
         v-else
         type="info"
         :closable="false"
         show-icon
         class="mrd-dsi-alert"
-        title="选择一个包含你创作构想的 DeepSeek 会话：导入将在该会话内提取故事大纲（该会话会新增 2 条消息），随后每个步骤由你手动「执行 / 同步」逐步确认。建议控制导入频率，避免短时间高频自动化操作。"
+        :title="`${siteLabel} 网页版暂不支持扩展侧会话列表：粘贴会话链接（如 https://www.${site === 'doubao' ? 'doubao.com' : 'qianwen.com'}/chat/…）或会话 ID；留空则导入时自动新建大纲会话。后续每步由你手动「执行 / 同步」逐步确认，建议控制导入频率。`"
       />
 
-      <div class="mrd-dsi-list">
+      <!-- DeepSeek：会话列表 -->
+      <div v-if="supportsList" class="mrd-dsi-list">
         <template v-if="loading">
           <div v-for="i in 6" :key="i" class="mrd-dsi-skeleton" />
         </template>
@@ -487,10 +520,26 @@ function stepBadge(st) {
         <el-empty v-else description="没有匹配的会话" :image-size="72" />
       </div>
 
+      <!-- 豆包 / 千问：手动填写会话 -->
+      <div v-else-if="isBridgeSite" class="mrd-dsi-manual">
+        <el-input
+          v-model="manualInput"
+          :placeholder="`粘贴 ${siteLabel} 会话链接或会话 ID（留空 = 自动新建会话）`"
+          clearable
+        />
+        <div v-if="manualInput && !manualId" class="mrd-dsi-manual-err">
+          无法从输入中识别会话 ID：请粘贴形如 /chat/&lt;id&gt; 的链接或直接填会话 ID
+        </div>
+      </div>
+
       <div class="mrd-dsi-footer">
         <el-button class="mrd-dsi-diag" :loading="diagLoading" @click="runDiag">页面自检</el-button>
         <el-button @click="close">取消</el-button>
-        <el-button type="primary" :disabled="!selectedId || !isDeepseek" @click="phase = 'run'">
+        <el-button
+          type="primary"
+          :disabled="!isBridgeSite || (supportsList && !selectedId)"
+          @click="phase = 'run'"
+        >
           下一步：逐步导入
         </el-button>
       </div>
@@ -499,9 +548,15 @@ function stepBadge(st) {
     <!-- 阶段二：步骤卡片（执行 / 同步） -->
     <div v-else class="mrd-dsi-run">
       <div class="mrd-dsi-toolbar-row">
-        <span class="mrd-dsi-toolbar-hint">每步先「执行」在 DeepSeek 生成，确认后再「同步」写入导演台</span>
+        <span class="mrd-dsi-toolbar-hint">每步先「执行」在{{ siteLabel }}网页会话生成，确认后再「同步」写入导演台</span>
         <div class="mrd-dsi-toolbar-btns">
-          <el-button size="small" :icon="'Delete'" :disabled="!!runningStep" @click="cleanupSessions">清理会话</el-button>
+          <el-button
+            size="small"
+            :icon="'Delete'"
+            :disabled="!!runningStep || !supportsList"
+            :title="supportsList ? '' : `${siteLabel} 暂不支持扩展侧删除会话`"
+            @click="cleanupSessions"
+          >清理会话</el-button>
           <el-button v-if="runningStep" size="small" type="danger" plain @click="cancelStep">取消执行</el-button>
           <el-button v-else size="small" @click="phase = 'select'">返回选会话</el-button>
           <el-button link type="info" size="small" @click="copyDebug">复制调试日志</el-button>
@@ -577,6 +632,8 @@ function stepBadge(st) {
 .mrd-dsi-toolbar { display: flex; gap: 8px; }
 .mrd-dsi-search { flex: 1; }
 .mrd-dsi-alert { border-radius: 8px; }
+.mrd-dsi-manual { display: flex; flex-direction: column; gap: 6px; }
+.mrd-dsi-manual-err { font-size: 11px; color: #f87171; }
 .mrd-dsi-list {
   max-height: 320px;
   overflow: auto;

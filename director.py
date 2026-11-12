@@ -8,6 +8,7 @@ from .lib.audio import fill_audio_gaps
 from .lib.image import calc_resolution
 from .lib.llm import unload_llama_models
 from .lib.prompt import build_h3_prompt, _translate_text_to_en
+from .lib.skill_notes import glossary_for_text
 
 GuideData = io.Custom("GUIDE_DATA")
 SubjectData = io.Custom("SUBJECT_DATA")
@@ -23,28 +24,31 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 # 引号保护：半角 "..." 与全角 \u201c...\u201d \u2018...\u2019（台词/标语/歌名等保持原语言）。
 # 注意：不含半角单引号 '...'，避免与英文撇号（don't / it's）冲突。
+# <!技术词>：技能关键词保护标记（仅 protect_keywords=1 的类别产生），翻译阶段掩码、
+# 译后只保留内文；触发词写法由用户写在全局提示词中，这里不做任何申明或置首处理。
 _PROTECTED_FRAGMENT_RE = re.compile(
-    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019"
-    r"|[（(][^（）()]*camera motion[^（）()]*[）)]",
+    r"<![^>]*>|<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
     re.DOTALL,
 )
 
-# 运镜短语片段：「中文运镜描写（camera motion, slow push-in）」中的括号段。
-# README 使用指南：Camera Motion LoRA 的触发词 "camera motion" 必须位于提示词开头。
-_CAMERA_MOTION_FRAGMENT_RE = re.compile(r"[（(][^（）()]*camera motion[^（）()]*[）)]")
+# 技能关键词标记：<!slow push-in>
+_PROTECT_MARK_RE = re.compile(r"^<!([^>]*)>$", re.DOTALL)
+# 全文剥离标记（英文提示词无需翻译时只保留技术词内文）
+_PROTECT_MARK_GLOBAL_RE = re.compile(r"<!([^>]*)>", re.DOTALL)
 
 
 def _needs_translate(prompt: str) -> bool:
     return bool(_CJK_RE.search(_PROTECTED_FRAGMENT_RE.sub("", prompt)))
 
 
-def _translate_prompt_to_en(prompt: str, opts: dict) -> str:
+def _translate_prompt_to_en(prompt: str, opts: dict, glossary: dict | None = None) -> str:
     """段提示词含中文时，将保护片段替换为英文占位符后整段翻译为英文，再还原占位符。
 
-    <@主体名> / <#主体名:对白> / <d>对白</d> 可能含中文且必须保持原语言（对白是
-    视频实际发声内容、主体名需保持原语言），翻译前掩码为 MASKED_N 英文占位符，
-    模型看不到原文，从源头杜绝改写；翻译后按顺序还原。若模型破坏/丢失了占位符，
-    则整体回退原文，保证对白/角色名不被污染。
+    <!技术词> / <@主体名> / <#主体名:对白> / <d>对白</d> 可能含中文或属于技术词，
+    翻译前掩码为 MASKED_N 英文占位符，模型看不到原文，从源头杜绝改写；翻译后按
+    顺序还原（<!…> 只保留内文，标记本身不进最终提示词）。若模型破坏/丢失了占位符，
+    则整体回退原文，保证对白/角色名/技术词不被污染。
+    glossary: 术语型技能中英对照，注入翻译指令；None 时按源文自动提取。
     翻译失败时 _translate_text_to_en 内部回退原文，不抛异常。
     """
     # 1. 保护片段 → 英文占位符
@@ -61,42 +65,23 @@ def _translate_prompt_to_en(prompt: str, opts: dict) -> str:
         return prompt
     # 3. 整段翻译为英文（subject_definitions / retention_analysis 等英文结构
     #    一并过模型，模型保持其英文原样，占位符被显式要求原样保留）
+    if glossary is None:
+        glossary = glossary_for_text(prompt)
     translated = _translate_text_to_en(
         masked,
         vlm_mode=str(opts.get("vlm_mode") or "llama-cpp"),
         options=opts,
         seed=int(opts.get("seed") or 42),
+        glossary=glossary,
     )
-    # 4. 占位符被模型删改 → 整体回退原文，避免对白/主体名丢失
+    # 4. 占位符被模型删改 → 整体回退原文，避免对白/技术词/主体名丢失
     missing = [token for token in placeholders if token not in translated]
     if missing:
         return prompt
     for token, original in placeholders.items():
-        translated = translated.replace(token, original)
-    # 5. Camera Motion LoRA：触发词 "camera motion" 必须位于英文提示词开头
-    #    （README 使用指南）。若源文含运镜短语而译文把它弄丢，回退原文；
-    #    若在句中出现但不在开头，则把该短语提到句首（避免触发词位置不达标）。
-    return _ensure_camera_motion_prefix(prompt, translated)
-
-
-def _ensure_camera_motion_prefix(src: str, translated: str) -> str:
-    """保证运镜短语（camera motion, ...）位于英文提示词开头；无运镜源文则原样返回。"""
-    m = _CAMERA_MOTION_FRAGMENT_RE.search(src)
-    if not m:
-        return translated
-    phrase = m.group(0).strip("（）()").strip()  # 如 camera motion, slow push-in
-    if not phrase.lower().startswith("camera motion"):
-        return translated
-    if _CAMERA_MOTION_FRAGMENT_RE.search(translated) is None:
-        # 译文丢失运镜短语 → 整体回退原文（不凭空造短语）
-        return src
-    if translated.lstrip().lower().startswith("camera motion"):
-        return translated
-    # 从译文中移除该短语片段（避免重复），再把触发词短语提到开头
-    moved = _CAMERA_MOTION_FRAGMENT_RE.sub("", translated, count=1)
-    moved = moved.strip()
-    moved = moved.lstrip("，,、 ").strip()
-    return f"{phrase}, {moved}" if moved else phrase
+        mark = _PROTECT_MARK_RE.match(original)
+        translated = translated.replace(token, mark.group(1).strip() if mark else original)
+    return translated
 
 
 class MiniMaxRefDirector(io.ComfyNode):
@@ -301,6 +286,10 @@ class MiniMaxRefDirector(io.ComfyNode):
                         "[MiniMaxRefDirector] segment %d post-translate prompt head: %s",
                         i, repr(prompt_res["prompt"][:160]),
                     )
+                else:
+                    # 纯英文提示词不走翻译：技能保护标记只保留内文，标记不进入最终提示词
+                    prompt_res["prompt"] = _PROTECT_MARK_GLOBAL_RE.sub(
+                        lambda m: m.group(1).strip(), prompt_res["prompt"])
                 entry = {
                     "prompt": prompt_res["prompt"],
                     "subjects": prompt_res["subjects"],

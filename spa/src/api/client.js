@@ -100,8 +100,15 @@ export function deleteSkillDict(id) {
 export function addSkillCategory(payload) {
   return postJSON("/spa/skill_dict/category/add", payload);
 }
+export function updateSkillCategory(payload) {
+  return postJSON("/spa/skill_dict/category/update", payload);
+}
 export function batchAddSkillDict(payload) {
   return postJSON("/spa/skill_dict/batch_add", payload);
+}
+// 技能选择 → skill_notes（后端唯一渲染源；服务端与网页桥接共用）
+export function fetchSkillNotes(selections, lang = "zh") {
+  return postJSON("/spa/skill_notes", { selections, lang });
 }
 
 // ===== LLM（复用现有端点，显式传 opts） =====
