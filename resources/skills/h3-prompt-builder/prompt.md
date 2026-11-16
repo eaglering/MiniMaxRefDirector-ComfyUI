@@ -1,7 +1,11 @@
 # H3 Prompt Builder（通用技能文档）
 
-> 本文件是「技能 → H3 提示词」的唯一模板：
+> 本文件是「技能 → H3 提示词」的主模板（骨架 + 规则 + 占位符）：
 > `lib/prompt.py::_build_h3_prompt` 读取后填充占位符，服务端三种模式与三种网页桥接共用。
+> 同目录配套文件：
+> - `h3-writing-guide.md`——四字段写作指南，注入 {{skills_guide}}（中英通用）
+> - `prompt_translate_to_en.md`——中→英翻译 skill（H3 转英文阶段）
+> - `minimaxh3_official_ref2v_prompt_writing.txt`——官方原版六段式指南（参考存档，运行时不读取）
 > 触发词写法（例如 `camera motion` 置于开头）由用户在「全局提示词」中自行申明，
 > 本模板与 skill_notes 不做任何触发词申明。
 
@@ -33,9 +37,7 @@ In "detailed_description", "overall_soundscape" and "non_diegetic_music":
 1. Wrap every character name as <@角色名称>, e.g. <@Zhang San>. This applies even if the user wrote the name as a bare word (e.g. "小李做了什么" must become "<@小李>做了什么").
 2. Wrap every dialogue as <#角色名称:对话内容>, e.g. <#Zhang San:Hello!> or <#李四:你好！>.
 3. Keep character names and dialogue in their original language, never translate them.
-
-## "summary" Format
-Write one short paragraph summarizing the target video and its reference relationships. It begins with a square-bracketed task-type prefix, e.g. "[reference generation]" or "[video editing + reference generation + audio reuse]". Choose task types according to the actual role each reference asset plays in the target video: keyframe completion (an image is a concrete frame anchor), reference generation (an asset provides generation guidance), video editing (a source video is directly modified), video continuation (new content continues from a source video), audio reuse (the same audio signal is reused in full or in part), audio reference (only the audio's characteristics are referenced). When multiple relationships hold, combine task types with " + " and do not repeat a type. The summary describes the main subjects and shot flow using <@角色名称> placeholders, e.g. <@Zhang San>, without introducing content beyond the user's input and without quoting any dialogue.
+4. Tag format is strict: no whitespace right after `<@` / `<#` / `<!` or right before the closing `>`, and the name/content separator must be a half-width colon `:` (never the full-width `：`). Correct: `<#李四:你好！>`；wrong: `<# 李四：你好！ >`.
 
 ## Strictness
 - "detailed_description" MUST begin with "[Shot 1]" and no text may appear before it. If the user's input has no explicit shot marker, open with "[Shot 1]".

@@ -133,7 +133,9 @@ class SubjectChip extends WidgetType {
   }
 }
 
-const TOKEN_RE = /<@([^>\n]*)>|<#([^:>\n]*)(?::([^>\n]*))?>|<!([^:>\n]*)(?::([^>\n]*))?>|<d>([\s\S]*?)<\/d>/g;
+// 标签匹配容忍模型偶发的格式毛刺（「<@ 张三>」「<#李四：你好 >」）：
+// 括号内首尾空格跳过，分隔冒号兼容全角「：」；捕获组使用处均已 trim
+const TOKEN_RE = /<@\s*([^>\n]*?)\s*>|<#\s*([^:>\n]*?)\s*(?::\s*([^>\n]*?)\s*)?>|<!\s*([^:>\n]*?)\s*(?::\s*([^>\n]*?)\s*)?>|<d>([\s\S]*?)<\/d>/g;
 
 function buildDeco(view) {
   const text = view.state.doc.toString();
@@ -329,8 +331,8 @@ function handleChipEdit(chip) {
   const text = view.state.doc.toString();
   // 快照校验：widget 可能已过期（文本被外部改写），区段内容不再是标签则放弃
   const seg = text.slice(chip.from, chip.to);
-  const mHash = /^<#([^:>\n]*)(?::([^>\n]*))?>$/.exec(seg);
-  const mAt = /^<@([^>\n]*)>$/.exec(seg);
+  const mHash = /^<#\s*([^:>\n]*?)\s*(?::\s*([^>\n]*?)\s*)?>$/.exec(seg);
+  const mAt = /^<@\s*([^>\n]*?)\s*>$/.exec(seg);
   const isHash = !!mHash;
   const m = isHash ? mHash : mAt;
   if (!m) return;

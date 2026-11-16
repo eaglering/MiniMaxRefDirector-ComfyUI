@@ -131,6 +131,8 @@ export async function generateH3Prompt(opts, payload) {
   };
   const resp = await generatePromptJson(body);
   if (!resp?.success) return resp;
+  // 前端兜底清洗（后端 prompt.py 已做 normalize；旧后端/重试路径可能漏网）
+  resp.json_data = normalizeH3Json(resp.json_data);
   // 服务端模式同样做 required_terms 校验（与网页通道一致，缺失纠正重试一次）
   if (Array.isArray(payload?.required_terms) && payload.required_terms.length) {
     const { json_data, stillMissing } = await ensureRequiredTerms(
@@ -141,7 +143,7 @@ export async function generateH3Prompt(opts, payload) {
           ...body,
           prompt: String(payload.prompt || "") + requiredTermsCorrectionPrompt(missing),
         });
-        return r?.success ? r.json_data : null;
+        return r?.success ? normalizeH3Json(r.json_data) : null;
       },
     );
     resp.json_data = json_data;
@@ -162,6 +164,7 @@ export const WEB_CHAT_H3_SYSTEM = `You are a video prompt engineer. Convert the 
 Rules:
 - Respond with ONLY the JSON object, no markdown fences, no extra text.
 - Wrap EVERY mentioned character/subject name as <@名字> (e.g. <@阿婆>) and never leave a subject name unwrapped; preserve existing <@Name> / <#Name:dialogue> / <d>dialogue</d> tags verbatim.
+- Tag format is strict: no whitespace right after <@ / <# / <! or right before >, and the name/content separator must be a half-width colon ":" (never the full-width "："). Correct: <#李四:你好！>; wrong: <# 李四：你好！ >.
 - detailed_description must break the shot into [Shot 1], [Shot 2] ... beats with timestamps: it MUST start with [Shot 1] (no timestamp on the first beat), and the following At MM:SS.mmm timestamps must be strictly increasing and cover the shot duration.
 - IMPORTANT: All four JSON field values (summary, detailed_description, overall_soundscape, non_diegetic_music) MUST be written in the SAME language as the input shot description — Chinese input MUST produce Chinese output, English input MUST produce English output. Never switch to a different language on your own; this rule overrides the language of this instruction.
 - Skill notes (if provided): EVERY listed entry MUST be explicitly reflected in detailed_description — never omit, skip or drop a selected skill. Merge their intent naturally; never output bullet lists, section headings, or skill names as tags.
@@ -180,10 +183,39 @@ function h3Brief(text, n = 120) {
 function parseH3(text) {
   try {
     const obj = parseJsonBlock(text);
-    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : null;
+    if (!(obj && typeof obj === "object" && !Array.isArray(obj))) return null;
+    // 标签格式清洗（模型偶发输出「<@ 张三>」「<#李四：你好 >」）：
+    // 去括号内首尾空格、全角「：」统一为半角（后端主体绑定只认半角冒号）
+    for (const k of ["summary", "detailed_description", "overall_soundscape", "non_diegetic_music"]) {
+      if (typeof obj[k] === "string") obj[k] = normalizeH3Tags(obj[k]);
+    }
+    return obj;
   } catch {
     return null;
   }
+}
+
+// H3 标签格式清洗：与后端 lib/prompt.py normalize_h3_tags 同构
+// - 括号内首尾空格去除（<@Name> 的英文名内部空格保留）
+// - <#名字:内容> / <！技术词:内容> 的分隔冒号统一为半角 ":"，前后空格去除
+export function normalizeH3Tags(text) {
+  return String(text || "").replace(/<([@#!])\s*([^>\n]*?)\s*>/g, (m, mark, inner) => {
+    if (mark === "@") return `<@${inner}>`;
+    const idx = Math.min(
+      ...[inner.indexOf(":"), inner.indexOf("：")].filter((p) => p >= 0).concat(Infinity)
+    );
+    if (!Number.isFinite(idx)) return `<${mark}${inner}>`;
+    return `<${mark}${inner.slice(0, idx).trim()}:${inner.slice(idx + 1).trim()}>`;
+  });
+}
+
+// 整份 H3 JSON 的四字段标签清洗
+export function normalizeH3Json(json) {
+  if (!json || typeof json !== "object") return json;
+  for (const k of ["summary", "detailed_description", "overall_soundscape", "non_diegetic_music"]) {
+    if (typeof json[k] === "string") json[k] = normalizeH3Tags(json[k]);
+  }
+  return json;
 }
 
 // 旧名兼容：deepseek 桥接入口

@@ -1,8 +1,12 @@
-# Four-Field Video Prompt Writing Guide (full-reference mode)
+# Four-Field Writing Guide（四字段写作指南 · 服务端 H3 生成注入块）
+
+> 本文件由 `lib/prompt.py::_load_h3_skills_template` 读取，注入主模板
+> `prompt.md` 的 `{{skills_guide}}` 占位符（服务端三种模式共用）。
+> 输出语言由主模板的 Output Language 段强制，本指南不重复申明语言；
+> 主体/对白包裹规则（`<@...>` / `<#...>`）见主模板 Placeholder Rules。
+> 历史的 `minimaxh3_custom_ref2v_prompt_writing*.txt`（中英两份）已并入本文件。
 
 You are an expert video prompt writer for a text-to-video generation system. Rewrite the user's input into a full-reference video prompt with exactly four fields: `summary`, `detailed_description`, `overall_soundscape`, and `non_diegetic_music`.
-
-**Output language:** Write all four fields in English. Keep only the fixed structural markers (`[Shot N]`, `At MM:SS.mmm`, `<@...>`, `<#...>`) and the field names in their fixed format. Character names, dialogue, and text visibly present in the scene always stay in their original language.
 
 ## 0. `summary`
 
@@ -19,9 +23,12 @@ Choose task types according to the actual role each reference asset plays in the
 | `audio reuse` | The same audio signal is reused in full or in part |
 | `audio reference` | The audio signal is not copied directly; only its music style, timbre, dialogue or lyric content, sound-effect texture, beat, or continuity is referenced |
 
-When a task satisfies multiple relationships, combine the task types with ` + ` and do not repeat a type. The mere presence of video or audio does not automatically create a corresponding task type. Describe the main subjects and shot flow using `<@角色名称>` placeholders (e.g. `<@Zhang San>`). The summary is a plain summary: do not introduce content beyond the user's input and do not include any dialogue in it.
+When a task satisfies multiple relationships, combine the task types with ` + ` and do not repeat a type. The mere presence of video or audio does not automatically create a corresponding task type. Describe the main subjects and shot flow using `<@角色名称>` placeholders. The summary is a plain summary: do not introduce content beyond the user's input and do not include any dialogue in it.
 
-Example:
+Example (zh):
+summary: [reference generation] 目标视频展示<@张三>在咖啡厅里吃饼干，以<@小白>作为宠物陪伴，结尾是罐头笑声。
+
+Example (en):
 summary: [reference generation] The target video shows <@Zhang San> eating a cookie in the coffee shop, using <@小白> as the pet companion and ending with a canned audience laugh.
 
 ## 1. `detailed_description`
@@ -32,7 +39,7 @@ The main body of the prompt. Describe visuals, actions, camera movement, sound, 
 - `[Shot 1]` marks the opening shot and has no timestamp. Later shots use `[Shot 2] At MM:SS.mmm, ..., [Shot N] At MM:SS.mmm, ...` to mark cut times.
 - If a total duration is provided, plan the cut timestamps against it: timestamps must be strictly increasing and lie within the total duration, the shots must jointly cover the full duration, and every shot should get a reasonable, non-trivial share (avoid extremely short shots such as a 2-second shot inside an 8-second video, and avoid one shot dominating almost the whole duration unless the action truly requires it).
 - For each shot, clearly establish the current composition, subject appearance and position, environment and lighting, actions and state changes, camera movement, and current sound.
-- Write camera movement in English within the current shot, including movement type, amplitude, and speed when they need to be expressed.
+- Write camera movement in the output language within the current shot, including movement type, amplitude, and speed when they need to be expressed.
 - Keep dialogue in its original language.
 - Make the description as detailed and explicit as possible, but never invent content beyond the user's input.
 
@@ -40,21 +47,24 @@ The main body of the prompt. Describe visuals, actions, camera movement, sound, 
 
 Summarize ambience and physical sounds across the full video. Dialogue, singing, and sound events synchronized to a particular shot remain in `detailed_description`.
 
-Example:
+Example (zh):
+overall_soundscape: 整个视频持续着安静的室内底噪和低沉的通风声。
+
+Example (en):
 overall_soundscape: Quiet indoor room tone and a low ventilation hum continue throughout the video.
 
 ## 3. `non_diegetic_music`
 
 Describe background music that the characters cannot hear and that is audible only to the audience. When music is present, state its instrumentation, tempo, and dynamic development. Write "N/A" when there is no music.
 
-Example:
+Example (zh):
+non_diegetic_music: 克制的独奏钢琴配乐，速度缓慢，下方有持续的低音大提琴铺垫，没有渐强起伏。
+
+Example (en):
 non_diegetic_music: A restrained solo-piano score at a slow tempo, with sustained low cello underneath and no swell.
 
 ## Writing Rules
 
-- Output all four fields in English. Character names, dialogue, and visible text in the scene keep their original language.
 - Use punctuation of the output language: Chinese punctuation `，` `。` `？` `！` for Chinese output, English punctuation `,` `.` `?` `!` for English output; remove decorative or repeated punctuation. End complete statements with a terminal mark.
 - Preserve the original language of dialogue and any text visibly present in the scene.
-- Wrap every mentioned character/subject name as `<@名字>` at least once before its first use (e.g. `<@小李>`), even if the user wrote the bare name. Never leave a subject name unwrapped.
-- Wrap every dialogue as `<#名字:对话内容>` (e.g. `<#小李:你好！>`).
 - Stay faithful to the user's input prompt: format exactly what the user provided. Do NOT add extra descriptions, actions, shots, or dialogue.

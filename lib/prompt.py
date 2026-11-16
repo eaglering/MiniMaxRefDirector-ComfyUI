@@ -94,19 +94,19 @@ def image_analysis(gguf_path: str, mmproj_path: str, prompt: str,
 
 
 # ── H3 skills 模板 ──────────────────────────────────────────────
-_PROMPT_DIR = os.path.join(
+# 模板统一放在 resources/skills/h3-prompt-builder/（历史位于 prompt/，已整合）：
+#   prompt.md                       主模板（骨架 + 规则 + 占位符）
+#   h3-writing-guide.md             四字段写作指南（注入 {{skills_guide}}，中英通用；
+#                                   输出语言由 lang_note 控制，不再分中英两份）
+#   prompt_translate_to_en.md       中→英翻译 skill（_translate_h3_prompt_to_en 加载）
+#   minimaxh3_official_ref2v_prompt_writing.txt  官方原版六段式指南（存档，运行时不读取）
+_H3_SKILLS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "prompt",
+    "resources", "skills", "h3-prompt-builder",
 )
-_H3_SKILLS_TEMPLATE_PATH = os.path.join(_PROMPT_DIR, "minimaxh3_custom_ref2v_prompt_writing.txt")
-_H3_SKILLS_TEMPLATE_PATH_ZH = os.path.join(_PROMPT_DIR, "minimaxh3_custom_ref2v_prompt_writing_zh.txt")
+_H3_SKILLS_TEMPLATE_PATH = os.path.join(_H3_SKILLS_DIR, "h3-writing-guide.md")
 # 提示词翻译为英文的 skill 模板（非英文语言生成后调用）
-_TRANSLATE_TO_EN_TEMPLATE_PATH = os.path.join(_PROMPT_DIR, "prompt_translate_to_en.txt")
-# 按语言选择 skills 模板：仅中/英双语，其他语言回退英文模板
-_H3_SKILLS_TEMPLATES = {
-    "zh": _H3_SKILLS_TEMPLATE_PATH_ZH,
-    "en": _H3_SKILLS_TEMPLATE_PATH,
-}
+_TRANSLATE_TO_EN_TEMPLATE_PATH = os.path.join(_H3_SKILLS_DIR, "prompt_translate_to_en.md")
 # 音频关系 -> retention_analysis 文案模板（{n} 为 Audio 编号）
 _AUDIO_RELATION_TEXT = {
     "fully_copy": "{n} is reused 1:1 as the target video's complete final audio track.",
@@ -119,19 +119,19 @@ _AUDIO_RELATION_TEXT = {
 # 技能定义在 SQLite（类别 render_mode 决定注入方式）；指令块渲染只有一份实现，
 # 服务端三种模式与三种网页桥接共用，本文件不再内置任何类别专用规则。
 def _load_h3_skills_template(lang: str = "en") -> str:
-    """Load the custom H3 skills template (four-field output) for the given language.
+    """加载四字段写作指南（注入主模板 {{skills_guide}} 占位符）。
 
-    lang == "zh" 使用中文模板，其余语言一律使用英文模板。
+    中英共用一份（h3-writing-guide.md）：输出语言由主模板 lang_note 强制，
+    保留 lang 参数仅为兼容旧调用签名。
     """
-    path = _H3_SKILLS_TEMPLATES.get(lang, _H3_SKILLS_TEMPLATES["en"])
-    with open(path, "r", encoding="utf-8") as f:
+    with open(_H3_SKILLS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
         return f.read()
 
 
 def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "", camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> str:
     """用通用模板（resources/skills/h3-prompt-builder/prompt.md）组装 H3 生成提示词。
 
-    - skills：四字段写作指南（prompt/minimaxh3_custom_ref2v_prompt_writing*.txt）
+    - skills：四字段写作指南（resources/skills/h3-prompt-builder/h3-writing-guide.md）
     - skill_notes：分镜技能注入块（lib/skill_notes.py 渲染；服务端与桥接共用同一份）
     - camera_motion / expression / shot_size / framing：**已废弃**，仅在 skill_notes
       为空时按类别 render_mode 反查并渲染一次，保证旧调用方（旧导演台 / 旧客户端）不炸
@@ -204,8 +204,7 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
     )
 
 
-_H3_BUILDER_TEMPLATE_PATH = os.path.join(
-    os.path.dirname(_PROMPT_DIR), "resources", "skills", "h3-prompt-builder", "prompt.md")
+_H3_BUILDER_TEMPLATE_PATH = os.path.join(_H3_SKILLS_DIR, "prompt.md")
 _H3_BUILDER_TEMPLATE_CACHE: dict[str, str] = {}
 
 # 模板缺失时的最小兜底（内容与 resources 模板保持同样占位语义）
@@ -221,6 +220,8 @@ _H3_BUILDER_FALLBACK = """You are an expert video prompt writer.
 Output ONLY a JSON object with exactly these keys: "summary", "detailed_description",
 "overall_soundscape", "non_diegetic_music". Fragments wrapped as `<!...>` are technical
 keywords: keep the inner text verbatim and never translate or rewrite them.
+Tag format is strict: no whitespace right after `<@` / `<#` / `<!` or before `>`, and
+the name/content separator must be a half-width colon `:` (never the full-width `：`).
 {{image_note}}{{lang_note}}
 
 ## User Input Prompt
@@ -380,7 +381,7 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int, gl
 def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, seed: int, glossary: dict | None = None) -> dict:
     """将四字段提示词翻译为英文（预留接口；当前编码链路由 director.py 调用文本翻译）。
 
-    读取 prompt_translate_to_en.txt 组装翻译 skill，复用 llm.py 的生成函数
+    读取 prompt_translate_to_en.md 组装翻译 skill，复用 llm.py 的生成函数
     （image=None 纯文本模式）。翻译保留 [Shot N] / At MM:SS.mmm / <@...> / <#...>
     等固定标签，字段名不变；角色名与对白内容保持原语言。实现上先对 <!技术词> /
     <@...> / <#...> / <d>...</d> 做占位符掩码，翻译后还原（<!…> 只留内文）。
@@ -448,6 +449,31 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
     except Exception as exc:
         log.warning(f"[MiniMaxRefDirector] prompt translation to EN failed, falling back to original: {exc}")
         return json_data
+
+
+# ── H3 标签规范化 ────────────────────────────────────────────────
+# 模型偶发把标签写成「<! 微表情：强忍悲戚 >」：括号内首尾带空格、分隔冒号
+# 误用全角「：」。主体绑定（_H3_DIALOGUE_RE 只认半角 ":"）与前端 chip 渲染
+# 都依赖规范格式，生成后统一清洗一次（只动标签骨架，不改标签内正文文字）。
+_H3_TAG_NORM_RE = re.compile(r"<([@#!])\s*([^>\n]*?)\s*>")
+
+def normalize_h3_tags(text: str) -> str:
+    """清洗 H3 标签格式：去括号内首尾空格、全角「：」统一为半角 ":"。"""
+    def _repl(m: "re.Match[str]") -> str:
+        mark, inner = m.group(1), m.group(2)
+        idx = min((p for p in (inner.find(":"), inner.find("：")) if p >= 0), default=-1)
+        if mark != "@" and idx >= 0:
+            return f"<{mark}{inner[:idx].strip()}:{inner[idx + 1:].strip()}>"
+        return f"<{mark}{inner}>"
+    return _H3_TAG_NORM_RE.sub(_repl, str(text or ""))
+
+def _normalize_h3_json(json_data: dict) -> dict:
+    """对 H3 四字段的全部标签做格式清洗（其余文字原样保留）。"""
+    for key in ("summary", "detailed_description", "overall_soundscape", "non_diegetic_music"):
+        v = json_data.get(key)
+        if isinstance(v, str):
+            json_data[key] = normalize_h3_tags(v)
+    return json_data
 
 
 def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "", selections: dict | None = None, camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> dict:
@@ -536,7 +562,7 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
         json_data = parse_generated_json(generate_text)
     else:
         raise ValueError(f"Unsupported vlm_mode: {vlm_mode}")
-    return json_data
+    return _normalize_h3_json(json_data)
 
 
 def generate_text(prompt: str = "", system: str = "", image_path: str = "", seed: int = 42,

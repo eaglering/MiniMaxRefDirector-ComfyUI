@@ -3,7 +3,7 @@
 // 左栏（纵向）：镜头技能（SQLite 技能词典，悬停显示描述，弹窗新增技能）/ 用户提示词
 // 右栏：H3 提示词四段（detailed_description 右侧带「自定义全局提示词」开关）
 import { computed, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElNotification } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
 import { useSplitterMemory } from "../../utils/splitter.js";
 import { generateH3Prompt } from "../../utils/llm.js";
@@ -203,7 +203,10 @@ async function generateH3(lang) {
       skillNotes = nr.notes || "";
       // 所选技能必须出现：后端返回的必选关键词（技术词原文 / 术语名）
       requiredTerms = Array.isArray(nr.required) ? nr.required : (nr.protected || []);
-      if (nr.warnings?.length) ElMessage.warning(nr.warnings.join("；"));
+      if (nr.warnings?.length) ElNotification.warning({
+        message: nr.warnings.join("；"),
+        duration: 0,
+      });
     }
     const payload = {
       prompt: seg.prompt,
@@ -227,8 +230,11 @@ async function generateH3(lang) {
     h3.value.overall_soundscape = data.overall_soundscape ?? h3.value.overall_soundscape;
     h3.value.non_diegetic_music = data.non_diegetic_music ?? h3.value.non_diegetic_music;
     ws.markDirty();
-    if (res.warning) ElMessage.warning(res.warning);
-    else ElMessage.success(lang === "zh" ? "中文 H3 提示词已生成" : "英文 H3 提示词已生成");
+    if (res.warning) ElNotification.warning({
+      message: res.warning,
+      duration: 0,
+    });
+    ElMessage.success(lang === "zh" ? "中文 H3 提示词已生成" : "英文 H3 提示词已生成");
   } catch (e) {
     ElMessage.error(`生成失败：${e.message || e}`);
   } finally {
