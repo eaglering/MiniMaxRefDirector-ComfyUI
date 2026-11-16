@@ -5,6 +5,9 @@
 - POST /spa/save          SPA 保存：落盘 + send_sync 通知 ComfyUI 页面回写 widget
 - GET/POST /spa/skills    自定义 skill 词条读写
 - GET  /spa/skill_dict    技能词典（类别含 render_mode / protect_keywords）
+- GET  /spa/skill_docs    技能文档列表（md 提示词模板，按分类过滤）
+- GET  /spa/skill_doc     单篇技能文档全文（id 或内置 key，缺失回落文件库）
+- POST /spa/skill_docs/add|update|delete  技能文档增删改
 - POST /spa/skill_notes   技能选择 → skill_notes 渲染（服务端与桥接共用）
 - GET  /spa/llm_files     models/llm 下 GGUF / mmproj 文件列表
 - GET  /spa/records       视频生成记录列表
@@ -19,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import traceback
 
 from aiohttp import web
@@ -28,9 +32,17 @@ from .lib import records as records_lib
 from .lib import skill_notes
 from .lib import spa_store
 from .lib import skill_db
+from .lib import webchat_cdp
 from .lib.llm import list_llm_gguf_files
 
 log = logging.getLogger(__name__)
+
+# 兜底注册：ComfyUI 以文件路径形式加载本节点包（模块名含反斜杠），个别加载
+# 路径下外壳可能未按 __name__ 注册进 sys.modules（或键指向旧副本），热重载时
+# importlib.reload 会报 "module ... not in sys.modules"。幂等：键已存在且
+# 对象一致时不覆盖。
+if sys.modules.get(webchat_cdp.__name__) is not webchat_cdp:
+    sys.modules[webchat_cdp.__name__] = webchat_cdp
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SPA_HTML_PATH = os.path.join(_PROJECT_ROOT, "js", "spa", "index.html")
@@ -254,6 +266,59 @@ async def spa_skill_category_update(request: web.Request) -> web.Response:
     return _skill_dict_mutation(lambda d: skill_db.update_category(d))(request)
 
 
+# ---------------- 技能文档（md 提示词模板，SQLite skill_docs 表）----------------
+
+
+@_routes.get(f"{API_PREFIX}/spa/skill_docs")
+async def spa_skill_docs(request: web.Request) -> web.Response:
+    """技能文档列表：?category=主体设计 过滤；不带参数返回全部 + 各类计数。
+
+    列表不返回正文（只回 summary），单文档按需再取全文，避免一次拉全量 md。
+    """
+    try:
+        category = (request.query.get("category") or "").strip()
+        return web.json_response({"success": True, **skill_db.list_docs(category)})
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/spa/skill_doc")
+async def spa_skill_doc(request: web.Request) -> web.Response:
+    """单篇技能文档全文：?id= 或 ?key=（内置 key，如 storyboard-design）。
+
+    key 在库中不存在时回落 resources/skills/<key>/prompt.md（导入流水线不断链）。
+    """
+    try:
+        doc_id = int(request.query.get("id") or 0)
+        key = (request.query.get("key") or "").strip()
+        return web.json_response({"success": True, "doc": skill_db.get_doc(doc_id, key)})
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_docs/add")
+async def spa_skill_doc_add(request: web.Request) -> web.Response:
+    # {category, title, content?}：分类固定四类，同分类标题唯一
+    return _skill_dict_mutation(lambda d: skill_db.add_doc(d))(request)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_docs/update")
+async def spa_skill_doc_update(request: web.Request) -> web.Response:
+    # {id, category?, title?, content?}
+    return _skill_dict_mutation(lambda d: skill_db.update_doc(d))(request)
+
+
+@_routes.post(f"{API_PREFIX}/spa/skill_docs/delete")
+async def spa_skill_doc_delete(request: web.Request) -> web.Response:
+    return _skill_dict_mutation(lambda d: skill_db.delete_doc(d))(request)
+
+
 @_routes.post(f"{API_PREFIX}/spa/skill_notes")
 async def spa_skill_notes(request: web.Request) -> web.Response:
     """把分镜选择的技能渲染成 skill_notes（服务端与三种网页桥接共用同一实现）。
@@ -272,6 +337,203 @@ async def spa_skill_notes(request: web.Request) -> web.Response:
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+# ---------------- 网页会话 CDP 通道（Playwright 附加真实 Chrome）----------------
+# 替代浏览器扩展桥接：SPA 的 H3 生成 / 分镜导入直接调这些端点，
+# 后端 lib/webchat_cdp.py 经 CDP 驱动用户真实 Chrome（:9222）完成生成与回读。
+
+
+def _cdp_endpoint_from(data: dict) -> str:
+    return str((data or {}).get("cdp_endpoint") or "").strip()
+
+
+@_routes.post(f"{API_PREFIX}/spa/webchat/complete")
+async def spa_webchat_complete(request: web.Request) -> web.Response:
+    """在指定站点网页会话内完成一次生成。
+
+    body: {site: deepseek|doubao|qwen, system?, prompt, expectJson?, sessionMode?:
+           "new"|"reuse", chatId?, cdpEndpoint?, timeoutMs?}
+    返回 {success, ok, text, chatId, error}
+    """
+    try:
+        data = await _read_json_body(request)
+        site = str(data.get("site") or data.get("proxy_site") or "deepseek")
+        prompt = str(data.get("prompt") or "")
+        system = str(data.get("system") or "")
+        expect_json = bool(data.get("expect_json") or data.get("expectJson"))
+        session_mode = str(data.get("session_mode") or data.get("sessionMode") or "new")
+        chat_id = str(data.get("chat_id") or data.get("chatId") or "")
+        timeout_s = float(data.get("timeout_ms") or data.get("timeoutMs") or 300_000) / 1000.0
+        result = webchat_cdp.complete(
+            system=system, prompt=prompt, expect_json=expect_json,
+            timeout_s=min(max(timeout_s, 30.0), 600.0), site=site,
+            session_mode="reuse" if session_mode == "reuse" else "new",
+            chat_id=chat_id, cdp_endpoint=_cdp_endpoint_from(data),
+        )
+        return web.json_response({
+            "success": True, "ok": bool(result.get("ok")),
+            "text": str(result.get("text") or ""),
+            "chatId": str(result.get("chat_id") or ""),
+            "error": str(result.get("error") or ""),
+        })
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/spa/webchat/sessions")
+async def spa_webchat_sessions(request: web.Request) -> web.Response:
+    """列出指定站点的网页会话（DeepSeek 站内 API；豆包/千问 UI 扫描侧栏）。
+
+    query: site=deepseek|doubao|qwen, cdpEndpoint?
+    返回 {success, sessions: [{id, title, updatedAt}]}
+    """
+    try:
+        site = str(request.query.get("site") or "deepseek")
+        sessions = webchat_cdp.list_sessions(
+            site=site, cdp_endpoint=str(request.query.get("cdpEndpoint") or "").strip()
+        )
+        return web.json_response({"success": True, "sessions": sessions})
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/spa/webchat/session/delete")
+async def spa_webchat_session_delete(request: web.Request) -> web.Response:
+    """删除整个会话（仅 DeepSeek 站内 API 支持；豆包/千问返回明确错误）。"""
+    try:
+        data = await _read_json_body(request)
+        site = str(data.get("site") or "deepseek")
+        chat_id = str(data.get("chat_id") or data.get("chatId") or "")
+        webchat_cdp.delete_session(
+            site=site, chat_id=chat_id, cdp_endpoint=_cdp_endpoint_from(data)
+        )
+        return web.json_response({"success": True, "chatId": chat_id})
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/spa/webchat/diag")
+async def spa_webchat_diag(request: web.Request) -> web.Response:
+    """页面自检：CDP 连接状态 + 三站标签页/输入框/发送按钮/回复区探针。"""
+    try:
+        result = webchat_cdp.diag(
+            cdp_endpoint=str(request.query.get("cdpEndpoint") or "").strip()
+        )
+        return web.json_response({"success": True, **result})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/spa/webchat/cancel")
+async def spa_webchat_cancel(request: web.Request) -> web.Response:
+    """取消进行中的网页会话任务（complete 在下一轮询点返回「已取消」）。"""
+    cancelled = webchat_cdp.cancel()
+    return web.json_response({"success": True, "cancelled": bool(cancelled)})
+
+
+@_routes.get(f"{API_PREFIX}/spa/webchat/status")
+async def spa_webchat_status(request: web.Request) -> web.Response:
+    """轻量连接测试（设置面板「测试连接」按钮）：CDP 端口是否可达。"""
+    try:
+        endpoint = str(request.query.get("cdpEndpoint") or "").strip()
+        result = webchat_cdp.status(cdp_endpoint=endpoint)
+        if not result.get("connected"):
+            # 未连接时尝试真实连接一次，给出可操作的错误提示
+            mgr_probe = webchat_cdp.diag(cdp_endpoint=endpoint, timeout_s=30.0)
+            result["error"] = mgr_probe.get("error") or ""
+        return web.json_response({"success": True, **result})
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/spa/webchat/browsers")
+async def spa_webchat_browsers(request: web.Request) -> web.Response:
+    """探测本机可用浏览器（设置面板「浏览器」下拉框数据源）。"""
+    try:
+        return web.json_response({"success": True, **webchat_cdp.find_browsers()})
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/spa/webchat/launch")
+async def spa_webchat_launch(request: web.Request) -> web.Response:
+    """一键启动调试浏览器并打开桥接站点网页（幂等，可重复点击）。
+
+    body: {browser?: chrome|edge|brave|chromium, browser_path?, site?, cdpEndpoint?}
+    用户目录固定为项目 userdata/browser（独立于浏览器默认 profile）。
+    返回 {success, launched, connected, endpoint, profileDir, error?}
+    """
+    try:
+        data = await _read_json_body(request)
+        site = str(data.get("site") or "").strip()
+        urls = []
+        if site:
+            sid = webchat_cdp.normalize_site(site)
+            urls.append(webchat_cdp.SITES[sid]["home"])
+        result = webchat_cdp.launch_browser(
+            browser=str(data.get("browser") or ""),
+            browser_path=str(data.get("browser_path") or data.get("browserPath") or ""),
+            urls=urls,
+            cdp_endpoint=_cdp_endpoint_from(data),
+        )
+        return web.json_response({"success": True, **result})
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/spa/webchat/reload")
+async def spa_webchat_reload(request: web.Request) -> web.Response:
+    """热重载网页会话驱动（开发用，免重启 ComfyUI）。
+
+    依次重载 lib/webchat_cdp_driver 包内模块（shared / pagescripts / base /
+    deepseek / doubao / qwen）并原地重建驱动注册表，随后原地重载 webchat_cdp
+    外壳（SITES 配置 / 同步 API / 提示文案，importlib.reload 原地生效，路由内
+    `webchat_cdp.xxx` 调用自动指向新实现）。
+
+    注意：外壳重载会重置管理器单例（旧 Playwright 连接与事件循环线程废弃，
+    新任务用新连接）；进行中的网页任务在旧实例上跑完不受影响。
+    SPA 前端改动仍需 `npm run build` + 浏览器强制刷新（Ctrl+F5）。
+
+    调用方式（SPA 页面 DevTools 控制台）：
+      fetch("/minimax_ref/api/spa/webchat/reload", {method: "POST"}).then(r => r.json())
+    """
+    reloaded: list = []
+    shell_note = ""
+    try:
+        reloaded += webchat_cdp.reload_drivers()
+        import sys
+        import importlib
+        # ComfyUI 以文件路径形式加载本节点包（模块名含反斜杠），个别加载路径下
+        # 外壳可能未按 __name__ 注册进 sys.modules（或键指向旧副本），直接 reload
+        # 会报 "module ... not in sys.modules"。先兜底注册为当前持有对象再重载。
+        _key = getattr(webchat_cdp, "__name__", "")
+        if _key and sys.modules.get(_key) is not webchat_cdp:
+            sys.modules[_key] = webchat_cdp
+        try:
+            importlib.reload(webchat_cdp)  # 原地重载外壳（模块对象身份不变）
+            shell_note = "reloaded"
+        except Exception as shell_err:
+            # 外壳重载失败不影响驱动/页面 JS 热重载（上面已完成）；如实上报
+            traceback.print_exc()
+            shell_note = f"skipped: {shell_err}"
+        return web.json_response(
+            {"success": True, "reloaded": reloaded, "facade": webchat_cdp.__name__, "shell": shell_note}
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "reloaded": reloaded, "error": str(e)}, status=500)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/batch_add")

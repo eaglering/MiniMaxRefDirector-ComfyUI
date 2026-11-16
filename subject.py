@@ -74,7 +74,7 @@ class MiniMaxRefSubject(io.ComfyNode):
                 "Define any number of subjects, each with a name, description, reference image, "
                 "and audio file. Connect to LTX Director for @-mention subject injection "
                 "in prompts. Also forwards the diffusion model / CLIP / video VAE / audio VAE "
-                "and VLM settings (local llama-cpp or cloud API) as a unified config."
+                "and VLM settings (local llama-server or cloud API) as a unified config."
             ),
             inputs=[
                 io.DynamicCombo.Input(
@@ -114,7 +114,7 @@ class MiniMaxRefSubject(io.ComfyNode):
                         ]),
                         io.DynamicCombo.Option("deepseek-proxy", []),
                     ],
-                    tooltip="How the H3 prompt is generated: locally with llama-cpp (GGUF), via a cloud API, with a local Ollama server, or via the DeepSeek web chat (deepseek-proxy: browser extension WS bridge, text-only).",
+                    tooltip="How the H3 prompt is generated: locally via llama-server (external llama.cpp HTTP server; start it in the LLM settings panel), via a cloud API, with a local Ollama server, or via the DeepSeek web chat (deepseek-proxy: page automation, text-only).",
                 ),
                 io.String.Input(
                     "global_prompt", multiline=True, default="", optional=True,
@@ -136,7 +136,8 @@ class MiniMaxRefSubject(io.ComfyNode):
 
     @classmethod
     def execute(cls, vlm_mode=None, global_prompt="", subject_data="", subject_count=1) -> io.NodeOutput:
-        # VLM mode: llama-cpp (local GGUF) or api (cloud provider).
+        # VLM mode: llama-cpp (external llama-server; option value kept for old
+        # workflow compat) or api (cloud provider).
         # DynamicCombo passes a dict, e.g. {"vlm_mode": "llama-cpp", "gguf_name": ..., "mmproj_path": ...}
         mode = "llama-cpp"
         gguf_name = ""

@@ -1,6 +1,7 @@
 """分镜技能 → skill_notes 渲染（唯一实现）。
 
-服务端生成的三种模式（api / ollama / llama-cpp）与三种浏览器桥接模式
+服务端生成的三种模式（api / ollama / llama-server，内部值 llama-cpp 兼容旧存档）
+与三种浏览器桥接模式
 （deepseek / doubao / qwen）共用本模块输出，前端不再拼装技能说明。
 
 输入 selections 为分镜上保存的通用选择：``{类别名: [技能 key, ...]}``
@@ -72,21 +73,26 @@ def _head(mode: str, category: str, lang: str) -> str:
 
 
 def _render_camera(cat: dict, skills: list[dict], lang: str) -> str:
-    """运镜：风格 + 描述 + 写法指南 + 英文触发短语（受保护，不做触发词申明）。"""
+    """运镜：风格 + 描述 + 写法指南 + 英文触发短语（受保护，不做触发词申明）。
+
+    用户要求：所选技能**必须出现**（不允许选择性遗漏），因此这里明确要求
+    每个所选风格的英文触发短语至少出现一次，可分配到不同 [Shot N]。
+    """
     protected = _cat_protect(cat)
     lines = [_head("camera", cat["name"], lang)]
     if lang == "en":
         lines.append(
-            "Pick one style per [Shot N] that best fits that shot's framing, action and mood; "
-            "rotate styles across shots instead of stacking several in one shot, and not every "
-            "listed style must appear. Weave the English trigger phrase into the shot's camera "
-            "movement naturally; never translate or paraphrase it."
+            "Every style listed below MUST appear (each English trigger phrase at least once) — "
+            "never drop a selected style. Assign styles to [Shot N] beats by framing/action/mood; "
+            "a shot may chain two styles when the movement calls for it, but avoid stacking "
+            "near-duplicates. Weave each English trigger phrase into that shot's camera movement "
+            "naturally; never translate or paraphrase it."
         )
     else:
         lines.append(
-            "按每个 [Shot N] 的景别、动作与情绪挑选最契合的一种风格；不同镜头可轮换，"
-            "同一镜头不要堆叠多种风格，所列风格不要求全部出现。把英文触发短语自然写进"
-            "该镜头的运镜描写，不得翻译或改写。"
+            "下列每一个风格都**必须出现**（每条英文触发短语至少用一次），不得遗漏或跳过；"
+            "按景别/动作/情绪把风格分配到各 [Shot N]，一个镜头需要时可衔接两种风格，"
+            "但不要堆叠近义重复。把英文触发短语自然写进对应镜头的运镜描写，不得翻译或改写。"
         )
     for s in skills:
         name = s.get("name") or s.get("key") or ""
@@ -112,15 +118,17 @@ def _render_term(cat: dict, skills: list[dict], lang: str) -> str:
     lines = [_head("term", cat["name"], lang)]
     if lang == "en":
         lines.append(
-            "Use exactly one term per shot, written with its English term from the mapping "
-            "below; rewrite any other wording from the user input to one of these terms."
+            "Every term listed below MUST appear at least once (spread them across [Shot N] "
+            "beats when several are selected); write it with its English term from the mapping. "
+            "Rewrite any other wording from the user input to one of these terms."
         )
         for s in skills:
             lines.append(f"- {s.get('name') or s.get('key')} → {s.get('nameEn') or s.get('name')}")
         return "\n".join(lines)
     lines.append(
-        "每个镜头只用一种，把下列中文名称**直接写入**镜头描述；用户输入中的其他说法一律"
-        "改写为下列名称。英文翻译阶段按括号内的英文对照还原。"
+        "下列**每一个**中文名称都必须出现（选中多个时分配到不同 [Shot N]，不得遗漏），"
+        "把中文名称**直接写入**镜头描述；用户输入中的其他说法一律改写为下列名称。"
+        "英文翻译阶段按括号内的英文对照还原。"
     )
     for s in skills:
         name = s.get("name") or s.get("key") or ""
@@ -130,18 +138,22 @@ def _render_term(cat: dict, skills: list[dict], lang: str) -> str:
 
 
 def _render_example(cat: dict, skills: list[dict], lang: str) -> str:
-    """示例：每镜从示例中挑一句自然融入，不写技能名。"""
+    """示例：每条 Cue 至少融入一句，不写技能名。"""
     lines = [_head("example", cat["name"], lang)]
     if lang == "en":
         lines.append(
-            "Pick ONE example per shot and weave it into the acting naturally; do not write "
-            "the skill name as a tag."
+            "EVERY cue listed below MUST contribute at least one example line, woven into the "
+            "acting naturally (spread cues across [Shot N] beats); do not write the skill name "
+            "as a tag and do not stack near-duplicates."
         )
         for s in skills:
             name = s.get("name") or s.get("key") or ""
             lines.append(f"- {name}: {' / '.join(str(x) for x in (s.get('examples') or []))}")
         return "\n".join(lines)
-    lines.append("每镜挑一句示例自然融入表演描写，不写技能名，不要堆叠多条。")
+    lines.append(
+        "下列**每一个** Cue 都至少融入一句示例，自然写进表演描写（多选时分配到不同 [Shot N]）；"
+        "不写技能名，不要堆叠近义重复。"
+    )
     for s in skills:
         name = s.get("name") or s.get("key") or ""
         desc = s.get("desc") or ""
@@ -158,13 +170,14 @@ def _render_descriptive(cat: dict, skills: list[dict], lang: str) -> str:
     lines = [_head("descriptive", cat["name"], lang)]
     if lang == "en":
         lines.append(
-            "Merge the selected entries into the shot description where they fit the action; "
-            "do not dump them as a list or invent content beyond the user's input."
+            "EVERY selected entry below MUST be reflected in the shot description — none may be "
+            "skipped. Merge them into the beats naturally; do not dump them as a list or invent "
+            "content beyond the user's input."
         )
     else:
         lines.append(
-            "把所选条目按内容需要融入镜头描述（人物外观 / 动作 / 特效等），不要罗列成清单，"
-            "也不要在用户输入之外编造设定。"
+            "下列**每一条**都必须体现在镜头描述里（人物外观 / 动作 / 特效等），不得遗漏；"
+            "按镜头节拍自然融入，不要罗列成清单，也不要在用户输入之外编造设定。"
         )
     for s in skills:
         name = s.get("name") or s.get("key") or ""
@@ -185,10 +198,11 @@ def _render_block(cat: dict, skills: list[dict], lang: str) -> str:
     protected = _cat_protect(cat)
     lines = [_head("block", cat["name"], lang)]
     lines.append(
-        "Append the selected fragment(s) to the shot description, keeping their wording "
-        "essentially unchanged; do not rewrite them."
+        "Append EVERY selected fragment below to the shot description, keeping their wording "
+        "essentially unchanged; none may be skipped and none rewritten."
         if lang == "en" else
-        "把所选片段按原意附加到镜头描述里，措辞基本保持原样，不要改写。"
+        "把下列**每一个**所选片段都按原意附加到镜头描述里，措辞基本保持原样，"
+        "不得遗漏、不得改写。"
     )
     for s in skills:
         name = s.get("name") or s.get("key") or ""
@@ -245,10 +259,12 @@ def render_skill_notes(selections, lang: str = "zh") -> dict:
         selections: {类别名: [技能 key, ...]}
         lang:       "zh"（默认，H3 中文阶段）/ "en"
     返回
-        {notes, protected, glossary, warnings}
+        {notes, protected, glossary, warnings, required}
+        required: 生成结果里必须原样出现的技能关键词（受保护技术词 + 术语名），
+                  供前端做"所选技能必须出现"的校验与纠正追问。
     """
     sel = _normalize_selections(selections)
-    result = {"notes": "", "protected": [], "glossary": {}, "warnings": []}
+    result = {"notes": "", "protected": [], "glossary": {}, "warnings": [], "required": []}
     if not sel:
         return result
 
@@ -294,12 +310,21 @@ def render_skill_notes(selections, lang: str = "zh") -> dict:
             for s in pool.values():
                 if s.get("name") and s.get("nameEn"):
                     result["glossary"][s["name"]] = s["nameEn"]
+            # 所选术语必须按目标语言原样出现在结果里（可校验的硬性要求）
+            for s in picked:
+                term = (s.get("nameEn") or s.get("name")) if lang == "en" else (s.get("name") or s.get("nameEn"))
+                if str(term or "").strip():
+                    result["required"].append(str(term).strip())
 
     notes = "\n\n".join(s for s in sections if s.strip())
     result["notes"] = notes
     result["protected"] = [
         m.group(1).strip() for m in _PROTECT_RE.finditer(notes) if m.group(1).strip()
     ]
+    # 受保护技术词（<!...> 内部原文）同样必须原样出现
+    for term in result["protected"]:
+        if term not in result["required"]:
+            result["required"].append(term)
     if len(result["protected"]) > _MAX_ITEMS_WARN:
         result["warnings"].append(
             f"本次注入技术词 {len(result['protected'])} 条，建议精简所选技能以免稀释注意力")

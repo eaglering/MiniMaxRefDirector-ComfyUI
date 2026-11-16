@@ -174,6 +174,9 @@ export const useWorkspace = defineStore("workspace", () => {
     million_pixels: 0.6,
     display_mode: "seconds",
     frame_rate: 24,
+    // 视频生成模式：h3 = MiniMax Hailuo（展示 H3 提示词 UI + Python 自动转英文）；
+    // doubao = 豆包生视频（预留占位，暂不实现）；off = 通用（隐藏全部 H3 入口）
+    video_mode: "h3",
     start_second: 0,
     end_second: 5,
     // 时间范围双单位（与节点 start_frame/end_frame/duration_frames 对齐），
@@ -193,10 +196,18 @@ export const useWorkspace = defineStore("workspace", () => {
     mode: "deepseek-proxy",
     gguf_path: "",
     mmproj_path: "",
+    // llama-server（外部 llama.cpp HTTP 服务端，替代进程内 llama-cpp-python）
+    llama_server_path: "",
+    llama_server_port: 8321,
     provider: "",
     api_key: "",
     ollama_model: "",
     ollama_base_url: "",
+    // 网页会话 CDP 通道：附加用户真实浏览器（chrome / edge / brave / chromium / custom）
+    cdp_endpoint: "http://127.0.0.1:9222",
+    browser: "chrome",
+    browser_path: "",
+    // 旧字段（浏览器扩展桥接已弃用）：保留只为旧存档兼容，UI 不再读写
     extension_id: "",
   });
   const customSkills = reactive({
@@ -298,6 +309,9 @@ export const useWorkspace = defineStore("workspace", () => {
     if (!llm.mode) llm.mode = "deepseek-proxy";
     // 兼容旧配置值：qwen-proxy → qianwen-proxy（桥接仍支持两种写法）
     if (llm.mode === "qwen-proxy") llm.mode = "qianwen-proxy";
+    // 旧存档无 cdp_endpoint（extension_id 时代）：补默认值
+    if (!llm.cdp_endpoint) llm.cdp_endpoint = "http://127.0.0.1:9222";
+    if (!llm.browser) llm.browser = "chrome";
     updatedAt.value = state.updated_at || 0;
   }
 

@@ -234,7 +234,7 @@ def _skill_row(key: str, data: dict, group: str = "") -> dict:
 
 
 def build_builtin_categories() -> list:
-    """组装内置类别与技能行（首次建库种子与 v0→v1 迁移共用，见 lib/skill_db.py）。"""
+    """组装内置类别与技能行（首次建库种子，见 lib/skill_db.py）。"""
     camera = [_skill_row(k, d) for k, d in _CAMERA_MOTION.items()]
     shot = [_skill_row(k, d) for k, d in _SHOT_SIZE.items()]
     framing = [_skill_row(k, d) for k, d in _FRAMING.items()]
@@ -253,15 +253,6 @@ def build_builtin_categories() -> list:
          "render_mode": "example", "protect_keywords": 0,
          "description": MICRO_CATEGORY_DESC, "skills": micro},
     ]
-
-
-def builtin_skill_rows() -> dict:
-    """全部内置技能行（按 key 索引），供 v0→v1 迁移回填内置词条新内容。"""
-    out = {}
-    for cat in build_builtin_categories():
-        for s in cat["skills"]:
-            out[s["key"]] = s
-    return out
 
 
 def _preset_camera(key: str) -> dict:

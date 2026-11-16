@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "note": "内置技能文档初始化清单。仅首次建库（install/skill_docs.seeded 不存在）时导入；用户改库不会被覆盖。file 相对本目录。",
+  "docs": [
+    {
+      "key": "krea2-four-view",
+      "category": "主体设计",
+      "title": "krea2 主体四视图（脸+正+侧+背）",
+      "file": "krea2-four-view.md"
+    },
+    {
+      "key": "qwen-image-2.1-four-view",
+      "category": "主体设计",
+      "title": "Qwen-Image 2.1 主体四视图",
+      "file": "qwen-image-four-view.md"
+    },
+    {
+      "key": "character-sheet",
+      "category": "主体设计",
+      "title": "主体设定（外貌/服装/道具一致性）",
+      "file": "character-sheet.md"
+    },
+    {
+      "key": "qwen3-tts",
+      "category": "音频设计",
+      "title": "Qwen3-TTS 语音生成",
+      "file": "qwen3-tts.md"
+    },
+    {
+      "key": "indextts2",
+      "category": "音频设计",
+      "title": "IndexTTS2 零样本语音生成",
+      "file": "indextts2.md"
+    },
+    {
+      "key": "ambience-foley",
+      "category": "音频设计",
+      "title": "底噪 / 环境音 / 拟音设计",
+      "file": "ambience-foley.md"
+    },
+    {
+      "key": "image-prompt-general",
+      "category": "图片设计",
+      "title": "通用生图提示词（写实/风格化）",
+      "file": "image-prompt-general.md"
+    }
+  ]
+}

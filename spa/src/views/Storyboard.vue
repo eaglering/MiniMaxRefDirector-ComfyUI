@@ -106,10 +106,6 @@ async function duplicateShot(id) {
 }
 
 async function removeShot(id) {
-  if (segments.value.length <= 1) {
-    ElMessage.warning("至少保留一个分镜");
-    return;
-  }
   const seg = segments.value.find((s) => s.id === id);
   if (!seg) return;
   try {
@@ -180,10 +176,6 @@ function applySegmentRange(id) {
 async function removeMany(ids) {
   const set = new Set(ids || []);
   if (!set.size) return;
-  if (set.size >= segments.value.length) {
-    ElMessage.warning("至少保留一个分镜");
-    return;
-  }
   try {
     await ElMessageBox.confirm(
       `确定删除选中的 ${set.size} 个分镜？`,
@@ -288,6 +280,7 @@ function afterSyncWrites(firstNewId) {
 //   { type: "subjects", characters, scenes }
 //   { type: "firstframe", frames }     按 index 回写已有分镜的帧提示词
 //   { type: "audio", audios }
+//   { type: "h3", items }              按 index 回写已有分镜的 H3 提示词
 function onDeepseekSync(payload) {
   const type = payload && payload.type;
   if (type === "storyboard") {
@@ -333,6 +326,23 @@ function onDeepseekSync(payload) {
     afterSyncWrites("");
     if (added) ElMessage.success(`已同步 ${added} 条音频条目`);
     else ElMessage.info("本次没有产生新的音频条目");
+  } else if (type === "h3") {
+    let updated = 0;
+    for (const it of payload.items || []) {
+      const seg = segments.value[(it.index || 0) - 1];
+      if (!seg || !it.h3 || typeof it.h3 !== "object") continue;
+      seg.h3PromptJson = {
+        summary: String(it.h3.summary || ""),
+        detailed_description: String(it.h3.detailed_description || ""),
+        overall_soundscape: String(it.h3.overall_soundscape || ""),
+        non_diegetic_music: String(it.h3.non_diegetic_music || ""),
+      };
+      updated++;
+    }
+    ws.markDirty();
+    ws.saveNow();
+    if (updated) ElMessage.success(`已写入 ${updated} 个镜头的 H3 提示词`);
+    else ElMessage.info("没有可写入的分镜（请先同步分镜）");
   }
 }
 </script>

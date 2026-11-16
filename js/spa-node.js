@@ -23,6 +23,7 @@ const DIRECTOR_WIDGET_NAMES = [
   "start_frame", "end_frame", "duration_frames",
   "guide_strength",
   "inpaint_audio", "override_audio",
+  "video_mode",
 ];
 
 function directorNodes() {

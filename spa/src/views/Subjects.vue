@@ -19,8 +19,6 @@ const subjects = computed(() => ws.subjects.subjects);
 const visibleOfTab = computed(() =>
   subjects.value.filter((s) => !isChildSubject(s) && s.type === activeTab.value)
 );
-const visibleCount = computed(() => subjects.value.filter((s) => !isChildSubject(s)).length);
-
 function addSubject() {
   subjects.value.unshift(makeSubject(activeTab.value));
   ws.markDirty();
@@ -29,15 +27,7 @@ function addSubject() {
   });
 }
 
-function canRemove() {
-  return visibleCount.value > 1;
-}
-
 async function onRemove(subj) {
-  if (!canRemove()) {
-    ElMessage.warning("至少保留一个主体");
-    return;
-  }
   try {
     await ElMessageBox.confirm(
       `确定删除主体「${subj.name || "(未命名)"}」？其引用资源（子主体）将一并删除。`,
@@ -54,6 +44,23 @@ async function onRemove(subj) {
       subjects.value.splice(i, 1);
     }
   }
+  ws.markDirty();
+}
+
+// 删除全部主体（含所有子主体），二次确认防误触
+async function onRemoveAll() {
+  const total = subjects.value.filter((s) => !isChildSubject(s)).length;
+  if (!total) return;
+  try {
+    await ElMessageBox.confirm(
+      `确定删除全部 ${total} 个主体？所有类型（主体 / 图片 / 音频 / 视频）及其引用资源将一并删除，此操作不可恢复。`,
+      "删除全部主体",
+      { confirmButtonText: "全部删除", cancelButtonText: "取消", type: "warning" }
+    );
+  } catch {
+    return;
+  }
+  subjects.value.splice(0, subjects.value.length);
   ws.markDirty();
 }
 
@@ -133,6 +140,11 @@ function onDragLeave() {
       </div>
       <div class="mrd-subjects-actions">
         <span class="mrd-drop-hint">支持拖放图片 / 音频 / 视频到页面直接新建</span>
+        <el-button
+          size="small" type="danger" plain :icon="'Delete'"
+          :disabled="!subjects.some((s) => !isChildSubject(s))"
+          @click="onRemoveAll"
+        >删除全部</el-button>
         <el-button type="primary" size="small" :icon="'Plus'" @click="addSubject">新增{{ SUBJECT_TYPE_LABELS[activeTab] }}</el-button>
       </div>
     </div>

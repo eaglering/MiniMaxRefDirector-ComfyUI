@@ -10,6 +10,7 @@ import {
 } from "../../constants/subject.js";
 import { uploadImage, uploadAudio, uploadVideo, viewUrl } from "../../api/client.js";
 import PromptEditor from "../common/PromptEditor.vue";
+import SubjectPromptDialog from "./SubjectPromptDialog.vue";
 import { el } from "element-plus/es/locale/index.mjs";
 import { Picture, VideoCameraFilled, Microphone } from "@element-plus/icons-vue";
 
@@ -332,6 +333,16 @@ function onChildPreview(file) {
 function removeSelf() {
   emit("remove", props.subject);
 }
+
+// 「生成提示词」弹窗（Subject / Picture / Audio；Video 暂不支持）
+const promptDialogRef = ref(null);
+function openPromptDialog() {
+  promptDialogRef.value?.open();
+}
+function applyPromptToDescription(text) {
+  props.subject.description = text;
+  changed();
+}
 </script>
 
 <template>
@@ -356,7 +367,7 @@ function removeSelf() {
               text
               title="删除该主体（级联删除其引用资源）"
               @click="removeSelf"
-            >删除主体</el-button>
+            >删除</el-button>
           </template>
         </el-input>
       </div>
@@ -442,18 +453,29 @@ function removeSelf() {
     <!-- 描述（@ 仅引用本主体的引用资源；# 不触发引用） -->
     <div v-if="descVisible" class="mrd-subj-row">
       <label class="mrd-subj-label">描述</label>
-      <PromptEditor
-        style="height:106px"
-        :model-value="subject.description"
-        :min-height="compact ? 48 : 92"
-        placeholder="主体外观 / 身份定义；输入 @ 可引用本主体的引用资源（图片 / 视频等）"
-        :candidates="children"
-        :allowed-types="mentionTypes"
-        :exclude-uid="subject.uid"
-        :allow-hash="false"
-        fill
-        @update:model-value="v => { subject.description = v; changed(); }"
-      />
+      <div class="mrd-subj-desc">
+        <PromptEditor
+          style="height:106px"
+          :model-value="subject.description"
+          :min-height="compact ? 48 : 92"
+          placeholder="主体外观 / 身份定义；输入 @ 可引用本主体的引用资源（图片 / 视频等）"
+          :candidates="children"
+          :allowed-types="mentionTypes"
+          :exclude-uid="subject.uid"
+          :allow-hash="false"
+          fill
+          @update:model-value="v => { subject.description = v; changed(); }"
+        />
+        <div class="mrd-subj-desc-right">
+          <el-button
+            v-if="subject.type !== 'Video' && canRemove"
+            size="small"
+            type="primary"
+            title="选择技能文档生成提示词"
+            @click="openPromptDialog"
+          >生成提示词</el-button>
+        </div>
+      </div>
     </div>
 
     <!-- 保持度（@ 引用任意主体；# 不触发引用） -->
@@ -534,6 +556,7 @@ function removeSelf() {
         <video v-if="dialogFile.type=='Video' || dialogFile.type=='Audio'" w-full :src="dialogFile.url" alt="Preview" controls />
       </div>
     </el-dialog>
+    <SubjectPromptDialog ref="promptDialogRef" :subject="subject" @apply="applyPromptToDescription" />
   </div>
 </template>
 
@@ -566,6 +589,13 @@ function removeSelf() {
   padding-top: 6px;
   font-size: 12px;
   color: #6b7488;
+  text-align: right;
+}
+.mrd-subj-desc {
+  flex: 1;
+}
+.mrd-subj-desc-right {
+  margin-top: 10px;
   text-align: right;
 }
 .mrd-subj-select {

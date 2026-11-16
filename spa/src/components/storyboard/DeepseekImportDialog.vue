@@ -1,23 +1,37 @@
 <script setup>
 // 网页分镜导入弹窗（DeepSeek / 豆包 / 千问）：两阶段（手动逐步模式，无一键全自动）
-// 阶段一：选择桥接站点会话 —— DeepSeek 走扩展侧会话列表；豆包/千问手动粘贴
-//   会话链接 / ID（可留空，导入时自动新建大纲会话）
-// 阶段二：步骤卡片（故事大纲 → 分镜设计 → 主体设计 → 首帧图 → 音频设计），
-//   每步独立「执行」（在站点网页会话生成，仅缓存）与「同步」（写入导演台）。
-//   H3 转换不属于导入流程；由用户在分镜属性里按需点「转H3提示词」。
-// 同步后 emit("sync", payload)，由 Storyboard.vue 分类型写入分镜 / 主体 / 音频。
+// 阶段一：选择桥接站点会话 —— 三站统一会话列表（后端 /spa/webchat/sessions：
+//   DeepSeek 站内 API；豆包/千问扫描页面侧栏）；侧栏扫描失败时可手动粘贴
+//   会话链接 / ID 兜底（可留空，导入时自动新建大纲会话）。
+//   另支持「故事正文」模式：粘贴/读取整本书 → 自动新建会话分片注入后提取大纲，
+//   忽略所选会话（原会话零污染）。
+// 阶段二：步骤卡片（故事大纲 → 分镜设计 → 主体设计 → 首帧图 → 音频设计 → 批量转H3），
+//   每步「执行」（在站点网页会话生成），成功后自动写入导演台（大纲仅缓存）；
+//   或点红色「一键导入」自动依次执行全部步骤（步骤间随机等待模拟人为节奏）。
+// 同步后 emit("sync", payload)，由 Storyboard.vue 分类型写入分镜 / 主体 / 音频 / H3。
+// 会话删除三站均支持：DeepSeek 走站内 API；豆包/千问走页面 UI 流程（后端驱动实现）。
+// 底部「结束会话」关闭大纲之后步骤新建的会话；「完成」只关闭弹窗。
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
-import { PROXY_SITES, SITE_LABELS, deepseekAttempt, deepseekCancel, deepseekDiag, deepseekListSessions } from "../../utils/llm.js";
+import {
+  PROXY_SITES,
+  SITE_LABELS,
+  setCdpEndpoint,
+  deepseekAttempt,
+  deepseekCancel,
+  deepseekListSessions,
+} from "../../utils/llm.js";
 import {
   IMPORT_STEPS,
   buildSyncPayload,
   cleanupImportSessions,
+  closeStepSessions,
   createImportState,
   createImportToken,
   runAudioStep,
   runFirstframeStep,
+  runH3Step,
   runOutlineStep,
   runStoryboardStep,
   runSubjectsStep,
@@ -29,12 +43,12 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue", "sync"]);
 
 const ws = useWorkspace();
-const extId = computed(() => (ws.llm.extension_id || "").trim());
+const cdpEndpoint = computed(() => (ws.llm.cdp_endpoint || "").trim());
 const site = computed(() => PROXY_SITES[ws.llm.mode] || "");
 const siteLabel = computed(() => SITE_LABELS[site.value] || site.value || "");
 const isBridgeSite = computed(() => !!site.value);
-// 仅 DeepSeek 支持扩展侧会话列表 / 删除；豆包/千问手动填会话且不可清理
-const supportsList = computed(() => site.value === "deepseek");
+// 会话列表/删除三站均支持（DeepSeek 走站内 API；豆包/千问走页面 UI 流程，后端驱动实现）
+const supportsDelete = computed(() => !!site.value);
 
 // ---- 阶段一：会话选择 ----
 const phase = ref("select"); // select | run
@@ -43,7 +57,7 @@ const loading = ref(false);
 const loadError = ref("");
 const keyword = ref("");
 const selectedId = ref("");
-// 手动模式（豆包/千问）：粘贴会话链接（如 https://www.doubao.com/chat/xxx）或会话 ID
+// 手动兜底：粘贴会话链接（如 https://www.doubao.com/chat/xxx）或会话 ID
 const manualInput = ref("");
 const manualId = computed(() => {
   const raw = String(manualInput.value || "").trim();
@@ -54,6 +68,29 @@ const manualId = computed(() => {
   return /^[0-9A-Za-z_-]{6,}$/.test(raw) ? raw : "";
 });
 
+// 故事正文模式：粘贴 / 读取整本书，大纲步骤改为「自动新建会话分片注入全文后提取」，
+// 不使用所选会话 —— 原会话零污染。填了正文时会话选择被忽略。
+const storyText = ref("");
+const storyFileRef = ref(null);
+const STORY_CHUNK_SIZE = 4000; // 与 deepseekImport.splitStoryChunks 的分片大小一致
+const storyChunkCount = computed(() => {
+  const t = storyText.value.trim();
+  return t ? Math.max(1, Math.ceil(t.length / STORY_CHUNK_SIZE)) : 0;
+});
+
+function onStoryFile(e) {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    storyText.value = String(reader.result || "").replace(/\r\n/g, "\n").trim();
+    ElMessage.success(`已读取「${f.name}」（${storyText.value.length} 字）`);
+  };
+  reader.onerror = () => ElMessage.error("文件读取失败，请改用粘贴方式");
+  reader.readAsText(f, "utf-8");
+  e.target.value = "";
+}
+
 const filtered = computed(() => {
   const k = keyword.value.trim().toLowerCase();
   if (!k) return sessions.value;
@@ -61,15 +98,12 @@ const filtered = computed(() => {
 });
 
 async function loadSessions() {
-  if (!extId.value) {
-    loadError.value = "未配置浏览器桥接扩展 ID：请到「全局参数 → LLM 设置」填写";
-    return;
-  }
-  if (!supportsList.value) return; // 手动模式无需拉列表
+  if (!isBridgeSite.value) return;
+  setCdpEndpoint(cdpEndpoint.value);
   loading.value = true;
   loadError.value = "";
   try {
-    sessions.value = await deepseekListSessions(extId.value, site.value);
+    sessions.value = await deepseekListSessions("", site.value, cdpEndpoint.value);
   } catch (e) {
     loadError.value = e.message || String(e);
   } finally {
@@ -77,29 +111,48 @@ async function loadSessions() {
   }
 }
 
-// 页面自检：确认站点标签页里输入框/发送按钮是否可定位（DOM 改版排查）
+// 页面自检：CDP 连接状态 + 站点标签页里输入框/发送按钮是否可定位（DOM 改版排查）
 const diagLoading = ref(false);
 async function runDiag() {
-  if (!extId.value) {
-    ElMessage.warning("请先填写浏览器桥接扩展 ID（全局参数 → LLM 设置）");
+  if (!isBridgeSite.value) {
+    ElMessage.warning("当前 LLM 模式不支持网页桥接导入");
     return;
   }
   diagLoading.value = true;
   try {
-    const d = await deepseekDiag(extId.value);
-    const p = d.probe || {};
-    const lines = [
-      `扩展版本：v${d.version || "未知"}${d.version && d.version < "1.6.0" ? "（过旧，请在 chrome://extensions 重新加载扩展）" : ""}`,
-      `标签页：${d.tabUrl || "（未找到站点标签页）"}`,
-      `桥接站点标签页共 ${(d.tabs || []).length} 个`,
-      `content 脚本就绪：${d.contentReady ? "是" : "否"}`,
-      `页面可见性：${p.visibility || "?"}${p.wasDiscarded ? "（曾被内存节省丢弃）" : ""}`,
-      `输入框：${p.inputFound ? `已找到（${p.inputKind || "?"}）` : "未找到"}`,
-      `发送按钮：${p.sendButtonFound ? "已找到" : "未找到"}`,
-      `回复区文本块：${p.assistantBlocks ?? 0} 个`,
-      `回复流钩子：${p.hookInstalled ? "已注入" : "未注入"}`,
-      `WS 桥接：${d.bridge && d.bridge.connected ? "已连接" : "未连接"}`,
-    ];
+    const d = await deepseekDiag("", cdpEndpoint.value);
+    const lines = [];
+    if (!d.connected) {
+      lines.push(`CDP 连接：未连接${d.error ? `<br/>原因：${d.error}` : ""}`);
+    } else {
+      const entry = (d.sites || []).find((s) => s.id === site.value) || {};
+      lines.push(`CDP 连接：已连接（${d.endpoint}）`);
+      lines.push(`${siteLabel.value} 标签页：${entry.tabs ?? 0} 个`);
+      const probes = entry.probes || [];
+      if (!probes.length) {
+        lines.push("该站点暂无打开的标签页（请先在调试 Chrome 中打开并登录站点网页）");
+      }
+      for (const p of probes) {
+        if (p.error) {
+          lines.push(`标签页探针失败：${p.error}`);
+          continue;
+        }
+        lines.push(
+          `页面：${(p.url || "").slice(0, 60)}<br/>` +
+          `输入框：${p.inputFound ? `已找到（${p.inputKind || "?"}）` : "未找到"} · ` +
+          `发送按钮：${p.sendButtonFound ? "已找到" : "未找到"} · ` +
+          `回复区文本块：${p.assistantBlocks ?? 0} 个`
+        );
+        if (p.inputCandidates && p.inputCandidates.length) {
+          lines.push(
+            "输入框候选：" +
+              p.inputCandidates
+                .map((c) => `${c.tag}#${c.id || "-"}(${c.size})`)
+                .join("、")
+          );
+        }
+      }
+    }
     await ElMessageBox.alert(lines.join("<br/>"), `${siteLabel.value} 页面自检`, {
       dangerouslyUseHTMLString: true,
       confirmButtonText: "知道了",
@@ -150,6 +203,10 @@ const stateRef = ref(null);
 const logBoxRef = ref(null);
 const storyboardSynced = ref(false); // 分镜是否已同步（首帧同步依赖已有分镜）
 
+// H3 插件化门控：非 h3 视频生成模式时隐藏「批量转H3提示词」步骤
+const h3Enabled = computed(() => (ws.widgets.video_mode || "h3") === "h3");
+const visibleSteps = computed(() => IMPORT_STEPS.filter((s) => h3Enabled.value || s.key !== "h3"));
+
 function stepOf(key) {
   if (!stepState[key]) stepState[key] = { status: "idle", synced: false, summary: "" };
   return stepState[key];
@@ -161,21 +218,15 @@ const STEP_RUNNERS = {
   subjects: (state, ctx) => runSubjectsStep(state, ctx),
   firstframe: (state, ctx) => runFirstframeStep(state, ctx),
   audio: (state, ctx) => runAudioStep(state, ctx),
+  h3: (state, ctx) => runH3Step(state, ctx),
 };
 
 function canRun(key) {
   const st = (k) => stepState[k]?.status;
   if (runningStep.value) return false;
   if (key === "storyboard" || key === "subjects" || key === "audio") return st("outline") === "done";
-  if (key === "firstframe") return st("storyboard") === "done";
-  return true;
-}
-function canSync(key) {
-  if (runningStep.value) return false;
-  const s = stepState[key];
-  if (!s || (s.status !== "done" && s.status !== "warn")) return false;
-  if (key === "outline") return false; // 大纲仅缓存，作为后续步骤输入
-  if (key === "firstframe") return storyboardSynced.value;
+  // 首帧 / H3 均按分镜序号回写，必须已有分镜写入导演台
+  if (key === "firstframe" || key === "h3") return st("storyboard") === "done" && storyboardSynced.value;
   return true;
 }
 function runHint(key) {
@@ -183,11 +234,11 @@ function runHint(key) {
   if (runningStep.value) return "有步骤执行中";
   if ((key === "storyboard" || key === "subjects" || key === "audio") && st("outline") !== "done")
     return "请先执行「故事大纲」";
-  if (key === "firstframe") {
+  if ((key === "firstframe" || key === "h3")) {
     if (st("storyboard") !== "done") return "请先执行「分镜设计」";
-    if (!storyboardSynced.value) return "请先同步分镜，再同步首帧提示词";
+    if (!storyboardSynced.value) return "分镜尚未写入导演台（执行成功会自动写入）";
   }
-  if (key === "outline") return "大纲仅缓存，作为后续步骤输入，无需同步";
+  if (key === "outline") return "大纲仅缓存，作为后续步骤输入，不写入导演台";
   return "";
 }
 
@@ -241,7 +292,7 @@ function startElapsed() {
   clearInterval(stageTimer);
   stageTimer = setInterval(async () => {
     try {
-      const d = await deepseekAttempt(extId.value);
+      const d = await deepseekAttempt();
       const stages = (d && d.lastAttempt && d.lastAttempt.stages) || [];
       const last = stages[stages.length - 1];
       if (last) stageText.value = STAGE_LABELS[last.stage] || last.stage;
@@ -269,41 +320,14 @@ function resetRun() {
   runningStep.value = "";
   storyboardSynced.value = false;
   stateRef.value = null;
+  autoRunning.value = false;
+  autoCancelled.value = false;
 }
 
 function hhmmss(ts) {
   const d = new Date(Number(ts) || Date.now());
   const p = (n) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
-async function copyDebug() {
-  let diag = null;
-  try {
-    diag = await deepseekDiag(extId.value);
-  } catch (e) {
-    diag = { error: String(e.message || e) };
-  }
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    steps: JSON.parse(JSON.stringify(stepState)),
-    spaLogs: logs.value.map((l) => `${l.time} [${l.level}] ${l.msg}`),
-    backgroundEvents: (debugTail.value || []).map((e) => `${hhmmss(e.at)} ${e.kind} ${e.detail}`),
-    diag,
-  };
-  const text = JSON.stringify(payload, null, 2);
-  try {
-    await navigator.clipboard.writeText(text);
-    ElMessage.success("调试日志已复制到剪贴板，直接粘贴发我即可");
-  } catch {
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `deepseek-import-debug-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    ElMessage.success("调试日志已下载为 JSON 文件");
-  }
 }
 
 function addLog(level, msg) {
@@ -318,18 +342,25 @@ function summarize(key, result) {
     const o = result || {};
     return `${o.title || "(未命名)"} · 主体 ${(o.subjects || []).length} · 场景 ${(o.scenes || []).length}`;
   }
-  if (key === "storyboard") return `${(result || []).length} 个镜头（未同步）`;
+  if (key === "storyboard") return `${(result || []).length} 个镜头`;
   if (key === "subjects") return `${(result || []).length} 个主体`;
   if (key === "firstframe") return `更新 ${(result || []).length} 个镜头的帧提示词`;
   if (key === "audio") return `${(result || []).length} 条音频`;
+  if (key === "h3") return `${(result || []).length} 个镜头已转 H3 提示词`;
   return "";
 }
 
+// 单步执行入口（手动点击）：守卫后真实执行
 async function runStep(step) {
+  if (autoRunning.value) return; // 一键导入进行中，禁止手动单步
+  if (!canRun(step.key) || !isBridgeSite.value) return;
+  await execStep(step);
+}
+
+// 真实执行（单步与一键导入共用；前置校验由调用方保证）
+async function execStep(step) {
   const key = step.key;
-  if (!canRun(key) || !isBridgeSite.value) return;
-  // DeepSeek 必须先选会话；豆包/千问可留空（自动新建大纲会话）
-  if (supportsList.value && !selectedId.value) return;
+  // 会话可留空：导入第一步自动新建大纲会话（三站均支持）
   if (!stateRef.value) {
     const segs = ws.timeline.segments || [];
     const fps = ws.widgets.frame_rate || 24;
@@ -344,13 +375,17 @@ async function runStep(step) {
           .join("\n")
       : "（当前时间线为空）";
     stateRef.value = createImportState({
-      extensionId: extId.value,
+      cdpEndpoint: cdpEndpoint.value,
       site: site.value,
-      sessionId: supportsList.value ? selectedId.value : manualId.value,
+      sessionId: selectedId.value || manualId.value,
       timelineDigest: digest,
       frameRate: fps,
       existingSubjects: ws.subjects.subjects || [],
+      storyText: storyText.value,
     });
+  }
+  if (storyText.value && key === "outline") {
+    addLog("info", "故事正文模式：将忽略所选会话，自动新建会话注入全文（不污染原会话）");
   }
   const state = stateRef.value;
   const token = createImportToken();
@@ -365,6 +400,8 @@ async function runStep(step) {
     st.status = "done";
     st.synced = false;
     st.summary = summarize(key, result);
+    // 执行成功即自动写入导演台（大纲仅缓存，作为后续步骤输入）
+    await autoSync(key, step);
   } catch (e) {
     st.status = "error";
     runError.value = e.message || String(e);
@@ -376,17 +413,19 @@ async function runStep(step) {
   }
 }
 
-async function syncStep(step) {
-  const key = step.key;
-  if (!canSync(key) || !stateRef.value) return;
+// 执行成功后自动写入导演台（大纲仅缓存不写入；分镜重复写入前确认，避免追加重复镜头）
+async function autoSync(key, step) {
+  if (key === "outline") return; // 大纲仅缓存，作为后续步骤输入
+  if (!stateRef.value) return;
   if (key === "storyboard" && storyboardSynced.value) {
     try {
       await ElMessageBox.confirm(
-        "分镜已同步过一次。再次同步将把本次缓存的全部分镜作为新分镜追加到时间线（可能产生重复镜头）。继续？",
-        "重复同步确认",
+        "分镜已写入过一次。重新执行后将把本次缓存的全部分镜作为新分镜追加到时间线（可能产生重复镜头）。继续？",
+        "重复写入确认",
         { type: "warning", confirmButtonText: "继续追加", cancelButtonText: "取消" }
       );
     } catch {
+      addLog("warn", "已取消写入：分镜仅缓存，可在「执行」后手动处理");
       return;
     }
   }
@@ -398,12 +437,12 @@ async function syncStep(step) {
     storyboardSynced.value = true;
     stepOf("firstframe").synced = false;
   }
-  addLog("success", `「${step.label}」已同步到导演台`);
+  addLog("success", `「${step.label}」已自动写入导演台`);
 }
 
 async function cleanupSessions() {
-  if (!supportsList.value) {
-    ElMessage.info(`${siteLabel.value} 网页版暂不支持扩展侧删除会话，请在该网页内手动管理`);
+  if (!supportsDelete.value) {
+    ElMessage.info(`${siteLabel.value} 网页版暂不支持自动化删除会话，请在该网页内手动管理`);
     return;
   }
   if (!stateRef.value || !stateRef.value.createdSessions.length) {
@@ -427,11 +466,65 @@ async function cancelStep() {
   if (tokenRef.value) tokenRef.value.cancelled = true;
   addLog("warn", "已请求取消，正在中止当前请求…");
   try {
-    const n = await deepseekCancel(extId.value);
-    addLog("warn", `已向扩展发送取消（挂起请求 ${n} 个），页面侧等待也会立即停止`);
+    const n = await deepseekCancel();
+    addLog("warn", `已向后端发送取消${n ? "，正在中止当前网页会话任务" : "（当前无进行中任务）"}`);
   } catch {
-    addLog("warn", "扩展未响应取消指令（可能为旧版本），将在当前请求结束后中止");
+    addLog("warn", "取消指令发送失败，将在当前请求结束后中止");
   }
+}
+
+// ---- 一键导入：自动依次执行 1-6 步 ----
+// 步骤间随机等待 2-6 秒模拟人为操作节奏，降低站点风控风险；
+// 任一步失败（或用户取消）立即停止，失败原因/原文见上方日志。
+const autoRunning = ref(false);
+const autoCancelled = ref(false);
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 可中断等待：等待期间点了「取消」立即返回 true
+async function interruptibleSleep(ms) {
+  const step = 200;
+  for (let t = 0; t < ms; t += step) {
+    if (autoCancelled.value) return true;
+    await sleepMs(step);
+  }
+  return autoCancelled.value;
+}
+
+async function runAllSteps() {
+  if (runningStep.value || autoRunning.value || !isBridgeSite.value) return;
+  autoRunning.value = true;
+  autoCancelled.value = false;
+  addLog("info", `一键导入开始：将依次执行 ${visibleSteps.value.length} 个步骤，步骤间随机等待 2-6 秒模拟人为节奏`);
+  try {
+    for (const step of visibleSteps.value) {
+      const delay = 2000 + Math.floor(Math.random() * 4000); // 2-6s 随机
+      addLog("info", `等待 ${Math.round(delay / 1000)}s 后执行「${step.label}」…`);
+      if (await interruptibleSleep(delay)) {
+        addLog("warn", "一键导入已取消");
+        return;
+      }
+      await execStep(step);
+      if (stepOf(step.key).status !== "done") {
+        addLog("warn", `「${step.label}」未成功，一键导入已停止（原因见上方日志，确认后可手动重新执行该步或重新一键导入）`);
+        return;
+      }
+    }
+    addLog("success", "一键导入完成：全部步骤已执行并写入导演台");
+  } finally {
+    autoRunning.value = false;
+    autoCancelled.value = false;
+  }
+}
+
+// 取消：步骤执行中 → 中止当前请求；步骤间等待 → 直接停止整批
+async function cancelRun() {
+  if (autoRunning.value && !runningStep.value) {
+    autoCancelled.value = true;
+    addLog("warn", "已请求取消一键导入（当前处于步骤间等待）");
+    return;
+  }
+  autoCancelled.value = true;
+  await cancelStep();
 }
 
 function close() {
@@ -439,12 +532,59 @@ function close() {
   emit("update:modelValue", false);
 }
 
+// 底部按钮：「完成」只关闭弹窗；「结束会话」先关闭大纲之后步骤新建的会话再关闭
+async function endSessionsAndClose() {
+  if (runningStep.value) return;
+  const state = stateRef.value;
+  if (!state) {
+    close();
+    return;
+  }
+  const keep = String(state.sessionId || "");
+  const targets = (state.createdSessions || []).filter((cid) => cid && cid !== keep);
+  if (!supportsDelete.value) {
+    ElMessage.info(`${siteLabel.value} 网页版暂不支持自动化关闭会话，请在该网页内手动管理`);
+    close();
+    return;
+  }
+  if (!targets.length) {
+    ElMessage.info("没有需要关闭的会话（故事大纲会话保留）");
+    close();
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `关闭「故事大纲」之后新建的 ${targets.length} 个会话？大纲会话会保留，删除后不可恢复。`,
+      "结束会话",
+      { type: "warning", confirmButtonText: "关闭会话", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
+  const { removed, total } = await closeStepSessions(state, addLog);
+  if (removed) ElMessage.success(`已关闭 ${removed}/${total} 个会话（大纲会话保留）`);
+  else ElMessage.warning("没有会话被关闭（原因见日志）");
+  close();
+}
+
 function stepBadge(st) {
   if (st.status === "running") return { text: "执行中", cls: "running" };
   if (st.status === "error") return { text: "失败", cls: "error" };
-  if (st.status === "done" && st.synced) return { text: "已同步", cls: "synced" };
+  if (st.status === "done" && st.synced) return { text: "已写入", cls: "synced" };
   if (st.status === "done" || st.status === "warn") return { text: "已完成", cls: "done" };
   return { text: "未执行", cls: "idle" };
+}
+
+// 大纲步骤在正文模式下展示为「故事导入·大纲提取」
+function stepLabel(st) {
+  if (st.key === "outline" && storyText.value.trim()) return "故事导入·大纲提取";
+  return st.label;
+}
+function stepHint(st) {
+  if (st.key === "outline" && storyText.value.trim()) {
+    return `自动新建会话，${storyChunkCount.value} 条消息分片注入全文后提取大纲（忽略所选会话）`;
+  }
+  return st.hint;
 }
 </script>
 
@@ -461,7 +601,7 @@ function stepBadge(st) {
   >
     <!-- 阶段一：会话选择 -->
     <div v-if="phase === 'select'" class="mrd-dsi-select">
-      <div v-if="supportsList" class="mrd-dsi-toolbar">
+      <div class="mrd-dsi-toolbar">
         <el-input v-model="keyword" placeholder="搜索会话标题…" clearable :prefix-icon="'Search'" class="mrd-dsi-search" />
         <el-button :icon="'Refresh'" :loading="loading" @click="loadSessions">刷新</el-button>
       </div>
@@ -483,24 +623,16 @@ function stepBadge(st) {
         class="mrd-dsi-alert"
       />
       <el-alert
-        v-else-if="supportsList"
-        type="info"
-        :closable="false"
-        show-icon
-        class="mrd-dsi-alert"
-        title="选择一个包含你创作构想的会话：导入将在该会话内提取故事大纲（该会话会新增 2 条消息），随后每个步骤由你手动「执行 / 同步」逐步确认。建议控制导入频率，避免短时间高频自动化操作。"
-      />
-      <el-alert
         v-else
         type="info"
         :closable="false"
         show-icon
         class="mrd-dsi-alert"
-        :title="`${siteLabel} 网页版暂不支持扩展侧会话列表：粘贴会话链接（如 https://www.${site === 'doubao' ? 'doubao.com' : 'qianwen.com'}/chat/…）或会话 ID；留空则导入时自动新建大纲会话。后续每步由你手动「执行 / 同步」逐步确认，建议控制导入频率。`"
+        title="选择一个包含你创作构想的会话：导入将在该会话内提取故事大纲，随后每个步骤由你手动「执行」，成功后自动写入导演台。若你已有完整故事文本，直接在下方「故事正文」粘贴或读入文件即可。建议控制导入频率，避免短时间高频自动化操作。"
       />
 
-      <!-- DeepSeek：会话列表 -->
-      <div v-if="supportsList" class="mrd-dsi-list">
+      <!-- 三站统一会话列表（后端拉取：DeepSeek 站内 API；豆包/千问扫描侧栏） -->
+      <div v-if="isBridgeSite" class="mrd-dsi-list">
         <template v-if="loading">
           <div v-for="i in 6" :key="i" class="mrd-dsi-skeleton" />
         </template>
@@ -517,18 +649,48 @@ function stepBadge(st) {
             <span class="mrd-dsi-session-time">{{ relTime(s.updatedAt) }}</span>
           </button>
         </template>
-        <el-empty v-else description="没有匹配的会话" :image-size="72" />
+        <el-empty v-else :description="loadError ? '会话列表加载失败' : '没有匹配的会话'" :image-size="72" />
       </div>
 
-      <!-- 豆包 / 千问：手动填写会话 -->
-      <div v-else-if="isBridgeSite" class="mrd-dsi-manual">
+      <!-- 手动兜底：列表为空或扫描失败时粘贴会话链接 / ID -->
+      <div v-if="isBridgeSite" class="mrd-dsi-manual">
         <el-input
           v-model="manualInput"
-          :placeholder="`粘贴 ${siteLabel} 会话链接或会话 ID（留空 = 自动新建会话）`"
+          :placeholder="`或手动粘贴 ${siteLabel} 会话链接 / ID（可选，留空且未选列表 = 自动新建会话）`"
           clearable
         />
         <div v-if="manualInput && !manualId" class="mrd-dsi-manual-err">
           无法从输入中识别会话 ID：请粘贴形如 /chat/&lt;id&gt; 的链接或直接填会话 ID
+        </div>
+      </div>
+
+      <!-- 故事正文模式：整本书直接注入新会话，不需要先在大纲会话里铺对话 -->
+      <div v-if="isBridgeSite" class="mrd-dsi-story">
+        <div class="mrd-dsi-story-head">
+          <span class="mrd-dsi-story-title">故事正文（可选）</span>
+          <span class="mrd-dsi-story-hint">
+            填入后大纲步骤改为「故事导入·大纲提取」：自动新建会话分片注入全文再提取大纲。
+          </span>
+        </div>
+        <el-input
+          v-model="storyText"
+          type="textarea"
+          :rows="4"
+          :placeholder="`粘贴整本故事书全文，或点右侧按钮读取 txt / md 文件…`"
+        />
+        <div class="mrd-dsi-story-actions">
+          <input
+            ref="storyFileRef"
+            type="file"
+            accept=".txt,.md,.markdown,text/plain"
+            style="display: none"
+            @change="onStoryFile"
+          />
+          <el-button size="small" @click="storyFileRef?.click()">读取 txt / md</el-button>
+          <el-button v-if="storyText" size="small" text type="danger" @click="storyText = ''">清空</el-button>
+          <span class="mrd-dsi-story-meta">
+            {{ storyText.length }} 字<template v-if="storyChunkCount"> · 预计分 {{ storyChunkCount }} 条消息注入<template v-if="storyChunkCount > 15">（较多，请耐心等待）</template></template>
+          </span>
         </div>
       </div>
 
@@ -537,7 +699,7 @@ function stepBadge(st) {
         <el-button @click="close">取消</el-button>
         <el-button
           type="primary"
-          :disabled="!isBridgeSite || (supportsList && !selectedId)"
+          :disabled="!isBridgeSite"
           @click="phase = 'run'"
         >
           下一步：逐步导入
@@ -548,28 +710,34 @@ function stepBadge(st) {
     <!-- 阶段二：步骤卡片（执行 / 同步） -->
     <div v-else class="mrd-dsi-run">
       <div class="mrd-dsi-toolbar-row">
-        <span class="mrd-dsi-toolbar-hint">每步先「执行」在{{ siteLabel }}网页会话生成，确认后再「同步」写入导演台</span>
+        <span class="mrd-dsi-toolbar-hint">每步「执行」在{{ siteLabel }}网页会话生成，成功后自动写入导演台（大纲仅缓存）</span>
         <div class="mrd-dsi-toolbar-btns">
           <el-button
             size="small"
             :icon="'Delete'"
-            :disabled="!!runningStep || !supportsList"
-            :title="supportsList ? '' : `${siteLabel} 暂不支持扩展侧删除会话`"
+            :disabled="!!runningStep || !supportsDelete"
+            :title="supportsDelete ? '' : `${siteLabel} 暂不支持自动化删除会话`"
             @click="cleanupSessions"
           >清理会话</el-button>
-          <el-button v-if="runningStep" size="small" type="danger" plain @click="cancelStep">取消执行</el-button>
+          <el-button v-if="runningStep || autoRunning" size="small" type="danger" plain @click="cancelRun">取消执行</el-button>
           <el-button v-else size="small" @click="phase = 'select'">返回选会话</el-button>
-          <el-button link type="info" size="small" @click="copyDebug">复制调试日志</el-button>
+          <el-button
+            size="small"
+            type="danger"
+            :disabled="!!runningStep || autoRunning"
+            title="依次自动执行 6 个步骤（步骤间随机等待，模拟人为节奏）"
+            @click="runAllSteps"
+          >一键导入</el-button>
         </div>
       </div>
 
       <div class="mrd-dsi-steps">
-        <div v-for="(st, idx) in IMPORT_STEPS" :key="st.key" class="mrd-dsi-step" :class="{ running: runningStep === st.key }">
+        <div v-for="(st, idx) in visibleSteps" :key="st.key" class="mrd-dsi-step" :class="{ running: runningStep === st.key }">
           <div class="mrd-dsi-step-head">
             <span class="mrd-dsi-step-idx">{{ idx + 1 }}</span>
             <div class="mrd-dsi-step-titles">
-              <span class="mrd-dsi-step-label">{{ st.label }}</span>
-              <span class="mrd-dsi-step-hint">{{ st.hint }}</span>
+              <span class="mrd-dsi-step-label">{{ stepLabel(st) }}</span>
+              <span class="mrd-dsi-step-hint">{{ stepHint(st) }}</span>
             </div>
             <span class="mrd-dsi-step-badge" :class="stepBadge(stepState[st.key] || {}).cls">
               {{ stepBadge(stepState[st.key] || {}).text }}
@@ -583,20 +751,11 @@ function stepBadge(st) {
               size="small"
               type="primary"
               plain
-              :disabled="!canRun(st.key)"
+              :disabled="!canRun(st.key) || autoRunning"
               :title="runHint(st.key)"
               @click="runStep(st)"
             >
               {{ stepState[st.key]?.status === "running" ? "执行中…" : "执行" }}
-            </el-button>
-            <el-button
-              size="small"
-              type="success"
-              plain
-              :disabled="!canSync(st.key)"
-              @click="syncStep(st)"
-            >
-              同步
             </el-button>
           </div>
         </div>
@@ -623,6 +782,13 @@ function stepBadge(st) {
       </details>
 
       <el-alert v-if="runError" type="error" :closable="false" show-icon :title="runError" class="mrd-dsi-alert" />
+
+      <div class="mrd-dsi-footer">
+        <el-button :disabled="!!runningStep" @click="close">完成</el-button>
+        <el-button type="danger" plain :disabled="!!runningStep" @click="endSessionsAndClose">
+          结束会话
+        </el-button>
+      </div>
     </div>
   </el-dialog>
 </template>
@@ -634,6 +800,20 @@ function stepBadge(st) {
 .mrd-dsi-alert { border-radius: 8px; }
 .mrd-dsi-manual { display: flex; flex-direction: column; gap: 6px; }
 .mrd-dsi-manual-err { font-size: 11px; color: #f87171; }
+.mrd-dsi-story {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed #2c3242;
+  border-radius: 10px;
+  background: #13161f;
+}
+.mrd-dsi-story-head { display: flex; flex-direction: column; gap: 2px; }
+.mrd-dsi-story-title { font-size: 12px; font-weight: 600; color: #cbd5e1; }
+.mrd-dsi-story-hint { font-size: 11px; color: #8a93a6; line-height: 1.5; }
+.mrd-dsi-story-actions { display: flex; align-items: center; gap: 8px; }
+.mrd-dsi-story-meta { font-size: 11px; color: #8a93a6; margin-left: auto; }
 .mrd-dsi-list {
   max-height: 320px;
   overflow: auto;

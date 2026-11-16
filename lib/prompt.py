@@ -21,7 +21,8 @@ from .utils import find_index, parse_generated_json
 
 # ── 浏览器桥接站点映射 ─────────────────────────────────────────────────────
 # vlm_mode "deepseek-proxy" / "doubao-proxy" / "qianwen-proxy"（别名 qwen-proxy）
-# 共用同一浏览器扩展 WS 桥接链路，仅站点适配器不同（lib/deepseek_bridge.py site）
+# 共用同一网页会话 CDP 通道（lib/webchat_cdp.py，Playwright 附加真实 Chrome），
+# 仅站点适配器不同；历史实现为浏览器扩展 WS 桥接（lib/deepseek_bridge.py）。
 _PROXY_SITE_MODES = {
     "deepseek-proxy": "deepseek",
     "doubao-proxy": "doubao",
@@ -158,7 +159,12 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
         ) % (float(duration_seconds))
 
     # 输出语言指令放在 prompt 末尾（模型注意力最强的位置），
-    # 避免被模板中大量英文正文/示例带偏语言
+    # 避免被模板中大量英文正文/示例带偏语言。
+    # lang="auto"：跟随输入语言——检测输入中的中文字符占比，中文→中文模板
+    # （与网页通道 WEB_CHAT_H3_SYSTEM 的语言跟随策略一致）
+    if lang == "auto":
+        zh_chars = len(re.findall(r"[\u4e00-\u9fff]", prompt or ""))
+        lang = "zh" if zh_chars >= 10 else "en"
     if lang == "zh":
         lang_note = (
             "## Output Language\n"
@@ -449,10 +455,12 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
 
     options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
     避免调用参数不断膨胀。支持的键：
-      - gguf_path / mmproj_path: llama-cpp 本地 GGUF 模型文件
+      - gguf_path / mmproj_path: llama-server 模式下由外部服务进程加载（设置面板
+        启动时指定），请求参数仅在服务未启动时报错提示中使用
       - image_path: 参考图路径（提供时与用户输入合并进 detailed_description）
       - seed: 采样种子
-      - vlm_mode: "llama-cpp"（默认，本地 GGUF）/ "api"（云端 OpenAI 兼容接口）/
+      - vlm_mode: "llama-cpp"（默认值名，实际为外部 llama-server HTTP 服务；
+        新代码可用 "llama-server"，server.py 归一化）/ "api"（云端 OpenAI 兼容接口）/
         "ollama"（本地 Ollama 服务）/ "deepseek-proxy"（DeepSeek 网页会话，经
         浏览器扩展 WS 桥接；纯文本，不支持参考图）
       - provider: vlm_mode="api" 时的服务商（走 API 管理器配置）
@@ -520,7 +528,7 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
         if image is not None:
             raise ValueError(
                 f"{vlm_mode} 不支持参考图（网页会话无法传图）：请改用 api / "
-                "ollama / llama-cpp 模式，或移除参考图后重试"
+                "ollama / llama-server 模式，或移除参考图后重试"
             )
         generate_text = generate_prompt_with_deepseek_proxy(
             prompt=full_prompt, seed=seed, site=_proxy_site(vlm_mode),
@@ -529,6 +537,52 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     else:
         raise ValueError(f"Unsupported vlm_mode: {vlm_mode}")
     return json_data
+
+
+def generate_text(prompt: str = "", system: str = "", image_path: str = "", seed: int = 42,
+                  vlm_mode: str = "llama-cpp", options: dict | None = None) -> str:
+    """纯文本生成（技能文档「生成提示词」等场景；与 H3 四字段 JSON 约束解耦）。
+
+    - system：技能文档内容（md 全文，作为指令前置）；prompt：渲染后的用户描述。
+      两者以分隔线拼接后作为完整提示词送入模型。
+    - vlm_mode：api / ollama / llama-cpp（外部 llama-server）/ *-proxy 网页会话，
+      复用 generate_prompt_with_* 的超时与错误语义；返回原始文本，解析交给调用方。
+    """
+    opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
+    image = load_image_tensor(image_path) if image_path else None
+    system = str(system or "").strip()
+    body = str(prompt or "").strip()
+    if not body:
+        raise ValueError("prompt is empty")
+    full_prompt = f"{system}\n\n---\n\n{body}" if system else body
+    if vlm_mode == "api":
+        return generate_prompt_with_api(
+            image=image, prompt=full_prompt, provider=opts.get("provider", "GLM"),
+            api_key=opts.get("api_key", ""), seed=seed,
+        )
+    if vlm_mode == "llama-cpp":
+        return generate_prompt_with_llama(
+            image=image, prompt=full_prompt, gguf_path=opts["gguf_path"],
+            mmproj_path=opts["mmproj_path"], seed=seed,
+        )
+    if vlm_mode == "ollama":
+        return generate_prompt_with_ollama(
+            image=image, prompt=full_prompt,
+            model=opts.get("ollama_model", ""),
+            base_url=opts.get("ollama_base_url", ""),
+            api_key=opts.get("api_key", "ollama"),
+            seed=seed,
+        )
+    if _proxy_site(vlm_mode):
+        if image is not None:
+            raise ValueError(
+                f"{vlm_mode} 不支持参考图（网页会话无法传图）：请改用 api / "
+                "ollama / llama-server 模式，或移除参考图后重试"
+            )
+        return generate_prompt_with_deepseek_proxy(
+            prompt=full_prompt, seed=seed, site=_proxy_site(vlm_mode),
+        )
+    raise ValueError(f"Unsupported vlm_mode: {vlm_mode}")
 
 
 # ── H3 主体绑定 ──────────────────────────────────────────────────

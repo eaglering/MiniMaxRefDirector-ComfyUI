@@ -1,10 +1,12 @@
-"""镜头技能词典的 SQLite 存储。
+"""镜头技能词典 + 技能文档的 SQLite 存储。
 
 库文件：install/skills.db（随插件存放）。
-两张表：
-    skill_categories(id, name UNIQUE, description, sort)   类别名 + 类别描述
+三张表：
+    skill_categories(id, name UNIQUE, description, sort, render_mode, protect_keywords)
     skills(id, category_id FK, key UNIQUE, name, name_en, desc,
            guide, examples, group_name, builtin, created_at)
+    skill_docs(id, category, title, content, builtin_key UNIQUE, builtin, sort,
+               created_at, updated_at)   —— md 提示词模板（主体/音频/图片/分镜设计）
 
 字段按类别使用（三段链路「原始提示词 → H3 中文 → H3 英文」）：
 - 运镜：guide = Camera Motion LoRA 写法指南；examples = 英文触发短语数组。
@@ -12,12 +14,12 @@
 - 微表情：examples = 中文示例数组（最终使用）；group_name = eye/brow/mouth/
   breath/body 分组（旧导演台筛选用）。
 
-初始化与迁移：
-- 首次连接（skills.db.lock 不存在）时执行 install/skill_seed.py 的种子写入。
-- 旧库（含 prompt/example/keyword/meta 列，user_version=0）在事务内重建为
-  新结构并回填 name_en/examples/group_name；内置词条内容以新种子为准，
-  用户自定义词条按类别映射保留。迁移成功后 PRAGMA user_version=1。
-- .lock 存在即不再重新播种，数据库是唯一数据源。
+初始化：
+- 首次连接（install/skills.db.lock 不存在）时写入种子：内置技能词条
+  （install/skill_seed.py）+ 历史自定义词条（spa/skills.json）+ 技能文档
+  （install/skill_docs/seed.json，缺失时回落 resources/skills）。
+- .lock 存在即不再播种，数据库是唯一数据源；删库重建请同时删除 .lock。
+- 建表全部 IF NOT EXISTS，不做版本判断（旧结构升级需手动删库重建）。
 
 读取接口：
 - list_all()：全量（categories / skills，examples 已解析为数组）
@@ -42,7 +44,6 @@ from ..install.skill_seed import (
     GROUP_TO_CATEGORY,
     RENDER_MODES,
     build_builtin_categories,
-    builtin_skill_rows,
 )
 from . import spa_store
 
@@ -50,8 +51,6 @@ log = logging.getLogger(__name__)
 
 _lock = threading.RLock()
 _conn: sqlite3.Connection | None = None
-
-_SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS skill_categories (
@@ -76,7 +75,35 @@ CREATE TABLE IF NOT EXISTS skills (
     created_at  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category_id);
+CREATE TABLE IF NOT EXISTS skill_docs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    category    TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    content     TEXT NOT NULL DEFAULT '',
+    builtin_key TEXT NOT NULL DEFAULT '',
+    builtin     INTEGER NOT NULL DEFAULT 0,
+    sort        INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL DEFAULT 0,
+    updated_at  INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category, title)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_docs_key
+    ON skill_docs(builtin_key) WHERE builtin_key <> '';
+CREATE INDEX IF NOT EXISTS idx_skill_docs_category ON skill_docs(category);
 """
+
+# 技能文档二级分类（固定枚举：不做自由增删，避免「分类标识」歧义）
+DOC_CATEGORIES = ("主体设计", "音频设计", "图片设计", "分镜设计")
+
+# resources/skills 文件态文档 → (分类, 标题)，作为 DB 缺失时的播种与运行期兜底
+_RESOURCE_DOCS = {
+    "character-design": ("主体设计", "主体设计指南（角色 / 场景）"),
+    "firstframe-design": ("图片设计", "首帧 / 尾帧图提示词设计"),
+    "audio-design": ("音频设计", "音频设计指南（配音 / 音效 / 音乐）"),
+    "story-design": ("分镜设计", "故事大纲提取"),
+    "storyboard-design": ("分镜设计", "分镜设计"),
+    "h3-prompt-builder": ("分镜设计", "H3 提示词写作指南"),
+}
 
 # key 只允许小写字母数字下划线（内置 key 皆如此）；自动生成时做同样约束
 _KEY_RE = re.compile(r"^[a-z0-9_]{1,64}$")
@@ -104,10 +131,6 @@ def _lock_path() -> Path:
     return _db_path().with_name(_db_path().name + ".lock")
 
 
-def _table_columns(conn: sqlite3.Connection, table: str) -> list[str]:
-    return [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-
-
 def _parse_examples(raw: str | None) -> list[str]:
     """examples 列（JSON 数组文本）→ 字符串数组；坏数据容错为空数组。"""
     if not raw:
@@ -121,108 +144,74 @@ def _parse_examples(raw: str | None) -> list[str]:
     return []
 
 
-def _migrate_v0_to_v1(conn: sqlite3.Connection) -> None:
-    """旧结构（prompt/example/keyword/meta 列）→ 新结构，事务内重建 skills 表。
+def _seed_skill_docs() -> None:
+    """技能文档首次播种：install/skill_docs 种子 → resources/skills 文件兜底。
 
-    - 内置词条：key 命中新种子时直接使用种子新内容（README 运镜指南等）。
-    - 自定义词条：从旧列与 meta JSON 回填 name_en / examples / group_name。
-    - 同步刷新四个内置类别的描述（运镜类别描述含 LoRA 触发词核心规则）。
+    - ``install/skill_docs/seed.json`` 为清单，每条 {key, category, title, file}；
+      文件正文相对 seed.json 所在目录。
+    - 种子缺失或读取失败只告警，不影响启动；文件态 skill（resources/skills）按
+      _RESOURCE_DOCS 映射补一份内置文档，保证导入流水线按 key 有文档可取。
+    - 用 INSERT OR IGNORE（UNIQUE(category,title) / builtin_key 唯一索引），
+      用户已改过的文档不会被覆盖。
     """
-    cols = _table_columns(conn, "skills")
-    if not cols or "meta" not in cols:
-        # 已是新结构（或表不存在），仅确保版本号
-        conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
+    # 由 _connect() 在连接就绪后调用：直接复用全局连接（不能再走 _connect 递归）
+    global _conn
+    conn = _conn
+    if conn is None:
         return
-    cat_name_by_id = {
-        int(r["id"]): r["name"]
-        for r in conn.execute("SELECT id, name FROM skill_categories").fetchall()
-    }
-    seed_rows = builtin_skill_rows()
-    conn.execute("ALTER TABLE skills RENAME TO skills_v0")
-    conn.execute(
-        """CREATE TABLE skills (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            category_id INTEGER NOT NULL REFERENCES skill_categories(id) ON DELETE CASCADE,
-            key         TEXT NOT NULL UNIQUE,
-            name        TEXT NOT NULL,
-            name_en     TEXT NOT NULL DEFAULT '',
-            desc        TEXT NOT NULL DEFAULT '',
-            guide       TEXT NOT NULL DEFAULT '',
-            examples    TEXT NOT NULL DEFAULT '[]',
-            group_name  TEXT NOT NULL DEFAULT '',
-            builtin     INTEGER NOT NULL DEFAULT 0,
-            created_at  INTEGER NOT NULL DEFAULT 0
-        )"""
-    )
-    rows = conn.execute("SELECT * FROM skills_v0").fetchall()
-    for r in rows:
+    root = Path(__file__).resolve().parent.parent
+    now = int(time.time() * 1000)
+    seed_dir = root / "install" / "skill_docs"
+    manifest = seed_dir / "seed.json"
+    added = 0
+    if manifest.is_file():
         try:
-            meta = json.loads(r["meta"]) if r["meta"] else {}
-            if not isinstance(meta, dict):
-                meta = {}
+            data = json.loads(manifest.read_text(encoding="utf-8-sig"))
+            items = data.get("docs") if isinstance(data, dict) else None
+            for i, item in enumerate(items or []):
+                key = str(item.get("key") or "").strip()
+                category = str(item.get("category") or "").strip()
+                title = str(item.get("title") or "").strip()
+                fname = str(item.get("file") or "").strip()
+                if not (key and category and title and fname):
+                    log.warning("[SPA] skill_docs seed 条目缺字段，已跳过：%s", item)
+                    continue
+                if category not in DOC_CATEGORIES:
+                    log.warning("[SPA] skill_docs seed 分类非法（%s），已跳过：%s", category, title)
+                    continue
+                path = seed_dir / fname
+                if not path.is_file():
+                    log.warning("[SPA] skill_docs 文档文件缺失：%s", path)
+                    continue
+                content = path.read_text(encoding="utf-8-sig")
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO skill_docs(category, title, content, builtin_key,"
+                    " builtin, sort, created_at, updated_at) VALUES(?,?,?,?,1,?,?,?)",
+                    (category, title, content, key, i, now, now),
+                )
+                added += 1 if cur.rowcount else 0
         except Exception:
-            meta = {}
-        cat_name = cat_name_by_id.get(int(r["category_id"])) or ""
-        builtin = bool(r["builtin"])
-        seed = seed_rows.get(r["key"]) if builtin else None
-        if seed is not None:
-            name = seed["name"]
-            name_en = seed["name_en"]
-            desc = seed["desc"]
-            guide = seed["guide"]
-            examples = list(seed["examples"])
-            group = seed["group_name"]
-        else:
-            name = r["name"]
-            name_en = str(meta.get("name_en") or "")
-            desc = r["desc"] or ""
-            guide = ""
-            if cat_name == "运镜":
-                examples = [str(x) for x in (meta.get("examples_en") or []) if str(x).strip()]
-            elif cat_name == "微表情":
-                examples = [str(x) for x in (meta.get("examples_zh") or []) if str(x).strip()]
-            else:
-                examples = []
-            group = str(meta.get("micro_category") or "")
-        conn.execute(
-            "INSERT OR REPLACE INTO skills(category_id, key, name, name_en, desc, guide,"
-            " examples, group_name, builtin, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (int(r["category_id"]), r["key"], name, name_en, desc, guide,
-             json.dumps(examples, ensure_ascii=False), group,
-             1 if builtin else 0, int(r["created_at"] or 0)),
+            log.warning("[SPA] skill_docs seed.json 解析失败", exc_info=True)
+    # 文件态 skill 兜底：DB 没有对应 builtin_key 才补
+    for i, (name, (category, title)) in enumerate(_RESOURCE_DOCS.items()):
+        if conn.execute("SELECT 1 FROM skill_docs WHERE builtin_key=?", (name,)).fetchone():
+            continue
+        md = root / "resources" / "skills" / name / "prompt.md"
+        if not md.is_file():
+            continue
+        try:
+            content = md.read_text(encoding="utf-8-sig")
+        except Exception:
+            log.warning("[SPA] 读取 skill 文档失败：%s", md, exc_info=True)
+            continue
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO skill_docs(category, title, content, builtin_key,"
+            " builtin, sort, created_at, updated_at) VALUES(?,?,?,?,1,?,?,?)",
+            (category, title, content, name, 100 + i, now, now),
         )
-    conn.execute("DROP TABLE skills_v0")
-    # 刷新内置类别描述（老库的运镜描述不含触发词规则）
-    for cat in build_builtin_categories():
-        conn.execute(
-            "UPDATE skill_categories SET description=? WHERE name=?",
-            (cat["description"], cat["name"]),
-        )
-    conn.execute("PRAGMA user_version=1")
-    log.info("[SPA] skill dict schema migrated v0 -> v1 (%d rows kept)", len(rows))
-
-
-def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
-    """v1 → v2：类别表增加注入方式（render_mode）与关键词保护开关。
-
-    内置四类按 BUILTIN_CATEGORY_RENDER 映射（运镜 camera + 保护；景别/镜头结构
-    term；微表情 example），其余自定义类别保持 descriptive / 不保护。
-    """
-    cols = _table_columns(conn, "skill_categories")
-    if "render_mode" not in cols:
-        conn.execute(
-            "ALTER TABLE skill_categories ADD COLUMN render_mode TEXT NOT NULL DEFAULT 'descriptive'")
-    if "protect_keywords" not in cols:
-        conn.execute(
-            "ALTER TABLE skill_categories ADD COLUMN protect_keywords INTEGER NOT NULL DEFAULT 0")
-    if "render_mode" not in cols or "protect_keywords" not in cols:
-        for name, (mode, protect) in BUILTIN_CATEGORY_RENDER.items():
-            conn.execute(
-                "UPDATE skill_categories SET render_mode=?, protect_keywords=? WHERE name=?",
-                (mode, int(protect), name),
-            )
-    conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
-    log.info("[SPA] skill dict schema migrated v1 -> v2 (render_mode / protect_keywords)")
+        added += 1 if cur.rowcount else 0
+    conn.commit()
+    log.info("[SPA] skill_docs seeded (%d docs)", added)
 
 
 def _connect() -> sqlite3.Connection:
@@ -233,22 +222,13 @@ def _connect() -> sqlite3.Connection:
             _conn.row_factory = sqlite3.Row
             _conn.execute("PRAGMA foreign_keys=ON")
             _conn.executescript(_SCHEMA)
-            try:
-                version = int(_conn.execute("PRAGMA user_version").fetchone()[0])
-                if version < _SCHEMA_VERSION:
-                    with _conn:
-                        if version < 1:
-                            _migrate_v0_to_v1(_conn)
-                            version = 1
-                        if version < 2:
-                            _migrate_v1_to_v2(_conn)
-            except Exception:
-                log.warning("[SPA] skill dict schema migration failed", exc_info=True)
-            # .lock 存在 → 已初始化过，不再跑种子（避免覆盖用户的库内编辑）
+            # .lock 存在 → 已初始化过，不再跑种子（避免覆盖用户的库内编辑）。
+            # 技能词条与技能文档共用这一个标记：删库重建时一并联动的只有它。
             if not _lock_path().exists():
                 try:
                     _seed_builtin()
                     _migrate_custom_json()
+                    _seed_skill_docs()
                     _conn.commit()
                     _lock_path().write_text(
                         f"initialized {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -258,7 +238,7 @@ def _connect() -> sqlite3.Connection:
                     log.info("[SPA] skill dict initialized -> %s", _lock_path())
                 except Exception:
                     _conn.rollback()
-                    log.warning("[SPA] skill dict seed/migrate failed", exc_info=True)
+                    log.warning("[SPA] skill dict seed failed", exc_info=True)
         return _conn
 
 
@@ -677,6 +657,176 @@ def batch_add_skills(payload: dict) -> dict:
 def skill_dict_snapshot() -> dict:
     """对外暴露的只读快照，供接口层直接返回。"""
     return list_all()
+
+
+# ---------------- 技能文档（md 提示词模板） ----------------
+
+def _norm_doc_category(value) -> str:
+    category = str(value or "").strip()
+    if category not in DOC_CATEGORIES:
+        raise ValueError(f"未知分类：{category or '(空)'}（可选：{' / '.join(DOC_CATEGORIES)}）")
+    return category
+
+
+def _doc_summary(content: str, limit: int = 120) -> str:
+    """取正文首段摘要（去 md 标记，列表接口不返回全文）。"""
+    for line in str(content or "").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("```"):
+            continue
+        s = re.sub(r"^[>\-*\d.\s]+", "", s)
+        if s:
+            return s[:limit]
+    return ""
+
+
+def _doc_row_dict(row: sqlite3.Row, with_content: bool = True) -> dict:
+    data = {
+        "id": int(row["id"]),
+        "category": row["category"],
+        "title": row["title"],
+        "builtinKey": row["builtin_key"],
+        "builtin": bool(row["builtin"]),
+        "sort": int(row["sort"]),
+        "updatedAt": int(row["updated_at"] or 0),
+        "summary": _doc_summary(row["content"]),
+    }
+    if with_content:
+        data["content"] = row["content"]
+        data["createdAt"] = int(row["created_at"] or 0)
+    return data
+
+
+def list_docs(category: str = "") -> dict:
+    """技能文档列表：不做分类过滤时返回全部（按分类 + sort + id 排序）。"""
+    cat = _norm_doc_category(category) if str(category or "").strip() else ""
+    with _lock:
+        conn = _connect()
+        if cat:
+            rows = conn.execute(
+                "SELECT * FROM skill_docs WHERE category=? ORDER BY sort, id", (cat,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM skill_docs ORDER BY category, sort, id"
+            ).fetchall()
+        counts = {c: 0 for c in DOC_CATEGORIES}
+        for r in conn.execute("SELECT category, COUNT(*) AS n FROM skill_docs GROUP BY category"):
+            if r["category"] in counts:
+                counts[r["category"]] = int(r["n"])
+        return {
+            "categories": list(DOC_CATEGORIES),
+            "counts": counts,
+            "docs": [_doc_row_dict(r, with_content=False) for r in rows],
+        }
+
+
+def get_doc(doc_id: int = 0, key: str = "") -> dict:
+    """按 id 或内置 key 取文档全文。
+
+    key 在 DB 中不存在时回落 resources/skills/<key>/prompt.md（保证导入流水线
+    即使用户删了文档也不断链）。
+    """
+    doc_id = int(doc_id or 0)
+    key = str(key or "").strip()
+    if not doc_id and not key:
+        raise ValueError("缺少文档 id 或 key")
+    with _lock:
+        conn = _connect()
+        row = None
+        if doc_id:
+            row = conn.execute("SELECT * FROM skill_docs WHERE id=?", (doc_id,)).fetchone()
+        elif key:
+            row = conn.execute(
+                "SELECT * FROM skill_docs WHERE builtin_key=?", (key,)
+            ).fetchone()
+        if row is not None:
+            return _doc_row_dict(row)
+    if key:
+        meta = _RESOURCE_DOCS.get(key)
+        md = Path(__file__).resolve().parent.parent / "resources" / "skills" / key / "prompt.md"
+        if md.is_file():
+            return {
+                "id": 0,
+                "category": (meta or ("分镜设计", ""))[0],
+                "title": (meta or ("", key))[1] or key,
+                "builtinKey": key,
+                "builtin": True,
+                "sort": 0,
+                "updatedAt": 0,
+                "summary": "",
+                "content": md.read_text(encoding="utf-8-sig"),
+                "createdAt": 0,
+                "fromFile": True,
+            }
+    raise ValueError(f"文档不存在：{doc_id or key}")
+
+
+def add_doc(payload: dict) -> dict:
+    category = _norm_doc_category(payload.get("category"))
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise ValueError("技能标题不能为空")
+    content = str(payload.get("content") or "")
+    now = int(time.time() * 1000)
+    with _lock:
+        conn = _connect()
+        if conn.execute(
+            "SELECT 1 FROM skill_docs WHERE category=? AND title=?", (category, title)
+        ).fetchone():
+            raise ValueError(f"该分类下已存在同名文档：{title}")
+        cur = conn.execute(
+            "INSERT INTO skill_docs(category, title, content, builtin_key, builtin, sort,"
+            " created_at, updated_at) VALUES(?,?,?,'',0,?,?,?)",
+            (category, title, content, int(payload.get("sort") or 999), now, now),
+        )
+        conn.commit()
+        return {"id": int(cur.lastrowid or 0), "category": category, "title": title}
+
+
+def update_doc(payload: dict) -> dict:
+    doc_id = int(payload.get("id") or 0)
+    if not doc_id:
+        raise ValueError("缺少文档 id")
+    with _lock:
+        conn = _connect()
+        row = conn.execute("SELECT * FROM skill_docs WHERE id=?", (doc_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"文档不存在：{doc_id}")
+        category = _norm_doc_category(
+            payload.get("category") if payload.get("category") is not None else row["category"]
+        )
+        title = str(payload.get("title") if payload.get("title") is not None
+                    else row["title"]).strip()
+        if not title:
+            raise ValueError("技能标题不能为空")
+        content = str(payload.get("content") if payload.get("content") is not None
+                      else row["content"])
+        if (category, title) != (row["category"], row["title"]):
+            if conn.execute(
+                "SELECT 1 FROM skill_docs WHERE category=? AND title=? AND id<>?",
+                (category, title, doc_id),
+            ).fetchone():
+                raise ValueError(f"该分类下已存在同名文档：{title}")
+        conn.execute(
+            "UPDATE skill_docs SET category=?, title=?, content=?, updated_at=? WHERE id=?",
+            (category, title, content, int(time.time() * 1000), doc_id),
+        )
+        conn.commit()
+        return {"id": doc_id, "category": category, "title": title}
+
+
+def delete_doc(payload: dict) -> dict:
+    doc_id = int(payload.get("id") or 0)
+    if not doc_id:
+        raise ValueError("缺少文档 id")
+    with _lock:
+        conn = _connect()
+        if not conn.execute("SELECT 1 FROM skill_docs WHERE id=?", (doc_id,)).fetchone():
+            raise ValueError(f"文档不存在：{doc_id}")
+        conn.execute("DELETE FROM skill_docs WHERE id=?", (doc_id,))
+        conn.commit()
+        return {"id": doc_id}
 
 
 def close() -> None:

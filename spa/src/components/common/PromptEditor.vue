@@ -229,8 +229,8 @@ const darkTheme = EditorView.theme(
   {
     "&": {
       backgroundColor: "transparent",
-      color: "#edeff5",
-      fontSize: "12.5px",
+      color: "#a9b1c3",
+      fontSize: "12px",
     },
     "&.cm-focused": { outline: "none" },
     ".cm-scroller": {

@@ -7,6 +7,7 @@ import BasicSettingsPanel from "../components/global/BasicSettingsPanel.vue";
 import LlmSettingsPanel from "../components/global/LlmSettingsPanel.vue";
 import GlobalPromptPanel from "../components/global/GlobalPromptPanel.vue";
 import SkillDictPanel from "../components/global/SkillDictPanel.vue";
+import SkillDocsPanel from "../components/global/SkillDocsPanel.vue";
 
 const ws = useWorkspace();
 
@@ -15,10 +16,11 @@ const MENU = [
   { key: "llm", label: "LLM 设置", icon: "MagicStick" },
   { key: "prompt", label: "全局提示词", icon: "Document" },
   { key: "skills", label: "分镜技能", icon: "Grid" },
+  { key: "skillDocs", label: "技能文档", icon: "Notebook" },
 ];
 const active = ref("basic");
 const activePanel = computed(
-  () => ({ basic: BasicSettingsPanel, llm: LlmSettingsPanel, prompt: GlobalPromptPanel, skills: SkillDictPanel })[active.value]
+  () => ({ basic: BasicSettingsPanel, llm: LlmSettingsPanel, prompt: GlobalPromptPanel, skills: SkillDictPanel, skillDocs: SkillDocsPanel })[active.value]
 );
 
 onMounted(() => {

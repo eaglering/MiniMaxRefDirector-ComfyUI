@@ -2215,7 +2215,7 @@ app.registerExtension({
                                 <input value=${v.ollama_base_url} onChange=${(e) => writeVlm({ ollama_base_url: e.target.value.trim() })} />
                             </div>`}
                         ${mode === "deepseek-proxy" && html`
-                            <div class="ref-ms-llm-hint">${t("Uses the browser extension bridge to chat.deepseek.com (configure the extension ID in the SPA director global params).")}</div>`}
+                            <div class="ref-ms-llm-hint">${t("Uses the backend Playwright CDP channel to chat.deepseek.com (configure the Chrome debug port in the SPA director global params).")}</div>`}
                     </div>`;
                 };
 

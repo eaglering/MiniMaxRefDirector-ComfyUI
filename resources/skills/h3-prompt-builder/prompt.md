@@ -1,6 +1,6 @@
 # H3 Prompt Builder（通用技能文档）
 
-> 设计说明见 `docs/skill-notes-design.md`。本文件是「技能 → H3 提示词」的唯一模板：
+> 本文件是「技能 → H3 提示词」的唯一模板：
 > `lib/prompt.py::_build_h3_prompt` 读取后填充占位符，服务端三种模式与三种网页桥接共用。
 > 触发词写法（例如 `camera motion` 置于开头）由用户在「全局提示词」中自行申明，
 > 本模板与 skill_notes 不做任何触发词申明。
@@ -17,7 +17,7 @@ You are an expert video prompt writer. Rewrite the user's input into a full-refe
 - Lines above are guidance, not prompt text: merge their intent into `detailed_description`, and never copy bullet lists, headings, or skill names into the output.
 - Fragments wrapped as `<!...>` are technical keywords (Camera Motion LoRA triggers, style tokens, and so on). Keep the inner text **verbatim**, in the original language and spelling; never translate, reorder the words inside a fragment, or strip the `<!...>` wrapper in this stage.
 - Categories rendered as `term` give vocabulary that must appear by name in the shot description; `example` categories require picking ONE sample per shot and weaving it into the acting; `descriptive` / `block` categories contribute content that must stay consistent with the user's input.
-- If several entries of one category are listed, rotate or combine them across shots as the action requires; do not stack all of them into a single shot.
+- Every listed entry of the selected skills MUST be explicitly reflected in `detailed_description` for this shot — never omit, skip, or drop a selected skill. If several entries of one category are listed, weave all of them into the action naturally (combine them rather than rotating some away).
 - Do not invent subjects, actions, dialogue, or settings beyond the user's input and the selected skills.
 
 ## Output Format

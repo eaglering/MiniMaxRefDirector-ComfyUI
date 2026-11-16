@@ -6,7 +6,6 @@ from comfy_api.latest import io
 
 from .lib.audio import fill_audio_gaps
 from .lib.image import calc_resolution
-from .lib.llm import unload_llama_models
 from .lib.prompt import build_h3_prompt, _translate_text_to_en
 from .lib.skill_notes import glossary_for_text
 
@@ -156,6 +155,12 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "million_pixels", default=0.6, min=0.1, max=4.0, step=0.1, optional=True,
                     tooltip="Million pixels target. 1.0 MP ≈ 1024×1024.",
                 ),
+                io.Combo.Input(
+                    "video_mode",
+                    options=["h3", "doubao", "off"],
+                    default="h3", optional=True,
+                    tooltip="Video generation mode: h3 = MiniMax Hailuo (show H3 prompt UI, auto-translate to English); doubao = reserved (not implemented yet); off = generic, no H3 entries.",
+                ),
             ],
             outputs=[
                 GuideData.Output(display_name="guide_data"),
@@ -171,10 +176,11 @@ class MiniMaxRefDirector(io.ComfyNode):
 
     @classmethod
     def execute(cls, config=None,
-                start_second=0.0, end_second=5.0, duration_seconds=5.0, 
-                start_frame=0, end_frame=120, duration_frames=120, timeline_data="", 
-                local_prompts="", segment_lengths="", frame_rate=24, 
-                display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6) -> io.NodeOutput:
+                start_second=0.0, end_second=5.0, duration_seconds=5.0,
+                start_frame=0, end_frame=120, duration_frames=120, timeline_data="",
+                local_prompts="", segment_lengths="", frame_rate=24,
+                display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6,
+                video_mode="h3") -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
         # config 是可选输入：前端首帧 subgraph 中 director 不连接 config，需容错
         global_prompt = config.get("global_prompt", "") if config else ""
@@ -217,107 +223,100 @@ class MiniMaxRefDirector(io.ComfyNode):
 
         # 段提示词可能以中文编写（编辑器"中→"按钮生成）：下游 MiniMax 视频模型需要
         # 英文提示词，此处对含中文的段提示词调用 LLM 翻译为英文。opts 从 config 透传
-        # （vlm_mode / gguf_path / mmproj_path / provider / api_key 等）；翻译会加载
-        # 本地 llama-cpp 模型，结束后在 finally 统一释放内存。
+        # （vlm_mode / gguf_path / mmproj_path / provider / api_key 等）；llama-server
+        # 模式下翻译经外部 HTTP 服务完成，ComfyUI 进程无模型内存需要释放。
         vlm_opts = ((config or {}).get("opts") or {}) if config else {}
-        translated_any = False
-        try:
-            for i, seg in enumerate(timeline_segments):
-                dur = int(seg.get("length", 1))
-                seg_start_frames = int(seg.get("start", 0))
-                seg_end_frames = seg_start_frames + dur
+        for i, seg in enumerate(timeline_segments):
+            dur = int(seg.get("length", 1))
+            seg_start_frames = int(seg.get("start", 0))
+            seg_end_frames = seg_start_frames + dur
 
-                if seg_start_frames < range_start:
-                    seg_start_frames = range_start
-                if seg_end_frames > range_end:
-                    seg_end_frames = range_end
+            if seg_start_frames < range_start:
+                seg_start_frames = range_start
+            if seg_end_frames > range_end:
+                seg_end_frames = range_end
 
-                dur = seg_end_frames - seg_start_frames
-                if dur <= 0:
-                    continue
-                seg_audio = fill_audio_gaps(audio_segments, seg_start_frames, seg_end_frames)
-                h3_prompt_json = seg.get("h3PromptJson", "")
-                prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
-                next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
-                # 段级主体覆盖（SPA 分镜预览页按引用「自定义」）：seg.subjectsOverride
-                # 为被覆盖主体（含其子主体）的副本数组；以全局 subject_data 为底，
-                # 按 name 匹配替换，override 中全局没有的主体追加；缺失 / 空列表 /
-                # 类型异常时回退全局（完全向后兼容，亦兼容旧"整体替换"数据）。
-                seg_subject_data = subject_data
-                _seg_override = seg.get("subjectsOverride")
-                if isinstance(_seg_override, list) and _seg_override:
-                    _global_subjects = subject_data.get("subjects") if isinstance(subject_data, dict) else None
-                    if isinstance(_global_subjects, list):
-                        _ov_by_name = {}
-                        for _s in _seg_override:
-                            if isinstance(_s, dict):
-                                _n = str(_s.get("name") or "").strip()
-                                if _n:
-                                    _ov_by_name[_n] = _s
-                        _merged = []
-                        _consumed = set()
-                        for _g in _global_subjects:
-                            if not isinstance(_g, dict):
-                                _merged.append(_g)
-                                continue
-                            _gn = str(_g.get("name") or "").strip()
-                            if _gn and _gn in _ov_by_name:
-                                _merged.append(_ov_by_name[_gn])
-                                _consumed.add(_gn)
-                            else:
-                                _merged.append(_g)
-                        for _n, _s in _ov_by_name.items():
-                            if _n not in _consumed:
-                                _merged.append(_s)
-                        seg_subject_data = {"subjects": _merged}
-                prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=seg_subject_data, 
-                                             prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
-                                             timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio,
-                                             frame_rate=frame_rate)
-                # 非英文（含中文，且非仅出现在对白/主体标签中）的段提示词翻译为英文
-                if _needs_translate(prompt_res["prompt"]):
-                    log.info(
-                        "[MiniMaxRefDirector] segment %d pre-translate prompt head: %s",
-                        i, repr(prompt_res["prompt"][:160]),
-                    )
-                    prompt_res["prompt"] = _translate_prompt_to_en(prompt_res["prompt"], vlm_opts)
-                    translated_any = True
-                    log.info(
-                        "[MiniMaxRefDirector] segment %d post-translate prompt head: %s",
-                        i, repr(prompt_res["prompt"][:160]),
-                    )
-                else:
-                    # 纯英文提示词不走翻译：技能保护标记只保留内文，标记不进入最终提示词
-                    prompt_res["prompt"] = _PROTECT_MARK_GLOBAL_RE.sub(
-                        lambda m: m.group(1).strip(), prompt_res["prompt"])
-                entry = {
-                    "prompt": prompt_res["prompt"],
-                    "subjects": prompt_res["subjects"],
-                    "images": prompt_res["images"],
-                    "audios": prompt_res["audios"],
-                    "videos": prompt_res["videos"],
-                    "prevImageFile": prompt_res["prevImageFile"],
-                    "prevType": prompt_res["prevType"],
-                    "durationFrames": dur,
-                    "startFrames": seg_start_frames,
-                    "type": seg.get("type", "text"),
-                    "imageFile": seg.get("imageFile", ""),
-                    "upscale": seg.get("upscale", False),
-                    "secondPass": seg.get("secondPass", False),
-                    "guideStrength": seg.get("guideStrength", 22),
-                    # 片段级降噪（seg.denoise = {enabled, alpha, alpha_end, ramp, seed}）；
-                    # Guide 在 motion context 路径开启时调用 ComfyUI-H3-Context-Noise
-                    "denoise": seg.get("denoise") or None,
-                }
-                guide_timeline.append(entry)
-                segment_count += 1
-        finally:
-            # 释放 llama-cpp 模型内存（翻译用 LLM 加载后不再驻留；未触发翻译/无模型时为空操作）
-            if translated_any:
-                try:
-                    unload_llama_models()
-                except Exception as e:
-                    log.warning(f"[MiniMaxRefDirector] Failed to unload Llama models: {e}")
+            dur = seg_end_frames - seg_start_frames
+            if dur <= 0:
+                continue
+            seg_audio = fill_audio_gaps(audio_segments, seg_start_frames, seg_end_frames)
+            h3_prompt_json = seg.get("h3PromptJson", "")
+            prev_seg = timeline_segments[i - 1] if i - 1 >= 0 else None
+            next_seg = timeline_segments[i + 1] if i + 1 < timeline_data_len else None
+            # 段级主体覆盖（SPA 分镜预览页按引用「自定义」）：seg.subjectsOverride
+            # 为被覆盖主体（含其子主体）的副本数组；以全局 subject_data 为底，
+            # 按 name 匹配替换，override 中全局没有的主体追加；缺失 / 空列表 /
+            # 类型异常时回退全局（完全向后兼容，亦兼容旧"整体替换"数据）。
+            seg_subject_data = subject_data
+            _seg_override = seg.get("subjectsOverride")
+            if isinstance(_seg_override, list) and _seg_override:
+                _global_subjects = subject_data.get("subjects") if isinstance(subject_data, dict) else None
+                if isinstance(_global_subjects, list):
+                    _ov_by_name = {}
+                    for _s in _seg_override:
+                        if isinstance(_s, dict):
+                            _n = str(_s.get("name") or "").strip()
+                            if _n:
+                                _ov_by_name[_n] = _s
+                    _merged = []
+                    _consumed = set()
+                    for _g in _global_subjects:
+                        if not isinstance(_g, dict):
+                            _merged.append(_g)
+                            continue
+                        _gn = str(_g.get("name") or "").strip()
+                        if _gn and _gn in _ov_by_name:
+                            _merged.append(_ov_by_name[_gn])
+                            _consumed.add(_gn)
+                        else:
+                            _merged.append(_g)
+                    for _n, _s in _ov_by_name.items():
+                        if _n not in _consumed:
+                            _merged.append(_s)
+                    seg_subject_data = {"subjects": _merged}
+            prompt_res = build_h3_prompt(global_prompt=global_prompt, subject_data=seg_subject_data, 
+                                         prompt_json=h3_prompt_json, previous_timeline_segment=prev_seg,
+                                         timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio,
+                                         frame_rate=frame_rate)
+            # 非英文（含中文，且非仅出现在对白/主体标签中）的段提示词翻译为英文。
+            # video_mode != "h3"（doubao 预留 / off 通用）时跳过自动转英文：保留原文
+            # 与中文 H3 结构，由所选视频模型的链路自行处理语言。
+            _h3_mode = str(video_mode or "h3").strip().lower() == "h3"
+            if _h3_mode and _needs_translate(prompt_res["prompt"]):
+                log.info(
+                    "[MiniMaxRefDirector] segment %d pre-translate prompt head: %s",
+                    i, repr(prompt_res["prompt"][:160]),
+                )
+                prompt_res["prompt"] = _translate_prompt_to_en(prompt_res["prompt"], vlm_opts)
+                log.info(
+                    "[MiniMaxRefDirector] segment %d post-translate prompt head: %s",
+                    i, repr(prompt_res["prompt"][:160]),
+                )
+            else:
+                # 纯英文提示词不走翻译：技能保护标记只保留内文，标记不进入最终提示词
+                prompt_res["prompt"] = _PROTECT_MARK_GLOBAL_RE.sub(
+                    lambda m: m.group(1).strip(), prompt_res["prompt"])
+            entry = {
+                "prompt": prompt_res["prompt"],
+                "subjects": prompt_res["subjects"],
+                "images": prompt_res["images"],
+                "audios": prompt_res["audios"],
+                "videos": prompt_res["videos"],
+                "prevImageFile": prompt_res["prevImageFile"],
+                "prevType": prompt_res["prevType"],
+                "durationFrames": dur,
+                "startFrames": seg_start_frames,
+                "type": seg.get("type", "text"),
+                "imageFile": seg.get("imageFile", ""),
+                "upscale": seg.get("upscale", False),
+                "secondPass": seg.get("secondPass", False),
+                "guideStrength": seg.get("guideStrength", 22),
+                # 片段级降噪（seg.denoise = {enabled, alpha, alpha_end, ramp, seed}）；
+                # Guide 在 motion context 路径开启时调用 ComfyUI-H3-Context-Noise
+                "denoise": seg.get("denoise") or None,
+            }
+            guide_timeline.append(entry)
+            segment_count += 1
 
         if segment_count == 0:
             raise ValueError("[MiniMaxRefDirector] No valid segments found in timeline_data.")

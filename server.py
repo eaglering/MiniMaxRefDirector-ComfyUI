@@ -203,17 +203,80 @@ _LazyRoutes.flush()
 
 @_routes.post(f"{API_PREFIX}/llm/unload")
 async def unload_llama_models_api(request: web.Request) -> web.Response:
-    """Unload all cached local GGUF (llama-cpp) models to free RAM/VRAM.
+    """Stop the external llama-server to free its VRAM (legacy endpoint kept for compat).
 
-    Lazy import keeps this module import-order agnostic (avoids cycles with
-    minimax_ref_prompt_enhance which imports comfy modules).
+    旧语义为卸载进程内 llama-cpp 模型；llama-server 模式下模型在外部进程，
+    此端点即「停止 llama-server」（与 /llm/llama_server/stop 等效）。
     """
     try:
         from .lib.llm import unload_llama_models as _unload
 
-        # 卸载走线程池（close()/gc/empty_cache 在锁内执行，排队等待进行中的推理）
+        # 停止走线程池（模块锁内执行，排队等待进行中的推理结束）
         await asyncio.to_thread(_unload)
         return web.json_response({"success": True, "unloaded": True})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+# ---------------- llama-server 进程管理（设置面板手动启停） ----------------
+
+@_routes.post(f"{API_PREFIX}/llm/llama_server/start")
+async def llama_server_start_api(request: web.Request) -> web.Response:
+    """启动 llama-server（先卸载 ComfyUI 显存模型，再拉起外部进程并轮询就绪）。"""
+    try:
+        data = await request.json()
+        from .lib.llama_server import DEFAULT_PORT, start
+
+        port = int(data.get("port") or 0) or DEFAULT_PORT
+        st = await asyncio.to_thread(
+            start,
+            str(data.get("path") or "").strip(),
+            str(data.get("gguf_path") or "").strip(),
+            str(data.get("mmproj_path") or "").strip(),
+            port,
+        )
+        return web.json_response({"success": True, **st})
+    except (ValueError, RuntimeError) as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/llm/llama_server/stop")
+async def llama_server_stop_api(request: web.Request) -> web.Response:
+    """停止 llama-server 并回收进程。"""
+    try:
+        from .lib.llama_server import stop
+
+        st = await asyncio.to_thread(stop)
+        return web.json_response({"success": True, **st})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/llm/llama_server/status")
+async def llama_server_status_api(request: web.Request) -> web.Response:
+    """llama-server 当前状态（running/loading/pid/endpoint/model）。"""
+    try:
+        from .lib.llama_server import status
+
+        return web.json_response({"success": True, **status()})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/llm/llama_server/log")
+async def llama_server_log_api(request: web.Request) -> web.Response:
+    """llama-server 日志尾部（启动失败排查）。"""
+    try:
+        from .lib.llama_server import tail_log
+
+        n = int(request.query.get("lines", "60"))
+        return web.json_response({"success": True, "log": tail_log(n)})
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
@@ -231,16 +294,17 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
         image_path = data.get("image_path", "")
         prompt = data.get("prompt", "")
         vlm_mode = data.get("vlm_mode", "llama-cpp")
+        if vlm_mode == "llama-server":
+            vlm_mode = "llama-cpp"  # 新模式名归一化（内部值保留 llama-cpp 兼容旧存档）
         gguf_path = data.get("gguf_path", "")
         mmproj_path = data.get("mmproj_path", "")
         seed = data.get("seed", 42)
         if not prompt:
             return web.json_response({"success": False, "error": "prompt is required"}, status=400)
         if vlm_mode == "llama-cpp":
-            gguf_path = _resolve_llm_file(gguf_path)
-            if not gguf_path:
-                return web.json_response({"success": False, "error": "gguf_path is required (no GGUF found under models/llm)"}, status=400)
-            mmproj_path = _resolve_llm_file(mmproj_path)
+            # llama-server 模式：模型由外部服务进程加载（设置面板启动时指定），
+            # 不再要求请求带 gguf/mmproj；未启动时由 generate_prompt_with_llama
+            # 返回带设置面板指引的错误
             work = lambda: image_analysis(gguf_path, mmproj_path, prompt, image_path, seed)
         elif vlm_mode == "ollama":
             model = data.get("ollama_model", "")
@@ -254,11 +318,11 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
                     base_url=base_url, api_key=api_key, seed=seed,
                 )
                 return {"detailed_description": text}
-        elif vlm_mode == "deepseek-proxy":
-            # 网页会话无法传图，图片分析不支持 deepseek-proxy（必须在 api 兜底分支之前）
+        elif vlm_mode in ("deepseek-proxy", "doubao-proxy", "qianwen-proxy", "qwen-proxy"):
+            # 网页会话无法传图，图片分析不支持任何网页代理模式（必须在 api 兜底分支之前）
             return web.json_response(
                 {"success": False,
-                 "error": "deepseek-proxy 不支持图片分析（网页会话无法传图）：请改用 api / ollama / llama-cpp 模式"},
+                 "error": f"{vlm_mode} 不支持图片分析（网页会话无法传图）：请改用 api / ollama / llama-server 模式"},
                 status=400,
             )
         else:
@@ -291,8 +355,12 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         prompt = data.get("prompt", "")
         image_path = data.get("image_path", "")
         vlm_mode = data.get("vlm_mode", "llama-cpp")
+        if vlm_mode == "llama-server":
+            vlm_mode = "llama-cpp"  # 新模式名归一化（内部值保留 llama-cpp 兼容旧存档）
         seed = data.get("seed", 42)
-        lang = data.get("lang", "en")
+        # lang：未显式传参时 "auto" = 跟随输入语言（中文输入→中文输出），
+        # 与网页通道的语言跟随策略一致，避免旧调用方静默拿到英文模板
+        lang = data.get("lang") or "auto"
         # 技能注入：优先用调用方已渲染好的 skill_notes（前端经 /spa/skill_notes 取），
         # 否则按 selections（{类别名: [key]}）在服务端现渲染。
         # 以下四个字段为旧契约，仅在 skill_notes / selections 都为空时兜底转换。
@@ -320,10 +388,10 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         if not prompt:
             return web.json_response({"success": False, "error": "prompt is required"}, status=400)
         if vlm_mode == "llama-cpp":
-            options["gguf_path"] = _resolve_llm_file(options["gguf_path"])
-            if not options["gguf_path"]:
-                return web.json_response({"success": False, "error": "gguf_path is required (no GGUF found under models/llm)"}, status=400)
-            options["mmproj_path"] = _resolve_llm_file(options["mmproj_path"])
+            # llama-server 模式：模型由外部服务进程加载（设置面板启动时指定），
+            # 请求无需 gguf/mmproj；未启动时由 generate_prompt_with_llama
+            # 返回带设置面板指引的错误
+            pass
         elif vlm_mode == "api":
             if not options["provider"]:
                 return web.json_response({"success": False, "error": "provider is required"}, status=400)
@@ -337,7 +405,7 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             if image_path:
                 return web.json_response(
                     {"success": False,
-                     "error": f"{vlm_mode} 不支持参考图（网页会话无法传图）：请改用 api / ollama / llama-cpp，或移除参考图"},
+                     "error": f"{vlm_mode} 不支持参考图（网页会话无法传图）：请改用 api / ollama / llama-server，或移除参考图"},
                     status=400,
                 )
         work = lambda: generate_h3_prompt(
@@ -351,6 +419,43 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         )
         json_data = await _await_llm_work(work)
         return web.json_response({"success": True, "json_data": json_data})
+    except RuntimeError as e:
+        # 模型输出解析失败等可预期错误 → 400 + 友好文案（含原文摘录），便于前端展示
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/llm/generate_text")
+async def generate_text_api(request: web.Request) -> web.Response:
+    """纯文本生成（技能文档「生成提示词」等场景，无 JSON 约束）。
+
+    body: {prompt, system?, image_path?, seed?, vlm_mode, options{...}}
+    网页代理（*-proxy）同样支持：拼 system+prompt 后走网页会话单轮。
+    返回 {success, text}。
+    """
+    try:
+        from .lib.prompt import generate_text
+        data = await request.json()
+        prompt = str(data.get("prompt") or "")
+        system = str(data.get("system") or "")
+        image_path = str(data.get("image_path") or "")
+        seed = data.get("seed", 42)
+        vlm_mode = str(data.get("vlm_mode") or "llama-cpp")
+        if vlm_mode == "llama-server":
+            vlm_mode = "llama-cpp"  # 新模式名归一化
+        options = data.get("options") if isinstance(data.get("options"), dict) else {}
+        if not prompt.strip():
+            return web.json_response({"success": False, "error": "prompt is required"}, status=400)
+        work = lambda: generate_text(
+            prompt=prompt, system=system, image_path=image_path,
+            seed=seed, vlm_mode=vlm_mode, options=options,
+        )
+        text = await _await_llm_work(work)
+        return web.json_response({"success": True, "text": text})
+    except RuntimeError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
@@ -1310,10 +1415,12 @@ async def ext_restart_api(request: web.Request) -> web.Response:
 
 @_routes.post(f"{API_PREFIX}/ext/pip_install")
 async def ext_pip_install_api(request: web.Request) -> web.Response:
-    """pip 安装 python 依赖（默认 llama-cpp-python，可带附加 pip 参数）。"""
+    """pip 安装 python 依赖（可带附加 pip 参数）。"""
     try:
         body = await request.json()
-        pkg = (body.get("pkg") or "llama-cpp-python").strip()
+        pkg = (body.get("pkg") or "").strip()
+        if not pkg:
+            return web.json_response({"success": False, "error": "pkg is required"}, status=400)
         args = body.get("args") or ""
         from . import ext_mgmt as _ext
         res = await asyncio.to_thread(_ext.pip_install_package, pkg, str(args))

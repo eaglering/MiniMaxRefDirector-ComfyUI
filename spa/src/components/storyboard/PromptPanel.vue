@@ -179,10 +179,14 @@ function ensureH3() {
 
 const h3 = computed(() => ensureH3());
 
+// H3 插件化门控：仅全局「视频生成模式 = h3」时展示 H3 提示词区与转 H3 入口
+const h3Enabled = computed(() => (ws.widgets.video_mode || "h3") === "h3");
+
 // ---- 原生 → H3 生成（中 / 英） ----
 // 技能注入块由后端 /spa/skill_notes 统一渲染（服务端与三种网页桥接共用）；
 // 分镜选择统一来自 seg.skills = { 类别名: [key] }，已删除的技能会被跳过并提示。
 async function generateH3(lang) {
+  if (!h3Enabled.value) return; // 视频生成模式非 h3：入口已隐藏，兜底拦截
   const seg = props.segment;
   if (!(seg.prompt || "").trim()) {
     ElMessage.warning("请先输入用户提示词");
@@ -192,10 +196,13 @@ async function generateH3(lang) {
   try {
     const selections = ws.segmentSelections(seg);
     let skillNotes = "";
+    let requiredTerms = [];
     if (Object.keys(selections).length) {
       const nr = await fetchSkillNotes(selections, lang);
       if (!nr.success) throw new Error(nr.error || "技能注入块渲染失败");
       skillNotes = nr.notes || "";
+      // 所选技能必须出现：后端返回的必选关键词（技术词原文 / 术语名）
+      requiredTerms = Array.isArray(nr.required) ? nr.required : (nr.protected || []);
       if (nr.warnings?.length) ElMessage.warning(nr.warnings.join("；"));
     }
     const payload = {
@@ -206,6 +213,8 @@ async function generateH3(lang) {
       // 后端唯一渲染源；同时带 selections 供服务端模式直接使用
       skill_notes: skillNotes,
       selections,
+      // 桥接模式据此校验"所选技能必须出现"，缺失会纠正追问并告警
+      required_terms: requiredTerms,
     };
     const res = await generateH3Prompt(ws.llm, payload);
     if (!res.success) {
@@ -218,7 +227,8 @@ async function generateH3(lang) {
     h3.value.overall_soundscape = data.overall_soundscape ?? h3.value.overall_soundscape;
     h3.value.non_diegetic_music = data.non_diegetic_music ?? h3.value.non_diegetic_music;
     ws.markDirty();
-    ElMessage.success(lang === "zh" ? "中文 H3 提示词已生成" : "英文 H3 提示词已生成");
+    if (res.warning) ElMessage.warning(res.warning);
+    else ElMessage.success(lang === "zh" ? "中文 H3 提示词已生成" : "英文 H3 提示词已生成");
   } catch (e) {
     ElMessage.error(`生成失败：${e.message || e}`);
   } finally {
@@ -290,6 +300,7 @@ async function generateH3(lang) {
                 <span class="mrd-col-hint">输入 @ 可引用主体</span>
               </div>
               <el-button
+                  v-if="h3Enabled"
                   size="small"
                   type="primary"
                   :loading="translating === 'zh'"
@@ -315,8 +326,8 @@ async function generateH3(lang) {
       </el-splitter>
     </el-splitter-panel>
 
-    <!-- 右栏：H3 提示词 -->
-    <el-splitter-panel :size="hSplit.sizes[1]" :min="28" collapsible>
+    <!-- 右栏：H3 提示词（video_mode=off / doubao 时整栏隐藏，左栏自适应铺满） -->
+    <el-splitter-panel v-if="h3Enabled" :size="hSplit.sizes[1]" :min="28" collapsible>
       <div class="mrd-h3-card">
       <div class="mrd-h3-head">
         <span class="mrd-col-title">H3 提示词</span>

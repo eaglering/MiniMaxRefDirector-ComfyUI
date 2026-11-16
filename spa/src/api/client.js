@@ -39,11 +39,12 @@ async function request(path, options = {}) {
   return resp.json();
 }
 
-async function getJSON(path) {
+// 导出基础请求助手：llm.js 的 /spa/webchat/* 通道复用（与下方端点同规则）
+export async function getJSON(path) {
   return request(path);
 }
 
-async function postJSON(path, body) {
+export async function postJSON(path, body) {
   return request(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -111,12 +112,36 @@ export function fetchSkillNotes(selections, lang = "zh") {
   return postJSON("/spa/skill_notes", { selections, lang });
 }
 
+// ===== 技能文档（md 提示词模板，SQLite skill_docs 表）=====
+export function fetchSkillDocs(category = "") {
+  return getJSON(`/spa/skill_docs${category ? `?category=${encodeURIComponent(category)}` : ""}`);
+}
+export function fetchSkillDoc({ id = 0, key = "" } = {}) {
+  const q = [];
+  if (id) q.push(`id=${id}`);
+  if (key) q.push(`key=${encodeURIComponent(key)}`);
+  return getJSON(`/spa/skill_doc?${q.join("&")}`);
+}
+export function addSkillDoc(payload) {
+  return postJSON("/spa/skill_docs/add", payload);
+}
+export function updateSkillDoc(payload) {
+  return postJSON("/spa/skill_docs/update", payload);
+}
+export function deleteSkillDoc(id) {
+  return postJSON("/spa/skill_docs/delete", { id });
+}
+
 // ===== LLM（复用现有端点，显式传 opts） =====
 export function generatePromptJson(payload) {
   return postJSON("/llm/generate_prompt_json", payload);
 }
 export function generateImageAnalysis(payload) {
   return postJSON("/llm/generate_image_analysis", payload);
+}
+// 纯文本生成（技能文档「生成提示词」等场景；system=文档内容，prompt=渲染后描述）
+export function generateText(payload) {
+  return postJSON("/llm/generate_text", payload);
 }
 
 // ===== 合并 =====

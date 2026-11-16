@@ -94,7 +94,7 @@ npm run dev     # http://127.0.0.1:5173
 - 功能调试完成后执行 `npm run build` 更新 `js/spa/index.html`（提交前必须重新构建，
   运行时不依赖 dev server）。
 
-DeepSeek 代理模式需安装附带的浏览器扩展，见 [extension/README.md](extension/README.md)。
+DeepSeek / 豆包 / 千问代理模式通过 CDP 附加用户真实浏览器（`--remote-debugging-port=9222`）完成网页会话自动化，无需安装任何浏览器扩展（LLM 设置面板可一键启动浏览器）。
 
 ## 使用流程
 
