@@ -1,14 +1,13 @@
-"""网页会话站点驱动包（每站一文件）。
+"""网页会话站点驱动包（每站一文件，完全自包含）。
 
-文件布局：
-- shared.py      SSE 解析 + 纯函数助手（热重载阈值可调）
-- pagescripts.py 页面侧 JS 常量（输入框定位/发送核对/会话扫描等）
-- base.py        BaseSiteDriver 公共链路（打开会话/发送消息/获取消息/删除会话）
-- deepseek.py    DeepSeek 驱动（站内 API 会话列表/删除）
+文件布局（无跨驱动共享模块——页面 JS / 元素选择器 / SSE 协议 / 流程实现
+全部在各站点驱动内独立维护，修改一个站点不影响其他站点）：
+- base.py        纯接口：BaseSiteDriver 抽象方法 + 通道级常量（NO_SIGNAL_S 等）
+- deepseek.py    DeepSeek 驱动（私有 SSE 协议；更多按钮 → 菜单「删除」）
 - doubao.py      豆包驱动（侧栏锚点扫描；更多按钮 → Ctrl+D 删除）
 - qwen.py        千问驱动（data-session-id 元素；UI 删除流程；可信键盘写入）
 
-热重载（免重启 ComfyUI）：reload_drivers() 按依赖序重载全部模块并原地重建
+热重载（免重启 ComfyUI）：reload_drivers() 重载全部模块并原地重建
 注册表；spa_server 的 POST {API_PREFIX}/spa/webchat/reload 调用之。外壳
 webchat_cdp.py 经 ``from . import webchat_cdp_driver as _driver_pkg`` 绑定
 包对象（importlib.reload 原地更新，引用始终有效）。
@@ -19,13 +18,13 @@ from __future__ import annotations
 import importlib
 import sys
 
-from .base import BaseSiteDriver, _CancelledError  # noqa: F401
+from .base import BaseSiteDriver, _CancelledError, sse_state  # noqa: F401
 
 # 注册表：站点 id → 驱动类（reload_drivers 原地重建）
 DRIVERS: dict[str, type[BaseSiteDriver]] = {}
 
-# 重载顺序：shared/pagescripts（被 base/站点模块 import）→ base → 各站点
-_SUBMODULES = ("shared", "pagescripts", "base", "deepseek", "doubao", "qwen")
+# 重载顺序：base（纯接口，无依赖）→ 各站点（互相独立）
+_SUBMODULES = ("base", "deepseek", "doubao", "qwen")
 
 
 def _rebuild_registry() -> None:

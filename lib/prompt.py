@@ -17,6 +17,7 @@ from .llm import (
 )
 from .path import resolve_input_path
 from .skill_notes import render_skill_notes, resolve_legacy_selections
+from . import skill_db
 from .utils import find_index, parse_generated_json
 
 # ── 浏览器桥接站点映射 ─────────────────────────────────────────────────────
@@ -121,11 +122,10 @@ _AUDIO_RELATION_TEXT = {
 def _load_h3_skills_template(lang: str = "en") -> str:
     """加载四字段写作指南（注入主模板 {{skills_guide}} 占位符）。
 
-    中英共用一份（h3-writing-guide.md）：输出语言由主模板 lang_note 强制，
-    保留 lang 参数仅为兼容旧调用签名。
+    中英共用一份（h3-writing-guide）：输出语言由主模板 lang_note 强制，
+    保留 lang 参数仅为兼容旧调用签名；DB 优先（技能文档面板可编辑）。
     """
-    with open(_H3_SKILLS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+    return _load_skill_doc("h3-writing-guide", _H3_SKILLS_TEMPLATE_PATH)
 
 
 def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "", camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> str:
@@ -205,7 +205,6 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
 
 
 _H3_BUILDER_TEMPLATE_PATH = os.path.join(_H3_SKILLS_DIR, "prompt.md")
-_H3_BUILDER_TEMPLATE_CACHE: dict[str, str] = {}
 
 # 模板缺失时的最小兜底（内容与 resources 模板保持同样占位语义）
 _H3_BUILDER_FALLBACK = """You are an expert video prompt writer.
@@ -231,21 +230,35 @@ Output ONLY the JSON object.
 """
 
 
-def _load_h3_builder_template() -> str:
-    """加载通用 H3 技能文档模板（进程内缓存；缺失时回退内置最小模板）。"""
-    cached = _H3_BUILDER_TEMPLATE_CACHE.get("tpl")
-    if cached is not None:
-        return cached
+def _load_skill_doc(key: str, fallback_path: str = "") -> str:
+    """内置 H3 模板统一读取：DB（技能文档面板，用户可编辑）优先，文件回落。
+
+    - key 为 skill_docs.builtin_key（h3-prompt-builder / h3-writing-guide /
+      h3-translate-to-en），DB 无该行或读取失败时回落 resources/skills 文件，
+      保证流水线不断链。
+    """
     try:
-        with open(_H3_BUILDER_TEMPLATE_PATH, "r", encoding="utf-8-sig") as f:
-            tpl = f.read()
-    except OSError as exc:
-        log.warning(
-            "[MiniMaxRefDirector] h3-prompt-builder template missing (%s): %s",
-            _H3_BUILDER_TEMPLATE_PATH, exc)
-        tpl = _H3_BUILDER_FALLBACK
-    _H3_BUILDER_TEMPLATE_CACHE["tpl"] = tpl
-    return tpl
+        doc = skill_db.get_doc(key=key)
+        content = str(doc.get("content") or "")
+        if content.strip():
+            return content
+    except Exception:
+        pass
+    if fallback_path:
+        with open(fallback_path, "r", encoding="utf-8-sig") as f:
+            return f.read()
+    return ""
+
+
+def _load_h3_builder_template() -> str:
+    """加载 H3 主模板（骨架 + 占位符）。"""
+    tpl = _load_skill_doc("h3-prompt-builder", _H3_BUILDER_TEMPLATE_PATH)
+    if tpl.strip():
+        return tpl
+    log.warning(
+        "[MiniMaxRefDirector] h3-prompt-builder template missing (db + %s)，使用内置兜底",
+        _H3_BUILDER_TEMPLATE_PATH)
+    return _H3_BUILDER_FALLBACK
 
 
 # 生成h3提示词
@@ -399,8 +412,7 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
             else:
                 masked[key] = value
         input_json = json.dumps(masked, ensure_ascii=False, indent=2)
-        with open(_TRANSLATE_TO_EN_TEMPLATE_PATH, "r", encoding="utf-8") as f:
-            skill = f.read()
+        skill = _load_skill_doc("h3-translate-to-en", _TRANSLATE_TO_EN_TEMPLATE_PATH)
         terms = ""
         if isinstance(glossary, dict) and glossary:
             terms = "\n".join(
@@ -919,13 +931,11 @@ def build_h3_subject_bindings(
             a_idx = find_index(subjects_in, func=lambda x, y=audio_ref: x.get("name") == y)
             if a_idx == -1:
                 unmatched.setdefault(name, []).append(f"{name}'s audioRef '{audio_ref}' not found")
-                mapping[f"<@{audio_ref}>"] = audio_label
                 continue
             audio_subj = subjects_in[a_idx]
             audio_file = audio_subj.get("audioFile", "")
             if not audio_file:
                 unmatched.setdefault(audio_ref, []).append(f"{audio_ref} has no audioFile")
-                mapping[f"<@{audio_ref}>"] = audio_label
                 continue
             audio_relationship = (audio_subj.get("relationship", "") or "").strip()
             audio_description = audio_subj.get("description", "")

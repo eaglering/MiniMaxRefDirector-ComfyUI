@@ -16,7 +16,7 @@
 
 import { fetchSkillDoc, fetchSkillLibrary } from "../api/client.js";
 import {
-  WEB_CHAT_H3_SYSTEM,
+  buildWebChatH3System,
   deepseekCompleteInSession,
   deepseekCompleteNewSession,
   deepseekDeleteSession,
@@ -458,6 +458,8 @@ export async function runH3Step(state, { token = null, onLog = () => {} } = {}) 
   }
   const chatId = state.storyboardChatId || state.sessionId;
   const total = state.shots.length;
+  // 写作指南整批只拉取一次（60s 缓存），注入每镜的 system
+  const system = await buildWebChatH3System();
   onLog("info", `批量转换 ${total} 个镜头为 H3 提示词（逐镜追问，同会话进行）…`);
   const failed = [];
   for (let i = 0; i < total; i++) {
@@ -476,7 +478,7 @@ export async function runH3Step(state, { token = null, onLog = () => {} } = {}) 
     try {
       text = await deepseekCompleteInSession("", {
         site: state.site,
-        system: WEB_CHAT_H3_SYSTEM,
+        system,
         prompt: parts.join("\n"),
         chatId,
         expectJson: true,

@@ -95,15 +95,27 @@ CREATE INDEX IF NOT EXISTS idx_skill_docs_category ON skill_docs(category);
 # 技能文档二级分类（固定枚举：不做自由增删，避免「分类标识」歧义）
 DOC_CATEGORIES = ("主体设计", "音频设计", "图片设计", "分镜设计")
 
-# resources/skills 文件态文档 → (分类, 标题)，作为 DB 缺失时的播种与运行期兜底
+# resources/skills 文件态文档 → (分类, 标题[, 相对 resources/skills 的文件路径])，
+# 作为 DB 缺失时的播种与运行期兜底；未给路径时按 <key>/prompt.md 解析。
 _RESOURCE_DOCS = {
     "character-design": ("主体设计", "主体设计指南（角色 / 场景）"),
     "firstframe-design": ("图片设计", "首帧 / 尾帧图提示词设计"),
     "audio-design": ("音频设计", "音频设计指南（配音 / 音效 / 音乐）"),
     "story-design": ("分镜设计", "故事大纲提取"),
     "storyboard-design": ("分镜设计", "分镜设计"),
-    "h3-prompt-builder": ("分镜设计", "H3 提示词写作指南"),
+    "h3-prompt-builder": ("分镜设计", "H3 提示词主模板"),
+    "h3-writing-guide": ("分镜设计", "H3 四字段写作指南",
+                         "h3-prompt-builder/h3-writing-guide.md"),
+    "h3-translate-to-en": ("分镜设计", "H3 中英翻译模板",
+                           "h3-prompt-builder/prompt_translate_to_en.md"),
 }
+
+
+def _resource_doc_path(key: str) -> Path:
+    """内置 key 对应的文件态正文路径（resources/skills 相对路径）。"""
+    meta = _RESOURCE_DOCS.get(key) or ()
+    rel = meta[2] if len(meta) > 2 else f"{key}/prompt.md"
+    return Path(__file__).resolve().parent.parent / "resources" / "skills" / rel
 
 # key 只允许小写字母数字下划线（内置 key 皆如此）；自动生成时做同样约束
 _KEY_RE = re.compile(r"^[a-z0-9_]{1,64}$")
@@ -145,14 +157,11 @@ def _parse_examples(raw: str | None) -> list[str]:
 
 
 def _seed_skill_docs() -> None:
-    """技能文档首次播种：install/skill_docs 种子 → resources/skills 文件兜底。
+    """技能文档首次播种：install/skill_docs/seed.json 清单（正文相对清单目录）。
 
-    - ``install/skill_docs/seed.json`` 为清单，每条 {key, category, title, file}；
-      文件正文相对 seed.json 所在目录。
-    - 种子缺失或读取失败只告警，不影响启动；文件态 skill（resources/skills）按
-      _RESOURCE_DOCS 映射补一份内置文档，保证导入流水线按 key 有文档可取。
-    - 用 INSERT OR IGNORE（UNIQUE(category,title) / builtin_key 唯一索引），
-      用户已改过的文档不会被覆盖。
+    种子缺失或读取失败只告警，不影响启动；resources/skills 文件态内置文档由
+    ``_sync_builtin_docs`` 负责（每次进程连接后同步一次）。INSERT OR IGNORE，
+    用户已改过的文档不会被覆盖。
     """
     # 由 _connect() 在连接就绪后调用：直接复用全局连接（不能再走 _connect 递归）
     global _conn
@@ -192,11 +201,34 @@ def _seed_skill_docs() -> None:
                 added += 1 if cur.rowcount else 0
         except Exception:
             log.warning("[SPA] skill_docs seed.json 解析失败", exc_info=True)
-    # 文件态 skill 兜底：DB 没有对应 builtin_key 才补
-    for i, (name, (category, title)) in enumerate(_RESOURCE_DOCS.items()):
-        if conn.execute("SELECT 1 FROM skill_docs WHERE builtin_key=?", (name,)).fetchone():
-            continue
-        md = root / "resources" / "skills" / name / "prompt.md"
+    conn.commit()
+    log.info("[SPA] skill_docs seeded (%d docs)", added)
+
+
+# 内置文档每进程只同步一次（避免每次 DB 访问都读 8 份文件）
+_builtin_docs_synced = False
+
+
+def _sync_builtin_docs() -> None:
+    """resources/skills 内置文档 ↔ DB 同步（每次进程连接后执行一次）。
+
+    - DB 缺行（新装 / 新增内置文档 / 用户在面板删过）→ 从文件补种；
+    - 行存在且从未在面板编辑过（updated_at == created_at）→ 内容随文件升级，
+      保证出厂文档修复/优化后老库也能拿到；
+    - 用户编辑过的行（updated_at > created_at）→ 永不覆盖，DB 是唯一数据源。
+    """
+    global _conn, _builtin_docs_synced
+    if _builtin_docs_synced:
+        return
+    conn = _conn
+    if conn is None:
+        return
+    _builtin_docs_synced = True
+    now = int(time.time() * 1000)
+    changed = 0
+    for i, name in enumerate(_RESOURCE_DOCS):
+        category, title = (_RESOURCE_DOCS[name][0], _RESOURCE_DOCS[name][1])
+        md = _resource_doc_path(name)
         if not md.is_file():
             continue
         try:
@@ -204,14 +236,26 @@ def _seed_skill_docs() -> None:
         except Exception:
             log.warning("[SPA] 读取 skill 文档失败：%s", md, exc_info=True)
             continue
-        cur = conn.execute(
-            "INSERT OR IGNORE INTO skill_docs(category, title, content, builtin_key,"
-            " builtin, sort, created_at, updated_at) VALUES(?,?,?,?,1,?,?,?)",
-            (category, title, content, name, 100 + i, now, now),
-        )
-        added += 1 if cur.rowcount else 0
-    conn.commit()
-    log.info("[SPA] skill_docs seeded (%d docs)", added)
+        row = conn.execute(
+            "SELECT id, content, created_at, updated_at FROM skill_docs WHERE builtin_key=?",
+            (name,),
+        ).fetchone()
+        if row is None:
+            conn.execute(
+                "INSERT OR IGNORE INTO skill_docs(category, title, content, builtin_key,"
+                " builtin, sort, created_at, updated_at) VALUES(?,?,?,?,1,?,?,?)",
+                (category, title, content, name, 100 + i, now, now),
+            )
+            changed += 1
+        elif row["updated_at"] == row["created_at"] and (row["content"] or "") != content:
+            conn.execute(
+                "UPDATE skill_docs SET content=?, updated_at=? WHERE id=?",
+                (content, now, row["id"]),
+            )
+            changed += 1
+    if changed:
+        conn.commit()
+        log.info("[SPA] builtin skill docs synced (%d updated)", changed)
 
 
 def _connect() -> sqlite3.Connection:
@@ -222,6 +266,7 @@ def _connect() -> sqlite3.Connection:
             _conn.row_factory = sqlite3.Row
             _conn.execute("PRAGMA foreign_keys=ON")
             _conn.executescript(_SCHEMA)
+            _sync_builtin_docs()
             # .lock 存在 → 已初始化过，不再跑种子（避免覆盖用户的库内编辑）。
             # 技能词条与技能文档共用这一个标记：删库重建时一并联动的只有它。
             if not _lock_path().exists():
@@ -744,7 +789,7 @@ def get_doc(doc_id: int = 0, key: str = "") -> dict:
             return _doc_row_dict(row)
     if key:
         meta = _RESOURCE_DOCS.get(key)
-        md = Path(__file__).resolve().parent.parent / "resources" / "skills" / key / "prompt.md"
+        md = _resource_doc_path(key)
         if md.is_file():
             return {
                 "id": 0,

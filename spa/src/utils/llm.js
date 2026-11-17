@@ -154,21 +154,51 @@ export async function generateH3Prompt(opts, payload) {
   return resp;
 }
 
-// H3 提示词生成模板（对齐后端 generate_h3_prompt 的产出结构与通用 skill_notes 语义）
-// 不预设技能类别，也不申明触发词写法（触发词规则由用户在全局提示词中自行申明）：
-//   - skill_notes 的每一节按其引导语自然融入 detailed_description；
-//   - <!技术词> 片段（如 <!slow push-in>）必须连包裹符原样保留，不得翻译/改写；
-//   - 其余类别（术语 / 示例 / 描述 / 片段）按节内说明使用，不罗列成清单。
+// H3 提示词生成（网页桥接通道）——与后端 generate_h3_prompt 的产出结构对齐。
+// 写作规则单一来源：h3-writing-guide（DB 技能文档，前端经 /spa/skill_doc 拉取），
+// 本常量只保留网页通道特有规则（JSON-only / 标签格式 / 语言跟随 / 受保护片段）。
+// 不预设技能类别，也不申明触发词写法（触发词规则由用户在全局提示词中自行申明）。
 export const WEB_CHAT_H3_SYSTEM = `You are a video prompt engineer. Convert the user's native-language shot description into an H3 prompt JSON object with EXACTLY these keys:
 {"summary": string, "detailed_description": string, "overall_soundscape": string, "non_diegetic_music": string}
 Rules:
 - Respond with ONLY the JSON object, no markdown fences, no extra text.
 - Wrap EVERY mentioned character/subject name as <@名字> (e.g. <@阿婆>) and never leave a subject name unwrapped; preserve existing <@Name> / <#Name:dialogue> / <d>dialogue</d> tags verbatim.
 - Tag format is strict: no whitespace right after <@ / <# / <! or right before >, and the name/content separator must be a half-width colon ":" (never the full-width "："). Correct: <#李四:你好！>; wrong: <# 李四：你好！ >.
-- detailed_description must break the shot into [Shot 1], [Shot 2] ... beats with timestamps: it MUST start with [Shot 1] (no timestamp on the first beat), and the following At MM:SS.mmm timestamps must be strictly increasing and cover the shot duration.
 - IMPORTANT: All four JSON field values (summary, detailed_description, overall_soundscape, non_diegetic_music) MUST be written in the SAME language as the input shot description — Chinese input MUST produce Chinese output, English input MUST produce English output. Never switch to a different language on your own; this rule overrides the language of this instruction.
-- Skill notes (if provided): EVERY listed entry MUST be explicitly reflected in detailed_description — never omit, skip or drop a selected skill. Merge their intent naturally; never output bullet lists, section headings, or skill names as tags.
 - Fragments wrapped as <!...> (e.g. <!slow push-in>) are protected technical keywords: keep the inner text verbatim in its original language/spelling, keep the <!...> wrapper in this stage, and never translate, reorder, or paraphrase them. Each such phrase must appear at least once.`;
+
+// 写作指南缓存（60s TTL）：一键导入逐镜追问时不重复拉取；面板里改完文档最多 1 分钟生效
+let _h3GuideCache = { at: 0, text: "" };
+const H3_GUIDE_TTL_MS = 60_000;
+
+function _cleanGuideText(text) {
+  // 剥掉文件头的中文维护注释（> 开头的引用块），避免稀释模型注意力
+  return String(text || "").replace(/^(?:>[^\n]*\n)+/, "").trim();
+}
+
+export async function buildWebChatH3System() {
+  const now = Date.now();
+  if (_h3GuideCache.text && now - _h3GuideCache.at < H3_GUIDE_TTL_MS) {
+    return WEB_CHAT_H3_SYSTEM + "\n\n## Four-Field Writing Guide\n" + _h3GuideCache.text;
+  }
+  let guide = "";
+  try {
+    // /spa/skill_doc 返回 {success, doc: {...}}，正文嵌在 doc 字段
+    const resp = await getJSON(`/spa/skill_doc?key=${encodeURIComponent("h3-writing-guide")}`);
+    const content = resp?.doc?.content ?? resp?.content ?? "";
+    if (content) guide = _cleanGuideText(content);
+  } catch (e) {
+    // 指南拉取失败：只用核心规则，不断链（后端未重启 / 文档被删时会出现）
+    console.warn("[MRD] 写作指南拉取失败，网页通道 H3 仅使用核心规则：", e?.message || e);
+  }
+  _h3GuideCache = { at: now, text: guide };
+  if (guide) {
+    console.info(`[MRD] 网页通道 H3 system 已注入写作指南（${guide.length} 字符，60s 缓存）`);
+  }
+  return guide
+    ? WEB_CHAT_H3_SYSTEM + "\n\n## Four-Field Writing Guide\n" + guide
+    : WEB_CHAT_H3_SYSTEM;
+}
 // 旧名保留，避免外部脚本引用失效
 const DEEPSEEK_H3_SYSTEM = WEB_CHAT_H3_SYSTEM;
 void DEEPSEEK_H3_SYSTEM;
@@ -227,6 +257,7 @@ export async function deepseekGenerateH3(opts, payload) {
 export async function webChatGenerateH3(opts, payload, site = "deepseek") {
   const label = SITE_LABELS[site] || site;
   const cdpEndpoint = cdpEndpointOf(opts);
+  const system = await buildWebChatH3System();
   const parts = [];
   if (payload?.duration_seconds) parts.push(`Duration: ${payload.duration_seconds}s.`);
   // 技能注入块（后端唯一渲染源）；旧调用方未传 skill_notes 时按 selections 提示
@@ -236,13 +267,27 @@ export async function webChatGenerateH3(opts, payload, site = "deepseek") {
 
   // 同一批 H3 转换共用一个会话：首镜走新会话，后续镜头传入 chat_id 直接追问，
   // 避免每镜都回首页开新会话（11 镜 = 11 个会话，慢且易中途失败）。
+  // 自建会话（调用方未传 chat_id，如单镜「转H3提示词」）在结束后立即删除；
+  // 批量导入传入的会话由导入流水线自行管理生命周期。
+  const createdHere = !String(payload?.chat_id || "");
   let sessionChat = String(payload?.chat_id || "");
+  const cleanupSession = async () => {
+    if (createdHere && sessionChat) {
+      const cid = sessionChat;
+      sessionChat = "";
+      try {
+        await deepseekDeleteSession("", cid, site, cdpEndpoint);
+      } catch (e) {
+        console.warn(`[MRD] ${label} 会话删除失败（不影响生成结果）：`, e?.message || e);
+      }
+    }
+  };
   const ask = async (extra) => {
     const prompt = parts.join("\n") + (extra || "");
     if (sessionChat) {
       const text = await deepseekCompleteInSession("", {
         site,
-        system: WEB_CHAT_H3_SYSTEM,
+        system,
         prompt,
         chatId: sessionChat,
         expectJson: true,
@@ -252,7 +297,7 @@ export async function webChatGenerateH3(opts, payload, site = "deepseek") {
     }
     const resp = await webchatComplete({
       site,
-      system: WEB_CHAT_H3_SYSTEM,
+      system,
       prompt,
       expectJson: true,
       cdpEndpoint,
@@ -262,6 +307,8 @@ export async function webChatGenerateH3(opts, payload, site = "deepseek") {
   };
 
   let text = "";
+  // finally 兜底：任何出口（成功 / 各类失败）都先清掉自建会话再返回
+  try {
   try {
     const r = await ask("");
     text = r.text;
@@ -305,14 +352,17 @@ export async function webChatGenerateH3(opts, payload, site = "deepseek") {
   });
   json_data = terms.json_data;
   const stillMissing = terms.stillMissing;
-  return {
-    success: true,
-    json_data,
-    chatId: sessionChat,
-    warning: stillMissing.length
-      ? `以下所选技能未出现在生成结果中：${stillMissing.join("、")}（可重新生成或手动补充）`
-      : "",
-  };
+    return {
+      success: true,
+      json_data,
+      chatId: sessionChat,
+      warning: stillMissing.length
+        ? `以下所选技能未出现在生成结果中：${stillMissing.join("、")}（可重新生成或手动补充）`
+        : "",
+    };
+  } finally {
+    await cleanupSession();
+  }
 }
 
 // ---------------- 网页会话通道（后端 /spa/webchat/*，分镜导入流水线用） ----------------

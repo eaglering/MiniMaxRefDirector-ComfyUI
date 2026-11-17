@@ -107,7 +107,7 @@ _SHOT_SIZE = {
     "cowboy": {"name": "牛仔镜头", "name_en": "cowboy shot"},
     "medium": {"name": "中景", "name_en": "medium shot"},
     "medium_close_up": {"name": "中近景", "name_en": "medium close-up"},
-    "close_up": {"name": "近景", "name_en": "close-up"},
+    "close_up_shot": {"name": "近景", "name_en": "close-up"},
     "extreme_close_up": {"name": "特写", "name_en": "extreme close-up"},
 }
 SHOT_SIZE_CATEGORY_DESC = "画面取景范围档位（大远景→特写），同一镜头只用一种；提示词中直接写入中文名称。"
@@ -239,7 +239,7 @@ def build_builtin_categories() -> list:
     shot = [_skill_row(k, d) for k, d in _SHOT_SIZE.items()]
     framing = [_skill_row(k, d) for k, d in _FRAMING.items()]
     micro = [_skill_row(k, d, group=d.get("group") or "") for k, d in _MICRO_EXPRESSION.items()]
-    return [
+    cats = [
         {"name": "运镜", "field": "camera",
          "render_mode": "camera", "protect_keywords": 1,
          "description": CAMERA_CATEGORY_DESC, "skills": camera},
@@ -253,6 +253,16 @@ def build_builtin_categories() -> list:
          "render_mode": "example", "protect_keywords": 0,
          "description": MICRO_CATEGORY_DESC, "skills": micro},
     ]
+    # skills.key 全局唯一（跨类别也不得重名，否则后入库的会被 INSERT OR IGNORE 静默吞掉）
+    seen: dict = {}
+    for cat in cats:
+        for s in cat["skills"]:
+            prev = seen.get(s["key"])
+            if prev:
+                raise ValueError(
+                    f"skill_seed 内置技能 key 重名：{s['key']}（{prev} / {cat['name']}）")
+            seen[s["key"]] = cat["name"]
+    return cats
 
 
 def _preset_camera(key: str) -> dict:

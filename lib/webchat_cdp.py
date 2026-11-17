@@ -13,12 +13,12 @@ www.qianwen.com 三个网页会话内完成 LLM 生成（H3 提示词 / 翻译 /
   DOM 回复块稳定性检测（兜底）；expect_json 时要求正文出现 ``{``，否则给 20s 宽限；
 - 90s 无信号快失败、240s 回复超时、页面未就绪/未登录/发送未生效等文案保持一致。
 
-站点驱动（工厂模式）：驱动实现拆分在子包 webchat_cdp_driver/（每站一文件，
-公共链路 base.py，页面 JS pagescripts.py，解析与助手 shared.py）；外壳工厂
-``get_driver(site)`` 暴露统一方法：
+站点驱动（工厂模式）：驱动实现拆分在子包 webchat_cdp_driver/（每站一文件完全
+自包含——页面 JS / 元素选择器 / SSE 协议 / 流程实现各自独立维护；base.py 仅
+为纯接口）；外壳工厂 ``get_driver(site)`` 暴露统一方法：
 获取会话列表 list_sessions / 打开会话 open_session / 发送提示词 send_prompt /
-获取提示词返回 get_reply / 关闭会话 close_session。站点差异（会话列表来源、
-SSE 解析器、URL 结构、删除能力）集中在子类，新增站点只加配置 + 子类 + 注册。
+获取提示词返回 get_reply / 关闭会话 close_session。修改某站点的选择器或常量
+不影响其他站点。
 
 关键优势：Playwright 经 CDP Input domain 注入的键盘/鼠标事件 ``isTrusted=true``，
 不被站点"合成事件"过滤（解决豆包扩展桥"发送未生效"类问题）。
@@ -47,15 +47,7 @@ import urllib.request
 from typing import Any
 
 from . import webchat_cdp_driver as _driver_pkg
-from .webchat_cdp_driver.shared import (
-    NO_SIGNAL_S,
-    NOT_JSON_GRACE_S,
-    _CancelledError,
-    _inject_helpers,
-    _page_for,
-    parse_sse_body,
-    sse_state,
-)
+from .webchat_cdp_driver.base import _CancelledError, sse_state
 
 log = logging.getLogger(__name__)
 
@@ -211,7 +203,9 @@ class _Manager:
         host = url.split("//", 1)[-1].split("/", 1)[0]
         return any(h in host for h in site["hosts"])
 
-    async def page_for(self, site: dict) -> Any:
+    async def page_for(self, driver: Any) -> Any:
+        """取站点页面（driver 为站点驱动实例，SSE 附加与解析经驱动分发）。"""
+        site = driver.cfg
         st = self._st
         cached = st["pages"].get(site["id"])
         if cached is not None:
@@ -230,24 +224,25 @@ class _Manager:
             for page in ctx.pages:
                 if self._host_matches(page.url, site):
                     st["pages"][site["id"]] = page
-                    self._attach_sse(page, site)
+                    self._attach_sse(page, driver)
                     return page
         ctx = st["browser"].contexts[0]
         page = await ctx.new_page()
         st["pages"][site["id"]] = page
-        self._attach_sse(page, site)
+        self._attach_sse(page, driver)
         try:
             await page.goto(site["home"], wait_until="domcontentloaded", timeout=45_000)
         except Exception as e:
             raise RuntimeError(f"打开 {site['name']} 页面失败（网络异常或站点不可达）：{e}")
         return page
 
-    def _attach_sse(self, page: Any, site: dict) -> None:
+    def _attach_sse(self, page: Any, driver: Any) -> None:
         if getattr(page, "_mrd_sse_attached", False):
             return
         page._mrd_sse_attached = True
         state = sse_state()
         page._mrd_sse = state
+        site = driver.cfg
 
         def on_response(resp) -> None:
             try:
@@ -260,7 +255,7 @@ class _Manager:
                 async def consume() -> None:
                     try:
                         body = await resp.text()
-                        parse_sse_body(body, site["parse"], state)
+                        driver.parse_sse_body(body, state)
                     except Exception:
                         pass
                     finally:
@@ -306,6 +301,15 @@ def get_driver(site: str):
 def reload_drivers() -> list:
     """热重载站点驱动与页面 JS（开发用，免重启 ComfyUI）。"""
     return _driver_pkg.reload_drivers()
+
+
+async def _page_for(mgr: "_Manager", driver: Any) -> Any:
+    """取站点页面（缓存页已关闭时重建缓存后重取）。"""
+    page = await mgr.page_for(driver)
+    if page.is_closed():
+        mgr._st["pages"].pop(driver.cfg["id"], None)
+        page = await mgr.page_for(driver)
+    return page
 
 
 # 疑似站点风控的错误特征：发送被静默拒绝（输入框未清空、消息不上屏、无任何提示）
@@ -446,9 +450,10 @@ async def _diag(cdp_endpoint: str) -> dict:
             "id": site["id"], "name": site["name"], "tabs": len(pages),
             "sessionApi": bool(site["session_api"]), "probes": [],
         }
+        drv = get_driver(site["id"])
         for page in pages[:3]:
             try:
-                await _inject_helpers(page)
+                await drv.inject_helpers(page)
                 p = await page.evaluate("() => window.__mrdCdp.probe()")
                 entry["probes"].append(p)
             except Exception as e:
