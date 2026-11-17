@@ -348,9 +348,9 @@ async def _complete(
     def _cancelled() -> bool:
         return cancel_evt.is_set()
 
-    def _result(ok: bool, msg: str = "", reply: str = "", cid: str = "") -> dict:
+    def _result(ok: bool, msg: str = "", reply: str = "", cid: str = "", risk: bool = False) -> dict:
         st["cancel"] = None
-        return {"ok": ok, "text": reply, "error": msg, "chat_id": cid}
+        return {"ok": ok, "text": reply, "error": msg, "chat_id": cid, "risk": bool(risk)}
 
     async def _cooldown(seconds: float) -> None:
         """可取消的冷却等待。"""
@@ -391,19 +391,11 @@ async def _complete(
                     str(reply.get("text") or ""),
                     str(reply.get("chat_id") or ""),
                 )
-            # 疑似风控（静默吞消息 / 无回复流）：冷却后重试一次（预算充足时）
-            if (
-                attempt == 0
-                and any(w in last_err for w in _RISK_ERROR_WORDS)
-                and budget > 120.0
-            ):
-                wait = random.uniform(*_RISK_COOLDOWN_S)
-                log.warning(
-                    "[WebChatCDP] %s 疑似触发站点风控（%s…），冷却 %.0fs 后自动重试一次",
-                    site_id, last_err[:60], wait,
-                )
-                await _cooldown(wait)
-                continue
+            # 疑似风控（静默吞消息 / 无回复流）：不再自动重发（高频自动重发易触发
+            # 站点风控升级为封号）。返回 risk 标记交前端弹窗，由用户决定
+            # 「拉取会话最后回复（不发送）/ 重发该镜提示词 / 跳过」。
+            if any(w in last_err for w in _RISK_ERROR_WORDS):
+                return _result(False, last_err, risk=True)
             return _result(False, last_err)
         return _result(False, last_err)
     except _CancelledError:
@@ -429,6 +421,16 @@ async def _delete_session(site_id: str, chat_id: str, cdp_endpoint: str) -> dict
     await mgr.ensure_connected(cdp_endpoint or DEFAULT_CDP_ENDPOINT)
     page = await _page_for(mgr, driver)
     return await driver.close_session(mgr, page, chat_id)
+
+
+async def _fetch_last_reply(site_id: str, chat_id: str, cdp_endpoint: str) -> dict:
+    """打开指定会话并读取最后一条助手回复（不发送任何消息）。"""
+    driver = get_driver(site_id)
+    mgr = _manager()
+    await mgr.ensure_connected(cdp_endpoint or DEFAULT_CDP_ENDPOINT)
+    page = await _page_for(mgr, driver)
+    await driver.open_session(mgr, page, chat_id or "")
+    return await driver.last_reply(mgr, page)
 
 
 async def _diag(cdp_endpoint: str) -> dict:
@@ -512,6 +514,25 @@ def delete_session(site: str = "deepseek", chat_id: str = "", cdp_endpoint: str 
         raise RuntimeError("已有网页会话任务进行中，请稍后再试")
     try:
         return mgr.submit(_delete_session(site_id, chat_id, cdp_endpoint), timeout=timeout_s)
+    finally:
+        mgr.op_lock.release()
+
+
+def fetch_last_reply(
+    site: str = "deepseek",
+    chat_id: str = "",
+    cdp_endpoint: str = "",
+    timeout_s: float = 90.0,
+) -> dict:
+    """读取指定会话最后一条助手回复（不发送任何消息；风控失败后的补救拉取）。"""
+    site_id = normalize_site(site)
+    mgr = _manager()
+    if not mgr.op_lock.acquire(timeout=2.0):
+        return {"ok": False, "text": "", "error": "已有网页会话任务进行中，请稍后再试", "risk": False}
+    try:
+        return mgr.submit(_fetch_last_reply(site_id, chat_id, cdp_endpoint), timeout=timeout_s)
+    except Exception as e:
+        return {"ok": False, "text": "", "error": f"拉取会话回复异常：{e}", "risk": False}
     finally:
         mgr.op_lock.release()
 

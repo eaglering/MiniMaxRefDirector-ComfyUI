@@ -210,25 +210,13 @@ function emptyH3() {
 }
 
 // 单个分镜 shot → segment 的公共字段映射（storyboard 同步与首次新增共用）
-// 技能选择统一写入 seg.skills；DeepSeek 导入仍可能返回旧字段，这里映射为内置类别名
-const LEGACY_SHOT_SKILLS = {
-  camera_motions: "运镜",
-  shot_sizes: "景别",
-  framings: "镜头结构",
-  expressions: "微表情",
-};
-
+// 技能选择只认 seg.skills（导演台手动勾选，值为技能词典 key）；
+// 分镜设计不再产出导演控件字段（camera_motions 等已废弃，不再映射）
 function applyShotToSegment(seg, shot) {
   seg.prompt = String(shot.prompt || "");
   const skills = (shot.skills && typeof shot.skills === "object" && !Array.isArray(shot.skills))
     ? { ...shot.skills }
-    : { ...(seg.skills || {}) };
-  for (const [field, cat] of Object.entries(LEGACY_SHOT_SKILLS)) {
-    const keys = Array.isArray(shot[field]) ? shot[field].filter(Boolean) : [];
-    if (keys.length) {
-      skills[cat] = Array.from(new Set([...(skills[cat] || []), ...keys]));
-    }
-  }
+    : (seg.skills || {});
   seg.skills = skills;
   // 首/尾帧提示词：自定义字段（parseInitial 保留未知字段，供后续首尾帧图生成使用）
   if (shot.first_frame_prompt) seg.firstFramePrompt = String(shot.first_frame_prompt);

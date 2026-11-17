@@ -87,3 +87,11 @@ class BaseSiteDriver:
     ) -> dict:
         """获取消息 → {ok, text, chat_id, error}；取消抛 _CancelledError。"""
         raise NotImplementedError
+
+    async def last_reply(self, mgr: Any, page: Any) -> dict:
+        """读取当前会话最后一条助手回复（不发送任何消息）→ {ok, text, error}。
+
+        风控失败后的补救拉取：等 DOM 快照稳定后取最后一个助手块。
+        拉到的可能是上一条提问的旧回复，由调用方做串轮判定。
+        """
+        raise NotImplementedError

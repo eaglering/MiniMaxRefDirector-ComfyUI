@@ -703,14 +703,21 @@ class QwenDriver(BaseSiteDriver):
         return False
 
     async def _readback_ok(self, loc: Any, text: str) -> bool:
-        """回读校验：输入框内容与提示词一致（前缀或等长）。"""
+        """回读校验：输入框内容与提示词一致（空白归一后比对，容忍编辑器重排）。"""
         read_back = await loc.evaluate(
             "el => (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') ? (el.value || '') : (el.innerText || '').trim()"
         )
         if not read_back:
             return False
-        prefix_ok = text.startswith(read_back.strip()[:40])
-        len_ok = len(read_back) == len(text)
+        norm_read = re.sub(r"[\s\u200b-\u200f\u2060\ufeff]+", "", read_back)
+        norm_text = re.sub(r"[\s\u200b-\u200f\u2060\ufeff]+", "", text)
+        prefix_ok = norm_text.startswith(norm_read[:40])
+        len_ok = len(norm_read) == len(norm_text)
+        if not (prefix_ok or len_ok):
+            log.warning(
+                "[WebChatCDP] %s 回读不一致：输入框 %d 字（%r…）vs 提示词 %d 字（%r…）",
+                self.name, len(read_back), read_back[:40], len(text), text[:40],
+            )
         return prefix_ok or len_ok
 
     async def _submit(self, page: Any, marker: str, baseline: dict, cancelled) -> None:
@@ -904,6 +911,32 @@ class QwenDriver(BaseSiteDriver):
             "ok": False, "text": "", "chat_id": "",
             "error": f"等待 {self.name} 回复超时（生成过久或页面接口已变更）",
         }
+
+    async def last_reply(self, mgr: Any, page: Any) -> dict:
+        """读取当前会话最后一条助手回复（不发送任何消息）。
+
+        风控失败后的补救拉取：等 DOM 连续两轮快照一致视为稳定（站点可能仍在
+        流式渲染）。拉到的可能是上一条提问的旧回复，由前端做串轮判定。
+        """
+        await self.inject_helpers(page)
+        last, stable = "", 0
+        for _ in range(20):
+            try:
+                blocks = await page.evaluate("() => window.__mrdCdp.assistantBlocks()")
+            except Exception:
+                blocks = []
+            cur = str(blocks[-1]) if blocks else ""
+            if cur and cur == last:
+                stable += 1
+                if stable >= 2:
+                    return {"ok": True, "text": cur, "error": "", "risk": False}
+            else:
+                stable = 0
+            last = cur
+            await asyncio.sleep(0.5)
+        if last:
+            return {"ok": True, "text": last, "error": "", "risk": False}
+        return {"ok": False, "text": "", "error": "会话中没有找到助手回复", "risk": False}
 
     async def _fill_chat_id(self, page: Any, reply: dict) -> dict:
         """回复成功但 chat_id 为空时，从侧栏高亮条目短暂重试读取（最多约 5s）。"""

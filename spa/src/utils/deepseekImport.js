@@ -21,6 +21,7 @@ import {
   deepseekCompleteNewSession,
   deepseekDeleteSession,
   parseJsonBlock,
+  webchatLastReply,
 } from "./llm.js";
 
 // 导入步骤（与 DeepseekImportDialog 的步骤卡片一一对应）
@@ -95,7 +96,15 @@ function head(text, n = 60) {
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 const humanGap = (minS, maxS) => sleepMs((minS + Math.random() * (maxS - minS)) * 1000);
 // 单次生成预算放宽到 480s：容纳后端"疑似风控 → 冷却 45-75s → 自动重试一次"
-const LONG_TIMEOUT_MS = 480_000;
+// 单次网页生成的前端超时：必须大于后端最坏耗时（timeout_s 上限 600s 触发不到，
+// 但风控冷却重试的预算是 timeout_s + 180s ≈ 660s）。前端先超时断连会让后端
+// 白跑一整轮，浏览器侧只会看到连接被掐断（ERR_EMPTY_RESPONSE）。
+const LONG_TIMEOUT_MS = 720_000;
+
+// 疑似站点风控的错误特征（与后端 _RISK_ERROR_WORDS 保持一致）：
+// 发送被静默拒绝（发送未生效）或发送后长时间无回复流（未检测到）。
+// 此类失败时弹窗提供「拉取会话最后回复」补救选项。
+const RISK_HINTS = ["未检测到", "发送未生效"];
 
 // 解析 JSON；失败时把完整原文打印到浏览器控制台（方便调试），抛错终止——
 // 不自动追问重发，由用户在导入弹窗手动决定是否重新「执行」。
@@ -449,10 +458,15 @@ export async function runAudioStep(state, { token = null, onLog = () => {} } = {
 
 /**
  * 步骤 6：批量分镜转 H3 提示词（不注入 skills guide / skill_notes）。
- * 逐镜在同一会话内追问；单镜失败只跳过并打印原文（不中断整批）。
+ * 逐镜在同一会话内追问；解析失败 / 缺字段 / 疑似串轮时**不自动追问**
+ * （高频连发易触发站点风控封号），改为弹出对话框展示原始提示词与最后回复，
+ * 由用户决定「采纳 / 重试 / 跳过」；重试必须用户逐次确认。
  * 结果写回 state.shots[i].h3。
  */
-export async function runH3Step(state, { token = null, onLog = () => {} } = {}) {
+export async function runH3Step(
+  state,
+  { token = null, onLog = () => {}, askH3Fail = null } = {}
+) {
   if (!Array.isArray(state.shots) || !state.shots.length) {
     throw new Error("请先执行「分镜设计」步骤");
   }
@@ -461,6 +475,54 @@ export async function runH3Step(state, { token = null, onLog = () => {} } = {}) 
   // 写作指南整批只拉取一次（60s 缓存），注入每镜的 system
   const system = await buildWebChatH3System();
   onLog("info", `批量转换 ${total} 个镜头为 H3 提示词（逐镜追问，同会话进行）…`);
+  const askShot = (prompt) =>
+    deepseekCompleteInSession("", {
+      site: state.site,
+      system,
+      prompt,
+      chatId,
+      expectJson: true,
+      cdpEndpoint: state.cdp,
+      timeoutMs: LONG_TIMEOUT_MS,
+    });
+  // 纠正追问提示（仅在用户点「重试」后发送）
+  const H3_RETRY_NOTE =
+    "\n\n上一次的回复不是合法的 H3 JSON（或缺 summary / detailed_description 字段，" +
+    "或是上一次提问的残留内容）。请针对本次 Shot description 重新输出：只输出一个 JSON 对象，" +
+    "键为 summary / detailed_description / overall_soundscape / non_diegetic_music，" +
+    "不要任何解释文字、不要 Markdown 围栏之外的内容。";
+  const toH3 = (obj) => ({
+    summary: String(obj.summary || ""),
+    detailed_description: String(obj.detailed_description || ""),
+    overall_soundscape: String(obj.overall_soundscape || ""),
+    non_diegetic_music: String(obj.non_diegetic_music || ""),
+  });
+  // 宽松解析：常规提取 → 去尾逗号 → 全角标点修复
+  const parseLenient = (txt) => {
+    try {
+      const o = parseJsonBlock(txt);
+      if (o && typeof o === "object" && !Array.isArray(o)) return o;
+    } catch (e) { /* 继续宽松修复 */ }
+    const m = String(txt || "").match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const fixes = [
+      m[0].replace(/,\s*([}\]])/g, "$1"),
+      m[0]
+        .replace(/[“”]/g, '"')
+        .replace(/，/g, ",")
+        .replace(/：/g, ":")
+        .replace(/【/g, "[")
+        .replace(/】/g, "]")
+        .replace(/,\s*([}\]])/g, "$1"),
+    ];
+    for (const fix of fixes) {
+      try {
+        const o = JSON.parse(fix);
+        if (o && typeof o === "object" && !Array.isArray(o)) return o;
+      } catch (e) { /* 尝试下一档 */ }
+    }
+    return null;
+  };
   const failed = [];
   for (let i = 0; i < total; i++) {
     checkCancelled(token);
@@ -473,52 +535,121 @@ export async function runH3Step(state, { token = null, onLog = () => {} } = {}) 
     }
     const shot = state.shots[i];
     const sec = Number(shot.duration_seconds) > 0 ? Number(shot.duration_seconds) : 5;
-    const parts = [`Duration: ${sec}s.`, `Shot description:\n${shot.prompt || ""}`];
-    let text = "";
+    const prompt = `Duration: ${sec}s.\nShot description:\n${shot.prompt || ""}`;
+    let reply = "";
     try {
-      text = await deepseekCompleteInSession("", {
-        site: state.site,
-        system,
-        prompt: parts.join("\n"),
-        chatId,
-        expectJson: true,
-        cdpEndpoint: state.cdp,
-        timeoutMs: LONG_TIMEOUT_MS,
-      });
+      reply = await askShot(prompt);
     } catch (e) {
-      failed.push(`#${i + 1} ${e.message || e}`);
-      onLog("warn", `镜头 ${i + 1} 转换失败：${e.message || e}`);
-      continue;
+      // 发送层面失败弹窗由用户决定（不自动重发）：
+      // - 疑似风控：可「拉取会话最后回复」——发送可能已上屏但回复流未捕获，
+      //   从 DOM 读最后一条助手回复（不发送任何消息），拉到的旧回复由串轮检测拦截
+      // - 重试 = 重发该镜提示词（内容未上屏或未获回复时，不构成重复内容）
+      const isRisk = !!e?.risk || RISK_HINTS.some((w) => String(e?.message || "").includes(w));
+      let reason = isRisk
+        ? `疑似站点风控（发送未生效 / 未检测到回复）：${e?.message || e}`
+        : `发送失败：${e?.message || e}`;
+      console.log(`[MRD 导入] 镜头 ${i + 1} ${reason}`);
+      if (!askH3Fail) {
+        failed.push(`#${i + 1} ${reason}`);
+        onLog("warn", `镜头 ${i + 1} ${reason}`);
+        continue;
+      }
+      let decided = false;
+      while (!decided) {
+        const decision = await askH3Fail({
+          shotIndex: i + 1,
+          total,
+          reason,
+          prompt,
+          reply: "",
+          canPull: isRisk,
+        });
+        if (decision === "pull") {
+          onLog("info", "拉取会话最后回复（不发送任何消息）…");
+          const r = await webchatLastReply({
+            site: state.site,
+            chatId,
+            cdpEndpoint: state.cdp,
+          });
+          if (r.ok && String(r.text || "").trim()) {
+            reply = r.text;
+            decided = true; // 拿到回复 → 进入解析决策循环（串轮检测拦截陈旧内容）
+          } else {
+            reason = r.ok ? "拉取完成，但会话中没有回复内容" : `拉取失败：${r.error}`;
+            onLog("warn", `镜头 ${i + 1} ${reason}`);
+          }
+        } else if (decision === "retry") {
+          try {
+            reply = await askShot(prompt);
+            decided = true;
+          } catch (e2) {
+            reason = `重试仍失败：${e2?.message || e2}`;
+            onLog("warn", `镜头 ${i + 1} ${reason}`);
+          }
+        } else {
+          // skip / 关闭对话框
+          failed.push(`#${i + 1} 已跳过（${reason}）`);
+          onLog("warn", `镜头 ${i + 1} 已跳过`);
+          decided = true;
+        }
+      }
+      if (!reply) continue;
     }
+    // 解析 + 用户决策循环：任何重发都必须经用户确认（防风控封号）
+    const prev = i > 0 ? state.shots[i - 1]?.h3 : null;
     let obj = null;
-    try {
-      obj = parseJsonBlock(text);
-    } catch (e) {
-      console.log(`[MRD 导入] 镜头 ${i + 1} H3 原始回复（JSON 解析失败）：\n`, text);
-      failed.push(`#${i + 1} JSON 解析失败`);
-      onLog("warn", `镜头 ${i + 1} 的回复无法解析为 H3 JSON（完整原文已打印到浏览器控制台）`);
-      continue;
+    for (;;) {
+      obj = parseLenient(reply);
+      const dup =
+        obj && prev &&
+        String(obj.detailed_description || "").trim() === prev.detailed_description;
+      const badFields =
+        obj && !(String(obj.summary || "").trim() && String(obj.detailed_description || "").trim());
+      if (obj && !dup && !badFields) break;
+      const reason = !obj
+        ? "回复无法解析为 H3 JSON"
+        : dup
+          ? "结果与上一镜完全相同（疑似串轮残留）"
+          : "H3 JSON 缺少 summary / detailed_description 字段";
+      console.log(`[MRD 导入] 镜头 ${i + 1} ${reason}：\n`, reply);
+      if (!askH3Fail) {
+        // 无对话框环境：不自动追问，保守记失败
+        failed.push(`#${i + 1} ${reason}`);
+        onLog("warn", `镜头 ${i + 1} ${reason}（完整原文已打印到浏览器控制台）`);
+        obj = null;
+        break;
+      }
+      const decision = await askH3Fail({
+        shotIndex: i + 1,
+        total,
+        reason,
+        prompt,
+        reply,
+      });
+      if (decision === "adopt") {
+        if (!obj) {
+          onLog("warn", `镜头 ${i + 1}：回复中未找到 JSON 结构，无法采纳（已按失败处理）`);
+          failed.push(`#${i + 1} 采纳失败：回复中无 JSON 结构`);
+          obj = null;
+        }
+        // 缺字段时按现状采纳（缺失字段置空），由用户在导演台手动补
+        break;
+      }
+      if (decision === "retry") {
+        try {
+          reply = await askShot(prompt + H3_RETRY_NOTE);
+        } catch (e) {
+          onLog("warn", `镜头 ${i + 1} 重试发送失败：${e.message || e}`);
+        }
+        continue;
+      }
+      // skip / 关闭对话框
+      failed.push(`#${i + 1} 已跳过（${reason}）`);
+      obj = null;
+      break;
     }
-    if (!String(obj?.summary || "").trim() || !String(obj?.detailed_description || "").trim()) {
-      console.log(`[MRD 导入] 镜头 ${i + 1} H3 JSON 缺字段：\n`, text);
-      failed.push(`#${i + 1} 缺 summary/detailed_description`);
-      onLog("warn", `镜头 ${i + 1} 的 H3 JSON 缺少必需字段（完整原文见控制台）`);
-      continue;
-    }
-    shot.h3 = {
-      summary: String(obj.summary || ""),
-      detailed_description: String(obj.detailed_description || ""),
-      overall_soundscape: String(obj.overall_soundscape || ""),
-      non_diegetic_music: String(obj.non_diegetic_music || ""),
-    };
-    // 串轮检测：与上一镜完全相同 → 多半拿到了上一轮的残留回复（SSE/跨轮串话）
-    const prev = i > 0 ? state.shots[i - 1].h3 : null;
-    if (prev && prev.detailed_description === shot.h3.detailed_description) {
-      failed.push(`#${i + 1} 与上一镜结果完全相同（疑似串轮残留）`);
-      onLog("warn", `镜头 ${i + 1} 的结果与上一镜完全相同，疑似拿到了上一轮残留回复，已按失败处理`);
-      delete shot.h3;
-      continue;
-    }
+    if (!obj) continue;
+    shot.h3 = toH3(obj);
     onLog("info", `镜头 ${i + 1}/${total} 已转换`);
   }
   const ok = state.shots.filter((s) => s.h3).length;

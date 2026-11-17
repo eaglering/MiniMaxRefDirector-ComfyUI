@@ -324,6 +324,28 @@ function resetRun() {
   autoCancelled.value = false;
 }
 
+// ---- H3 回复解析失败决策对话框（不自动追问，防站点风控封号）----
+// runH3Step 解析失败/缺字段/疑似串轮时回调 askH3Fail，展示原始提示词与最后回复，
+// 由用户决定「采纳 / 重试（重新发送一次纠正提示）/ 跳过该镜」。
+const h3Fail = reactive({ visible: false, info: null, resolve: null });
+function askH3Fail(info) {
+  return new Promise((resolve) => {
+    h3Fail.info = info;
+    h3Fail.resolve = resolve;
+    h3Fail.visible = true;
+  });
+}
+function h3FailDecide(decision) {
+  h3Fail.visible = false;
+  const resolve = h3Fail.resolve;
+  h3Fail.resolve = null;
+  h3Fail.info = null;
+  if (resolve) resolve(decision);
+}
+function h3FailClosed() {
+  if (h3Fail.resolve) h3FailDecide("skip");
+}
+
 function hhmmss(ts) {
   const d = new Date(Number(ts) || Date.now());
   const p = (n) => String(n).padStart(2, "0");
@@ -396,7 +418,7 @@ async function execStep(step) {
   runError.value = "";
   startElapsed();
   try {
-    const result = await STEP_RUNNERS[key](state, { token, onLog: addLog });
+    const result = await STEP_RUNNERS[key](state, { token, onLog: addLog, askH3Fail });
     st.status = "done";
     st.synced = false;
     st.summary = summarize(key, result);
@@ -497,6 +519,11 @@ async function runAllSteps() {
   addLog("info", `一键导入开始：将依次执行 ${visibleSteps.value.length} 个步骤，步骤间随机等待 2-6 秒模拟人为节奏`);
   try {
     for (const step of visibleSteps.value) {
+      // 已完成的步骤直接跳过（不重新生成；需要重跑某一步时用该步的「执行」按钮）
+      if (stepState[step.key]?.status === "done") {
+        addLog("info", `「${step.label}」已完成，一键导入跳过该步`);
+        continue;
+      }
       const delay = 2000 + Math.floor(Math.random() * 4000); // 2-6s 随机
       addLog("info", `等待 ${Math.round(delay / 1000)}s 后执行「${step.label}」…`);
       if (await interruptibleSleep(delay)) {
@@ -791,6 +818,51 @@ function stepHint(st) {
       </div>
     </div>
   </el-dialog>
+
+  <!-- H3 回复解析失败：展示原始提示词与最后回复，由用户决定采纳/重试/跳过 -->
+  <el-dialog
+    v-model="h3Fail.visible"
+    title="H3 回复解析失败"
+    width="680px"
+    top="6vh"
+    :close-on-click-modal="false"
+    append-to-body
+    @closed="h3FailClosed"
+  >
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      class="mrd-dsi-alert"
+      :title="`镜头 ${h3Fail.info?.shotIndex}/${h3Fail.info?.total}：${h3Fail.info?.reason || ''}`"
+      description="疑似风控时可「拉取会话最后回复」（读取会话里最后一条助手回复，不发送任何消息；若拉到的是上一镜的旧回复会被串轮检测拦下）。点「重试」则重发一次提示词（每点一次只重发一条，不会自动连发）。"
+    />
+    <div class="mrd-dsi-h3fail-block">
+      <div class="mrd-dsi-h3fail-label">原始提示词</div>
+      <pre class="mrd-dsi-h3fail-pre">{{ h3Fail.info?.prompt }}</pre>
+    </div>
+    <div class="mrd-dsi-h3fail-block">
+      <div class="mrd-dsi-h3fail-label">站点最后回复</div>
+      <pre class="mrd-dsi-h3fail-pre">{{ h3Fail.info?.reply }}</pre>
+    </div>
+    <template #footer>
+      <el-button @click="h3FailDecide('skip')">跳过该镜</el-button>
+      <el-button
+        v-if="h3Fail.info?.canPull"
+        type="success"
+        plain
+        @click="h3FailDecide('pull')"
+      >
+        拉取会话最后回复
+      </el-button>
+      <el-button type="warning" plain @click="h3FailDecide('retry')">
+        {{ h3Fail.info?.reply ? "重试（重发一条纠正提示）" : "重试（重发该镜提示词）" }}
+      </el-button>
+      <el-button v-if="h3Fail.info?.reply" type="primary" @click="h3FailDecide('adopt')">
+        采纳该回复
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -965,4 +1037,25 @@ function stepHint(st) {
 .mrd-dsi-debug-time { flex: none; color: #4b5366; }
 .mrd-dsi-debug-kind { flex: none; color: #7c89d6; }
 .mrd-dsi-debug-detail { color: #9aa3b2; word-break: break-all; }
+
+/* H3 失败决策对话框：提示词 / 回复原文展示 */
+.mrd-dsi-h3fail-block { margin-top: 10px; }
+.mrd-dsi-h3fail-label {
+  font-size: 12px;
+  color: #8b93a7;
+  margin-bottom: 4px;
+}
+.mrd-dsi-h3fail-pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.08);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+}
 </style>

@@ -19,6 +19,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import logging
 import os
@@ -365,16 +367,55 @@ async def spa_webchat_complete(request: web.Request) -> web.Response:
         session_mode = str(data.get("session_mode") or data.get("sessionMode") or "new")
         chat_id = str(data.get("chat_id") or data.get("chatId") or "")
         timeout_s = float(data.get("timeout_ms") or data.get("timeoutMs") or 300_000) / 1000.0
-        result = webchat_cdp.complete(
-            system=system, prompt=prompt, expect_json=expect_json,
-            timeout_s=min(max(timeout_s, 30.0), 600.0), site=site,
-            session_mode="reuse" if session_mode == "reuse" else "new",
-            chat_id=chat_id, cdp_endpoint=_cdp_endpoint_from(data),
+        # complete() 是同步阻塞实现（内部等待分钟级网页生成，含风控冷却重试）。
+        # 必须放进线程执行器：直接在 async 处理器里调用会把 ComfyUI 事件循环
+        # 整个冻住——批量 H3 后段浏览器收到 ERR_EMPTY_RESPONSE（连接无响应被掐断）
+        # 的根因就是这个。
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            functools.partial(
+                webchat_cdp.complete,
+                system=system, prompt=prompt, expect_json=expect_json,
+                timeout_s=min(max(timeout_s, 30.0), 600.0), site=site,
+                session_mode="reuse" if session_mode == "reuse" else "new",
+                chat_id=chat_id, cdp_endpoint=_cdp_endpoint_from(data),
+            ),
         )
         return web.json_response({
             "success": True, "ok": bool(result.get("ok")),
             "text": str(result.get("text") or ""),
             "chatId": str(result.get("chat_id") or ""),
+            "error": str(result.get("error") or ""),
+        })
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/spa/webchat/last_reply")
+async def spa_webchat_last_reply(request: web.Request) -> web.Response:
+    """读取指定会话最后一条助手回复（不发送任何消息；风控失败后的补救拉取）。
+
+    body: {site, chatId?, cdpEndpoint?}
+    返回 {success, ok, text, error}
+    """
+    try:
+        data = await _read_json_body(request)
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            functools.partial(
+                webchat_cdp.fetch_last_reply,
+                site=str(data.get("site") or data.get("proxy_site") or "deepseek"),
+                chat_id=str(data.get("chat_id") or data.get("chatId") or ""),
+                cdp_endpoint=_cdp_endpoint_from(data),
+                timeout_s=90.0,
+            ),
+        )
+        return web.json_response({
+            "success": True, "ok": bool(result.get("ok")),
+            "text": str(result.get("text") or ""),
             "error": str(result.get("error") or ""),
         })
     except ValueError as e:

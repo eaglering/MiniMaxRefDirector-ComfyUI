@@ -14,7 +14,6 @@ const ws = useWorkspace();
 // 可候选：本分镜生效主体（全局 + 段级自定义副本按名合并）
 const candidates = computed(() =>
 {
-  console.log(ws.subjects.subjects, props.segment.subjectsOverride);
   return mergeSegmentSubjects(ws.subjects.subjects, props.segment.subjectsOverride).filter(
     (s) => (s.name || "").trim() !== "" && s.relationship.trim() !== ""
   )

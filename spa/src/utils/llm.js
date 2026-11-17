@@ -52,6 +52,7 @@ async function webchatComplete({
       text: String(data.text || ""),
       chat_id: String(data.chatId || ""),
       error: String(data.error || ""),
+      risk: !!data.risk,
     };
   } catch (e) {
     const aborted = e?.name === "AbortError";
@@ -71,7 +72,25 @@ function throwCompleteError(resp, site) {
   const hint = /超时/.test(resp?.error || "")
     ? "（可点「页面自检」确认 Chrome 调试端口与站点登录状态）"
     : "";
-  throw new Error(`${resp?.error || `${label} 桥接调用失败`}${hint}`);
+  const err = new Error(`${resp?.error || `${label} 桥接调用失败`}${hint}`);
+  // 疑似站点风控标记（后端 _RISK_ERROR_WORDS 判定）：供批量流程弹窗给用户
+  // 「拉取会话最后回复 / 重发 / 跳过」的补救选项
+  err.risk = !!resp?.risk || /未检测到|发送未生效/.test(resp?.error || "");
+  throw err;
+}
+
+// 拉取指定会话最后一条助手回复（不发送任何消息；风控失败后的补救读取）。
+export async function webchatLastReply({ site = "deepseek", chatId = "", cdpEndpoint = "" } = {}) {
+  try {
+    const data = await postJSON("/spa/webchat/last_reply", {
+      site,
+      chat_id: chatId,
+      cdp_endpoint: cdpEndpoint || _cdpEndpoint,
+    });
+    return { ok: !!data.ok, text: String(data.text || ""), error: String(data.error || "") };
+  } catch (e) {
+    return { ok: false, text: "", error: e.message || String(e) };
+  }
 }
 
 /**
