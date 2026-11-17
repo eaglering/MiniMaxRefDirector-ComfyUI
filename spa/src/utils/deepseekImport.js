@@ -468,7 +468,7 @@ export async function runH3Step(state, { token = null, onLog = () => {} } = {}) 
     // 是"批量 H3 后段失败"的直接诱因；被吞的镜头由后端风控冷却重试兜底
     if (i > 0) {
       const gap = 6 + Math.floor(Math.random() * 9);
-      onLog("info", `等待 ${gap}s（拟人间隔）后处理镜头 ${i + 1}…`);
+      onLog("info", `等待 ${gap}s 后处理镜头 ${i + 1}…`);
       await humanGap(6, 14);
     }
     const shot = state.shots[i];

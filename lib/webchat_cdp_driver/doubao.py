@@ -889,9 +889,3 @@ class DoubaoDriver(BaseSiteDriver):
             "ok": False, "text": "", "chat_id": "",
             "error": f"等待 {self.name} 回复超时（生成过久或页面接口已变更）",
         }
-ait asyncio.sleep(0.8)
-        return await self._verify_session_gone(page, anchor, "豆包")
-ait asyncio.sleep(0.8)
-        return await self._verify_session_gone(page, anchor, "豆包")
-ait asyncio.sleep(0.8)
-        return await self._verify_session_gone(page, anchor, "豆包")
