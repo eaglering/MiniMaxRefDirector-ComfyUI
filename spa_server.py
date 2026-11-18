@@ -4,7 +4,7 @@
 - GET  /spa/state         读取某导演节点暂存状态
 - POST /spa/save          SPA 保存：落盘 + send_sync 通知 ComfyUI 页面回写 widget
 - GET/POST /spa/skills    自定义 skill 词条读写
-- GET  /spa/skill_dict    技能词典（类别含 render_mode / protect_keywords）
+- GET  /spa/skill_dict    技能词典（类别含 render_mode）
 - GET  /spa/skill_docs    技能文档列表（md 提示词模板，按分类过滤）
 - GET  /spa/skill_doc     单篇技能文档全文（id 或内置 key，缺失回落文件库）
 - POST /spa/skill_docs/add|update|delete  技能文档增删改
@@ -258,13 +258,13 @@ async def spa_skill_delete(request: web.Request) -> web.Response:
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/category/add")
 async def spa_skill_category_add(request: web.Request) -> web.Response:
-    # {name, renderMode: camera|term|example|descriptive|block, protectKeywords, description?, sort?}
+    # {name, renderMode: term|example|descriptive|block, description?, sort?}
     return _skill_dict_mutation(lambda d: skill_db.add_category(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/category/update")
 async def spa_skill_category_update(request: web.Request) -> web.Response:
-    # {id, name?, description?, renderMode?, protectKeywords?, sort?}
+    # {id, name?, description?, renderMode?, sort?}
     return _skill_dict_mutation(lambda d: skill_db.update_category(d))(request)
 
 

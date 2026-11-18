@@ -272,13 +272,14 @@ _H3_DEFAULT_OPTIONS: dict = {
 }
 
 
-# 翻译时禁止改写的片段：<!技术词>（技能关键词保护，仅 protect_keywords=1 的类别）、
-# <@主体名>、<#主体名:对白>、<d>[语言]对白</d>，以及双引号（含全角引号）包裹的内容。
+# 翻译时禁止改写的片段：<@主体名>、<#主体名:对白>、<d>[语言]对白</d>，
+# 以及双引号（含全角引号）包裹的内容。
 # 对白是视频实际发声内容、主体名可能含中文，均必须保持原语言。
 # 引号保护：半角 "..." 与全角 \u201c...\u201d \u2018...\u2019。
 # 注意：不含半角单引号 '...'，避免与英文撇号（don't / it's）冲突。
+# （旧版还保护 <!技术词> 标记，随技能词典保护机制移除而删除。）
 _PROTECTED_FRAGMENT_RE = re.compile(
-    r"<![^>]*>|<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
+    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
     re.DOTALL,
 )
 # 占位符使用 PUA 私有区字符（U+E000 与 U+F8FF）+ 序号，几乎不可能出现在正常文本或模型输出中
@@ -300,15 +301,10 @@ def _mask_protected(text: str) -> tuple[str, dict[str, str]]:
     return _PROTECTED_FRAGMENT_RE.sub(_repl, text), placeholders
 
 
-# 技能注入块的技术词标记：<!slow push-in>（仅 protect_keywords=1 的类别产生）
-_PROTECT_MARK_RE = re.compile(r"^<!([^>]*)>$", re.DOTALL)
-
-
 def unmask_protected_text(text: str, placeholders: dict[str, str]) -> str:
-    """将占位符还原为原始片段；<!技术词> 只保留内文（标记本身不进最终提示词）。"""
+    """将占位符还原为原始片段（原样还原，不做任何改写）。"""
     for token, original in placeholders.items():
-        mark = _PROTECT_MARK_RE.match(original)
-        text = text.replace(token, mark.group(1).strip() if mark else original)
+        text = text.replace(token, original)
     return text
 
 
@@ -396,8 +392,8 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
 
     读取 prompt_translate_to_en.md 组装翻译 skill，复用 llm.py 的生成函数
     （image=None 纯文本模式）。翻译保留 [Shot N] / At MM:SS.mmm / <@...> / <#...>
-    等固定标签，字段名不变；角色名与对白内容保持原语言。实现上先对 <!技术词> /
-    <@...> / <#...> / <d>...</d> 做占位符掩码，翻译后还原（<!…> 只留内文）。
+    等固定标签，字段名不变；角色名与对白内容保持原语言。实现上先对
+    <@...> / <#...> / <d>...</d> 做占位符掩码，翻译后原样还原。
     glossary 为术语型技能的中英对照（写入模板 {{GLOSSARY}}）。
     """
     try:

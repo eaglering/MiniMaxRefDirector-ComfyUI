@@ -7,23 +7,21 @@
 输入 selections 为分镜上保存的通用选择：``{类别名: [技能 key, ...]}``
 （类别名 = skill_categories.name；技能 key = skills.key）。
 
-输出：``{notes, protected, glossary, warnings}``
+输出：``{notes, protected, glossary, warnings, required}``
 - notes:       注入 H3 生成提示词的结构化技能说明（按 render_mode 分节）
-- protected:   被 ``<!...>`` 包裹的技术词原文（调试 / 前端提示用）
+- protected:   兼容保留字段，恒为空数组（<!...> 技术词保护机制已移除）
 - glossary:    术语型（term）类别的 中文名 → name_en，供中文→英文翻译阶段对照
 - warnings:    已删除 / 未知技能（跳过，不阻断生成）
+- required:    生成结果里必须原样出现的技能关键词（术语中文名 / 英文对照）
 
-技术词保护规则（用户确认）：
-- 只有类别表里 ``protect_keywords=1`` 的类别（内置为「运镜」）才用
-  ``<!技术词>`` 包裹；翻译阶段掩码、译后原样还原。
-- **不做触发词申明**：``camera motion`` 等触发词写法由用户写在全局提示词里，
-  本模块只输出技能条目本身（风格 / 指南 / 英文触发短语）。
+历史说明：旧版曾用 ``<!技术词>`` 包裹运镜英文触发短语并在翻译阶段掩码还原
+（protect_keywords 类别字段 + camera 注入方式），现已整体移除——运镜与
+景别/镜头结构同为 term 注入（中文名直写 + name_en 对照）。
 """
 
 from __future__ import annotations
 
 import logging
-import re
 
 from . import skill_db
 
@@ -31,38 +29,14 @@ log = logging.getLogger(__name__)
 
 # 类别名 → 分节引导语（zh / en）
 _SECTION_HEAD = {
-    "camera": ("运镜方向", "Camera Motion"),
     "term": ("镜头语汇", "Shot Vocabulary"),
     "example": ("表演细节", "Performance Detail"),
     "descriptive": ("描述型技能", "Descriptive Skill"),
     "block": ("片段型技能", "Block Skill"),
 }
 
-# 技术词包裹标记：<!slow push-in>
-_PROTECT_RE = re.compile(r"<!([^>]*)>")
-
-# notes 内可读性上限：技能条目过多时提示（不截断，保证用户选择完整生效）
-_MAX_ITEMS_WARN = 40
-
-
-def _wrap_protected(text: str) -> str:
-    """按需把技术词包成 <!...>；已包裹/空串原样返回。"""
-    value = str(text or "").strip()
-    if not value:
-        return ""
-    if _PROTECT_RE.fullmatch(value):
-        return value
-    return f"<!{value}>"
-
-
 def _cat_mode(cat: dict) -> str:
     return str(cat.get("renderMode") or cat.get("render_mode") or "descriptive").lower()
-
-
-def _cat_protect(cat: dict) -> bool:
-    """关键词保护开关（list_all 输出 camelCase，DB 行可能是 snake_case）。"""
-    return bool(cat.get("protectKeywords") if cat.get("protectKeywords") is not None
-                else cat.get("protect_keywords"))
 
 
 def _head(mode: str, category: str, lang: str) -> str:
@@ -70,47 +44,6 @@ def _head(mode: str, category: str, lang: str) -> str:
     if lang == "en":
         return f"## {en} · {category}"
     return f"## {zh} · {category}"
-
-
-def _render_camera(cat: dict, skills: list[dict], lang: str) -> str:
-    """运镜：风格 + 描述 + 写法指南 + 英文触发短语（受保护，不做触发词申明）。
-
-    用户要求：所选技能**必须出现**（不允许选择性遗漏），因此这里明确要求
-    每个所选风格的英文触发短语至少出现一次，可分配到不同 [Shot N]。
-    """
-    protected = _cat_protect(cat)
-    lines = [_head("camera", cat["name"], lang)]
-    if lang == "en":
-        lines.append(
-            "Every style listed below MUST appear (each English trigger phrase at least once) — "
-            "never drop a selected style. Assign styles to [Shot N] beats by framing/action/mood; "
-            "a shot may chain two styles when the movement calls for it, but avoid stacking "
-            "near-duplicates. Weave each English trigger phrase into that shot's camera movement "
-            "naturally; never translate or paraphrase it."
-        )
-    else:
-        lines.append(
-            "下列每一个风格都**必须出现**（每条英文触发短语至少用一次），不得遗漏或跳过；"
-            "按景别/动作/情绪把风格分配到各 [Shot N]，一个镜头需要时可衔接两种风格，"
-            "但不要堆叠近义重复。把英文触发短语自然写进对应镜头的运镜描写，不得翻译或改写。"
-        )
-    for s in skills:
-        name = s.get("name") or s.get("key") or ""
-        name_en = s.get("nameEn") or ""
-        if lang == "en":
-            lines.append(f"- {name}" + (f" ({name_en})" if name_en else ""))
-        else:
-            lines.append(f"- 风格：{name}" + (f"（{name_en}）" if name_en else ""))
-        if s.get("desc"):
-            lines.append(f"  - {s['desc']}")
-        if s.get("guide"):
-            lines.append(f"  - 写法指南：{s['guide']}")
-        phrases = list(s.get("examples") or [])
-        if phrases:
-            rendered = [(_wrap_protected(p) if protected else str(p)) for p in phrases]
-            label = "Trigger phrases" if lang == "en" else "英文触发短语"
-            lines.append(f"  - {label}：{' / '.join(rendered)}")
-    return "\n".join(lines)
 
 
 def _render_term(cat: dict, skills: list[dict], lang: str) -> str:
@@ -166,7 +99,6 @@ def _render_example(cat: dict, skills: list[dict], lang: str) -> str:
 
 def _render_descriptive(cat: dict, skills: list[dict], lang: str) -> str:
     """描述型：desc + 参考短语自然融入（人物主体 / 打斗 / 特效等扩展类别）。"""
-    protected = _cat_protect(cat)
     lines = [_head("descriptive", cat["name"], lang)]
     if lang == "en":
         lines.append(
@@ -184,18 +116,14 @@ def _render_descriptive(cat: dict, skills: list[dict], lang: str) -> str:
         lines.append(f"- {name}" + (f"（{s['nameEn']}）" if s.get("nameEn") else ""))
         if s.get("desc"):
             lines.append(f"  - {s['desc']}")
-        if s.get("guide"):
-            lines.append(f"  - 写法指南：{s['guide']}")
         examples = [str(x) for x in (s.get("examples") or []) if str(x).strip()]
         if examples:
-            rendered = [(_wrap_protected(p) if protected else p) for p in examples]
-            lines.append(f"  - 参考短语：{' / '.join(rendered)}")
+            lines.append(f"  - 参考短语：{' / '.join(examples)}")
     return "\n".join(lines)
 
 
 def _render_block(cat: dict, skills: list[dict], lang: str) -> str:
     """片段型：整段内容近似原样进入提示词（风格 / 特殊效果预置）。"""
-    protected = _cat_protect(cat)
     lines = [_head("block", cat["name"], lang)]
     lines.append(
         "Append EVERY selected fragment below to the shot description, keeping their wording "
@@ -211,14 +139,11 @@ def _render_block(cat: dict, skills: list[dict], lang: str) -> str:
             content = "；".join(str(x) for x in (s.get("examples") or []) if str(x).strip())
         if not content:
             continue
-        if protected:
-            content = _wrap_protected(content)
         lines.append(f"- {name}：{content}")
     return "\n".join(lines)
 
 
 _RENDERERS = {
-    "camera": _render_camera,
     "term": _render_term,
     "example": _render_example,
     "descriptive": _render_descriptive,
@@ -318,16 +243,6 @@ def render_skill_notes(selections, lang: str = "zh") -> dict:
 
     notes = "\n\n".join(s for s in sections if s.strip())
     result["notes"] = notes
-    result["protected"] = [
-        m.group(1).strip() for m in _PROTECT_RE.finditer(notes) if m.group(1).strip()
-    ]
-    # 受保护技术词（<!...> 内部原文）同样必须原样出现
-    for term in result["protected"]:
-        if term not in result["required"]:
-            result["required"].append(term)
-    if len(result["protected"]) > _MAX_ITEMS_WARN:
-        result["warnings"].append(
-            f"本次注入技术词 {len(result['protected'])} 条，建议精简所选技能以免稀释注意力")
     return result
 
 
@@ -361,18 +276,19 @@ def resolve_legacy_selections(
 ) -> dict[str, list[str]]:
     """旧 payload 字段（camera_motion / expression / shot_size / framing）→ selections。
 
-    仅用于兼容尚未升级的调用方：按类别 render_mode 反查类别名，避免写死中文类别名。
+    仅用于兼容尚未升级的调用方：camera / shotSize / framing 三个旧字段按内置类别
+    字段映射（CATEGORY_FIELD 的逆映射）定位类别名；expression 仍按 example 注入
+    方式反查（自定义微表情类类别也能命中）。
     """
-    pairs = {
-        "camera": camera_motion,
-        "example": expression,
-        "term": [],
-    }
+    from ..install.skill_seed import CATEGORY_FIELD
+
+    field_to_cat = {v: k for k, v in CATEGORY_FIELD.items()}
     out: dict[str, list[str]] = {}
     try:
         cats = skill_db.list_all().get("categories") or []
     except Exception:
         return out
+    existing = {c.get("name") for c in cats}
     by_mode: dict[str, list[str]] = {}
     for c in cats:
         by_mode.setdefault(str(c.get("renderMode") or "descriptive"), []).append(c["name"])
@@ -385,20 +301,16 @@ def resolve_legacy_selections(
         return []
 
     cam = _keys(camera_motion)
-    if cam and by_mode.get("camera"):
-        out[by_mode["camera"][0]] = cam
+    cam_cat = field_to_cat.get("camera")
+    if cam and cam_cat and cam_cat in existing:
+        out[cam_cat] = cam
     expr = _keys(expression)
     if expr and by_mode.get("example"):
         out[by_mode["example"][0]] = expr
-    # 景别 / 镜头结构都是 term 类：两个参数按 term 类别顺序分配（单类别时合并）
-    terms = by_mode.get("term") or []
     sizes, frames = _keys(shot_size), _keys(framing)
-    if terms and (sizes or frames):
-        if len(terms) == 1:
-            out[terms[0]] = sizes + frames
-        else:
-            if sizes:
-                out[terms[0]] = sizes
-            if frames:
-                out[terms[1]] = frames
+    size_cat, frame_cat = field_to_cat.get("shotSize"), field_to_cat.get("framing")
+    if sizes and size_cat and size_cat in existing:
+        out[size_cat] = sizes
+    if frames and frame_cat and frame_cat in existing:
+        out[frame_cat] = frames
     return out

@@ -2,16 +2,15 @@
 
 库文件：install/skills.db（随插件存放）。
 三张表：
-    skill_categories(id, name UNIQUE, description, sort, render_mode, protect_keywords)
+    skill_categories(id, name UNIQUE, description, sort, render_mode)
     skills(id, category_id FK, key UNIQUE, name, name_en, desc,
-           guide, examples, group_name, builtin, created_at)
+           examples, group_name, builtin, created_at)
     skill_docs(id, category, title, content, builtin_key UNIQUE, builtin, sort,
                created_at, updated_at)   —— md 提示词模板（主体/音频/图片/分镜设计）
 
 字段按类别使用（三段链路「原始提示词 → H3 中文 → H3 英文」）：
-- 运镜：guide = Camera Motion LoRA 写法指南；examples = 英文触发短语数组。
-- 景别 / 镜头结构：name 中文名直接写入提示词；name_en 供英文阶段对照。
-- 微表情：examples = 中文示例数组（最终使用）；group_name = eye/brow/mouth/
+- 运镜 / 景别 / 镜头结构（term）：name 中文名直接写入提示词；name_en 供英文阶段对照。
+- 微表情（example）：examples = 中文示例数组（最终使用）；group_name = eye/brow/mouth/
   breath/body 分组（旧导演台筛选用）。
 
 初始化：
@@ -19,11 +18,12 @@
   （install/skill_seed.py）+ 历史自定义词条（spa/skills.json）+ 技能文档
   （install/skill_docs/seed.json，缺失时回落 resources/skills）。
 - .lock 存在即不再播种，数据库是唯一数据源；删库重建请同时删除 .lock。
-- 建表全部 IF NOT EXISTS，不做版本判断（旧结构升级需手动删库重建）。
+- 建表全部 IF NOT EXISTS；旧结构（含 protect_keywords / guide 列、camera 注入方式）
+  由 _migrate_legacy_schema() 在连接时自动迁移。
+- 内置词条（builtin=1）的内容随种子升级：名称/描述以种子为准自动刷新。
 
 读取接口：
 - list_all()：全量（categories / skills，examples 已解析为数组）
-- category_presets()：生成链路用的四类预设（lib/prompt.py _skill_presets 消费）
 
 CRUD 全部走进程内锁串行；数据量 <100 行，查询一次全量。
 """
@@ -40,7 +40,6 @@ from pathlib import Path
 
 from ..install.skill_seed import (
     BUILTIN_CATEGORY_RENDER,
-    CATEGORY_FIELD,
     GROUP_TO_CATEGORY,
     RENDER_MODES,
     build_builtin_categories,
@@ -54,12 +53,11 @@ _conn: sqlite3.Connection | None = None
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS skill_categories (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    name            TEXT NOT NULL UNIQUE,
-    description     TEXT NOT NULL DEFAULT '',
-    sort            INTEGER NOT NULL DEFAULT 0,
-    render_mode     TEXT NOT NULL DEFAULT 'descriptive',
-    protect_keywords INTEGER NOT NULL DEFAULT 0
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    sort        INTEGER NOT NULL DEFAULT 0,
+    render_mode TEXT NOT NULL DEFAULT 'descriptive'
 );
 CREATE TABLE IF NOT EXISTS skills (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +66,6 @@ CREATE TABLE IF NOT EXISTS skills (
     name        TEXT NOT NULL,
     name_en     TEXT NOT NULL DEFAULT '',
     desc        TEXT NOT NULL DEFAULT '',
-    guide       TEXT NOT NULL DEFAULT '',
     examples    TEXT NOT NULL DEFAULT '[]',
     group_name  TEXT NOT NULL DEFAULT '',
     builtin     INTEGER NOT NULL DEFAULT 0,
@@ -123,7 +120,6 @@ _KEY_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 # 注入方式（render_mode）→ 新增/编辑技能时的字段要求。
 # 校验按类别配置的 render_mode 而非类别名，新增类别无需改代码。
 _RENDER_MODE_RULES = {
-    "camera": {"name_en": False, "examples_label": "英文触发短语（如 slow push-in，多个用分号分隔）"},
     "term": {"name_en": True, "examples_label": None},
     "example": {"name_en": False, "examples_label": "示例（多个用分号分隔）"},
     "descriptive": {"name_en": False, "examples_label": None},
@@ -258,6 +254,51 @@ def _sync_builtin_docs() -> None:
         log.info("[SPA] builtin skill docs synced (%d updated)", changed)
 
 
+def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
+    """旧结构一次性迁移（仅当检测到 legacy 列时执行，避免覆盖用户后续编辑）：
+
+    - render_mode='camera' → 'term'（运镜与景别/镜头结构同为术语型注入）；
+    - 删除 skill_categories.protect_keywords 与 skills.guide 列
+      （SQLite < 3.35 不支持 DROP COLUMN 时保留列，但代码不再读写）；
+    - 内置词条内容随种子刷新（运镜改纯中文名、清空 examples）。
+    """
+    cat_cols = {r[1] for r in conn.execute("PRAGMA table_info(skill_categories)")}
+    skill_cols = {r[1] for r in conn.execute("PRAGMA table_info(skills)")}
+    legacy = "protect_keywords" in cat_cols or "guide" in skill_cols
+    if not legacy and "render_mode" in cat_cols:
+        legacy = conn.execute(
+            "SELECT 1 FROM skill_categories WHERE render_mode='camera' LIMIT 1"
+        ).fetchone() is not None
+    if not legacy:
+        return
+    log.info("[SPA] skill dict legacy schema detected, migrating...")
+    if "render_mode" in cat_cols:
+        conn.execute("UPDATE skill_categories SET render_mode='term' WHERE render_mode='camera'")
+    # 内置词条随种子刷新（仅 builtin=1；此时 guide 列可能仍存在，一并清空）
+    from ..install.skill_seed import _CAMERA_MOTION
+    for cat in build_builtin_categories():
+        clear_examples = cat["name"] == "运镜"
+        for s in cat["skills"]:
+            sets = ["name=?", "name_en=?", "desc=?"]
+            args: list = [s["name"], s["name_en"], s["desc"]]
+            if clear_examples:
+                sets.append("examples='[]'")
+            if "guide" in skill_cols:
+                sets.append("guide=''")
+            args.append(s["key"])
+            conn.execute(
+                f"UPDATE skills SET {', '.join(sets)} WHERE key=? AND builtin=1", args)
+    for table, col in (("skill_categories", "protect_keywords"), ("skills", "guide")):
+        if col in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            try:
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+            except Exception:
+                log.warning("[SPA] 删除 %s.%s 列失败（旧版 SQLite），保留列但不再使用",
+                            table, col, exc_info=True)
+    conn.commit()
+    log.info("[SPA] skill dict legacy schema migrated")
+
+
 def _connect() -> sqlite3.Connection:
     global _conn
     with _lock:
@@ -266,6 +307,7 @@ def _connect() -> sqlite3.Connection:
             _conn.row_factory = sqlite3.Row
             _conn.execute("PRAGMA foreign_keys=ON")
             _conn.executescript(_SCHEMA)
+            _migrate_legacy_schema(_conn)
             _sync_builtin_docs()
             # .lock 存在 → 已初始化过，不再跑种子（避免覆盖用户的库内编辑）。
             # 技能词条与技能文档共用这一个标记：删库重建时一并联动的只有它。
@@ -295,10 +337,10 @@ def _seed_builtin() -> None:
         row = cur.fetchone()
         if row is None:
             cur = conn.execute(
-                "INSERT INTO skill_categories(name, description, sort, render_mode, protect_keywords)"
-                " VALUES(?,?,?,?,?)",
+                "INSERT INTO skill_categories(name, description, sort, render_mode)"
+                " VALUES(?,?,?,?)",
                 (cat["name"], cat.get("description") or "", sort,
-                 cat.get("render_mode") or "descriptive", int(cat.get("protect_keywords") or 0)),
+                 cat.get("render_mode") or "descriptive"),
             )
             cat_id = int(cur.lastrowid or 0)
         else:
@@ -309,10 +351,10 @@ def _seed_builtin() -> None:
             )
         for s in cat.get("skills") or []:
             conn.execute(
-                "INSERT OR IGNORE INTO skills(category_id, key, name, name_en, desc, guide,"
-                " examples, group_name, builtin, created_at) VALUES(?,?,?,?,?,?,?,?,1,?)",
+                "INSERT OR IGNORE INTO skills(category_id, key, name, name_en, desc,"
+                " examples, group_name, builtin, created_at) VALUES(?,?,?,?,?,?,?,1,?)",
                 (cat_id, s["key"], s["name"], s.get("name_en") or "", s.get("desc") or "",
-                 s.get("guide") or "", json.dumps(s.get("examples") or [], ensure_ascii=False),
+                 json.dumps(s.get("examples") or [], ensure_ascii=False),
                  s.get("group_name") or "", int(time.time() * 1000)),
             )
 
@@ -341,8 +383,8 @@ def _migrate_custom_json() -> None:
             if not key or not label:
                 continue
             conn.execute(
-                "INSERT OR IGNORE INTO skills(category_id, key, name, name_en, desc, guide,"
-                " examples, group_name, builtin, created_at) VALUES(?,?,?,'',?,'','[]','','0',?)",
+                "INSERT OR IGNORE INTO skills(category_id, key, name, name_en, desc,"
+                " examples, group_name, builtin, created_at) VALUES(?,?,?,'',?,'[]','','0',?)",
                 (cat_id, key, label, str(it.get("title") or ""), int(time.time() * 1000)),
             )
 
@@ -359,10 +401,9 @@ def list_all() -> dict:
                 "description": r["description"],
                 "sort": int(r["sort"]),
                 "renderMode": r["render_mode"] or "descriptive",
-                "protectKeywords": bool(r["protect_keywords"]),
             }
             for r in conn.execute(
-                "SELECT id, name, description, sort, render_mode, protect_keywords"
+                "SELECT id, name, description, sort, render_mode"
                 " FROM skill_categories ORDER BY sort, id")
         ]
         skills = [
@@ -373,7 +414,6 @@ def list_all() -> dict:
                 "key": r["key"],
                 "nameEn": r["name_en"],
                 "desc": r["desc"],
-                "guide": r["guide"],
                 "examples": _parse_examples(r["examples"]),
                 "groupName": r["group_name"],
                 "builtin": bool(r["builtin"]),
@@ -381,51 +421,6 @@ def list_all() -> dict:
             for r in conn.execute("SELECT * FROM skills ORDER BY id")
         ]
         return {"categories": cats, "skills": skills}
-
-
-def category_presets() -> dict:
-    """生成链路四类预设（lib/prompt.py _skill_presets 消费）。
-
-    返回 {
-      "camera":     {key: {name_zh, name_en, desc_zh, guide, examples(英文触发短语)}},
-      "shotSize":   {key: {name_zh, name_en}},
-      "framing":    {key: {name_zh, name_en}},
-      "expression": {key: {name_zh, name_en, desc_zh, examples_zh, group}},
-    }
-    界面新增的技能按 desc/nameEn/examples/groupName 推导。
-    """
-    field_of_category = dict(CATEGORY_FIELD)
-    data = list_all()
-    cat_name = {c["id"]: c["name"] for c in data["categories"]}
-    out: dict[str, dict] = {f: {} for f in field_of_category.values()}
-    for s in data["skills"]:
-        cat = cat_name.get(s["categoryId"]) or ""
-        field = field_of_category.get(cat)
-        if not field:
-            continue
-        name = s["name"] or s["key"]
-        if field == "camera":
-            out[field][s["key"]] = {
-                "name_zh": name,
-                "name_en": s["nameEn"] or name,
-                "desc_zh": s["desc"] or name,
-                "guide": s["guide"] or "",
-                "examples": list(s["examples"] or []),
-            }
-        elif field in ("shotSize", "framing"):
-            out[field][s["key"]] = {
-                "name_zh": name,
-                "name_en": s["nameEn"] or name,
-            }
-        elif field == "expression":
-            out[field][s["key"]] = {
-                "name_zh": name,
-                "name_en": s["nameEn"] or name,
-                "desc_zh": s["desc"] or name,
-                "examples_zh": list(s["examples"] or []),
-                "group": s["groupName"] or "body",
-            }
-    return out
 
 
 # ---------------- 写操作 ----------------
@@ -463,7 +458,7 @@ def _normalize_examples(value) -> list[str]:
 
 def _category_row(conn: sqlite3.Connection, cat_id: int) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT id, name, description, sort, render_mode, protect_keywords"
+        "SELECT id, name, description, sort, render_mode"
         " FROM skill_categories WHERE id=?", (cat_id,)
     ).fetchone()
 
@@ -500,7 +495,6 @@ def add_skill(payload: dict) -> dict:
             raise ValueError(f"技能类别不存在：{cat_id}")
         name_en = str(payload.get("nameEn") or payload.get("name_en") or "").strip()
         desc = str(payload.get("desc") or "").strip()
-        guide = str(payload.get("guide") or "").strip()
         examples = _normalize_examples(payload.get("examples"))
         _validate_by_category(dict(cat_row), name_en, examples, desc)
         key = str(payload.get("key") or "").strip().lower() or _gen_key(name, conn)
@@ -509,9 +503,9 @@ def add_skill(payload: dict) -> dict:
         if conn.execute("SELECT 1 FROM skills WHERE key=?", (key,)).fetchone():
             raise ValueError(f"key 已存在：{key}")
         cur = conn.execute(
-            "INSERT INTO skills(category_id, key, name, name_en, desc, guide, examples,"
-            " group_name, builtin, created_at) VALUES(?,?,?,?,?,?,?,?,'0',?)",
-            (cat_id, key, name, name_en, desc, guide,
+            "INSERT INTO skills(category_id, key, name, name_en, desc, examples,"
+            " group_name, builtin, created_at) VALUES(?,?,?,?,?,?,?,'0',?)",
+            (cat_id, key, name, name_en, desc,
              json.dumps(examples, ensure_ascii=False),
              str(payload.get("groupName") or payload.get("group_name") or ""),
              int(time.time() * 1000)),
@@ -535,7 +529,6 @@ def update_skill(payload: dict) -> dict:
                            else (payload.get("name_en") if payload.get("name_en") is not None
                                  else row["name_en"])).strip(),
             "desc": str(payload.get("desc") if payload.get("desc") is not None else row["desc"]),
-            "guide": str(payload.get("guide") if payload.get("guide") is not None else row["guide"]),
             "group_name": str(payload.get("groupName") if payload.get("groupName") is not None
                               else row["group_name"]),
         }
@@ -551,9 +544,9 @@ def update_skill(payload: dict) -> dict:
         _validate_by_category(dict(cat_row), fields["name_en"], examples, fields["desc"])
         # key 与 builtin 不可改（内置 key 与生成链路一一对应）
         conn.execute(
-            "UPDATE skills SET name=?, name_en=?, desc=?, guide=?, examples=?, group_name=?"
+            "UPDATE skills SET name=?, name_en=?, desc=?, examples=?, group_name=?"
             " WHERE id=?",
-            (fields["name"], fields["name_en"], fields["desc"], fields["guide"],
+            (fields["name"], fields["name_en"], fields["desc"],
              json.dumps(examples, ensure_ascii=False), fields["group_name"], skill_id),
         )
         conn.commit()
@@ -570,7 +563,7 @@ def delete_skill(payload: dict) -> dict:
         if row is None:
             raise ValueError(f"技能不存在：{skill_id}")
         if row["builtin"]:
-            raise ValueError("内置技能不可删除（可修改其名称/英文写法/指南/示例）")
+            raise ValueError("内置技能不可删除（可修改其名称/英文写法/描述/示例）")
         conn.execute("DELETE FROM skills WHERE id=?", (skill_id,))
         conn.commit()
         return {"id": skill_id}
@@ -584,31 +577,29 @@ def _normalize_render_mode(value) -> str:
 
 
 def add_category(payload: dict) -> dict:
-    """新增类别（自定义技能分组用）：名称 + 注入方式 + 是否关键词保护。"""
+    """新增类别（自定义技能分组用）：名称 + 注入方式。"""
     name = str(payload.get("name") or "").strip()
     if not name:
         raise ValueError("类别名称不能为空")
     mode = _normalize_render_mode(
         payload.get("renderMode") if payload.get("renderMode") is not None
         else payload.get("render_mode"))
-    protect = 1 if (payload.get("protectKeywords") or payload.get("protect_keywords")) else 0
     with _lock:
         conn = _connect()
         if conn.execute("SELECT 1 FROM skill_categories WHERE name=?", (name,)).fetchone():
             raise ValueError(f"类别已存在：{name}")
         cur = conn.execute(
-            "INSERT INTO skill_categories(name, description, sort, render_mode, protect_keywords)"
-            " VALUES(?,?,?,?,?)",
+            "INSERT INTO skill_categories(name, description, sort, render_mode)"
+            " VALUES(?,?,?,?)",
             (name, str(payload.get("description") or ""), int(payload.get("sort") or 99),
-             mode, protect),
+             mode),
         )
         conn.commit()
-        return {"id": int(cur.lastrowid or 0), "name": name,
-                "renderMode": mode, "protectKeywords": bool(protect)}
+        return {"id": int(cur.lastrowid or 0), "name": name, "renderMode": mode}
 
 
 def update_category(payload: dict) -> dict:
-    """编辑类别：描述 / 注入方式 / 关键词保护 / 排序（内置类别名称不可改）。"""
+    """编辑类别：描述 / 注入方式 / 排序（内置类别名称不可改）。"""
     cat_id = int(payload.get("id") or 0)
     if not cat_id:
         raise ValueError("缺少类别 id")
@@ -621,7 +612,7 @@ def update_category(payload: dict) -> dict:
         if not name:
             raise ValueError("类别名称不能为空")
         if name != row["name"]:
-            if row["protect_keywords"] and row["name"] in BUILTIN_CATEGORY_RENDER:
+            if row["name"] in BUILTIN_CATEGORY_RENDER:
                 raise ValueError("内置类别不可重命名（分镜选择按类别名存储）")
             if conn.execute("SELECT 1 FROM skill_categories WHERE name=?", (name,)).fetchone():
                 raise ValueError(f"类别已存在：{name}")
@@ -629,21 +620,16 @@ def update_category(payload: dict) -> dict:
             payload.get("renderMode") if payload.get("renderMode") is not None
             else (payload.get("render_mode") if payload.get("render_mode") is not None
                   else row["render_mode"]))
-        if payload.get("protectKeywords") is not None or payload.get("protect_keywords") is not None:
-            protect = 1 if (payload.get("protectKeywords") or payload.get("protect_keywords")) else 0
-        else:
-            protect = int(row["protect_keywords"] or 0)
         desc = str(payload.get("description") if payload.get("description") is not None
                    else row["description"])
         sort = int(payload.get("sort") if payload.get("sort") is not None else row["sort"])
         conn.execute(
-            "UPDATE skill_categories SET name=?, description=?, sort=?, render_mode=?,"
-            " protect_keywords=? WHERE id=?",
-            (name, desc, sort, mode, protect, cat_id),
+            "UPDATE skill_categories SET name=?, description=?, sort=?, render_mode=?"
+            " WHERE id=?",
+            (name, desc, sort, mode, cat_id),
         )
         conn.commit()
-        return {"id": cat_id, "name": name, "renderMode": mode,
-                "protectKeywords": bool(protect)}
+        return {"id": cat_id, "name": name, "renderMode": mode}
 
 
 BATCH_ADD_MAX = 200  # 单次批量导入上限（超出提示分批，避免一次性长事务）
@@ -653,7 +639,7 @@ def batch_add_skills(payload: dict) -> dict:
     """批量导入技能词条。
 
     payload: { categoryId?: int, newCategory?: str,
-               items: [ {name, nameEn?, desc?, guide?, examples?, key?} ] }
+               items: [ {name, nameEn?, desc?, examples?, key?} ] }
     - 可选先建新类别（newCategory，同名已存在则复用）。
     - 逐条复用 add_skill（独立失败，不影响已入库条目），收集失败原因。
     返回 {added: int, failed: [{name, error}], total: int}

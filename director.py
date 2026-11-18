@@ -23,17 +23,10 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 # 引号保护：半角 "..." 与全角 \u201c...\u201d \u2018...\u2019（台词/标语/歌名等保持原语言）。
 # 注意：不含半角单引号 '...'，避免与英文撇号（don't / it's）冲突。
-# <!技术词>：技能关键词保护标记（仅 protect_keywords=1 的类别产生），翻译阶段掩码、
-# 译后只保留内文；触发词写法由用户写在全局提示词中，这里不做任何申明或置首处理。
 _PROTECTED_FRAGMENT_RE = re.compile(
-    r"<![^>]*>|<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
+    r"<@[^>]*>|<#[^>]*>|<d>.*?</d>|\"[^\"]*\"|\u201c.*?\u201d|\u2018.*?\u2019",
     re.DOTALL,
 )
-
-# 技能关键词标记：<!slow push-in>
-_PROTECT_MARK_RE = re.compile(r"^<!([^>]*)>$", re.DOTALL)
-# 全文剥离标记（英文提示词无需翻译时只保留技术词内文）
-_PROTECT_MARK_GLOBAL_RE = re.compile(r"<!([^>]*)>", re.DOTALL)
 
 
 def _needs_translate(prompt: str) -> bool:
@@ -43,10 +36,9 @@ def _needs_translate(prompt: str) -> bool:
 def _translate_prompt_to_en(prompt: str, opts: dict, glossary: dict | None = None) -> str:
     """段提示词含中文时，将保护片段替换为英文占位符后整段翻译为英文，再还原占位符。
 
-    <!技术词> / <@主体名> / <#主体名:对白> / <d>对白</d> 可能含中文或属于技术词，
-    翻译前掩码为 MASKED_N 英文占位符，模型看不到原文，从源头杜绝改写；翻译后按
-    顺序还原（<!…> 只保留内文，标记本身不进最终提示词）。若模型破坏/丢失了占位符，
-    则整体回退原文，保证对白/角色名/技术词不被污染。
+    <@主体名> / <#主体名:对白> / <d>对白</d> 可能含中文，翻译前掩码为 MASKED_N
+    英文占位符，模型看不到原文，从源头杜绝改写；翻译后按顺序原样还原。
+    若模型破坏/丢失了占位符，则整体回退原文，保证对白/角色名不被污染。
     glossary: 术语型技能中英对照，注入翻译指令；None 时按源文自动提取。
     翻译失败时 _translate_text_to_en 内部回退原文，不抛异常。
     """
@@ -73,13 +65,12 @@ def _translate_prompt_to_en(prompt: str, opts: dict, glossary: dict | None = Non
         seed=int(opts.get("seed") or 42),
         glossary=glossary,
     )
-    # 4. 占位符被模型删改 → 整体回退原文，避免对白/技术词/主体名丢失
+    # 4. 占位符被模型删改 → 整体回退原文，避免对白/主体名丢失
     missing = [token for token in placeholders if token not in translated]
     if missing:
         return prompt
     for token, original in placeholders.items():
-        mark = _PROTECT_MARK_RE.match(original)
-        translated = translated.replace(token, mark.group(1).strip() if mark else original)
+        translated = translated.replace(token, original)
     return translated
 
 
@@ -292,10 +283,6 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "[MiniMaxRefDirector] segment %d post-translate prompt head: %s",
                     i, repr(prompt_res["prompt"][:160]),
                 )
-            else:
-                # 纯英文提示词不走翻译：技能保护标记只保留内文，标记不进入最终提示词
-                prompt_res["prompt"] = _PROTECT_MARK_GLOBAL_RE.sub(
-                    lambda m: m.group(1).strip(), prompt_res["prompt"])
             entry = {
                 "prompt": prompt_res["prompt"],
                 "subjects": prompt_res["subjects"],

@@ -55,21 +55,18 @@ function toggleSkill(group, key) {
 
 // ---- 新增技能弹窗（按类别注入方式 render_mode 动态字段） ----
 // 规则与后端 lib/skill_db.py _RENDER_MODE_RULES 对齐，新增类别无需改前端：
-//   camera 运镜：名称+英文触发短语（指南可选）
-//   term 术语：中文名+英文写法（景别 / 镜头结构）
+//   term 术语：中文名+英文写法（运镜 / 景别 / 镜头结构）
 //   example 示例：名称+示例数组，每镜挑一句（微表情）
 //   descriptive 描述：名称+描述/短语（人物主体 / 打斗 / 特效）
 //   block 片段：名称+整段内容（风格 / 效果预置）
 const RENDER_MODE_RULES = {
-  camera: { needNameEn: false, needExamples: true, showGuide: true, exLabel: "英文触发短语", exZh: false },
-  term: { needNameEn: true, needExamples: false, showGuide: false, exLabel: "", exZh: false },
-  example: { needNameEn: false, needExamples: true, showGuide: false, exLabel: "中文示例", exZh: true },
-  descriptive: { needNameEn: false, needExamples: false, showGuide: true, exLabel: "参考短语", exZh: false },
-  block: { needNameEn: false, needExamples: false, showGuide: false, exLabel: "内容片段", exZh: false },
+  term: { needNameEn: true, needExamples: false, exLabel: "", exZh: false },
+  example: { needNameEn: false, needExamples: true, exLabel: "中文示例", exZh: true },
+  descriptive: { needNameEn: false, needExamples: false, exLabel: "参考短语", exZh: false },
+  block: { needNameEn: false, needExamples: false, exLabel: "内容片段", exZh: false },
 };
 const RENDER_MODE_OPTIONS = [
   { value: "descriptive", label: "描述型（人物/打斗/特效等，自然融入）" },
-  { value: "camera", label: "运镜型（英文触发短语）" },
   { value: "term", label: "术语型（中文名 + 英文对照）" },
   { value: "example", label: "示例型（每镜挑一句示例）" },
   { value: "block", label: "片段型（整段内容近似原样）" },
@@ -80,11 +77,9 @@ const addDialog = reactive({
   name: "",
   nameEn: "",
   desc: "",
-  guide: "",
   examples: "",
   newCategory: "",
   newCategoryMode: "descriptive",
-  newCategoryProtect: false,
   saving: false,
 });
 
@@ -99,11 +94,9 @@ function openAddDialog(group) {
   addDialog.name = "";
   addDialog.nameEn = "";
   addDialog.desc = "";
-  addDialog.guide = "";
   addDialog.examples = "";
   addDialog.newCategory = "";
   addDialog.newCategoryMode = group?.renderMode || "descriptive";
-  addDialog.newCategoryProtect = false;
   addDialog.visible = true;
 }
 
@@ -129,7 +122,6 @@ async function submitAddSkill() {
       const catRes = await addSkillCategory({
         name: newCat,
         renderMode: addDialog.newCategoryMode,
-        protectKeywords: addDialog.newCategoryProtect,
       });
       if (!catRes.success) throw new Error(catRes.error || "新增类别失败");
       categoryId = catRes.id;
@@ -143,7 +135,6 @@ async function submitAddSkill() {
       name: addDialog.name.trim(),
       nameEn: addDialog.nameEn.trim(),
       desc: addDialog.desc.trim(),
-      guide: addDialog.guide.trim(),
       examples: addDialog.examples.trim(),
     });
     if (!res.success) throw new Error(res.error || "新增技能失败");
@@ -201,8 +192,8 @@ async function generateH3(lang) {
       const nr = await fetchSkillNotes(selections, lang);
       if (!nr.success) throw new Error(nr.error || "技能注入块渲染失败");
       skillNotes = nr.notes || "";
-      // 所选技能必须出现：后端返回的必选关键词（技术词原文 / 术语名）
-      requiredTerms = Array.isArray(nr.required) ? nr.required : (nr.protected || []);
+      // 所选技能必须出现：后端返回的必选关键词（术语中文名 / 英文对照）
+      requiredTerms = Array.isArray(nr.required) ? nr.required : [];
       if (nr.warnings?.length) ElNotification.warning({
         message: nr.warnings.join("；"),
         duration: 0,
@@ -263,7 +254,6 @@ async function generateH3(lang) {
               <div v-for="g in groups" :key="g.id" class="mrd-skill-group">
                 <div class="mrd-skill-group-title">
                   {{ g.label }}
-                  <span v-if="g.protectKeywords" class="mrd-skill-badge">关键词保护</span>
                   <span v-if="g.description" class="mrd-skill-group-desc">{{ g.description }}</span>
                 </div>
                 <div class="mrd-skill-pills">
@@ -279,7 +269,6 @@ async function generateH3(lang) {
                         <div class="mrd-skill-tip-name">{{ it.label }}</div>
                         <div v-if="it.desc" class="mrd-skill-tip-desc">{{ it.desc }}</div>
                         <div v-if="it.nameEn" class="mrd-skill-tip-kw">英文：{{ it.nameEn }}</div>
-                        <div v-if="it.guide" class="mrd-skill-tip-ex">指南：{{ it.guide }}</div>
                         <div v-if="it.examples && it.examples.length" class="mrd-skill-tip-ex">
                           例：{{ it.examples.join("；") }}
                         </div>
@@ -399,11 +388,6 @@ async function generateH3(lang) {
             <el-option v-for="m in RENDER_MODE_OPTIONS" :key="m.value" :label="m.label" :value="m.value" />
           </el-select>
         </div>
-        <div class="mrd-add-skill-row">
-          <span class="mrd-add-skill-label">关键词保护</span>
-          <el-switch v-model="addDialog.newCategoryProtect" size="small" />
-          <span class="mrd-add-skill-hint">开：技术词用 &lt;!…&gt; 包裹，翻译阶段原样保留（如运镜）</span>
-        </div>
       </template>
       <div class="mrd-add-skill-row">
         <span class="mrd-add-skill-label">名称</span>
@@ -420,11 +404,7 @@ async function generateH3(lang) {
         <span class="mrd-add-skill-label">描述</span>
         <el-input v-model="addDialog.desc" type="textarea" :rows="2" placeholder="悬停胶囊时展示的技能描述（可选）" />
       </div>
-      <div v-if="addDialogRules.showGuide" class="mrd-add-skill-row">
-        <span class="mrd-add-skill-label">写法指南</span>
-        <el-input v-model="addDialog.guide" type="textarea" :rows="2" placeholder="可选：星级 / 强度 / 方向写法，如「★★★ 最稳。建议 slow push-in / dolly in」" />
-      </div>
-      <div v-if="addDialogRules.needExamples || addDialogRules.showGuide" class="mrd-add-skill-row">
+      <div v-if="addDialogRules.needExamples" class="mrd-add-skill-row">
         <span class="mrd-add-skill-label">示例</span>
         <el-input
           v-model="addDialog.examples"

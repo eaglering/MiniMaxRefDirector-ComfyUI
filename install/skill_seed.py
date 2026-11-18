@@ -4,98 +4,75 @@
 skills.db 时读取本模块写入数据库，并写 .lock 标记；之后一律以数据库为准
 （界面编辑 / 新增技能都落库），lock 存在则不再重复初始化。
 
-内置类别同时声明「注入方式」（render_mode）与「关键词保护」（protect_keywords）：
-- 运镜 → camera + protect_keywords=1（英文触发短语用 <!…> 保护，翻译阶段原样保留）
-- 景别 / 镜头结构 → term（中文名直写 + name_en 对照，翻译阶段按 glossary 还原）
+内置类别只声明「注入方式」（render_mode）：
+- 运镜 → term（中文名直写提示词 + name_en 英文对照，翻译阶段按 glossary 还原；
+- 景别 / 镜头结构 → term（同上）
 - 微表情 → example（每镜挑一句示例自然融入）
-自定义类别（人物主体 / 打斗 / 特效 / 风格…）在界面创建时选择这五种之一即可，
+自定义类别（人物主体 / 打斗 / 特效 / 风格…）在界面创建时选择注入方式即可，
 渲染与校验逻辑见 lib/skill_notes.py 与 lib/skill_db.py。
 
 字段精简原则（按三段链路「原始提示词 → H3 中文 → H3 英文」的实际使用）：
-- 运镜：name（中文展示名）+ name_en + desc（中文一句话）+ guide（写法指南：
-  星级/建议写法/强度/方向）+ examples（英文触发短语数组）。
+- 运镜：name（纯中文名，如「推近」）+ name_en（英文对照，如 "Push-in / Dolly-in"）
+  + desc（中文一句话）。无 guide、examples 恒为空数组。
 - 景别 / 镜头结构：仅 name（中文名直接写入提示词，如「大远景」「双人镜头」）+
   name_en（英文阶段对照映射，保证翻译为 extreme wide shot / two shot 而非泛化词）。
 - 微表情：name（如「轻叹」）+ name_en + desc + examples（中文示例数组，最终使用）
   + group_name（eye/brow/mouth/breath/body，供旧导演台分组筛选）。
-不再保留 desc 之外的双语冗余打包（原 prompt/example/keyword/meta 列已废弃）。
 """
 
-# ── 运镜（Camera Motion LoRA，内容依据 README 使用指南）─────────────────────
-# guide：写法指南；examples：英文触发短语（与训练素材最接近的建议写法）。
+# ── 运镜（Camera Motion，中文名直写提示词；name_en 供英文阶段对照）─────────────
 _CAMERA_MOTION = {
     "push_in": {
-        "name": "推近 Push-in",
+        "name": "推近",
         "name_en": "Push-in / Dolly-in",
         "desc": "机位向主体或兴趣点前移，画面逐渐收紧，增强张力或亲密感。",
-        "guide": "★★★ 最稳。建议写法：slow push-in / dolly in / push in；"
-                 "更舒缓加 slow，更强烈用 aggressive push-in；指定方向：push-in from left。",
-        "examples": ["slow push-in", "dolly in", "push in"],
     },
     "pull_back": {
-        "name": "拉远 Pull-back",
+        "name": "拉远",
         "name_en": "Pull-back / Dolly-out",
         "desc": "机位自主体后退，视野逐渐张开，交代环境、比例与情境。",
-        "guide": "★★★ 最稳。建议写法：pull-back / dolly out；更舒缓加 slow（slow pull-back）。",
-        "examples": ["pull-back", "dolly out"],
     },
     "push_pull": {
-        "name": "推拉组合 Push+Pull",
+        "name": "推拉组合",
         "name_en": "Push + Pull",
         "desc": "同一镜头内先推后拉（或反之）的连贯运动，形成推拉相间的节奏。",
-        "guide": "★★☆ 稳。建议写法：push-in then pull-back。",
-        "examples": ["push-in then pull-back"],
     },
     "orbit": {
-        "name": "环绕 Orbit",
+        "name": "环绕",
         "name_en": "Orbit",
         "desc": "机位沿人物作弧线环绕（半圈或整圈），不断变换观察角度。",
-        "guide": "★★☆ 稳。建议写法：slow orbit / orbit around；指定方向：orbit right。",
-        "examples": ["slow orbit", "orbit around"],
     },
     "tracking": {
-        "name": "跟拍 Tracking",
+        "name": "跟拍",
         "name_en": "Tracking / Handheld",
         "desc": "机位与人物平行或跟随其后移动，同步其行进（可带轻微手持的真实感）。",
-        "guide": "★★★ 最稳。建议写法：handheld tracking shot / dynamic handheld。",
-        "examples": ["handheld tracking shot", "dynamic handheld"],
     },
     "aerial": {
-        "name": "航拍 Aerial",
+        "name": "航拍",
         "name_en": "Aerial / Drone",
         "desc": "俯拍、航拍或无人机镜头，用于建立场景、飞掠而过或向兴趣点下降。",
-        "guide": "★★☆ 稳。建议写法：aerial drone shot / flyover。",
-        "examples": ["aerial drone shot", "flyover"],
     },
     "crane": {
-        "name": "升降 Crane",
+        "name": "升降",
         "name_en": "Crane / Tilt",
         "desc": "垂直方向的镜头运动：升降臂起落或俯仰扫动，用以重新构图画面。",
-        "guide": "★★☆ 稳。建议写法：crane reveal / tilt up / tilt down。",
-        "examples": ["crane reveal", "tilt up", "tilt down"],
     },
     "pan": {
-        "name": "横摇 Pan",
+        "name": "横摇",
         "name_en": "Pan",
         "desc": "机位不动，镜头水平扫动，掠过场景或在主体之间移动。",
-        "guide": "★☆☆ 较弱（训练样本少）。建议写法：pan left / pan right；"
-                 "建议叠加其他运镜词（如 slow pan right）以增强效果。",
-        "examples": ["pan left", "pan right"],
     },
     "close_up": {
-        "name": "特写 Close-up",
+        "name": "特写",
         "name_en": "Close-up / Macro",
         "desc": "大特写或微距构图，将面孔、物体、质感或细节充满画面。",
-        "guide": "★★☆ 稳。建议写法：close-up / macro / extreme close-up。",
-        "examples": ["close-up", "macro", "extreme close-up"],
     },
 }
 
 # 运镜类别说明（写进 skill_categories.description，仅作界面说明）
-# 触发词写法由用户在「全局提示词」中自行申明，skill_notes 不再注入该规则。
 CAMERA_CATEGORY_DESC = (
-    "Camera Motion LoRA 运镜触发词库。触发词写法规矩（例如 camera motion 置于开头）"
-    "请在全局提示词中自行申明；此处只维护运镜风格、写法指南与英文触发短语。"
+    "运镜方式词条（中文名直写提示词，英文阶段按英文对照还原）。"
+    "分镜 / H3 提示词中的运镜描写用自然语言即可，此处词条供导演台按镜头勾选。"
 )
 
 # ── 景别（中文名直接写入提示词；name_en 供英文阶段对照）────────────────────
@@ -194,7 +171,8 @@ GROUP_TO_CATEGORY = {
     "expressions": "微表情",
 }
 
-# 类别名 → 生成链路指令构建用的字段名（legacy 兼容层：lib/skill_db.py category_presets）
+# 类别名 → 生成链路旧字段名（legacy 兼容：lib/skill_notes.py resolve_legacy_selections
+# 用它把旧 payload 的 camera_motion / shot_size / framing 反查到对应类别）
 CATEGORY_FIELD = {
     "运镜": "camera",
     "景别": "shotSize",
@@ -204,30 +182,28 @@ CATEGORY_FIELD = {
 
 # ── 注入方式（skill_categories.render_mode）────────────────────────────────
 # 决定该类别技能如何进入 skill_notes：
-#   camera      运镜类：列风格 + 英文触发短语（受 protect_keywords 保护，不做触发词申明）
-#   term        术语类：中文名直接写入镜头描述，英文阶段按 name_en 对照（景别 / 镜头结构）
+#   term        术语类：中文名直接写入镜头描述，英文阶段按 name_en 对照（运镜 / 景别 / 镜头结构）
 #   example     示例类：从示例数组挑一句自然融入，不写技能名（微表情）
 #   descriptive 描述类：desc + 示例短语自然融入（人物主体 / 打斗 / 特效等扩展类别）
 #   block       片段类：整段内容近似原样进入提示词（风格 / 特殊效果预置）
-RENDER_MODES = ("camera", "term", "example", "descriptive", "block")
+RENDER_MODES = ("term", "example", "descriptive", "block")
 
-# 内置类别 → (render_mode, protect_keywords)
+# 内置类别 → render_mode（旧 camera 模式已移除，运镜与景别/镜头结构同为 term）
 BUILTIN_CATEGORY_RENDER = {
-    "运镜": ("camera", 1),
-    "景别": ("term", 0),
-    "镜头结构": ("term", 0),
-    "微表情": ("example", 0),
+    "运镜": "term",
+    "景别": "term",
+    "镜头结构": "term",
+    "微表情": "example",
 }
 
 
 def _skill_row(key: str, data: dict, group: str = "") -> dict:
-    """组装一条技能行（新结构，examples 为数组，入库时序列化为 JSON）。"""
+    """组装一条技能行（examples 为数组，入库时序列化为 JSON）。"""
     return {
         "key": key,
         "name": data.get("name") or key,
         "name_en": data.get("name_en") or "",
         "desc": data.get("desc") or "",
-        "guide": data.get("guide") or "",
         "examples": list(data.get("examples") or []),
         "group_name": group,
     }
@@ -241,16 +217,16 @@ def build_builtin_categories() -> list:
     micro = [_skill_row(k, d, group=d.get("group") or "") for k, d in _MICRO_EXPRESSION.items()]
     cats = [
         {"name": "运镜", "field": "camera",
-         "render_mode": "camera", "protect_keywords": 1,
+         "render_mode": "term",
          "description": CAMERA_CATEGORY_DESC, "skills": camera},
         {"name": "景别", "field": "shotSize",
-         "render_mode": "term", "protect_keywords": 0,
+         "render_mode": "term",
          "description": SHOT_SIZE_CATEGORY_DESC, "skills": shot},
         {"name": "镜头结构", "field": "framing",
-         "render_mode": "term", "protect_keywords": 0,
+         "render_mode": "term",
          "description": FRAMING_CATEGORY_DESC, "skills": framing},
         {"name": "微表情", "field": "expression",
-         "render_mode": "example", "protect_keywords": 0,
+         "render_mode": "example",
          "description": MICRO_CATEGORY_DESC, "skills": micro},
     ]
     # skills.key 全局唯一（跨类别也不得重名，否则后入库的会被 INSERT OR IGNORE 静默吞掉）
@@ -263,30 +239,3 @@ def build_builtin_categories() -> list:
                     f"skill_seed 内置技能 key 重名：{s['key']}（{prev} / {cat['name']}）")
             seen[s["key"]] = cat["name"]
     return cats
-
-
-def _preset_camera(key: str) -> dict:
-    d = _CAMERA_MOTION[key]
-    return {"name_zh": d["name"], "name_en": d["name_en"], "desc_zh": d["desc"],
-            "guide": d["guide"], "examples": list(d["examples"])}
-
-
-def _preset_name_pair(key: str, table: dict) -> dict:
-    d = table[key]
-    return {"name_zh": d["name"], "name_en": d["name_en"]}
-
-
-def _preset_expression(key: str) -> dict:
-    d = _MICRO_EXPRESSION[key]
-    return {"name_zh": d["name"], "name_en": d["name_en"], "desc_zh": d["desc"],
-            "examples_zh": list(d["examples"]), "group": d["group"]}
-
-
-def fallback_presets() -> dict:
-    """数据库不可用时的内置回退（与种子一致，供 lib/prompt.py 使用）。"""
-    return {
-        "camera": {k: _preset_camera(k) for k in _CAMERA_MOTION},
-        "shotSize": {k: _preset_name_pair(k, _SHOT_SIZE) for k in _SHOT_SIZE},
-        "framing": {k: _preset_name_pair(k, _FRAMING) for k in _FRAMING},
-        "expression": {k: _preset_expression(k) for k in _MICRO_EXPRESSION},
-    }

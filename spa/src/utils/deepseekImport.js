@@ -20,6 +20,8 @@ import {
   deepseekCompleteInSession,
   deepseekCompleteNewSession,
   deepseekDeleteSession,
+  normalizeH3Json,
+  parseH3Lenient,
   parseJsonBlock,
   webchatLastReply,
 } from "./llm.js";
@@ -491,38 +493,18 @@ export async function runH3Step(
     "或是上一次提问的残留内容）。请针对本次 Shot description 重新输出：只输出一个 JSON 对象，" +
     "键为 summary / detailed_description / overall_soundscape / non_diegetic_music，" +
     "不要任何解释文字、不要 Markdown 围栏之外的内容。";
-  const toH3 = (obj) => ({
-    summary: String(obj.summary || ""),
-    detailed_description: String(obj.detailed_description || ""),
-    overall_soundscape: String(obj.overall_soundscape || ""),
-    non_diegetic_music: String(obj.non_diegetic_music || ""),
-  });
-  // 宽松解析：常规提取 → 去尾逗号 → 全角标点修复
-  const parseLenient = (txt) => {
-    try {
-      const o = parseJsonBlock(txt);
-      if (o && typeof o === "object" && !Array.isArray(o)) return o;
-    } catch (e) { /* 继续宽松修复 */ }
-    const m = String(txt || "").match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const fixes = [
-      m[0].replace(/,\s*([}\]])/g, "$1"),
-      m[0]
-        .replace(/[“”]/g, '"')
-        .replace(/，/g, ",")
-        .replace(/：/g, ":")
-        .replace(/【/g, "[")
-        .replace(/】/g, "]")
-        .replace(/,\s*([}\]])/g, "$1"),
-    ];
-    for (const fix of fixes) {
-      try {
-        const o = JSON.parse(fix);
-        if (o && typeof o === "object" && !Array.isArray(o)) return o;
-      } catch (e) { /* 尝试下一档 */ }
-    }
-    return null;
-  };
+  const toH3 = (obj) =>
+    // 标签格式清洗：模型偶发输出「<@ 张三>」「<#李四：你好 >」等畸形标签，
+    // 不清洗会破坏主体绑定与 chip 渲染（parseH3Lenient 内已清洗，此处幂等兜底）
+    normalizeH3Json({
+      summary: String(obj.summary || ""),
+      detailed_description: String(obj.detailed_description || ""),
+      overall_soundscape: String(obj.overall_soundscape || ""),
+      non_diegetic_music: String(obj.non_diegetic_music || ""),
+    });
+  // 宽松解析与单镜转换共用同一入口（llm.js parseH3Lenient）：
+  // 常规提取 → 去尾逗号 → 全角标点修复，成功后统一做标签清洗
+  const parseLenient = parseH3Lenient;
   const failed = [];
   for (let i = 0; i < total; i++) {
     checkCancelled(token);

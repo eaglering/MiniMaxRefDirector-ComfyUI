@@ -237,7 +237,7 @@ export const useWorkspace = defineStore("workspace", () => {
     }
   }
 
-  // 按类别分组的技能组：{ id, label, categoryName, renderMode, protectKeywords, items }
+  // 按类别分组的技能组：{ id, label, categoryName, renderMode, items }
   // 选择统一写入 seg.skills[categoryName]（类别名 UNIQUE，可无限扩展）
   const skillGroups = computed(() =>
     skillDict.categories.map((c) => ({
@@ -245,7 +245,6 @@ export const useWorkspace = defineStore("workspace", () => {
       label: c.name,
       categoryName: c.name,
       renderMode: c.renderMode || "descriptive",
-      protectKeywords: !!c.protectKeywords,
       categoryId: c.id,
       description: c.description,
       items: skillDict.skills

@@ -175,16 +175,16 @@ export async function generateH3Prompt(opts, payload) {
 
 // H3 提示词生成（网页桥接通道）——与后端 generate_h3_prompt 的产出结构对齐。
 // 写作规则单一来源：h3-writing-guide（DB 技能文档，前端经 /spa/skill_doc 拉取），
-// 本常量只保留网页通道特有规则（JSON-only / 标签格式 / 语言跟随 / 受保护片段）。
+// 本常量只保留网页通道特有规则（JSON-only / 标签格式 / 语言跟随）。
 // 不预设技能类别，也不申明触发词写法（触发词规则由用户在全局提示词中自行申明）。
 export const WEB_CHAT_H3_SYSTEM = `You are a video prompt engineer. Convert the user's native-language shot description into an H3 prompt JSON object with EXACTLY these keys:
 {"summary": string, "detailed_description": string, "overall_soundscape": string, "non_diegetic_music": string}
 Rules:
 - Respond with ONLY the JSON object, no markdown fences, no extra text.
 - Wrap EVERY mentioned character/subject name as <@名字> (e.g. <@阿婆>) and never leave a subject name unwrapped; preserve existing <@Name> / <#Name:dialogue> / <d>dialogue</d> tags verbatim.
-- Tag format is strict: no whitespace right after <@ / <# / <! or right before >, and the name/content separator must be a half-width colon ":" (never the full-width "："). Correct: <#李四:你好！>; wrong: <# 李四：你好！ >.
+- Tag format is strict: no whitespace right after <@ / <# or right before >, and the name/content separator must be a half-width colon ":" (never the full-width "："). Correct: <#李四:你好！>; wrong: <# 李四：你好！ >.
 - IMPORTANT: All four JSON field values (summary, detailed_description, overall_soundscape, non_diegetic_music) MUST be written in the SAME language as the input shot description — Chinese input MUST produce Chinese output, English input MUST produce English output. Never switch to a different language on your own; this rule overrides the language of this instruction.
-- Fragments wrapped as <!...> (e.g. <!slow push-in>) are protected technical keywords: keep the inner text verbatim in its original language/spelling, keep the <!...> wrapper in this stage, and never translate, reorder, or paraphrase them. Each such phrase must appear at least once.`;
+- Describe camera movement and ambient sound in natural language.`;
 
 // 写作指南缓存（60s TTL）：一键导入逐镜追问时不重复拉取；面板里改完文档最多 1 分钟生效
 let _h3GuideCache = { at: 0, text: "" };
@@ -226,22 +226,43 @@ function h3Brief(text, n = 120) {
   return String(text || "").replace(/\s+/g, " ").slice(0, n);
 }
 
-// 宽松解析：抓到的文本可能是 DOM 兜底内容，前面会带「已深度思考（用时 12 秒）」
-// 之类的页面文字，或包在 ```json 围栏里。直接 JSON.parse 必然失败（整步全灭），
-// 统一走 parseJsonBlock：剥围栏 + 取首个 { 到最后一个 } 再解析。
-function parseH3(text) {
+// 宽松解析 + 四字段标签清洗（单镜转换与批量转 H3 的统一入口，单一来源）：
+// 1) parseJsonBlock：剥 ```json 围栏 + 取首个 { 到最后一个 }；
+// 2) 失败则宽松修复：取 {…} 后先去尾逗号，再全角标点修复（“”→"" ，，→, ：→: 【】→[]）；
+// 3) 成功后 normalizeH3Json 清洗畸形标签（模型偶发输出「<@ 张三>」「<#李四：你好 >」），
+//    后端主体绑定只认半角冒号。
+export function parseH3Lenient(text) {
+  let obj = null;
   try {
-    const obj = parseJsonBlock(text);
-    if (!(obj && typeof obj === "object" && !Array.isArray(obj))) return null;
-    // 标签格式清洗（模型偶发输出「<@ 张三>」「<#李四：你好 >」）：
-    // 去括号内首尾空格、全角「：」统一为半角（后端主体绑定只认半角冒号）
-    for (const k of ["summary", "detailed_description", "overall_soundscape", "non_diegetic_music"]) {
-      if (typeof obj[k] === "string") obj[k] = normalizeH3Tags(obj[k]);
+    const o = parseJsonBlock(text);
+    if (o && typeof o === "object" && !Array.isArray(o)) obj = o;
+  } catch { /* 继续宽松修复 */ }
+  if (!obj) {
+    const m = String(text || "").match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const fixes = [
+      m[0].replace(/,\s*([}\]])/g, "$1"),
+      m[0]
+        .replace(/[“”]/g, '"')
+        .replace(/，/g, ",")
+        .replace(/：/g, ":")
+        .replace(/【/g, "[")
+        .replace(/】/g, "]")
+        .replace(/,\s*([}\]])/g, "$1"),
+    ];
+    for (const fix of fixes) {
+      try {
+        const o = JSON.parse(fix);
+        if (o && typeof o === "object" && !Array.isArray(o)) { obj = o; break; }
+      } catch { /* 尝试下一档 */ }
     }
-    return obj;
-  } catch {
-    return null;
   }
+  return obj ? normalizeH3Json(obj) : null;
+}
+
+// 单镜转换解析入口（与批量转 H3 parseH3Lenient 完全同构：宽松修复 + 标签清洗）
+function parseH3(text) {
+  return parseH3Lenient(text);
 }
 
 // H3 标签格式清洗：与后端 lib/prompt.py normalize_h3_tags 同构

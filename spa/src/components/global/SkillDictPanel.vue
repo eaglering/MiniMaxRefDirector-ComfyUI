@@ -1,8 +1,7 @@
 <script setup>
 // 全局参数 · 分镜技能词典管理面板
 // 类别驱动（render_mode 决定注入方式与必填字段），可无限扩展：
-//   camera 运镜 / term 术语 / example 示例 / descriptive 描述 / block 片段
-// protect_keywords=1 的类别，其技术词在 skill_notes 中用 <!技术词> 保护（如运镜）
+//   term 术语（运镜/景别/镜头结构） / example 示例 / descriptive 描述 / block 片段
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
@@ -15,29 +14,24 @@ const ws = useWorkspace();
 
 // 注入方式规则（与后端 lib/skill_db.py _RENDER_MODE_RULES 对齐）
 const RENDER_MODE_RULES = {
-  camera: {
-    needNameEn: false, needExamples: true, showGuide: true, exLang: "en",
-    exLabel: "英文触发短语（分号分隔，如 slow push-in；dolly in）",
-  },
-  term: { needNameEn: true, needExamples: false, showGuide: false },
+  term: { needNameEn: true, needExamples: false },
   example: {
-    needNameEn: false, needExamples: true, showGuide: false, exLang: "zh",
+    needNameEn: false, needExamples: true, exLang: "zh",
     exLabel: "示例（分号分隔，如 长长地呼出一口气；轻叹一声）",
   },
   descriptive: {
-    needNameEn: false, needExamples: false, showGuide: true, exLang: "en",
+    needNameEn: false, needExamples: false, exLang: "en",
     exLabel: "参考短语（可选，分号分隔）",
   },
-  block: { needNameEn: false, needExamples: false, showGuide: false },
+  block: { needNameEn: false, needExamples: false },
 };
 const RENDER_MODE_OPTIONS = [
   { value: "descriptive", label: "描述型 · 人物/打斗/特效等，自然融入" },
-  { value: "camera", label: "运镜型 · 英文触发短语（建议开启关键词保护）" },
-  { value: "term", label: "术语型 · 中文名 + 英文对照（景别/构图）" },
+  { value: "term", label: "术语型 · 中文名 + 英文对照（运镜/景别/构图）" },
   { value: "example", label: "示例型 · 每镜挑一句示例（微表情）" },
   { value: "block", label: "片段型 · 整段内容近似原样（风格/效果）" },
 ];
-const MODE_LABEL = { camera: "运镜", term: "术语", example: "示例", descriptive: "描述", block: "片段" };
+const MODE_LABEL = { term: "术语", example: "示例", descriptive: "描述", block: "片段" };
 
 const activeCatId = ref(null);
 const activeCat = computed(() =>
@@ -59,8 +53,7 @@ const columns = computed(() => {
   const mode = activeMode.value;
   const cols = [{ prop: "name", label: "名称" }, { prop: "nameEn", label: "英文写法" }];
   cols.push({ prop: "desc", label: mode === "block" ? "内容片段" : "描述" });
-  if (mode === "camera" || mode === "descriptive") cols.push({ prop: "guide", label: "写法指南" });
-  if (mode === "camera" || mode === "example" || mode === "descriptive") {
+  if (mode === "example" || mode === "descriptive") {
     cols.push({ prop: "examples", label: mode === "example" ? "示例" : "短语" });
   }
   return cols;
@@ -74,7 +67,7 @@ function cellText(row, prop) {
 // ---- 类别新增 / 编辑 ----
 const catDialog = reactive({
   visible: false, editing: null, name: "", description: "",
-  renderMode: "descriptive", protectKeywords: false, saving: false,
+  renderMode: "descriptive", saving: false,
 });
 
 function openCategory(editing = null) {
@@ -82,7 +75,6 @@ function openCategory(editing = null) {
   catDialog.name = editing?.name || "";
   catDialog.description = editing?.description || "";
   catDialog.renderMode = editing?.renderMode || "descriptive";
-  catDialog.protectKeywords = !!editing?.protectKeywords;
   catDialog.visible = true;
 }
 
@@ -98,7 +90,6 @@ async function submitCategory() {
       name: catDialog.name.trim(),
       description: catDialog.description.trim(),
       renderMode: catDialog.renderMode,
-      protectKeywords: catDialog.protectKeywords,
     };
     const res = catDialog.editing
       ? await updateSkillCategory({ id: catDialog.editing.id, ...payload })
@@ -117,7 +108,7 @@ async function submitCategory() {
 // ---- 技能新增 / 编辑 ----
 const dialog = reactive({
   visible: false, editing: null, categoryId: null,
-  name: "", nameEn: "", desc: "", guide: "", examples: "", saving: false,
+  name: "", nameEn: "", desc: "", examples: "", saving: false,
 });
 
 const dialogMode = computed(() => {
@@ -132,7 +123,6 @@ function openAdd() {
   dialog.name = "";
   dialog.nameEn = "";
   dialog.desc = "";
-  dialog.guide = "";
   dialog.examples = "";
   dialog.visible = true;
 }
@@ -143,7 +133,6 @@ function openEdit(row) {
   dialog.name = row.name || "";
   dialog.nameEn = row.nameEn || "";
   dialog.desc = row.desc || "";
-  dialog.guide = row.guide || "";
   dialog.examples = (row.examples || []).join("；");
   dialog.visible = true;
 }
@@ -169,7 +158,6 @@ async function submitDialog() {
       name: dialog.name.trim(),
       nameEn: dialog.nameEn.trim(),
       desc: dialog.desc.trim(),
-      guide: dialog.guide.trim(),
       examples: dialog.examples.trim(),
     };
     const res = dialog.editing
@@ -258,10 +246,9 @@ async function submitBatch() {
   <section class="mrd-card mrd-section">
     <h3 class="mrd-section-title"><el-icon><component :is="'Grid'" /></el-icon>分镜技能</h3>
     <p class="mrd-skill-sub">
-      技能按「注入方式」进入 skill_notes：运镜用英文触发短语，术语型直接写中文名并在英文阶段
-      按对照还原，示例型每镜挑一句，描述/片段型自然融入镜头描述。开启「关键词保护」的类别
-      （内置为运镜）其技术词会以 &lt;!技术词&gt; 包裹，翻译阶段原样保留。
-      触发词写法（如 camera motion 置于开头）请在全局提示词中自行申明。
+      技能按「注入方式」进入 skill_notes：术语型（运镜/景别/镜头结构）直接写中文名并在英文阶段
+      按对照还原，示例型每镜挑一句，描述/片段型自然融入镜头描述。
+      分镜 / H3 提示词里的运镜与环境音描写用自然语言即可，无需通过词典。
     </p>
 
     <div class="mrd-skill-tabs">
@@ -271,7 +258,6 @@ async function submitBatch() {
         @click="activeCatId = c.id"
       >
         {{ c.name }}
-        <span v-if="c.protectKeywords" class="mrd-skill-tab-badge">保护</span>
       </button>
       <div class="mrd-skill-actions">
         <el-button size="small" :icon="'Plus'" @click="openCategory(null)">新建类别</el-button>
@@ -283,14 +269,13 @@ async function submitBatch() {
 
     <p v-if="activeCat" class="mrd-skill-cat-desc">
       <el-tag size="small" effect="plain">{{ MODE_LABEL[activeMode] || activeMode }}</el-tag>
-      <el-tag v-if="activeCat.protectKeywords" size="small" effect="plain" type="warning">关键词保护</el-tag>
       <span v-if="activeCat.description">{{ activeCat.description }}</span>
     </p>
 
     <el-table :data="catSkills" size="small" class="mrd-skill-table" :key="activeCat?.id">
       <el-table-column
         v-for="col in columns" :key="col.prop"
-        :prop="col.prop" :label="col.label" :min-width="col.prop === 'guide' ? 240 : 130"
+        :prop="col.prop" :label="col.label" min-width="130"
       >
         <template #default="{ row }">{{ cellText(row, col.prop) }}</template>
       </el-table-column>
@@ -305,7 +290,7 @@ async function submitBatch() {
       </template>
     </el-table>
 
-    <!-- 类别弹窗：注入方式 / 关键词保护 -->
+    <!-- 类别弹窗：注入方式 -->
     <el-dialog v-model="catDialog.visible" :title="catDialog.editing ? '编辑类别' : '新建类别'" width="480px" append-to-body>
       <div class="mrd-field">
         <label>类别名称（分镜选择按类别名存储，重命名会影响已有选择）</label>
@@ -316,10 +301,6 @@ async function submitBatch() {
         <el-select v-model="catDialog.renderMode" style="width: 100%">
           <el-option v-for="m in RENDER_MODE_OPTIONS" :key="m.value" :label="m.label" :value="m.value" />
         </el-select>
-      </div>
-      <div class="mrd-field mrd-field-row">
-        <label>关键词保护（技术词用 &lt;!…&gt; 包裹，翻译阶段原样保留）</label>
-        <el-switch v-model="catDialog.protectKeywords" />
       </div>
       <div class="mrd-field">
         <label>类别说明（可选，展示于分镜技能区）</label>
@@ -341,7 +322,7 @@ async function submitBatch() {
       </div>
       <div class="mrd-field">
         <label>名称（中文名直接写入提示词）</label>
-        <el-input v-model="dialog.name" placeholder="如：大远景 / 双人镜头 / 轻叹 / 推近 Push-in" />
+        <el-input v-model="dialog.name" placeholder="如：大远景 / 双人镜头 / 轻叹 / 推近" />
       </div>
       <div class="mrd-field">
         <label>英文写法{{ dialogRules.needNameEn ? "（必填，英文翻译阶段对照）" : "（可选）" }}</label>
@@ -351,11 +332,7 @@ async function submitBatch() {
         <label>描述{{ dialogMode === "block" ? "（片段型：整段内容会近似原样进入提示词）" : "（可选，悬停提示 / 融入说明）" }}</label>
         <el-input v-model="dialog.desc" :type="dialogMode === 'block' ? 'textarea' : 'text'" :rows="2" placeholder="一句话说明" />
       </div>
-      <div v-if="dialogRules.showGuide" class="mrd-field">
-        <label>写法指南（可选：星级 / 强度 / 方向写法）</label>
-        <el-input v-model="dialog.guide" type="textarea" :rows="2" placeholder="如：★★★ 最稳。建议写法：slow push-in / dolly in；更舒缓加 slow。" />
-      </div>
-      <div v-if="dialogRules.needExamples || dialogRules.showGuide" class="mrd-field">
+      <div v-if="dialogRules.needExamples" class="mrd-field">
         <label>{{ dialogRules.exLabel || "参考短语（可选，分号分隔）" }}</label>
         <el-input v-model="dialog.examples" type="textarea" :rows="2"
           :placeholder="dialogRules.exLang === 'zh' ? '长长地呼出一口气；轻叹一声' : 'slow push-in；dolly in；push in'" />
