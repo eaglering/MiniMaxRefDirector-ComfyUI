@@ -59,12 +59,6 @@ export function fetchState(nodeId) {
 export function saveState(nodeId, state) {
   return postJSON("/spa/save", { node_id: nodeId, state });
 }
-export function fetchSkills() {
-  return getJSON("/spa/skills");
-}
-export function saveSkills(skills) {
-  return postJSON("/spa/skills", { skills });
-}
 export function fetchLlmFiles() {
   return getJSON("/spa/llm_files");
 }

@@ -9,18 +9,18 @@
                created_at, updated_at)   —— md 提示词模板（主体/音频/图片/分镜设计）
 
 字段按类别使用（三段链路「原始提示词 → H3 中文 → H3 英文」）：
-- 运镜 / 景别 / 镜头结构（term）：name 中文名直接写入提示词；name_en 供英文阶段对照。
-- 微表情（example）：examples = 中文示例数组（最终使用）；group_name = eye/brow/mouth/
-  breath/body 分组（旧导演台筛选用）。
+- term 类别：name 中文名直接写入提示词；name_en 供英文阶段对照。
+- example 类别：examples = 中文示例数组（生成时挑一句织入）；group_name 为展示分组。
+- descriptive / block 类别：desc 与内容按 render_mode 语义注入。
 
 初始化：
-- 首次连接（install/skills.db.lock 不存在）时写入种子：内置技能词条
-  （install/skill_seed.py）+ 历史自定义词条（spa/skills.json）+ 技能文档
-  （install/skill_docs/seed.json，缺失时回落 resources/skills）。
+- 首次连接（install/skills.db.lock 不存在）时写入种子：内置技能类别与词条
+  （install/skill_seed.py）+ 技能文档（install/skill_docs/seed.json，
+  缺失时回落 resources/skills）。
 - .lock 存在即不再播种，数据库是唯一数据源；删库重建请同时删除 .lock。
 - 建表全部 IF NOT EXISTS；旧结构（含 protect_keywords / guide 列、camera 注入方式）
   由 _migrate_legacy_schema() 在连接时自动迁移。
-- 内置词条（builtin=1）的内容随种子升级：名称/描述以种子为准自动刷新。
+- 内置词条（builtin=1）的内容随种子升级：名称/对照/描述/示例以种子为准自动刷新。
 
 读取接口：
 - list_all()：全量（categories / skills，examples 已解析为数组）
@@ -40,11 +40,9 @@ from pathlib import Path
 
 from ..install.skill_seed import (
     BUILTIN_CATEGORY_RENDER,
-    GROUP_TO_CATEGORY,
     RENDER_MODES,
     build_builtin_categories,
 )
-from . import spa_store
 
 log = logging.getLogger(__name__)
 
@@ -257,10 +255,10 @@ def _sync_builtin_docs() -> None:
 def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
     """旧结构一次性迁移（仅当检测到 legacy 列时执行，避免覆盖用户后续编辑）：
 
-    - render_mode='camera' → 'term'（运镜与景别/镜头结构同为术语型注入）；
+    - render_mode='camera' → 'term'；
     - 删除 skill_categories.protect_keywords 与 skills.guide 列
       （SQLite < 3.35 不支持 DROP COLUMN 时保留列，但代码不再读写）；
-    - 内置词条内容随种子刷新（运镜改纯中文名、清空 examples）。
+    - 内置词条内容随种子全量刷新（name / name_en / desc / examples 以种子为准）。
     """
     cat_cols = {r[1] for r in conn.execute("PRAGMA table_info(skill_categories)")}
     skill_cols = {r[1] for r in conn.execute("PRAGMA table_info(skills)")}
@@ -275,14 +273,11 @@ def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
     if "render_mode" in cat_cols:
         conn.execute("UPDATE skill_categories SET render_mode='term' WHERE render_mode='camera'")
     # 内置词条随种子刷新（仅 builtin=1；此时 guide 列可能仍存在，一并清空）
-    from ..install.skill_seed import _CAMERA_MOTION
     for cat in build_builtin_categories():
-        clear_examples = cat["name"] == "运镜"
         for s in cat["skills"]:
-            sets = ["name=?", "name_en=?", "desc=?"]
-            args: list = [s["name"], s["name_en"], s["desc"]]
-            if clear_examples:
-                sets.append("examples='[]'")
+            sets = ["name=?", "name_en=?", "desc=?", "examples=?"]
+            args: list = [s["name"], s["name_en"], s["desc"],
+                          json.dumps(s.get("examples") or [], ensure_ascii=False)]
             if "guide" in skill_cols:
                 sets.append("guide=''")
             args.append(s["key"])
@@ -314,7 +309,6 @@ def _connect() -> sqlite3.Connection:
             if not _lock_path().exists():
                 try:
                     _seed_builtin()
-                    _migrate_custom_json()
                     _seed_skill_docs()
                     _conn.commit()
                     _lock_path().write_text(
@@ -356,36 +350,6 @@ def _seed_builtin() -> None:
                 (cat_id, s["key"], s["name"], s.get("name_en") or "", s.get("desc") or "",
                  json.dumps(s.get("examples") or [], ensure_ascii=False),
                  s.get("group_name") or "", int(time.time() * 1000)),
-            )
-
-
-def _migrate_custom_json() -> None:
-    """把 spa/skills.json 的历史自定义词条迁入（builtin=0，key 冲突跳过）。"""
-    try:
-        custom = spa_store.load_skills()
-    except Exception:
-        return
-    if not custom:
-        return
-    conn = _connect()
-    cat_ids = {r["name"]: int(r["id"]) for r in
-               conn.execute("SELECT id, name FROM skill_categories").fetchall()}
-    for group, items in custom.items():
-        cat_name = GROUP_TO_CATEGORY.get(str(group))
-        cat_id = cat_ids.get(cat_name) if cat_name else None
-        if not cat_id:
-            continue
-        for it in items or []:
-            if not isinstance(it, dict):
-                continue
-            key = str(it.get("key") or "").strip()
-            label = str(it.get("label") or "").strip()
-            if not key or not label:
-                continue
-            conn.execute(
-                "INSERT OR IGNORE INTO skills(category_id, key, name, name_en, desc,"
-                " examples, group_name, builtin, created_at) VALUES(?,?,?,'',?,'[]','','0',?)",
-                (cat_id, key, label, str(it.get("title") or ""), int(time.time() * 1000)),
             )
 
 

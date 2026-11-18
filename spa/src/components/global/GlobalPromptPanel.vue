@@ -1,6 +1,5 @@
 <script setup>
 // 全局参数 · 全局提示词面板（自 GlobalParams 迁移）
-// 提示：camera_motion 关键词可手动写入全局提示词，作为全片运镜约束（优先于镜头选择）。
 import { computed } from "vue";
 import { useWorkspace } from "../../stores/workspace.js";
 
@@ -25,8 +24,8 @@ const dirty = () => ws.markDirty();
     <div class="mrd-gp-meta">当前 {{ globalPromptLen }} 字</div>
     <el-alert type="info" :closable="false" show-icon class="mrd-gp-hint">
       <template #title>
-        运镜关键词可手动写入：如「camera_motion：slow push-in / slow orbit」，将作为全片运镜约束，
-        优先于各镜头的运镜选择（Camera Motion LoRA 的触发词 camera motion 会保持在提示词开头）。
+        运镜、环境音等全片约束可直接用自然语言写入（如「全片以缓慢推近与固定机位为主，
+        保留环境风声」）；各镜头的技能选择在分镜页按镜头勾选。
       </template>
     </el-alert>
   </section>

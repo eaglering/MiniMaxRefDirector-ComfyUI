@@ -426,50 +426,29 @@ const ZH = {
   "audio reuse": "音频复用",
   "audio reference": "音频参考",
 
-  // ---------- 运镜选择（CAMERA_MOTIONS label/title，key 与 shared.js 原文精确一致） ----------
-  // 多选语义：空集合 = 运镜自由（模型决定）；分段缺省时继承时间线全局默认（设置菜单）。
-  "Camera Motion": "运镜",
-  "Default Camera Motion": "默认运镜",
-  // 技能词条（label/title）来自 SQLite 技能词典，不再内置 i18n 翻译
-  // 分段行 / 设置行的继承-覆盖交互文案
+  // ---------- 技能选择（类别与词条均来自 SQLite 技能词典，任意类别动态渲染） ----------
+  // 多选语义：空集合 = 该类自由（模型决定）；分段缺省该类别时继承时间线全局默认（设置菜单）。
+  "Skills": "技能",
+  "Default Skills": "全局默认技能",
+  "Audio segments need no skill selection": "音频段无需技能选择",
   "Follow global default": "跟随全局默认",
   "Segment custom": "本段自定义",
   "None (model decides freely)": "未设置（模型自由决定）",
-  "This segment has its own camera motion selection; click × to clear it and follow the global default again": "本分段已单独设置运镜；点击 × 清除自定义，重新跟随全局默认",
-  "Reset to global default camera motions": "清除本段自定义，回到全局默认",
-  "This segment follows the global default camera motions (set in the timeline Settings menu). Click any style below to give this segment its own selection; empty selection means the camera language is left to the model": "本分段未单独设置，跟随设置菜单中的全局默认运镜；点击下方任一风格即为本段单独设置，全部取消则该分段运镜语言交由模型决定",
-  "Empty default camera motions: the model freely writes the camera language for every shot": "默认运镜为空：每个镜头的运镜语言由模型自由书写",
-
-  // ---------- 微表情选择（MICRO_EXPRESSIONS label/title，key 与 shared.js 原文精确一致） ----------
-  // 多选语义：空集合 = 表演自然（模型自由书写）；仅段级选择，无全局继承。
-  "Micro-expression": "微表情",
-  "No micro-expression selected; the model freely writes natural acting for every shot": "本段未选择微表情：每个镜头的表演由模型自然书写（点击任意细节即为本段指定）",
-  "This segment has its own micro-expression selection; click × to clear it and leave the acting to the model": "本分段已单独指定微表情/表演细节；点击 × 清除，恢复表演自然",
-  "Reset to natural acting": "清除本段微表情，恢复自然表演",
+  "This segment has its own selection; click × to clear it and follow the global default again": "本分段已单独设置；点击 × 清除自定义，重新跟随全局默认",
+  "This segment follows the global default selection (set in the timeline Settings menu); click any item below to give this segment its own selection": "本分段未单独设置，跟随设置菜单中的全局默认；点击下方任一词条即为本段单独设置",
+  "This segment has its own selection; click × to clear it and leave this aspect to the model": "本分段已单独设置；点击 × 清除，交由模型决定",
+  "No selection; the model freely writes this aspect for every shot": "未选择：每个镜头由模型自由书写（点击任一词条即为本段指定）",
+  "Clear this category": "清除该类别的本段选择",
+  // 技能词条（label/title）来自 SQLite 技能词典，不再内置 i18n 翻译
   "Import": "导入",
-  "Import a JSON expression library from a local file to extend the built-in micro-expression cues": "从本地文件导入自定义微表情词库 JSON（数组，或含 expressions 数组的对象；条目结构 {key,label,title,category}），扩充内置词条",
+  "Import a JSON expression library from a local file to extend the built-in micro-expression cues": "从本地文件导入自定义示例词条 JSON（数组，或含 expressions 数组的对象；条目结构 {key,label,title,category}），扩充词典词条",
   "No valid expression entries found in the imported file": "导入文件里没有有效的词条",
-  "Failed to parse the imported expression library file": "导入的微表情词库文件解析失败",
-  "Import expression library (JSON)": "导入微表情词库 (JSON)",
-  "ImportExpressionDesc": "选择本地 JSON 文件导入自定义微表情词条。支持的格式：完整词条数组（推荐）、含 expressions 数组的对象，以及 {分类:[keys]} / {key:label} 简写；条目结构与内置词条一致，key 与内置冲突时忽略（内置优先）。导入后持久保存在本地浏览器。",
-  "FormatRecommendedTitle": "推荐 · 完整词条数组（条目同内置词条结构）",
+  "Failed to parse the imported expression library file": "导入的词库文件解析失败",
+  "Import expression library (JSON)": "导入示例词库 (JSON)",
+  "ImportExpressionDesc": "选择本地 JSON 文件导入自定义示例词条。支持的格式：完整词条数组（推荐）、含 expressions 数组的对象，以及 {分类:[keys]} / {key:label} 简写；条目结构与词典词条一致，key 与词典冲突时忽略（词典优先）。导入后持久保存在本地浏览器。",
+  "FormatRecommendedTitle": "推荐 · 完整词条数组（条目同词典词条结构）",
   "FormatCompactTitle": "简写 · {分类:[keys]} 或 {key:label}",
   "Choose File & Import": "选择文件并导入",
-  // 技能词条（label/title）来自 SQLite 技能词典，不再内置 i18n 翻译
-
-  // ---------- 景别选择（词条来自 SQLite 技能词典） ----------
-  // 多选语义：空集合 = 景别自由（模型按叙事自行决定）；仅段级选择，无全局继承。
-  "Shot Size": "景别",
-  "No shot size selected; the model freely writes the shot scale for every shot": "本段未选择景别：每个镜头的景别由模型自由书写（点击任一档位即为本段指定）",
-  "This segment has its own shot-size selection; click × to clear it and leave the framing to the model": "本分段已单独指定景别；点击 × 清除，镜头取景交由模型决定",
-  "Reset shot-size selection": "清除本段景别选择，恢复自由取景",
-
-  // ---------- 构图关系选择（词条来自 SQLite 技能词典） ----------
-  // 多选语义：空集合 = 构图自由（模型按镜头内容自行决定）；仅段级选择，无全局继承。
-  "Framing": "构图关系",
-  "No framing selected; the model freely writes the composition for every shot": "本段未选择构图关系：每个镜头的构图由模型自由书写（点击任一关系镜头即为本段指定）",
-  "This segment has its own framing selection; click × to clear it and leave the composition to the model": "本分段已单独指定构图关系；点击 × 清除，构图交由模型决定",
-  "Reset framing selection": "清除本段构图选择，恢复自由构图",
 };
 
 function getLocale() {

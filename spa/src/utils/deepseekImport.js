@@ -260,7 +260,9 @@ async function runOutlineFromText(state, storyText, { token = null, onLog = () =
     input:
       `（提取指令）前面 ${total} 条消息合起来是完整故事全文，现已全部发送完毕。` +
       `请通读全文，按你的任务要求提取用户想拍的故事并输出任务要求的 JSON；` +
-      `以故事正文为准，不要遗漏主线与关键人物。`,
+      `以故事正文为准，不要遗漏主线与关键人物。` +
+      `特别注意：全文中的台词、字幕、音效/环境音、运镜、微表情等制作要素必须逐场原样保留，` +
+      `台词保留原句全文与说话人，一句都不许丢；无台词的场次显式写「无台词」。`,
   });
   const outlineText = await deepseekCompleteInSession("", {
     prompt: extractPrompt,
@@ -292,7 +294,9 @@ export async function runOutlineStep(state, { token = null, onLog = () => {} } =
   const outlinePrompt = fillTemplate(storyTpl, {
     input:
       "（提取指令）请通读本会话上方的全部对话内容，按你的任务要求提取用户想拍的故事。" +
-      "以用户表达的内容为准；对话中未被用户采纳的方案不要写入。",
+      "以用户表达的内容为准；对话中未被用户采纳的方案不要写入。" +
+      "特别注意：对话中的台词、字幕、音效/环境音、运镜、微表情等制作要素必须逐场原样保留，" +
+      "台词保留原句全文与说话人，一句都不许丢；无台词的场次显式写「无台词」。",
   });
   if (!state.sessionId) {
     // 手动模式未填会话：自动新建大纲会话（后续步骤在同会话/分镜会话内追问）

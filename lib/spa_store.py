@@ -1,9 +1,8 @@
-"""SPA 导演台状态 / 自定义 skill 词库的落盘存储。
+"""SPA 导演台状态的落盘存储。
 
 目录结构（对齐 api_config.py 的 user/default/MiniMaxRefDirector 布局）：
     user/default/MiniMaxRefDirector/
         spa/state/{director_node_id}.json   # 每个导演节点一份暂存状态
-        spa/skills.json                     # 自定义 skill 词条（全局共享）
 
 写入全部走 tmp + os.replace 原子替换，进程内加锁串行化。
 """
@@ -79,46 +78,6 @@ def delete_state(node_id: str) -> None:
             _state_path(node_id).unlink(missing_ok=True)
         except Exception:
             log.warning("[SPA] failed to delete state for %s", node_id, exc_info=True)
-
-
-# ---------------- 自定义 skill 词条 ----------------
-
-def _skills_path() -> Path:
-    return _spa_dir() / "skills.json"
-
-
-def load_skills() -> dict:
-    with _lock:
-        p = _skills_path()
-        if not p.is_file():
-            return {}
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            log.warning("[SPA] failed to load skills", exc_info=True)
-            return {}
-
-
-def save_skills(skills: dict) -> dict:
-    skills = skills if isinstance(skills, dict) else {}
-    # 仅保留 list 结构的组，条目需含 key/label
-    cleaned: dict[str, list] = {}
-    for group, items in skills.items():
-        if not isinstance(items, list):
-            continue
-        entries = []
-        for it in items:
-            if isinstance(it, dict) and it.get("key") and it.get("label"):
-                entries.append({"key": str(it["key"]), "label": str(it["label"]),
-                                "title": str(it.get("title") or "")})
-            elif isinstance(it, str) and it.strip():
-                entries.append({"key": it.strip(), "label": it.strip(), "title": ""})
-        cleaned[str(group)] = entries
-    with _lock:
-        _atomic_write(_skills_path(), cleaned)
-    return cleaned
 
 
 def _now_ms() -> int:

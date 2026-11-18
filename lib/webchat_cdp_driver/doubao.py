@@ -116,6 +116,23 @@ _PAGE_JS = r"""
     return /语音|麦克风|上传|附件|图片|录音|暂停|停止|voice|mic|upload|attach|stop|pause/.test(label);
   }
 
+  // 生成中判定：输入区（composer）附近出现「停止/暂停」按钮——豆包生成期间
+  // 发送按钮会切换为停止态。只在输入框祖先容器内匹配宽泛词，避免把页面其他
+  // 位置的「暂停」（TTS / 播客播放器）误判为生成中；输入框定位失败时返回
+  // false（fail-open，不阻塞发送）。
+  function generating() {
+    const input = currentInput() || findInput();
+    let scope = input;
+    for (let i = 0; i < 6 && scope && scope.parentElement; i++) scope = scope.parentElement;
+    if (!scope) return false;
+    for (const el of scope.querySelectorAll("button, div[role='button'], span[role='button'], [data-testid]")) {
+      if (!isVisible(el)) continue;
+      const label = labelOf(el);
+      if (/停止生成|停止|^stop( generating)?$|^pause$|暂停生成/.test(label)) return true;
+    }
+    return false;
+  }
+
   function findSendButton(input) {
     const nodes = [...document.querySelectorAll("button, div[role='button'], span[role='button'], [data-testid]")];
     for (const el of nodes) {
@@ -162,11 +179,24 @@ _PAGE_JS = r"""
     return "";
   }
 
+  // 计数前对正文与特征文本都做空白归一化：豆包气泡保留提示词换行，而 marker
+  // 在 Python 侧已把换行压成空格，不归一化则多行提示词永远匹配不上
+  function normSpace(s) {
+    return String(s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+  }
+
   function countInBody(marker) {
     if (!marker) return 0;
-    const body = ((document.body && document.body.innerText) || "").replace(/\u00a0/g, " ");
-    const m = String(marker).replace(/\u00a0/g, " ");
+    const body = normSpace((document.body && document.body.innerText) || "");
+    const m = normSpace(marker);
     return body ? body.split(m).length - 1 : 0;
+  }
+
+  function countInText(text, marker) {
+    if (!text || !marker) return 0;
+    const t = normSpace(text);
+    const m = normSpace(marker);
+    return t ? t.split(m).length - 1 : 0;
   }
 
   function blockText(el) {
@@ -224,13 +254,16 @@ _PAGE_JS = r"""
 
   function sentCheck(marker, beforeMarker, pathBefore) {
     const input = currentInput();
-    const empty = !input || !inputText(input);
+    const text = input ? inputText(input) : "";
+    const empty = !input || !text;
     const btn = input ? findSendButton(input) : null;
     const blocks = assistantBlocks();
-    const markerCount = countInBody(marker);
+    // marker 计数剔除输入框自身的草稿文本：baseline 取自输入框为空时，
+    // 不剔除则填入草稿后总计数 +1，会把「尚未发送」误判成「已上屏」
+    const markerCount = Math.max(0, countInBody(marker) - countInText(text, marker));
     return {
       inputEmpty: empty,
-      inputLen: input ? inputText(input).length : 0,
+      inputLen: text.length,
       sendBtnFound: !!btn,
       sendBtnDisabled: btn
         ? btn.getAttribute("aria-disabled") === "true" || btn.hasAttribute("disabled")
@@ -239,8 +272,11 @@ _PAGE_JS = r"""
       markerAppeared: markerCount > (Number(beforeMarker) || 0),
       pathChanged: location.pathname !== String(pathBefore || ""),
       blockCount: blocks.length,
-      roundCount: document.querySelectorAll(".chat-round").length,
-      userMsgCount: document.querySelectorAll(".message-card-wrap.question").length,
+      // .chat-round 已被豆包改版废掉（页面上有回复但计数恒 0）；用户气泡
+      // 侧挂 send_message testid（与 receive_message 对应），两类一起数
+      roundCount: document.querySelectorAll(".chat-round, [data-testid='send_message']").length,
+      userMsgCount: document.querySelectorAll(".message-card-wrap.question, [data-testid='send_message']").length,
+      generating: generating(),
       chatId: currentChatId(),
     };
   }
@@ -255,6 +291,7 @@ _PAGE_JS = r"""
       lastBlockText: last,
       lastBlockChanged: isNew && cur !== (beforeLast || ""),
       roundCount: document.querySelectorAll(".chat-round").length,
+      generating: generating(),
       lastRoundText: (() => {
         const rounds = document.querySelectorAll(".chat-round");
         if (!rounds.length) return "";
@@ -294,6 +331,7 @@ _PAGE_JS = r"""
     inputReady,
     sentCheck,
     domSnapshot,
+    generating,
     probe,
     currentChatId,
     countInBody,
@@ -440,6 +478,10 @@ def _norm_path(p: str) -> str:
 def _marker_of(text: str) -> str:
     """用户消息特征文本（去掉 Markdown 记号，与扩展 driveFillAndCollect 一致）。"""
     return re.sub(r"\s+", " ", re.sub(r"[`*#>~_|-]", " ", str(text))).strip()[:20]
+
+
+# 发送核验窗口：深度思考启动可能慢于旧版 12 轮 ≈18.5s 的轮询总时长
+_SUBMIT_VERIFY_WINDOW_S = 45.0
 
 
 def _looks_json_complete(text: str) -> bool:
@@ -699,14 +741,19 @@ class DoubaoDriver(BaseSiteDriver):
     # ---- 发送消息 ----
 
     async def send_prompt(self, mgr: Any, page: Any, text: str, cancelled) -> dict:
-        """发送消息（写入 + 提交 + 核验）。失败/取消抛异常。"""
+        """发送消息（等待空闲 + 写入 + 提交 + 核验）。失败/取消抛异常。"""
         mgr.reset_sse(page)
+        # 关键修复：上一轮仍在生成时发送会被豆包静默丢弃（发送按钮处于「停止」态，
+        # Enter / 发送按钮均不生效）。批量转 H3 第 3 条以后必现——会话越长生成越慢、
+        # 流式停顿越长，get_reply 的 DOM 稳定判定越容易提前返回，下一镜就会在
+        # 生成中写入。先等「停止」按钮消失再发送（纯前置条件，不是重试）。
+        await self._wait_generation_idle(page, cancelled)
         marker = _marker_of(text)
         before = await page.evaluate(
             "([m]) => { const blocks = window.__mrdCdp.assistantBlocks();"
             " return { beforeCount: blocks.length, beforeLast: blocks.length ? blocks[blocks.length - 1] : '',"
             " beforeMarker: window.__mrdCdp.countInBody(m), pathBefore: location.pathname,"
-            " beforeRounds: document.querySelectorAll('.chat-round').length }; }",
+            " beforeRounds: document.querySelectorAll('.chat-round, [data-testid=\\'send_message\\']').length }; }",
             [marker],
         )
         baseline = {
@@ -725,6 +772,30 @@ class DoubaoDriver(BaseSiteDriver):
             )
         await self._submit(page, marker, baseline, cancelled)
         return baseline
+
+    async def _wait_generation_idle(self, page: Any, cancelled, max_wait: float = 90.0) -> None:
+        """等待豆包上一轮生成结束（composer 内「停止」按钮消失）再发送。
+
+        生成中写入的消息会被站点静默丢弃；这里最多等 max_wait 秒（深度思考
+        一般不超过此限），超时则告警并照常尝试发送（由 _submit 的核验兜底）。
+        """
+        deadline = time.monotonic() + max_wait
+        warned = False
+        while time.monotonic() < deadline:
+            if cancelled():
+                raise _CancelledError()
+            try:
+                busy = bool(await page.evaluate("() => window.__mrdCdp.generating()"))
+            except Exception:
+                return  # 助手未就绪 / 页面异常时不阻塞发送
+            if not busy:
+                return
+            if not warned:
+                log.info("[WebChatCDP] %s 上一轮仍在生成，等待其结束后再发送", self.name)
+                warned = True
+            await asyncio.sleep(2.0)
+        log.warning(
+            "[WebChatCDP] %s 等待上一轮生成结束超时（%.0fs），仍尝试发送", self.name, max_wait)
 
     async def _write_text(self, page: Any, text: str, cancelled) -> bool:
         """写入输入框（locator.fill 可信事件，带回读校验重试）。"""
@@ -772,9 +843,16 @@ class DoubaoDriver(BaseSiteDriver):
         return prefix_ok or len_ok
 
     async def _submit(self, page: Any, marker: str, baseline: dict, cancelled) -> None:
-        """提交消息（回车 → 补回车 → 通用发送按钮，未提交安全重试不重复写入）。"""
+        """提交消息（回车 → 补回车 → 通用发送按钮）。
+
+        每轮都先核验「已上屏」信号，不以输入框清空为前提（旧实现的互斥分支曾让
+        已发送的消息被判失败）；输入框未清空只决定是否补发动作。判定条件：
+        输入框已清空 + 任一信号（生成中 / 新助手块 / 消息上屏 / 路径变化）。
+        """
         submits = 0
-        for round_i in range(12):
+        deadline = time.monotonic() + _SUBMIT_VERIFY_WINDOW_S
+        last_snap: dict = {}
+        while time.monotonic() < deadline:
             if cancelled():
                 raise _CancelledError()
             if submits == 0:
@@ -783,7 +861,7 @@ class DoubaoDriver(BaseSiteDriver):
                 except Exception:
                     pass
                 submits = 1
-            await asyncio.sleep(2.0 if round_i == 0 else 1.5)
+            await asyncio.sleep(2.0)
             try:
                 s = await page.evaluate(
                     "([m, bm, pb]) => window.__mrdCdp.sentCheck(m, bm, pb)",
@@ -791,27 +869,51 @@ class DoubaoDriver(BaseSiteDriver):
                 )
             except Exception:
                 continue
-            if s and s.get("inputEmpty") is False:
-                if submits == 1:
-                    submits = 2
+            last_snap = s if isinstance(s, dict) else {}
+            if s and s.get("inputEmpty"):
+                if (s.get("generating") or s.get("markerAppeared") or s.get("pathChanged")
+                        or int(s.get("blockCount") or 0) > baseline["before_count"]
+                        or int(s.get("roundCount") or 0) > int(baseline.get("before_rounds") or 0)):
+                    return
+                # 已清空但信号未到（如深度思考尚未流式输出）：继续等，不盲目补发
+                continue
+            # 输入框仍有内容：补发（补回车一次，再点发送按钮，各限一次防重复）
+            if submits == 1:
+                submits = 2
+                try:
+                    await page.keyboard.press("Enter")
+                except Exception:
+                    pass
+                continue
+            if submits < 4:
+                submits += 1
+                btn = await page.evaluate("() => window.__mrdCdp.pickSendButton()")
+                if btn and btn.get("found"):
                     try:
-                        await page.keyboard.press("Enter")
+                        await page.locator('[data-mrd-send="1"]').first.click(timeout=5000)
                     except Exception:
                         pass
-                    continue
-                if submits < 4:
-                    submits += 1
-                    btn = await page.evaluate("() => window.__mrdCdp.pickSendButton()")
-                    if btn and btn.get("found"):
-                        try:
-                            await page.locator('[data-mrd-send="1"]').first.click(timeout=5000)
-                        except Exception:
-                            pass
-                continue
-            if s and (s.get("markerAppeared") or s.get("pathChanged")
-                      or int(s.get("blockCount") or 0) > baseline["before_count"]
-                      or int(s.get("roundCount") or 0) > int(baseline.get("before_rounds") or 0)):
-                return
+        swallowed = bool(last_snap) and bool(last_snap.get("inputEmpty")) and (
+            int(last_snap.get("blockCount") or 0) == int(baseline.get("before_count") or 0)
+            and int(last_snap.get("roundCount") or 0) == int(baseline.get("before_rounds") or 0)
+            and not last_snap.get("generating")
+        )
+        log.warning(
+            "[WebChatCDP] %s 发送核验失败（baseline: before_count=%s before_rounds=%s before_marker=%s），"
+            "最后一轮快照：%s",
+            self.name,
+            baseline.get("before_count"), baseline.get("before_rounds"), baseline.get("before_marker"),
+            {k: last_snap.get(k) for k in ("inputEmpty", "inputLen", "markerCount", "markerAppeared",
+                                           "blockCount", "roundCount", "generating", "pathChanged", "chatId")},
+        )
+        if swallowed:
+            # 输入框被清空但会话内毫无变化（无气泡 / 无生成 / 无回复块）：
+            # 站点静默吞消息（高频连发风控），不是检测问题。文案保留「发送未生效」
+            # 以命中 _RISK_ERROR_WORDS，继续走前端 risk 弹窗（拉取 / 重试 / 跳过）。
+            raise RuntimeError(
+                "发送未生效（疑似风控吞消息）：输入框已清空，但会话内未出现这条消息、"
+                "也未开始任何生成（等待 45s 无任何变化）。建议冷却 1-2 分钟后再重试该镜"
+            )
         raise RuntimeError(
             "发送未生效：已回车并补点发送按钮（含重试），但输入框始终未清空、页面上也没出现这条消息。"
             f"常见原因：页面结构改版导致发送按钮/输入框定位偏移。请在 {self.name} 页面手动粘贴发送一次确认页面可用"
@@ -860,6 +962,13 @@ class DoubaoDriver(BaseSiteDriver):
                 elif time.monotonic() - not_json_at > NOT_JSON_GRACE_S:
                     return {"ok": True, "text": sse_text, "chat_id": str(dom.get("chatId") or ""), "error": ""}
             stable_need = 3.0 if not sse.get("active") else 8.0
+            # 生成中（「停止」按钮仍在）不得因 DOM 短暂稳定而提前返回：深度思考
+            # / 流式停顿期间 DOM 可能数十秒不变，提前返回会让下一镜在生成中发送
+            # 而被静默丢弃（批量转 H3 第 3 条以后失败的根因）。生成中持续重置
+            # 稳定计时；但 DOM 稳定超过 20s 仍显示生成中时按已完成处理
+            # （「停止」按钮残留的兜底，避免死等）。
+            if dom.get("generating") and time.monotonic() - stable_since < 20.0:
+                stable_since = time.monotonic()
 
             def _json_pending() -> bool:
                 return bool(expect_json and not _looks_json_complete(last_text))

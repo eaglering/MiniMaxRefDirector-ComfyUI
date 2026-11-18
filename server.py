@@ -362,17 +362,12 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         # 与网页通道的语言跟随策略一致，避免旧调用方静默拿到英文模板
         lang = data.get("lang") or "auto"
         # 技能注入：优先用调用方已渲染好的 skill_notes（前端经 /spa/skill_notes 取），
-        # 否则按 selections（{类别名: [key]}）在服务端现渲染。
-        # 以下四个字段为旧契约，仅在 skill_notes / selections 都为空时兜底转换。
+        # 否则按 selections（{类别名: [技能 key]}，类别名 = skill_categories.name）
+        # 在服务端按 DB render_mode 现渲染。
         skill_notes = str(data.get("skill_notes") or "")
         selections = data.get("selections")
         if not isinstance(selections, dict):
             selections = None
-        camera_motion = data.get("camera_motion", "")
-        expression = data.get("expression", "")
-        expression_catalog = data.get("expression_catalog", []) or []
-        shot_size = data.get("shot_size", "")
-        framing = data.get("framing", "")
         try:
             duration_seconds = float(data.get("duration_seconds") or 0)
         except (TypeError, ValueError):
@@ -413,9 +408,6 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             vlm_mode=vlm_mode, options=options,
             duration_seconds=duration_seconds, lang=lang,
             skill_notes=skill_notes, selections=selections,
-            camera_motion=camera_motion, expression=expression,
-            expression_catalog=expression_catalog,
-            shot_size=shot_size, framing=framing,
         )
         json_data = await _await_llm_work(work)
         return web.json_response({"success": True, "json_data": json_data})

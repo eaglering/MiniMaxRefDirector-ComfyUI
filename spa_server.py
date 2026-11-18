@@ -3,7 +3,6 @@
 - POST /spa/push          入口节点打开页面前推送初始状态（不通知）
 - GET  /spa/state         读取某导演节点暂存状态
 - POST /spa/save          SPA 保存：落盘 + send_sync 通知 ComfyUI 页面回写 widget
-- GET/POST /spa/skills    自定义 skill 词条读写
 - GET  /spa/skill_dict    技能词典（类别含 render_mode）
 - GET  /spa/skill_docs    技能文档列表（md 提示词模板，按分类过滤）
 - GET  /spa/skill_doc     单篇技能文档全文（id 或内置 key，缺失回落文件库）
@@ -205,11 +204,6 @@ async def spa_save(request: web.Request) -> web.Response:
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
-
-
-@_routes.get(f"{API_PREFIX}/spa/skills")
-async def spa_get_skills(request: web.Request) -> web.Response:
-    return web.json_response({"success": True, "skills": spa_store.load_skills()})
 
 
 # ---------------- 镜头技能词典（SQLite）----------------
@@ -581,17 +575,6 @@ async def spa_webchat_reload(request: web.Request) -> web.Response:
 async def spa_skill_batch_add(request: web.Request) -> web.Response:
     # 批量导入技能词条：{categoryId?, newCategory?, items:[{name, nameEn?, desc?, guide?, examples?}]}
     return _skill_dict_mutation(lambda d: skill_db.batch_add_skills(d))(request)
-
-
-@_routes.post(f"{API_PREFIX}/spa/skills")
-async def spa_save_skills(request: web.Request) -> web.Response:
-    try:
-        data = await _read_json_body(request)
-        cleaned = spa_store.save_skills(data.get("skills") or {})
-        return web.json_response({"success": True, "skills": cleaned})
-    except Exception as e:
-        traceback.print_exc()
-        return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
 @_routes.get(f"{API_PREFIX}/spa/llm_files")

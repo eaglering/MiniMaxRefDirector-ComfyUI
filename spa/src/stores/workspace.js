@@ -1,7 +1,7 @@
 // ===== 工作台中央状态：加载 / 防抖保存 / 状态指示 =====
 import { defineStore } from "pinia";
 import { computed, reactive, ref, toRaw } from "vue";
-import { fetchState, saveState, fetchSkills, fetchSkillDict } from "../api/client.js";
+import { fetchState, saveState, fetchSkillDict } from "../api/client.js";
 import { genId } from "../utils/media.js";
 
 // 与 js/components/director/shared.js parseInitial 对齐的默认值
@@ -17,43 +17,9 @@ function defaultTimeline() {
     inpaint_audio: true,
     normalStartFrame: 0,
     normalDurationFrames: 120,
-    defaultCameraMotions: [],
+    // 全片默认技能（{类别名: [技能 key]}）：未覆盖的分镜继承此集合
+    defaultSkills: {},
   };
-}
-
-// 旧分镜字段 → 通用技能选择（seg.skills = { 类别名: [key] }）
-// 自定义类别历史上没有对应字段，因此迁移只涉及四个内置类别名。
-const LEGACY_SKILL_FIELD = {
-  cameraMotions: "运镜",
-  shotSizes: "景别",
-  framings: "镜头结构",
-  expressions: "微表情",
-};
-
-function migrateSegmentSkills(rest) {
-  const skills = (rest.skills && typeof rest.skills === "object" && !Array.isArray(rest.skills))
-    ? { ...rest.skills }
-    : {};
-  const push = (cat, keys) => {
-    const list = Array.isArray(keys) ? keys.filter((k) => typeof k === "string" && k.trim()) : [];
-    if (!list.length) return;
-    skills[cat] = Array.from(new Set([...(skills[cat] || []), ...list]));
-  };
-  // 旧的单值字段先并入（cameraMotion / expression)
-  if (typeof rest.cameraMotion === "string" && rest.cameraMotion && rest.cameraMotion !== "auto") {
-    push("运镜", [rest.cameraMotion]);
-  }
-  if (typeof rest.expression === "string" && rest.expression.trim() && rest.expression !== "auto") {
-    push("微表情", [rest.expression.trim()]);
-  }
-  for (const [field, cat] of Object.entries(LEGACY_SKILL_FIELD)) {
-    push(cat, rest[field]);
-    delete rest[field];
-  }
-  delete rest.cameraMotion;
-  delete rest.expression;
-  rest.skills = skills;
-  return rest;
 }
 
 function parseInitial(jsonStr) {
@@ -71,7 +37,7 @@ function parseInitial(jsonStr) {
       if (Array.isArray(p.segments)) {
         parsed.segments = p.segments.map((s) => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s || {};
-          return migrateSegmentSkills(rest);
+          return rest;
         });
       }
       if (Array.isArray(p.audioSegments)) {
@@ -210,12 +176,6 @@ export const useWorkspace = defineStore("workspace", () => {
     // 旧字段（浏览器扩展桥接已弃用）：保留只为旧存档兼容，UI 不再读写
     extension_id: "",
   });
-  const customSkills = reactive({
-    cameraMotions: [],
-    shotSizes: [],
-    framings: [],
-    expressions: [],
-  });
 
   // ---- 镜头技能词典（SQLite：/spa/skill_dict）----
   const skillDict = reactive({ loaded: false, loading: false, categories: [], skills: [] });
@@ -276,16 +236,10 @@ export const useWorkspace = defineStore("workspace", () => {
       return;
     }
     try {
-      const [stateRes, skillsRes] = await Promise.all([
-        fetchState(nodeId.value),
-        fetchSkills().catch(() => null),
-        loadSkillDict(),
-      ]);
+      const stateRes = await fetchState(nodeId.value);
+      loadSkillDict();
       if (!stateRes.success) throw new Error(stateRes.error || "加载失败");
       applyState(stateRes.state || {});
-      if (skillsRes && skillsRes.success && skillsRes.skills) {
-        Object.assign(customSkills, skillsRes.skills);
-      }
       loaded.value = true;
       loadError.value = "";
     } catch (e) {
@@ -389,7 +343,7 @@ export const useWorkspace = defineStore("workspace", () => {
 
   return {
     nodeId, nodeTitle, loaded, loadError, saveStatus, lastSavedAt, updatedAt,
-    timeline, widgets, globalPrompt, subjects, subjectNodeId, llm, customSkills,
+    timeline, widgets, globalPrompt, subjects, subjectNodeId, llm,
     skillDict, skillGroups, loadSkillDict, segmentSelections,
     load, reload, markDirty, saveNow, buildState,
   };

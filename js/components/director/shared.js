@@ -298,7 +298,7 @@ function parseInitial(jsonStr) {
     inpaint_audio: true,
     normalStartFrame: 0,
     normalDurationFrames: 120,
-    defaultCameraMotions: []
+    defaultSkills: {}
   };
   try {
     if (jsonStr) {
@@ -311,38 +311,16 @@ function parseInitial(jsonStr) {
       if (p.inpaint_audio !== undefined) parsed.inpaint_audio = p.inpaint_audio;
       if (p.normalStartFrame !== undefined) parsed.normalStartFrame = p.normalStartFrame;
       if (p.normalDurationFrames !== undefined) parsed.normalDurationFrames = p.normalDurationFrames;
-      if (Array.isArray(p.defaultCameraMotions)) {
-        parsed.defaultCameraMotions = p.defaultCameraMotions.filter(k => typeof k === "string");
+      if (p.defaultSkills && typeof p.defaultSkills === "object" && !Array.isArray(p.defaultSkills)) {
+        const ds = {};
+        for (const [cat, keys] of Object.entries(p.defaultSkills)) {
+          if (Array.isArray(keys)) ds[cat] = keys.filter(k => typeof k === "string" && k.trim());
+        }
+        parsed.defaultSkills = ds;
       }
       if (Array.isArray(p.segments)) {
         parsed.segments = p.segments.map(s => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
-          // 技能选择迁移：旧四个固定字段（cameraMotions / shotSizes / framings / expressions）
-          // → 通用 map seg.skills = { 类别名: [key] }，迁移后删除旧键
-          const skills = (rest.skills && typeof rest.skills === "object" && !Array.isArray(rest.skills))
-            ? { ...rest.skills } : {};
-          const pushSkill = (cat, keys) => {
-            const list = Array.isArray(keys) ? keys.filter(k => typeof k === "string" && k.trim()) : [];
-            if (!list.length) return;
-            skills[cat] = Array.from(new Set([...(skills[cat] || []), ...list]));
-          };
-          if (typeof rest.cameraMotion === "string" && rest.cameraMotion && rest.cameraMotion !== "auto") {
-            pushSkill("运镜", [rest.cameraMotion]);
-          }
-          if (typeof rest.expression === "string" && rest.expression.trim() && rest.expression !== "auto") {
-            pushSkill("微表情", [rest.expression.trim()]);
-          }
-          pushSkill("运镜", rest.cameraMotions);
-          pushSkill("景别", rest.shotSizes);
-          pushSkill("镜头结构", rest.framings);
-          pushSkill("微表情", rest.expressions);
-          delete rest.cameraMotions;
-          delete rest.shotSizes;
-          delete rest.framings;
-          delete rest.expressions;
-          delete rest.cameraMotion;
-          delete rest.expression;
-          rest.skills = skills;
           return rest;
         });
       }
@@ -380,22 +358,15 @@ function parseInitial(jsonStr) {
 
 // --- 镜头技能词典运行时缓存（共享给 transfer.js / settings.js 使用） ---
 // 技能定义一律来自 SQLite 技能词典（/spa/skill_dict，首次由 install/skill_seed.py
-// 初始化），本文件不再内置任何词条；以下四个数组仅是 loadSkillDict 的加载容器：
-// 条目结构 { key, label, title, category? }，title=技能描述（胶囊悬停显示）。
-const CAMERA_MOTIONS = [];
-const SHOT_SIZES = [];
-const FRAMINGS = [];
-const MICRO_EXPRESSIONS = [];
-
-// 动态类别容器：由 loadSkillDict 按数据库类别重建（含自定义类别 / renderMode /
-// 关键词保护开关），旧 UI 的四段固定胶囊保持可用，新增类别走 SKILL_GROUPS 渲染。
+// 初始化），本文件不内置任何词条。类别完全由数据库驱动（任意类别名 + renderMode），
+// 不做固定类别假设；条目结构 { key, label, title, category? }，
+// title=技能描述（胶囊悬停显示），category=展示分组（取自 groupName）。
 const SKILL_GROUPS = [];
 
 // --- 镜头技能词典（SQLite /spa/skill_dict）加载 ---
-// 替换式刷新：清空四个容器后按数据库内容重建（数据库是唯一数据源）。
-// title 用技能描述 → 胶囊悬停即显示描述；微表情条目 category 取自 groupName
-// （eye/brow/mouth/breath/body），缺省归入 body。词典原文缓存于
-// skillDictData（「添加技能」弹窗的类别下拉）；失败返回 null（容器保持上次内容）。
+// 替换式刷新：清空容器后按数据库内容重建（数据库是唯一数据源）。
+// title 用技能描述 → 胶囊悬停即显示描述。词典原文缓存于 skillDictData
+// （「添加技能」弹窗的类别下拉）；失败返回 null（容器保持上次内容）。
 let skillDictData = { categories: [], skills: [] };
 
 async function loadSkillDict() {
@@ -405,23 +376,12 @@ async function loadSkillDict() {
     if (!data || !data.success) return null;
     const catName = {};
     for (const c of data.categories || []) catName[c.id] = c.name;
-    const catArr = {
-      "运镜": CAMERA_MOTIONS,
-      "景别": SHOT_SIZES,
-      "镜头结构": FRAMINGS,
-      "微表情": MICRO_EXPRESSIONS,
-    };
-    CAMERA_MOTIONS.length = 0;
-    SHOT_SIZES.length = 0;
-    FRAMINGS.length = 0;
-    MICRO_EXPRESSIONS.length = 0;
     SKILL_GROUPS.length = 0;
     for (const c of data.categories || []) {
       SKILL_GROUPS.push({
         id: `cat_${c.id}`,
         name: c.name,
         renderMode: c.renderMode || "descriptive",
-        protectKeywords: !!c.protectKeywords,
         items: [],
       });
     }
@@ -430,11 +390,9 @@ async function loadSkillDict() {
     for (const s of data.skills || []) {
       const cat = catName[s.categoryId] || "";
       const entry = { key: s.key, label: s.name, title: s.desc || s.name };
-      if (cat === "微表情") entry.category = s.groupName || "body";
+      if (s.groupName) entry.category = s.groupName;
       const group = groupByName[cat];
       if (group) group.items.push(entry);
-      const arr = catArr[cat];
-      if (arr) arr.push(entry);
     }
     skillDictData = { categories: data.categories || [], skills: data.skills || [] };
     return skillDictData;
@@ -444,4 +402,4 @@ async function loadSkillDict() {
   }
 }
 
-export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl, CAMERA_MOTIONS, SHOT_SIZES, FRAMINGS, MICRO_EXPRESSIONS, SKILL_GROUPS, loadSkillDict };
+export { app, api, RULER_HEIGHT, BLOCK_HEIGHT, AUDIO_TRACK_HEIGHT, CANVAS_HEIGHT, HANDLE_HIT_PX, MIN_SEGMENT_LENGTH, MAX_THUMBNAIL_DIM, HIDDEN_WIDGET_NAMES, hideWidget, showWidget, clamp, genId, viewUrl, viewUrlInline, uploadImage, ICONS, parseInitial, STYLES, styleEl, SKILL_GROUPS, loadSkillDict };

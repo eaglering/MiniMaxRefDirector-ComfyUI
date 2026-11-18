@@ -210,8 +210,7 @@ function emptyH3() {
 }
 
 // 单个分镜 shot → segment 的公共字段映射（storyboard 同步与首次新增共用）
-// 技能选择只认 seg.skills（导演台手动勾选，值为技能词典 key）；
-// 分镜设计不再产出导演控件字段（camera_motions 等已废弃，不再映射）
+// 技能选择只认 seg.skills（{类别名: [技能 key]}，类别名与技能 key 均来自技能词典）
 function applyShotToSegment(seg, shot) {
   seg.prompt = String(shot.prompt || "");
   const skills = (shot.skills && typeof shot.skills === "object" && !Array.isArray(shot.skills))

@@ -16,7 +16,7 @@ from .llm import (
     generate_prompt_with_ollama,
 )
 from .path import resolve_input_path
-from .skill_notes import render_skill_notes, resolve_legacy_selections
+from .skill_notes import render_skill_notes
 from . import skill_db
 from .utils import find_index, parse_generated_json
 
@@ -128,13 +128,12 @@ def _load_h3_skills_template(lang: str = "en") -> str:
     return _load_skill_doc("h3-writing-guide", _H3_SKILLS_TEMPLATE_PATH)
 
 
-def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "", camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> str:
+def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "") -> str:
     """用通用模板（resources/skills/h3-prompt-builder/prompt.md）组装 H3 生成提示词。
 
     - skills：四字段写作指南（resources/skills/h3-prompt-builder/h3-writing-guide.md）
-    - skill_notes：分镜技能注入块（lib/skill_notes.py 渲染；服务端与桥接共用同一份）
-    - camera_motion / expression / shot_size / framing：**已废弃**，仅在 skill_notes
-      为空时按类别 render_mode 反查并渲染一次，保证旧调用方（旧导演台 / 旧客户端）不炸
+    - skill_notes：分镜技能注入块（lib/skill_notes.py 按 DB 类别 render_mode 渲染；
+      服务端与桥接共用同一份）
     - 模板与注入块均不申明触发词写法：camera motion 等触发词由用户写在全局提示词中
     """
     image_note = ""
@@ -185,13 +184,6 @@ def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds
         )
 
     notes = str(skill_notes or "").strip()
-    if not notes:
-        selections = resolve_legacy_selections(
-            camera_motion=camera_motion, expression=expression,
-            shot_size=shot_size, framing=framing,
-        )
-        if selections:
-            notes = render_skill_notes(selections, lang="en" if lang == "en" else "zh")["notes"]
 
     return (
         _load_h3_builder_template()
@@ -484,7 +476,7 @@ def _normalize_h3_json(json_data: dict) -> dict:
     return json_data
 
 
-def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "", selections: dict | None = None, camera_motion: str | list = "", expression: str | list = "", expression_catalog: list | None = None, shot_size: str | list = "", framing: str | list = "") -> dict:
+def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mode: str="llama-cpp", options: dict | None = None, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "", selections: dict | None = None) -> dict:
     """Generate an H3 full-reference prompt JSON.
 
     options 是一个配置字典（未提供的键使用 _H3_DEFAULT_OPTIONS 默认值），
@@ -515,9 +507,8 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     lang="zh" 中文模板强制中文，其余语言英文模板强制英文。
 
     skill_notes: 已渲染好的技能注入块（lib/skill_notes.py 输出，推荐由调用方传入）
-    selections:  {类别名: [技能 key]}，仅当 skill_notes 为空时现渲染
-    camera_motion / expression / shot_size / framing: **已废弃**，仅当 skill_notes 与
-    selections 都为空时按类别 render_mode 反查渲染一次（兼容旧导演台 / 旧客户端）
+    selections:  {类别名: [技能 key]}（类别名 = skill_categories.name），仅当
+    skill_notes 为空时按 DB render_mode 现渲染
     """
     opts = {**_H3_DEFAULT_OPTIONS, **(options or {})}
     # 首帧图路径来自函数参数 image_path（server.py 传入），options 中不包含该键
@@ -529,9 +520,6 @@ def generate_h3_prompt(prompt: str="", image_path: str="", seed: int=42, vlm_mod
     full_prompt = _build_h3_prompt(
         skills, prompt, image is not None, duration_seconds, lang,
         skill_notes=notes,
-        camera_motion=camera_motion, expression=expression,
-        expression_catalog=expression_catalog,
-        shot_size=shot_size, framing=framing,
     )
     if notes:
         _head = "\n".join(notes.splitlines()[:4])

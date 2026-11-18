@@ -163,23 +163,6 @@ _MICRO_EXPRESSION = {
 }
 MICRO_CATEGORY_DESC = "克制的面部与肢体表演细节；生成时从中文示例数组中挑一句自然织入，不写技能名。"
 
-# spa/skills.json 的分组 id → 类别名（历史自定义词条迁移用）
-GROUP_TO_CATEGORY = {
-    "cameraMotions": "运镜",
-    "shotSizes": "景别",
-    "framings": "镜头结构",
-    "expressions": "微表情",
-}
-
-# 类别名 → 生成链路旧字段名（legacy 兼容：lib/skill_notes.py resolve_legacy_selections
-# 用它把旧 payload 的 camera_motion / shot_size / framing 反查到对应类别）
-CATEGORY_FIELD = {
-    "运镜": "camera",
-    "景别": "shotSize",
-    "镜头结构": "framing",
-    "微表情": "expression",
-}
-
 # ── 注入方式（skill_categories.render_mode）────────────────────────────────
 # 决定该类别技能如何进入 skill_notes：
 #   term        术语类：中文名直接写入镜头描述，英文阶段按 name_en 对照（运镜 / 景别 / 镜头结构）
@@ -216,16 +199,16 @@ def build_builtin_categories() -> list:
     framing = [_skill_row(k, d) for k, d in _FRAMING.items()]
     micro = [_skill_row(k, d, group=d.get("group") or "") for k, d in _MICRO_EXPRESSION.items()]
     cats = [
-        {"name": "运镜", "field": "camera",
+        {"name": "运镜",
          "render_mode": "term",
          "description": CAMERA_CATEGORY_DESC, "skills": camera},
-        {"name": "景别", "field": "shotSize",
+        {"name": "景别",
          "render_mode": "term",
          "description": SHOT_SIZE_CATEGORY_DESC, "skills": shot},
-        {"name": "镜头结构", "field": "framing",
+        {"name": "镜头结构",
          "render_mode": "term",
          "description": FRAMING_CATEGORY_DESC, "skills": framing},
-        {"name": "微表情", "field": "expression",
+        {"name": "微表情",
          "render_mode": "example",
          "description": MICRO_CATEGORY_DESC, "skills": micro},
     ]
