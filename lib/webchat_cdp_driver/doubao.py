@@ -51,126 +51,42 @@ _PAGE_JS = r"""
     return (clone.innerText || "").replace(/\u00a0/g, " ").trim();
   }
 
-  function inputCandidates() {
-    const els = [...document.querySelectorAll("textarea, div[contenteditable='true']")];
-    return els
-      .filter((el) => {
-        if (!isVisible(el)) return false;
-        const r = el.getBoundingClientRect();
-        return r.width >= 40 && r.height >= 16;
-      })
-      .map((el) => {
-        const r = el.getBoundingClientRect();
-        const id = String(el.id || "").toLowerCase();
-        const cls = String(el.className || "").toLowerCase();
-        const ph = el.getAttribute("placeholder") || "";
-        let score = 0;
-        if (id === "chat-input") score += 100;
-        if (/chat|input|prompt|composer/.test(`${id} ${cls}`)) score += 20;
-        if (ph) score += 10;
-        if (el.tagName === "TEXTAREA") score += 5;
-        score += Math.min(30, Math.round((r.width * r.height) / 4000));
-        return { el, score, tag: el.tagName, id: el.id || "", placeholder: ph, w: Math.round(r.width), h: Math.round(r.height) };
-      })
-      .sort((a, b) => b.score - a.score);
-  }
-
+  // 豆包专用输入框：composer 唯一的 div[contenteditable='true']，选中后打
+  // data-mrd-input="1" 标记，后续一律按标记取（不做启发式打分猜测）。
   function findInput() {
-    const list = inputCandidates();
-    return list.length ? list[0].el : null;
+    return (
+      document.querySelector("[data-mrd-input]") ||
+      document.querySelector("div[contenteditable='true']")
+    );
   }
 
   function pickInput() {
-    const list = inputCandidates();
     document.querySelectorAll("[data-mrd-input]").forEach((e) => e.removeAttribute("data-mrd-input"));
-    if (!list.length) return { found: false, candidates: [] };
-    const el = list[0].el;
+    const el = document.querySelector("div[contenteditable='true']");
+    if (!el) return { found: false };
     el.setAttribute("data-mrd-input", "1");
-    return {
-      found: true,
-      tag: el.tagName,
-      id: el.id || "",
-      placeholder: (el.getAttribute("placeholder") || "").slice(0, 24),
-      len: inputText(el).length,
-      candidates: list.slice(0, 5).map((c) => ({
-        tag: c.tag, id: c.id || "", placeholder: (c.placeholder || "").slice(0, 24),
-        size: `${c.w}x${c.h}`, score: c.score,
-      })),
-    };
+    return { found: true, tag: el.tagName, id: el.id || "", len: inputText(el).length };
   }
 
   function currentInput() {
-    return document.querySelector("[data-mrd-input]") || findInput();
+    return findInput();
   }
 
-  function labelOf(el) {
-    return (
-      el.getAttribute("aria-label") ||
-      el.getAttribute("title") ||
-      el.textContent ||
-      ""
-    ).trim().toLowerCase();
-  }
-
-  function isBypass(label) {
-    return /语音|麦克风|上传|附件|图片|录音|暂停|停止|voice|mic|upload|attach|stop|pause/.test(label);
-  }
-
-  // 生成中判定：输入区（composer）附近出现「停止/暂停」按钮——豆包生成期间
-  // 发送按钮会切换为停止态。只在输入框祖先容器内匹配宽泛词，避免把页面其他
-  // 位置的「暂停」（TTS / 播客播放器）误判为生成中；输入框定位失败时返回
-  // false（fail-open，不阻塞发送）。
+  // 生成中判定（豆包专用）：发送/停止按钮为 button[data-testid="chat_input_send_button"]，
+  // data-disabled="true" 即生成中（点击发送后 1-2s 才切换，属正常过渡）。
+  // 按钮不存在时返回 false（fail-open，不阻塞发送）。
   function generating() {
-    const input = currentInput() || findInput();
-    let scope = input;
-    for (let i = 0; i < 6 && scope && scope.parentElement; i++) scope = scope.parentElement;
-    if (!scope) return false;
-    for (const el of scope.querySelectorAll("button, div[role='button'], span[role='button'], [data-testid]")) {
-      if (!isVisible(el)) continue;
-      const label = labelOf(el);
-      if (/停止生成|停止|^stop( generating)?$|^pause$|暂停生成/.test(label)) return true;
-    }
-    return false;
+    const btn = document.querySelector('button[data-testid="chat_input_send_button"]');
+    return !!btn && btn.getAttribute("data-disabled") === "true";
   }
 
+  // 豆包专用：发送/停止按钮唯一入口 button[data-testid="chat_input_send_button"]，
+  // 生成停止态（data-disabled="true"）不可点。不做通用文案/位置猜测（那是
+  // deepseek 通用实现的思路，对豆包只会误判）。
   function findSendButton(input) {
-    const nodes = [...document.querySelectorAll("button, div[role='button'], span[role='button'], [data-testid]")];
-    for (const el of nodes) {
-      if (!isVisible(el)) continue;
-      const label = labelOf(el);
-      if (isBypass(label)) continue;
-      if (label === "发送" || label === "send" || label === "发送消息") return el;
-    }
-    let scope = input;
-    for (let i = 0; i < 4 && scope && scope.parentElement; i++) scope = scope.parentElement;
-    if (scope) {
-      const cands = [...scope.querySelectorAll("div[role='button'], button, [data-testid]")].filter((el) => {
-        if (!isVisible(el)) return false;
-        if (el.getAttribute("aria-disabled") === "true") return false;
-        if (el.hasAttribute("disabled")) return false;
-        if (isBypass(labelOf(el))) return false;
-        const cls = String(el.className || "") + String(el.getAttribute("data-testid") || "");
-        return /send|submit/i.test(cls) || !el.querySelector("svg");
-      });
-      const ranked = cands
-        .map((el) => ({ el, r: el.getBoundingClientRect() }))
-        .sort((a, b) => b.r.top - a.r.top || b.r.left - a.r.left);
-      if (ranked.length) return ranked[0].el;
-    }
+    const btn = document.querySelector('button[data-testid="chat_input_send_button"]');
+    if (btn && isVisible(btn) && btn.getAttribute("data-disabled") !== "true") return btn;
     return null;
-  }
-
-  function pickSendButton() {
-    document.querySelectorAll("[data-mrd-send]").forEach((e) => e.removeAttribute("data-mrd-send"));
-    const input = currentInput();
-    const btn = findSendButton(input);
-    if (!btn) return { found: false };
-    btn.setAttribute("data-mrd-send", "1");
-    return {
-      found: true,
-      label: (btn.getAttribute("aria-label") || btn.getAttribute("title") || "").slice(0, 24),
-      disabled: btn.getAttribute("aria-disabled") === "true" || btn.hasAttribute("disabled"),
-    };
   }
 
   function currentChatId() {
@@ -227,20 +143,16 @@ _PAGE_JS = r"""
       .trim();
   }
 
-  // 豆包：消息正文统一挂在 [data-testid="message_text_content"]（md-box-root），
-  // 且 [class*='markdown'] 在豆包零命中 —— 只按 markdown 类名找会导致 DOM 回复
-  // 通道完全失效。用 receive_message 祖先限定，排除用户自己的消息气泡。
+  // 豆包：消息正文统一挂 [data-testid="message_text_content"]，用户气泡与助手
+  // 回复都带此 testid，必须用 receive_message 祖先限定排除用户消息。会话区虚拟
+  // 滚动只挂载最近约 3 条，最后一个即为最新回复 —— 回复等待/拉取只依赖最后
+  // 一条，截断不影响判定。
   function blockSel() {
     return '[data-testid="receive_message"] [data-testid="message_text_content"]';
   }
 
   function assistantBlocks() {
     return [...document.querySelectorAll(blockSel())].map(blockText).filter((t) => t);
-  }
-
-  function assistantBlocksIn(root) {
-    if (!root) return [];
-    return [...root.querySelectorAll(blockSel())].map(blockText).filter((t) => t);
   }
 
   function inputReady() {
@@ -267,36 +179,31 @@ _PAGE_JS = r"""
       sendBtnFound: !!btn,
       sendBtnDisabled: btn
         ? btn.getAttribute("aria-disabled") === "true" || btn.hasAttribute("disabled")
+          || btn.getAttribute("data-disabled") === "true"
         : false,
       markerCount,
       markerAppeared: markerCount > (Number(beforeMarker) || 0),
       pathChanged: location.pathname !== String(pathBefore || ""),
       blockCount: blocks.length,
-      // .chat-round 已被豆包改版废掉（页面上有回复但计数恒 0）；用户气泡
-      // 侧挂 send_message testid（与 receive_message 对应），两类一起数
-      roundCount: document.querySelectorAll(".chat-round, [data-testid='send_message']").length,
-      userMsgCount: document.querySelectorAll(".message-card-wrap.question, [data-testid='send_message']").length,
+      // 发送轮次：每条已发送消息挂 button[data-index-entry-key]；助手回复块会
+      // 因虚拟滚动最多只挂载约 3 条，不能用作轮次计数
+      roundCount: document.querySelectorAll("button[data-index-entry-key]").length,
       generating: generating(),
       chatId: currentChatId(),
     };
   }
 
   function domSnapshot(beforeCount, beforeLast) {
+    // 虚拟滚动下 blockCount 恒为挂载上限（约 3），新旧判定主要靠 lastBlockText
+    // 与 baseline before_last 的文本比较
     const blocks = assistantBlocks();
     const last = blocks.length ? blocks[blocks.length - 1] : "";
-    const cur = last;
-    const isNew = !!cur && (blocks.length > (beforeCount || 0) || cur !== (beforeLast || ""));
+    const isNew = !!last && (blocks.length > (beforeCount || 0) || last !== (beforeLast || ""));
     return {
       blockCount: blocks.length,
       lastBlockText: last,
-      lastBlockChanged: isNew && cur !== (beforeLast || ""),
-      roundCount: document.querySelectorAll(".chat-round").length,
+      lastBlockChanged: isNew && last !== (beforeLast || ""),
       generating: generating(),
-      lastRoundText: (() => {
-        const rounds = document.querySelectorAll(".chat-round");
-        if (!rounds.length) return "";
-        return assistantBlocksIn(rounds[rounds.length - 1]).join("\n\n");
-      })(),
       chatId: currentChatId(),
       path: location.pathname,
     };
@@ -304,19 +211,14 @@ _PAGE_JS = r"""
 
   function probe() {
     const input = findInput();
-    const btn = input ? findSendButton(input) : null;
+    const btn = findSendButton(input);
     const blocks = assistantBlocks();
-    const cands = inputCandidates().slice(0, 5).map((c) => ({
-      tag: c.tag, id: c.id || "", placeholder: (c.placeholder || "").slice(0, 24),
-      size: `${c.w}x${c.h}`, score: c.score,
-    }));
     return {
       url: location.href,
       title: document.title,
       loggedIn: !document.querySelector("button[class*='login'], a[href*='login']") || blocks.length > 0 || !!input,
       inputFound: !!input,
       inputKind: input ? input.tagName : "",
-      inputCandidates: cands,
       sendButtonFound: !!btn,
       sendButtonLabel: btn ? (btn.getAttribute("aria-label") || btn.getAttribute("title") || "").slice(0, 40) : "",
       assistantBlocks: blocks.length,
@@ -327,7 +229,6 @@ _PAGE_JS = r"""
   window.__mrdCdp = {
     SITE,
     pickInput,
-    pickSendButton,
     inputReady,
     sentCheck,
     domSnapshot,
@@ -336,7 +237,6 @@ _PAGE_JS = r"""
     currentChatId,
     countInBody,
     assistantBlocks,
-    assistantBlocksIn,
     blockText,
   };
   return true;
@@ -670,10 +570,7 @@ class DoubaoDriver(BaseSiteDriver):
         except Exception as e:
             raise RuntimeError(f"读取 {self.name} 会话列表失败（页面可能正在加载，请稍后重试）：{e}")
         if not sessions:
-            raise RuntimeError(
-                f"未能从 {self.name} 侧栏识别到会话列表（页面结构可能改版）。"
-                "可在导入弹窗手动粘贴会话链接，或留空自动新建会话"
-            )
+            return []
         return sessions
 
     async def _goto_home_for_sidebar(self, mgr: Any, page: Any) -> None:
@@ -753,7 +650,7 @@ class DoubaoDriver(BaseSiteDriver):
             "([m]) => { const blocks = window.__mrdCdp.assistantBlocks();"
             " return { beforeCount: blocks.length, beforeLast: blocks.length ? blocks[blocks.length - 1] : '',"
             " beforeMarker: window.__mrdCdp.countInBody(m), pathBefore: location.pathname,"
-            " beforeRounds: document.querySelectorAll('.chat-round, [data-testid=\\'send_message\\']').length }; }",
+            " beforeRounds: document.querySelectorAll('button[data-index-entry-key]').length }; }",
             [marker],
         )
         baseline = {
@@ -774,7 +671,7 @@ class DoubaoDriver(BaseSiteDriver):
         return baseline
 
     async def _wait_generation_idle(self, page: Any, cancelled, max_wait: float = 90.0) -> None:
-        """等待豆包上一轮生成结束（composer 内「停止」按钮消失）再发送。
+        """等待豆包上一轮生成结束（发送按钮停止态 data-disabled="true" 消失）再发送。
 
         生成中写入的消息会被站点静默丢弃；这里最多等 max_wait 秒（深度思考
         一般不超过此限），超时则告警并照常尝试发送（由 _submit 的核验兜底）。
@@ -887,12 +784,12 @@ class DoubaoDriver(BaseSiteDriver):
                 continue
             if submits < 4:
                 submits += 1
-                btn = await page.evaluate("() => window.__mrdCdp.pickSendButton()")
-                if btn and btn.get("found"):
-                    try:
-                        await page.locator('[data-mrd-send="1"]').first.click(timeout=5000)
-                    except Exception:
-                        pass
+                try:
+                    await page.locator('button[data-testid="chat_input_send_button"]').first.click(
+                        timeout=5000
+                    )
+                except Exception:
+                    pass
         swallowed = bool(last_snap) and bool(last_snap.get("inputEmpty")) and (
             int(last_snap.get("blockCount") or 0) == int(baseline.get("before_count") or 0)
             and int(last_snap.get("roundCount") or 0) == int(baseline.get("before_rounds") or 0)
@@ -962,42 +859,34 @@ class DoubaoDriver(BaseSiteDriver):
                 elif time.monotonic() - not_json_at > NOT_JSON_GRACE_S:
                     return {"ok": True, "text": sse_text, "chat_id": str(dom.get("chatId") or ""), "error": ""}
             stable_need = 3.0 if not sse.get("active") else 8.0
-            # 生成中（「停止」按钮仍在）不得因 DOM 短暂稳定而提前返回：深度思考
+            # 生成中（发送按钮处于停止态）不得因 DOM 短暂稳定而提前返回：深度思考
             # / 流式停顿期间 DOM 可能数十秒不变，提前返回会让下一镜在生成中发送
             # 而被静默丢弃（批量转 H3 第 3 条以后失败的根因）。生成中持续重置
-            # 稳定计时；但 DOM 稳定超过 20s 仍显示生成中时按已完成处理
-            # （「停止」按钮残留的兜底，避免死等）。
-            if dom.get("generating") and time.monotonic() - stable_since < 20.0:
+            # 稳定计时；但生成态持续超过 60s 且 DOM 无任何变化时按已完成处理
+            # （停止态残留兜底，避免死等；深度思考单次停顿一般不超过此限）。
+            if dom.get("generating") and time.monotonic() - stable_since < 60.0:
                 stable_since = time.monotonic()
 
             def _json_pending() -> bool:
                 return bool(expect_json and not _looks_json_complete(last_text))
 
-            cur_round = str(dom.get("lastRoundText") or "")
-            if cur_round:
+            cur = str(dom.get("lastBlockText") or "")
+            # 虚拟滚动下 blockCount 恒为挂载上限（约 3），新回复判定主要靠与
+            # baseline before_last 的文本比较（最后一个 message_text_content
+            # 即最新回复）
+            is_new = bool(cur) and (
+                int(dom.get("blockCount") or 0) > before_count
+                or cur != before_last
+            )
+            if is_new:
                 saw_any = True
-                if cur_round != last_text:
-                    last_text = cur_round
+                if cur != last_text:
+                    last_text = cur
                     stable_since = time.monotonic()
                 elif time.monotonic() - stable_since > stable_need and not (
                     _json_pending() and deadline - time.monotonic() > 20.0
                 ):
                     return {"ok": True, "text": last_text, "chat_id": str(dom.get("chatId") or ""), "error": ""}
-            else:
-                cur = str(dom.get("lastBlockText") or "")
-                is_new = bool(cur) and (
-                    int(dom.get("blockCount") or 0) > before_count
-                    or cur != before_last
-                )
-                if is_new:
-                    saw_any = True
-                    if cur != last_text:
-                        last_text = cur
-                        stable_since = time.monotonic()
-                    elif time.monotonic() - stable_since > stable_need and not (
-                        _json_pending() and deadline - time.monotonic() > 20.0
-                    ):
-                        return {"ok": True, "text": last_text, "chat_id": str(dom.get("chatId") or ""), "error": ""}
             if not sse.get("active") and not saw_any and time.monotonic() > no_signal_at:
                 return {
                     "ok": False, "text": "", "chat_id": "",

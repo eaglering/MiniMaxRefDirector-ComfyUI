@@ -105,6 +105,9 @@ async function loadSessions() {
   try {
     sessions.value = await deepseekListSessions("", site.value, cdpEndpoint.value);
   } catch (e) {
+    // 失败时同步清空残留列表：上次加载的结果不代表当前真实状态（如会话已被
+    // 用户在站点里删光），保留会误导选择；错误提示由 loadError 呈现
+    sessions.value = [];
     loadError.value = e.message || String(e);
   } finally {
     loading.value = false;

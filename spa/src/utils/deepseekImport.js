@@ -464,9 +464,10 @@ export async function runAudioStep(state, { token = null, onLog = () => {} } = {
 
 /**
  * 步骤 6：批量分镜转 H3 提示词（不注入 skills guide / skill_notes）。
- * 逐镜在同一会话内追问；解析失败 / 缺字段 / 疑似串轮时**不自动追问**
- * （高频连发易触发站点风控封号），改为弹出对话框展示原始提示词与最后回复，
- * 由用户决定「采纳 / 重试 / 跳过」；重试必须用户逐次确认。
+ * 会话轮换策略：新开会话 → 随机咨询 1-3 个分镜 → 关闭该会话 → 再开新会话，
+ * 循环直到全部转换（降低单会话高频连发触发站点风控的概率）。
+ * 解析失败 / 缺字段 / 疑似串轮时**不自动追问**，弹出对话框展示原始提示词与
+ * 最后回复，由用户决定「采纳 / 重试 / 跳过」；重试必须用户逐次确认。
  * 结果写回 state.shots[i].h3。
  */
 export async function runH3Step(
@@ -476,21 +477,61 @@ export async function runH3Step(
   if (!Array.isArray(state.shots) || !state.shots.length) {
     throw new Error("请先执行「分镜设计」步骤");
   }
-  const chatId = state.storyboardChatId || state.sessionId;
   const total = state.shots.length;
   // 写作指南整批只拉取一次（60s 缓存），注入每镜的 system
   const system = await buildWebChatH3System();
-  onLog("info", `批量转换 ${total} 个镜头为 H3 提示词（逐镜追问，同会话进行）…`);
-  const askShot = (prompt) =>
-    deepseekCompleteInSession("", {
+  onLog("info", `批量转换 ${total} 个镜头为 H3 提示词（新开会话 → 随机 1-3 镜 → 关闭会话 → 轮换）…`);
+  // 会话轮换状态：chatId 为空表示下次发送要开新会话
+  let chatId = "";
+  let usedInSession = 0;
+  let sessionQuota = 1 + Math.floor(Math.random() * 3); // 本会话计划 1-3 镜
+  // 关闭当前会话；删除失败则保留 id 到 createdSessions，供「清理会话」重试
+  const closeSession = async () => {
+    if (!chatId) return;
+    const cid = chatId;
+    chatId = "";
+    usedInSession = 0;
+    sessionQuota = 1 + Math.floor(Math.random() * 3);
+    try {
+      await deepseekDeleteSession("", cid, state.site, state.cdp);
+      onLog("info", `已关闭会话 ${cid.slice(0, 8)}…`);
+    } catch (e) {
+      if (!state.createdSessions.includes(cid)) state.createdSessions.push(cid);
+      onLog("warn", `关闭会话 ${cid.slice(0, 8)}… 失败（稍后可用「清理会话」重试）：${e.message || e}`);
+    }
+  };
+  // 发送一镜：有会话在同会话追问；无会话则新开会话（首镜即新会话首条消息）
+  const askShot = async (prompt) => {
+    checkCancelled(token);
+    if (chatId) {
+      const text = await deepseekCompleteInSession("", {
+        site: state.site,
+        system,
+        prompt,
+        chatId,
+        expectJson: true,
+        cdpEndpoint: state.cdp,
+        timeoutMs: LONG_TIMEOUT_MS,
+      });
+      usedInSession += 1;
+      return text;
+    }
+    const resp = await deepseekCompleteNewSession("", {
       site: state.site,
       system,
       prompt,
-      chatId,
       expectJson: true,
       cdpEndpoint: state.cdp,
       timeoutMs: LONG_TIMEOUT_MS,
     });
+    if (!resp.chatId) {
+      throw new Error("已发送但未能取得新会话 id（无法继续会话轮换）");
+    }
+    chatId = resp.chatId;
+    usedInSession = 1;
+    onLog("info", `已开新会话 ${resp.chatId.slice(0, 8)}…（本会话计划 ${sessionQuota} 镜）`);
+    return resp.text;
+  };
   // 纠正追问提示（仅在用户点「重试」后发送）
   const H3_RETRY_NOTE =
     "\n\n上一次的回复不是合法的 H3 JSON（或缺 summary / detailed_description 字段，" +
@@ -512,12 +553,20 @@ export async function runH3Step(
   const failed = [];
   for (let i = 0; i < total; i++) {
     checkCancelled(token);
-    // 镜间随机等待 6-14s（拟人节奏）：豆包实测高频连发约 4 条后开始静默吞消息，
-    // 是"批量 H3 后段失败"的直接诱因；被吞的镜头由后端风控冷却重试兜底
+    // 会话轮换：上一镜已用满本会话配额（随机 1-3 镜）→ 关闭当前会话，本镜开新会话。
+    // 放在循环开头，覆盖成功 / 跳过 / 失败等所有 continue 路径
+    if (chatId && usedInSession >= sessionQuota) {
+      const gap = 3 + Math.floor(Math.random() * 4);
+      onLog("info", `会话已用满 ${sessionQuota} 镜，等待 ${gap}s 后关闭并开新会话…`);
+      await humanGap(3, 7);
+      await closeSession();
+    }
+    // 镜间随机等待 4-10s（拟人节奏）：会话轮换已分散单会话连发压力，
+    // 间隔相应缩短；被吞的镜头由后端风控冷却重试兜底
     if (i > 0) {
-      const gap = 6 + Math.floor(Math.random() * 9);
+      const gap = 4 + Math.floor(Math.random() * 7);
       onLog("info", `等待 ${gap}s 后处理镜头 ${i + 1}…`);
-      await humanGap(6, 14);
+      await humanGap(4, 10);
     }
     const shot = state.shots[i];
     const sec = Number(shot.duration_seconds) > 0 ? Number(shot.duration_seconds) : 5;
@@ -638,6 +687,8 @@ export async function runH3Step(
     shot.h3 = toH3(obj);
     onLog("info", `镜头 ${i + 1}/${total} 已转换`);
   }
+  // 批量结束：关闭最后一个会话（无残留会话时为 no-op）
+  await closeSession();
   const ok = state.shots.filter((s) => s.h3).length;
   if (!ok) throw new Error(`全部镜头转换失败（${failed.length} 个，详见控制台与日志）`);
   if (failed.length) onLog("warn", `${failed.length} 个镜头未转换：${failed.join("；")}`);

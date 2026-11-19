@@ -56,109 +56,41 @@ _PAGE_JS = r"""
     return (clone.innerText || "").replace(/\u00a0/g, " ").trim();
   }
 
-  function inputCandidates() {
-    const els = [...document.querySelectorAll("textarea, div[contenteditable='true']")];
-    return els
-      .filter((el) => {
-        if (!isVisible(el)) return false;
-        const r = el.getBoundingClientRect();
-        return r.width >= 40 && r.height >= 16;
-      })
-      .map((el) => {
-        const r = el.getBoundingClientRect();
-        const id = String(el.id || "").toLowerCase();
-        const cls = String(el.className || "").toLowerCase();
-        const ph = el.getAttribute("placeholder") || "";
-        let score = 0;
-        if (id === "chat-input") score += 100;
-        if (/chat|input|prompt|composer/.test(`${id} ${cls}`)) score += 20;
-        if (ph) score += 10;
-        if (el.tagName === "TEXTAREA") score += 5;
-        score += Math.min(30, Math.round((r.width * r.height) / 4000));
-        return { el, score, tag: el.tagName, id: el.id || "", placeholder: ph, w: Math.round(r.width), h: Math.round(r.height) };
-      })
-      .sort((a, b) => b.score - a.score);
-  }
-
+  // 千问专用输入框：div[contenteditable='true'][role="textbox"]，选中后打
+  // data-mrd-input="1" 标记，后续一律按标记取（不做启发式打分猜测）。
   function findInput() {
-    const list = inputCandidates();
-    return list.length ? list[0].el : null;
+    return (
+      document.querySelector("[data-mrd-input]") ||
+      document.querySelector("div[contenteditable='true'][role='textbox']")
+    );
   }
 
   function pickInput() {
-    const list = inputCandidates();
     document.querySelectorAll("[data-mrd-input]").forEach((e) => e.removeAttribute("data-mrd-input"));
-    if (!list.length) return { found: false, candidates: [] };
-    const el = list[0].el;
+    const el = document.querySelector("div[contenteditable='true'][role='textbox']");
+    if (!el) return { found: false };
     el.setAttribute("data-mrd-input", "1");
-    return {
-      found: true,
-      tag: el.tagName,
-      id: el.id || "",
-      placeholder: (el.getAttribute("placeholder") || "").slice(0, 24),
-      len: inputText(el).length,
-      candidates: list.slice(0, 5).map((c) => ({
-        tag: c.tag, id: c.id || "", placeholder: (c.placeholder || "").slice(0, 24),
-        size: `${c.w}x${c.h}`, score: c.score,
-      })),
-    };
+    return { found: true, tag: el.tagName, id: el.id || "", len: inputText(el).length };
   }
 
   function currentInput() {
-    return document.querySelector("[data-mrd-input]") || findInput();
+    return findInput();
   }
 
-  function labelOf(el) {
-    return (
-      el.getAttribute("aria-label") ||
-      el.getAttribute("title") ||
-      el.textContent ||
-      ""
-    ).trim().toLowerCase();
-  }
-
-  function isBypass(label) {
-    return /语音|麦克风|上传|附件|图片|录音|暂停|停止|voice|mic|upload|attach|stop|pause/.test(label);
-  }
-
+  // 千问专用发送按钮：button[aria-label="发送消息"]，disabled 表示输入框无
+  // 内容；页面可能存在多个同名按钮，取第一个可见且未禁用的
   function findSendButton(input) {
-    const nodes = [...document.querySelectorAll("button, div[role='button'], span[role='button'], [data-testid]")];
-    for (const el of nodes) {
-      if (!isVisible(el)) continue;
-      const label = labelOf(el);
-      if (isBypass(label)) continue;
-      if (label === "发送" || label === "send" || label === "发送消息") return el;
-    }
-    let scope = input;
-    for (let i = 0; i < 4 && scope && scope.parentElement; i++) scope = scope.parentElement;
-    if (scope) {
-      const cands = [...scope.querySelectorAll("div[role='button'], button, [data-testid]")].filter((el) => {
-        if (!isVisible(el)) return false;
-        if (el.getAttribute("aria-disabled") === "true") return false;
-        if (el.hasAttribute("disabled")) return false;
-        if (isBypass(labelOf(el))) return false;
-        const cls = String(el.className || "") + String(el.getAttribute("data-testid") || "");
-        return /send|submit/i.test(cls) || !el.querySelector("svg");
-      });
-      const ranked = cands
-        .map((el) => ({ el, r: el.getBoundingClientRect() }))
-        .sort((a, b) => b.r.top - a.r.top || b.r.left - a.r.left);
-      if (ranked.length) return ranked[0].el;
+    for (const b of document.querySelectorAll('button[aria-label="发送消息"]')) {
+      if (!isVisible(b)) continue;
+      if (b.disabled === true || b.getAttribute("aria-disabled") === "true") continue;
+      return b;
     }
     return null;
   }
 
-  function pickSendButton() {
-    document.querySelectorAll("[data-mrd-send]").forEach((e) => e.removeAttribute("data-mrd-send"));
-    const input = currentInput();
-    const btn = findSendButton(input);
-    if (!btn) return { found: false };
-    btn.setAttribute("data-mrd-send", "1");
-    return {
-      found: true,
-      label: (btn.getAttribute("aria-label") || btn.getAttribute("title") || "").slice(0, 24),
-      disabled: btn.getAttribute("aria-disabled") === "true" || btn.hasAttribute("disabled"),
-    };
+  // 生成中判定（千问专用）：出现 button[aria-label="停止回答"] 即生成中
+  function generating() {
+    return !!document.querySelector('button[aria-label="停止回答"]');
   }
 
   function currentChatId() {
@@ -175,11 +107,24 @@ _PAGE_JS = r"""
     return "";
   }
 
+  // 计数前对正文与 marker 都做空白归一化：千问气泡保留提示词换行，而 marker
+  // 在 Python 侧已把换行压成空格，不归一化则多行提示词永远匹配不上
+  function normSpace(s) {
+    return String(s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+  }
+
   function countInBody(marker) {
     if (!marker) return 0;
-    const body = ((document.body && document.body.innerText) || "").replace(/\u00a0/g, " ");
-    const m = String(marker).replace(/\u00a0/g, " ");
+    const body = normSpace((document.body && document.body.innerText) || "");
+    const m = normSpace(marker);
     return body ? body.split(m).length - 1 : 0;
+  }
+
+  function countInText(text, marker) {
+    if (!text || !marker) return 0;
+    const t = normSpace(text);
+    const m = normSpace(marker);
+    return t ? t.split(m).length - 1 : 0;
   }
 
   function blockText(el) {
@@ -210,18 +155,14 @@ _PAGE_JS = r"""
       .trim();
   }
 
-  // 千问：通用 markdown 类名（.chat-round 轮次壳内取最后一轮答案）
+  // 千问：每条助手回复正文挂 div[id="qk-markdown-react"]（多个条目共用同一
+  // id 属站点行为），最后一个即为最新回复
   function blockSel() {
-    return ".ds-markdown, .markdown-body, [class*='markdown']";
+    return 'div[id="qk-markdown-react"]';
   }
 
   function assistantBlocks() {
     return [...document.querySelectorAll(blockSel())].map(blockText).filter((t) => t);
-  }
-
-  function assistantBlocksIn(root) {
-    if (!root) return [];
-    return [...root.querySelectorAll(blockSel())].map(blockText).filter((t) => t);
   }
 
   function inputReady() {
@@ -235,23 +176,26 @@ _PAGE_JS = r"""
 
   function sentCheck(marker, beforeMarker, pathBefore) {
     const input = currentInput();
-    const empty = !input || !inputText(input);
+    const text = input ? inputText(input) : "";
+    const empty = !input || !text;
     const btn = input ? findSendButton(input) : null;
     const blocks = assistantBlocks();
-    const markerCount = countInBody(marker);
+    // marker 计数空白归一化 + 剔除输入框草稿：草稿也在 body.innerText 里，
+    // 不剔除会把「尚未发送」误判成「已上屏」
+    const markerCount = Math.max(0, countInBody(marker) - countInText(text, marker));
     return {
       inputEmpty: empty,
-      inputLen: input ? inputText(input).length : 0,
+      inputLen: text.length,
       sendBtnFound: !!btn,
-      sendBtnDisabled: btn
-        ? btn.getAttribute("aria-disabled") === "true" || btn.hasAttribute("disabled")
-        : false,
+      sendBtnDisabled: btn ? btn.disabled === true || btn.getAttribute("aria-disabled") === "true" : false,
       markerCount,
       markerAppeared: markerCount > (Number(beforeMarker) || 0),
       pathChanged: location.pathname !== String(pathBefore || ""),
       blockCount: blocks.length,
-      roundCount: document.querySelectorAll(".chat-round").length,
-      userMsgCount: document.querySelectorAll(".message-card-wrap.question").length,
+      // 发送轮次：每条消息挂 div[data-chat-list-key]（data-chat-list-index 从 0
+      // 递增），新消息使计数相对 baseline 增加
+      roundCount: document.querySelectorAll("div[data-chat-list-key]").length,
+      generating: generating(),
       chatId: currentChatId(),
     };
   }
@@ -259,18 +203,12 @@ _PAGE_JS = r"""
   function domSnapshot(beforeCount, beforeLast) {
     const blocks = assistantBlocks();
     const last = blocks.length ? blocks[blocks.length - 1] : "";
-    const cur = last;
-    const isNew = !!cur && (blocks.length > (beforeCount || 0) || cur !== (beforeLast || ""));
+    const isNew = !!last && (blocks.length > (beforeCount || 0) || last !== (beforeLast || ""));
     return {
       blockCount: blocks.length,
       lastBlockText: last,
-      lastBlockChanged: isNew && cur !== (beforeLast || ""),
-      roundCount: document.querySelectorAll(".chat-round").length,
-      lastRoundText: (() => {
-        const rounds = document.querySelectorAll(".chat-round");
-        if (!rounds.length) return "";
-        return assistantBlocksIn(rounds[rounds.length - 1]).join("\n\n");
-      })(),
+      lastBlockChanged: isNew && last !== (beforeLast || ""),
+      generating: generating(),
       chatId: currentChatId(),
       path: location.pathname,
     };
@@ -278,19 +216,14 @@ _PAGE_JS = r"""
 
   function probe() {
     const input = findInput();
-    const btn = input ? findSendButton(input) : null;
+    const btn = findSendButton(input);
     const blocks = assistantBlocks();
-    const cands = inputCandidates().slice(0, 5).map((c) => ({
-      tag: c.tag, id: c.id || "", placeholder: (c.placeholder || "").slice(0, 24),
-      size: `${c.w}x${c.h}`, score: c.score,
-    }));
     return {
       url: location.href,
       title: document.title,
       loggedIn: !document.querySelector("button[class*='login'], a[href*='login']") || blocks.length > 0 || !!input,
       inputFound: !!input,
       inputKind: input ? input.tagName : "",
-      inputCandidates: cands,
       sendButtonFound: !!btn,
       sendButtonLabel: btn ? (btn.getAttribute("aria-label") || btn.getAttribute("title") || "").slice(0, 40) : "",
       assistantBlocks: blocks.length,
@@ -301,15 +234,14 @@ _PAGE_JS = r"""
   window.__mrdCdp = {
     SITE,
     pickInput,
-    pickSendButton,
     inputReady,
     sentCheck,
     domSnapshot,
+    generating,
     probe,
     currentChatId,
     countInBody,
     assistantBlocks,
-    assistantBlocksIn,
     blockText,
   };
   return true;
@@ -335,21 +267,17 @@ _QWEN_SESSIONS_JS = r"""
 }
 """
 
-# 千问发送按钮状态（aria-label="发送消息"；输入框为空/编辑器状态未同步时 disabled）
+# 千问发送按钮状态（button[aria-label="发送消息"]；disabled 表示输入框无内容）
 _QWEN_SEND_STATE_JS = r"""
 () => {
-  for (const b of document.querySelectorAll("button, [role='button']")) {
-    const label = String(b.getAttribute("aria-label") || b.getAttribute("title") || "").trim();
-    if (label === "发送消息" || label === "发送" || /^send$/i.test(label)) {
-      const r = b.getBoundingClientRect();
-      return {
-        found: true,
-        disabled: b.disabled === true || b.getAttribute("aria-disabled") === "true",
-        visible: r.width > 0 && r.height > 0,
-      };
-    }
-  }
-  return { found: false };
+  const b = document.querySelector('button[aria-label="发送消息"]');
+  if (!b) return { found: false };
+  const r = b.getBoundingClientRect();
+  return {
+    found: true,
+    disabled: b.disabled === true || b.getAttribute("aria-disabled") === "true",
+    visible: r.width > 0 && r.height > 0,
+  };
 }
 """
 
@@ -561,12 +489,7 @@ class QwenDriver(BaseSiteDriver):
             sessions = await page.evaluate(_QWEN_SESSIONS_JS)
         except Exception as e:
             raise RuntimeError(f"读取千问会话列表失败（页面可能正在加载，请稍后重试）：{e}")
-        if not sessions:
-            raise RuntimeError(
-                '未能从千问侧栏识别到会话列表（data-session-switch-target="normal"，'
-                "页面结构可能改版）。可在导入弹窗手动粘贴会话链接，或留空自动新建会话"
-            )
-        return sessions
+        return sessions or []
 
     async def _goto_home_for_sidebar(self, mgr: Any, page: Any) -> None:
         """删除流程前置：回到首页并等侧栏/输入框就绪。"""
@@ -631,11 +554,12 @@ class QwenDriver(BaseSiteDriver):
         """发送消息（写入 + 提交 + 核验）。失败/取消抛异常。"""
         mgr.reset_sse(page)
         marker = _marker_of(text)
+        await self._wait_generation_idle(page)  # 生成中发送会被丢弃，先等空闲
         before = await page.evaluate(
             "([m]) => { const blocks = window.__mrdCdp.assistantBlocks();"
             " return { beforeCount: blocks.length, beforeLast: blocks.length ? blocks[blocks.length - 1] : '',"
             " beforeMarker: window.__mrdCdp.countInBody(m), pathBefore: location.pathname,"
-            " beforeRounds: document.querySelectorAll('.chat-round').length }; }",
+            " beforeRounds: document.querySelectorAll('div[data-chat-list-key]').length }; }",
             [marker],
         )
         baseline = {
@@ -654,6 +578,27 @@ class QwenDriver(BaseSiteDriver):
             )
         await self._submit(page, marker, baseline, cancelled)
         return baseline
+
+    async def _wait_generation_idle(self, page: Any, max_wait: float = 90.0) -> None:
+        """等待上一轮生成结束（「停止回答」按钮消失）再发送。
+
+        生成中写入的消息可能被站点静默丢弃；超时则告警并照常尝试发送
+        （由 _submit 的核验兜底）。
+        """
+        deadline = time.monotonic() + max_wait
+        warned = False
+        while time.monotonic() < deadline:
+            try:
+                busy = await page.evaluate("() => window.__mrdCdp.generating()")
+            except Exception:
+                return
+            if not busy:
+                return
+            if not warned:
+                log.info("[WebChatCDP] %s 上一轮仍在生成，等待其结束后再发送", self.name)
+                warned = True
+            await asyncio.sleep(1.0)
+        log.warning("[WebChatCDP] %s 等待上一轮生成结束超时（%ss），继续尝试发送", self.name, int(max_wait))
 
     async def _wait_send_enabled(self, page: Any) -> bool:
         """等待「发送消息」按钮可用（编辑器状态同步有延迟）。找不到按钮视为可用。"""
@@ -737,14 +682,9 @@ class QwenDriver(BaseSiteDriver):
                     # 草稿被站点清空但消息未发出 → 重新写入再提交
                     await self._write_text(page, pending, cancelled)
             try:
-                # 优先点 findSendButton 打标的元素（与手工验证一致）；
-                # 页面可能存在多个 aria-label="发送消息" 的按钮，直接按 CSS
-                # 选择器取 .first 可能点到无效的那个（点后草稿被清但消息不发）
-                mark = await page.evaluate("() => window.__mrdCdp.pickSendButton()")
-                if mark and mark.get("found") and not mark.get("disabled"):
-                    await page.locator('[data-mrd-send="1"]').first.click(timeout=5000)
-                else:
-                    await page.locator(_SEND_BTN_LOC).first.click(timeout=4000)
+                # 千问发送按钮：button[aria-label="发送消息"]（可能有多个同名
+                # 按钮，:visible 过滤取第一个可见的；disabled=输入框无内容）
+                await page.locator('button[aria-label="发送消息"]:visible').first.click(timeout=5000)
             except Exception as e:
                 log.debug("[WebChatCDP] qwen send click: %s", e)
             await asyncio.sleep(2.0 if attempt == 0 else 1.5)
@@ -773,9 +713,14 @@ class QwenDriver(BaseSiteDriver):
                            or int(s.get("roundCount") or 0) > int(baseline.get("before_rounds") or 0)))
 
     async def _submit_generic(self, page: Any, marker: str, baseline: dict, cancelled) -> None:
-        """通用提交路径（回车 → 补回车 → 通用发送按钮），按钮策略失败时兜底。"""
+        """通用提交兜底（回车 → 补回车 → 点发送按钮），信号先行核验。
+
+        每轮先核验「已上屏」信号，不以输入框清空为前提；输入框未清空只决定
+        是否补发动作（补回车一次、点发送按钮一次，各限一次防重复提交）。
+        """
         submits = 0
-        for round_i in range(12):
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline:
             if cancelled():
                 raise _CancelledError()
             if submits == 0:
@@ -784,7 +729,7 @@ class QwenDriver(BaseSiteDriver):
                 except Exception:
                     pass
                 submits = 1
-            await asyncio.sleep(2.0 if round_i == 0 else 1.5)
+            await asyncio.sleep(2.0)
             try:
                 s = await page.evaluate(
                     "([m, bm, pb]) => window.__mrdCdp.sentCheck(m, bm, pb)",
@@ -792,27 +737,25 @@ class QwenDriver(BaseSiteDriver):
                 )
             except Exception:
                 continue
-            if s and s.get("inputEmpty") is False:
-                if submits == 1:
-                    submits = 2
-                    try:
-                        await page.keyboard.press("Enter")
-                    except Exception:
-                        pass
-                    continue
-                if submits < 4:
-                    submits += 1
-                    btn = await page.evaluate("() => window.__mrdCdp.pickSendButton()")
-                    if btn and btn.get("found"):
-                        try:
-                            await page.locator('[data-mrd-send="1"]').first.click(timeout=5000)
-                        except Exception:
-                            pass
+            if s and s.get("inputEmpty"):
+                if (s.get("markerAppeared") or s.get("pathChanged")
+                        or int(s.get("blockCount") or 0) > baseline["before_count"]
+                        or int(s.get("roundCount") or 0) > int(baseline.get("before_rounds") or 0)):
+                    return
                 continue
-            if s and (s.get("markerAppeared") or s.get("pathChanged")
-                      or int(s.get("blockCount") or 0) > baseline["before_count"]
-                      or int(s.get("roundCount") or 0) > int(baseline.get("before_rounds") or 0)):
-                return
+            if submits == 1:
+                submits = 2
+                try:
+                    await page.keyboard.press("Enter")
+                except Exception:
+                    pass
+                continue
+            if submits < 4:
+                submits += 1
+                try:
+                    await page.locator('button[aria-label="发送消息"]:visible').first.click(timeout=5000)
+                except Exception:
+                    pass
         raise RuntimeError(
             "发送未生效：已回车并补点发送按钮（含重试），但输入框始终未清空、页面上也没出现这条消息。"
             f"常见原因：页面结构改版导致发送按钮/输入框定位偏移。请在 {self.name} 页面手动粘贴发送一次确认页面可用"
@@ -872,33 +815,27 @@ class QwenDriver(BaseSiteDriver):
             def _json_pending() -> bool:
                 return bool(expect_json and not _looks_json_complete(last_text))
 
-            cur_round = str(dom.get("lastRoundText") or "")
-            if cur_round:
+            # 生成中（「停止回答」按钮仍在）不得因 DOM 短暂稳定而提前返回：
+            # 流式停顿期提前返回会让下一镜在生成中发送。生成中持续重置稳定
+            # 计时；生成态持续超过 60s 且 DOM 无变化时按已完成处理（残留兜底）
+            if dom.get("generating") and time.monotonic() - stable_since < 60.0:
+                stable_since = time.monotonic()
+
+            cur = str(dom.get("lastBlockText") or "")
+            is_new = bool(cur) and (
+                int(dom.get("blockCount") or 0) > before_count
+                or cur != before_last
+            )
+            if is_new:
                 saw_any = True
-                if cur_round != last_text:
-                    last_text = cur_round
+                if cur != last_text:
+                    last_text = cur
                     stable_since = time.monotonic()
                 elif time.monotonic() - stable_since > stable_need and not (
                     _json_pending() and deadline - time.monotonic() > 20.0
                 ):
                     reply = {"ok": True, "text": last_text, "chat_id": str(dom.get("chatId") or ""), "error": ""}
                     return await self._fill_chat_id(page, reply)
-            else:
-                cur = str(dom.get("lastBlockText") or "")
-                is_new = bool(cur) and (
-                    int(dom.get("blockCount") or 0) > before_count
-                    or cur != before_last
-                )
-                if is_new:
-                    saw_any = True
-                    if cur != last_text:
-                        last_text = cur
-                        stable_since = time.monotonic()
-                    elif time.monotonic() - stable_since > stable_need and not (
-                        _json_pending() and deadline - time.monotonic() > 20.0
-                    ):
-                        reply = {"ok": True, "text": last_text, "chat_id": str(dom.get("chatId") or ""), "error": ""}
-                        return await self._fill_chat_id(page, reply)
             if not sse.get("active") and not saw_any and time.monotonic() > no_signal_at:
                 return {
                     "ok": False, "text": "", "chat_id": "",

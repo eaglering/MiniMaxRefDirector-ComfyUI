@@ -609,30 +609,53 @@ function matchBracket(s, start) {
   return -1;
 }
 
+// 提取 JSON 候选正文：整体原文 + 逐个围栏块。围栏用 ≥3 反引号宽松匹配
+// （模型偶发输出 6 反引号长围栏；或站点把回复重复输出两遍时，上一块的结束
+// 围栏与下一块的开始围栏无分隔粘连成 "``````json"——旧实现的 3 反引号围栏
+// 会匹配到空体并短路，即使后文有完整 JSON 也抛「回复中未找到完整 JSON」）。
+function jsonBodies(raw) {
+  const bodies = [raw];
+  const fenceRe = /`{3,}[^\n]*\r?\n([\s\S]*?)\r?\n`{3,}/g;
+  for (const m of raw.matchAll(fenceRe)) {
+    const body = String(m[1] || "").trim();
+    if (body) bodies.push(body);
+  }
+  return bodies;
+}
+
 export function parseJsonBlock(text) {
   const raw = String(text || "").trim();
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const body = (fenced ? fenced[1] : raw).trim();
-  // 1) 整体直接解析（无前后缀文字的最常见情形）
-  try {
-    return JSON.parse(body);
-  } catch {}
-  // 2) 平衡扫描：逐个 { / [ 起点取配对闭合段尝试解析，
-  //    自动跳过 JSON 前后的解释文字与追问尾巴
-  for (let i = 0; i < body.length; i++) {
-    const ch = body[i];
-    if (ch !== "{" && ch !== "[") continue;
-    const end = matchBracket(body, i);
-    if (end < 0) continue;
+  const bodies = jsonBodies(raw);
+  // 1) 各候选整体直接解析（无前后缀文字的最常见情形）
+  for (const body of bodies) {
     try {
-      return JSON.parse(body.slice(i, end + 1));
-    } catch {
-      // 该段不是合法 JSON（可能是文字示例），继续找下一个候选
+      return JSON.parse(body);
+    } catch {}
+  }
+  // 2) 平衡扫描：对每个候选逐个 { / [ 起点取配对闭合段尝试解析，
+  //    自动跳过 JSON 前后的解释文字与追问尾巴
+  for (const body of bodies) {
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i];
+      if (ch !== "{" && ch !== "[") continue;
+      const end = matchBracket(body, i);
+      if (end < 0) continue;
+      try {
+        return JSON.parse(body.slice(i, end + 1));
+      } catch {
+        // 该段不是合法 JSON（可能是文字示例），继续找下一个候选
+      }
     }
   }
   // 3) 兜底：首 { 到末 } 截取（旧行为）
-  const first = body.indexOf("{");
-  const last = body.lastIndexOf("}");
-  if (first >= 0 && last > first) return JSON.parse(body.slice(first, last + 1));
+  for (const body of bodies) {
+    const first = body.indexOf("{");
+    const last = body.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      try {
+        return JSON.parse(body.slice(first, last + 1));
+      } catch {}
+    }
+  }
   throw new Error("回复中未找到完整 JSON");
 }

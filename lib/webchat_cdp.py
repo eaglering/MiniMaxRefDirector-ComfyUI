@@ -226,6 +226,11 @@ class _Manager:
                     st["pages"][site["id"]] = page
                     self._attach_sse(page, driver)
                     return page
+        if not st["browser"].contexts:
+            raise RuntimeError(
+                "CDP 已连接但浏览器没有任何窗口上下文（浏览器可能已关闭全部窗口）。"
+                "请重新打开浏览器后重试"
+            )
         ctx = st["browser"].contexts[0]
         page = await ctx.new_page()
         st["pages"][site["id"]] = page
