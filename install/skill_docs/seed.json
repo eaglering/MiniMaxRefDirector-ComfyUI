@@ -16,7 +16,7 @@
     },
     {
       "key": "character-sheet",
-      "category": "主体设计",
+      "category": "分镜设计",
       "title": "主体设定（外貌/服装/道具一致性）",
       "file": "character-sheet.md"
     },
@@ -34,7 +34,7 @@
     },
     {
       "key": "ambience-foley",
-      "category": "音频设计",
+      "category": "分镜设计",
       "title": "底噪 / 环境音 / 拟音设计",
       "file": "ambience-foley.md"
     },

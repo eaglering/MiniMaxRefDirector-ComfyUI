@@ -122,3 +122,22 @@ export function nextChildName(subjects, type) {
   while (used.has(`${prefix}${i}`)) i++;
   return `${prefix}${i}`;
 }
+
+export function imageOf(subject, candidates) {
+  if (!subject) return "";
+  if (subject.type === "Subject") {
+    const tags = subject.description.match(/<@[a-zA-Z0-9]+>/g) || []
+    for (const tag of tags) {
+      const name = tag.slice(2, -1);
+      const s = (candidates || []).find((x) => (x.name || "").trim() === name);
+      if (s && s.type !== "Subject") {
+        const thumb = imageOf(s, candidates);
+        if (thumb) return thumb;
+      }
+    }
+  }
+  if (subject.type === "Picture" && subject.imageFile) return subject.imageFile;
+  if (subject.imageFile) return subject.imageFile;
+  return "";
+}
+  

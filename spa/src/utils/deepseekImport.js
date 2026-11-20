@@ -1,15 +1,17 @@
 // ===== 网页分镜导入流水线（手动逐步模式；站点无关）=====
-// 不提供一键全自动导入：每个步骤（故事大纲 → 分镜设计 → 主体设计 → 首帧图
-// 提示词 → 音频设计）由用户逐步「执行」。
+// 不提供一键全自动导入：每个步骤（故事大纲/故事导入 → 分镜设计 → 主体设计 →
+// 首帧图提示词 → 音频设计）由用户逐步「执行」。
+// 两种输入模式：
+// - 会话模式（选定已有会话）：步骤一在所选会话内提取大纲 JSON，其余步骤
+//   在分镜设计新建的会话内依据大纲摘要追问；
+// - 正文模式（粘贴故事正文 / 读取 txt-md）：步骤一为「故事导入」——自动新建
+//   会话分片注入全文即完成（不提取大纲），后续步骤（分镜 / 主体 / 音频）全部
+//   在导入会话内依据故事全文与上下文继续。
 // - 「执行」= 在桥接站点的网页会话内生成该步骤结果，缓存到 ImportState；
 //   成功后由 DeepseekImportDialog 自动写入 workspace（大纲仅缓存不写入）。
 // - 某步返回内容无法解析为 JSON 时：完整原文打印到浏览器控制台（F12 可查），
 //   步骤置为失败，由用户确认后手动重新「执行」——不自动追问重发。
-// 分镜设计不再注入任何技能清单（skill_keys 已废弃）；H3 转换不属于导入流程，
-// 由用户在分镜属性里按需点「转H3提示词」。
-// 会话 id 跨步骤复用：故事大纲在用户选定会话内提取（豆包/千问可手动填会话
-// 链接/ID 或留空自动新建），其余步骤在分镜设计新建的会话内追问；是否删除本次
-// 新建会话改为「清理会话」独立操作（三站均支持，默认不自动删除）。
+// 是否删除本次新建会话改为「清理会话」独立操作（三站均支持，默认不自动删除）。
 // 全部经后端 Playwright CDP 桥接（deepseek / doubao / qianwen），不使用 llama-cpp。
 //
 // skills 词库为本项目 resources/skills（后端 /spa/skill_library）。
@@ -146,8 +148,9 @@ async function genJsonInSession(state, chatId, prompt, what = "网页会话", on
  *   - cdpEndpoint: string          CDP 端点（后端 Playwright 附加用户 Chrome；空 = 后端默认）
  *   - site: string                 桥接站点（deepseek / doubao / qwen）
  *   - sessionId: string            用户选定的会话 id（会话模式的大纲提取用；空 = 自动新建）
- *   - storyText: string            故事正文（正文模式：自动新建会话分片注入全文后提取大纲，
- *                                  忽略 sessionId，避免污染原会话）
+ *   - storyText: string            故事正文（正文模式：自动新建会话分片注入全文即完成
+ *                                  故事导入，忽略 sessionId，避免污染原会话；后续步骤
+ *                                  在导入会话内依据全文继续）
  *   - timelineDigest: string       当前时间线摘要
  *   - frameRate: number            帧率
  *   - existingSubjects: array      现有主体
@@ -162,7 +165,8 @@ export function createImportState(opts = {}) {
     frameRate: opts.frameRate || 24,
     existingSubjects: opts.existingSubjects || [],
     createdSessions: [],   // 本次导入新建的会话 id（「清理会话」按钮统一删除）
-    storyboardChatId: "",  // 分镜设计新建的会话（后续步骤复用）
+    storyboardChatId: "",  // 分镜设计新建/复用的会话（后续步骤复用）
+    storyImported: false,  // 正文模式：故事已导入（分镜等后续步骤复用导入会话）
     outline: null,
     shots: [],
     characters: [],
@@ -199,16 +203,17 @@ function splitStoryChunks(text, size = STORY_CHUNK_SIZE) {
 }
 
 /**
- * 大纲提取 · 故事正文模式：自动新建会话，把整本书分片注入（每片让模型只回
- * 「已收到」，不污染上下文语义），全部发完后再发提取指令，产出与会话模式
- * 相同的大纲 JSON。全程在**新会话**内进行，不污染用户原会话。
+ * 步骤 1 · 故事导入（正文模式）：自动新建会话，把整本书分片注入（每片让模型
+ * 只回「已收到」，不污染上下文语义），发完后发一条简短收尾消息即完成——
+ * 不提取大纲 JSON，故事全文保留在会话上下文中，后续步骤（分镜 / 主体 / 音频）
+ * 直接在本会话内依据全文继续。全程在**新会话**内进行，不污染用户原会话。
  */
-async function runOutlineFromText(state, storyText, { token = null, onLog = () => {} }) {
+async function runStoryImport(state, storyText, { token = null, onLog = () => {} }) {
   const chunks = splitStoryChunks(storyText);
-  if (!chunks.length) throw new Error("故事正文为空，无法注入");
+  if (!chunks.length) throw new Error("故事正文为空，无法导入");
   const total = chunks.length;
-  const estMin = Math.round((total * 12 + 60) / 60);
-  onLog("info", `故事正文模式：自动新建会话，全文 ${storyText.length} 字将分 ${total} 条消息注入（预计 ${estMin} 分钟左右）…`);
+  const estMin = Math.round((total * 12 + 30) / 60);
+  onLog("info", `故事导入：自动新建会话，全文 ${storyText.length} 字将分 ${total} 条消息注入（预计 ${estMin} 分钟左右）…`);
 
   // 首片：新会话发出，从返回 chatId 建立会话
   const firstPrompt =
@@ -224,7 +229,7 @@ async function runOutlineFromText(state, storyText, { token = null, onLog = () =
     timeoutMs: LONG_TIMEOUT_MS,
   });
   if (!firstResp.chatId) {
-    throw new Error("已发送第 1 条正文，但未能取得新会话 id（无法继续注入，请重试）");
+    throw new Error("已发送第 1 条正文，但未能取得新会话 id（无法继续导入，请重试）");
   }
   const chatId = firstResp.chatId;
   state.sessionId = chatId;
@@ -247,47 +252,52 @@ async function runOutlineFromText(state, storyText, { token = null, onLog = () =
     });
     const brief = String(reply || "").replace(/\s+/g, "");
     if (brief.length > 30) {
-      onLog("warn", `第 ${i + 1} 条正文后模型回复了较长内容（未只回「已收到」），已继续注入；若后续提取偏离全文可手动重跑`);
+      onLog("warn", `第 ${i + 1} 条正文后模型回复了较长内容（未只回「已收到」），已继续导入`);
     }
     onLog("info", `已发送 ${i + 1}/${total} 条正文`);
   }
 
   checkCancelled(token);
-  // 全部发送完毕 → 提取指令（与会话模式同一个 story-design 模板）
-  onLog("info", "全文注入完毕，正在提取故事大纲（网页生成通常 30-90s）…");
-  const storyTpl = await loadSkill("story-design");
-  const extractPrompt = fillTemplate(storyTpl, {
-    input:
-      `（提取指令）前面 ${total} 条消息合起来是完整故事全文，现已全部发送完毕。` +
-      `请通读全文，按你的任务要求提取用户想拍的故事并输出任务要求的 JSON；` +
-      `以故事正文为准，不要遗漏主线与关键人物。` +
-      `特别注意：全文中的台词、字幕、音效/环境音、运镜、微表情等制作要素必须逐场原样保留，` +
-      `台词保留原句全文与说话人，一句都不许丢；无台词的场次显式写「无台词」。`,
-  });
-  const outlineText = await deepseekCompleteInSession("", {
-    prompt: extractPrompt,
+  // 收尾消息：告知全文发送完毕，等待后续任务指令（不产出任何 JSON）
+  await humanGap(3, 6);
+  await deepseekCompleteInSession("", {
+    prompt: `以上 ${total} 条消息就是完整故事全文，现已全部发送完毕。` +
+      `请只回复「已收到」，不要分析、不要总结；后续任务指令马上发出。`,
     chatId,
-    expectJson: true,
+    expectJson: false,
     site: state.site,
     cdpEndpoint: state.cdp,
     timeoutMs: LONG_TIMEOUT_MS,
   });
-  const outline = parseJsonOrFail(outlineText, { what: "故事大纲", onLog });
-  return finishOutline(state, outline, onLog);
+
+  // 导入成功：标记模式；本会话即后续分镜 / 主体 / 音频步骤的上下文载体。
+  // 重复执行导入会重建会话：重置分镜会话指针与已产出结果，提示后续步骤需重跑
+  state.storyImported = true;
+  state.outline = null;
+  if (state.storyboardChatId) {
+    onLog("warn", "故事已重新导入到新会话：原分镜会话已失效，分镜 / 主体 / 音频等后续步骤需重新执行");
+    state.storyboardChatId = "";
+    state.shots = [];
+    state.characters = [];
+    state.audios = [];
+  }
+  onLog("success", `故事导入完成：全文 ${storyText.length} 字已注入会话 ${chatId.slice(0, 8)}…（后续步骤将在此会话内继续）`);
+  return null;
 }
 
 /**
- * 步骤 1：故事大纲 —— 两种输入模式：
- * - 正文模式（填了故事正文）：自动新建会话，分片注入全文后提取（不污染原会话）；
- * - 会话模式：在用户选定会话内提取（利用会话完整上下文）；
+ * 步骤 1：故事大纲 / 故事导入 —— 两种输入模式：
+ * - 正文模式（填了故事正文）：自动新建会话，分片注入全文即完成（不提取大纲，
+ *   不污染原会话；后续步骤在本会话内依据全文继续）；
+ * - 会话模式：在用户选定会话内提取大纲 JSON（利用会话完整上下文）；
  *   未选定会话（豆包/千问手动模式可留空）时自动新建会话并记录到 createdSessions。
- * 结果仅缓存到 state.outline，不写入导演台。
+ * 会话模式结果仅缓存到 state.outline，不写入导演台。
  */
 export async function runOutlineStep(state, { token = null, onLog = () => {} } = {}) {
   checkCancelled(token);
   const storyText = String(state.storyText || "").trim();
   if (storyText) {
-    return runOutlineFromText(state, storyText, { token, onLog });
+    return runStoryImport(state, storyText, { token, onLog });
   }
   onLog("info", "在所选会话内提取故事大纲（网页生成通常 30-90s）…");
   const storyTpl = await loadSkill("story-design");
@@ -343,6 +353,39 @@ function finishOutline(state, outline, onLog) {
  * 不注入任何技能清单（skill_keys 已废弃）。结果缓存到 state.shots。
  */
 export async function runStoryboardStep(state, { token = null, onLog = () => {} } = {}) {
+  // 正文模式（故事已导入）：复用导入会话，直接依据会话上下文中的故事全文分镜
+  if (state.storyImported) {
+    if (!state.sessionId) throw new Error("请先执行「故事导入」步骤");
+    checkCancelled(token);
+    onLog("info", "在故事会话内依据全文进行分镜设计（storyboard-design，通常 40-120s）…");
+    const sbTpl = await loadSkill("storyboard-design");
+    const sbPrompt = fillTemplate(sbTpl, {
+      input:
+        "（分镜指令）本会话上方已完整发送故事全文。请通读全文，依据故事全文做分镜设计，" +
+        "不要遗漏主线与关键情节；全文中的台词、字幕、音效/环境音、运镜、微表情等制作要素" +
+        "必须逐场原样保留，台词保留原句全文与说话人，一句都不许丢；无台词的场次显式写「无台词」。",
+      timeline_digest: state.timelineDigest,
+      frame_rate: state.frameRate,
+    });
+    const sbText = await deepseekCompleteInSession("", {
+      prompt: sbPrompt,
+      chatId: state.sessionId,
+      expectJson: true,
+      site: state.site,
+      cdpEndpoint: state.cdp,
+      timeoutMs: LONG_TIMEOUT_MS,
+    });
+    state.storyboardChatId = state.sessionId;
+    const sb = parseJsonOrFail(sbText, { what: "分镜设计", onLog });
+    const shots = Array.isArray(sb.segments) && sb.segments.length
+      ? sb.segments
+      : (Array.isArray(sb) ? sb : null);
+    if (!shots) throw new Error("分镜提取失败：返回 JSON 缺少 segments 数组");
+    state.shots = shots;
+    onLog("success", `分镜设计完成：${shots.length} 个镜头（后续步骤在故事会话内继续）`);
+    return shots;
+  }
+  // 会话模式（故事大纲 JSON 已提取）：新建会话，用大纲摘要做分镜（行为不变）
   if (!state.outline) throw new Error("请先执行「故事大纲」步骤");
   checkCancelled(token);
   onLog("info", "新建会话并进行分镜设计（storyboard-design，通常 40-120s）…");
@@ -380,9 +423,11 @@ export async function runStoryboardStep(state, { token = null, onLog = () => {} 
 
 /**
  * 步骤 3：主体设计（character-design）。结果缓存到 state.characters。
+ * 正文模式：在故事会话内依据全文与分镜结果设计（不再依赖大纲 JSON）。
  */
 export async function runSubjectsStep(state, { token = null, onLog = () => {} } = {}) {
-  if (!state.outline) throw new Error("请先执行「故事大纲」步骤");
+  if (state.storyImported && !state.shots.length) throw new Error("请先执行「分镜设计」步骤");
+  if (!state.outline && !state.storyImported) throw new Error("请先执行「故事大纲」步骤");
   checkCancelled(token);
   onLog("info", "主体设计（character-design，通常 30-90s）…");
   const chatId = state.storyboardChatId || state.sessionId;
@@ -390,8 +435,13 @@ export async function runSubjectsStep(state, { token = null, onLog = () => {} } 
     ? state.existingSubjects.map((s) => `- ${s.name || "(未命名)"}：${(s.description || "").slice(0, 80)}`).join("\n")
     : "（暂无已有主体）";
   const charTpl = await loadSkill("character-design");
+  const charInput = state.storyImported
+    ? "（主体指令）本会话上方已完整发送故事全文，且已给出分镜设计结果。" +
+      "请依据故事全文与分镜，设计故事中需要出场的主体（角色 / 场景 / 物件），" +
+      "并按任务要求输出 JSON。主体描述要贴合故事原文设定，不要虚构原文没有的特征。"
+    : `${storyDigest(state.outline)}\n\n大纲列出的出场主体：\n${castDigest(state.outline)}`;
   const charPrompt = fillTemplate(charTpl, {
-    input: `${storyDigest(state.outline)}\n\n大纲列出的出场主体：\n${castDigest(state.outline)}`,
+    input: charInput,
     characters: existingDigest,
     timeline_digest: shotListDigest(state.shots),
   });
@@ -445,15 +495,22 @@ export async function runFirstframeStep(state, { token = null, onLog = () => {} 
 
 /**
  * 步骤 5：音频设计（audio-design）。结果缓存到 state.audios。
+ * 正文模式：在故事会话内依据全文与分镜结果设计（不再依赖大纲 JSON）。
  */
 export async function runAudioStep(state, { token = null, onLog = () => {} } = {}) {
-  if (!state.outline) throw new Error("请先执行「故事大纲」步骤");
+  if (state.storyImported && !state.shots.length) throw new Error("请先执行「分镜设计」步骤");
+  if (!state.outline && !state.storyImported) throw new Error("请先执行「故事大纲」步骤");
   checkCancelled(token);
   onLog("info", "音频设计（audio-design）…");
   const chatId = state.storyboardChatId || state.sessionId;
   const audioTpl = await loadSkill("audio-design");
+  const audioInput = state.storyImported
+    ? "（音频指令）本会话上方已完整发送故事全文，且已给出分镜设计结果。" +
+      "请依据故事全文与分镜设计音频条目（台词 / 配音 / 音效 / 环境音等），并按任务要求输出 JSON。" +
+      "台词与音效要以故事原文为准，不要虚构原文没有的内容。"
+    : storyDigest(state.outline);
   const audioPrompt = fillTemplate(audioTpl, {
-    input: storyDigest(state.outline),
+    input: audioInput,
     timeline_digest: shotListDigest(state.shots),
   });
   const audioRes = await genJsonInSession(state, chatId, audioPrompt, "音频设计", onLog);

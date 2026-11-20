@@ -5,6 +5,7 @@ import { computed } from "vue";
 import { useWorkspace } from "../../stores/workspace.js";
 import { SUBJECT_TYPE_LABELS, mergeSegmentSubjects } from "../../constants/subject.js";
 import { viewUrl } from "../../api/client.js";
+import { imageOf } from "../../constants/subject.js";
 
 const props = defineProps({
   segment: { type: Object, required: true },
@@ -19,6 +20,13 @@ const candidates = computed(() =>
   )
 }
 );
+
+const extraCandidates = computed(() => {
+  return candidates.value.filter((s) => !mentionedNames.value.has((s.name || "").trim())).map((s) => ({
+    ...s,
+    thumb: thumbOf(s, candidates.value || []),
+  }));
+});
 
 // 本分镜提示词中已 @ 提及的主体名（无需重复勾选）
 const mentionedNames = computed(() => {
@@ -41,6 +49,11 @@ function toggle(name) {
   else arr.push(name);
   ws.markDirty();
 }
+
+function thumbOf(item, candidates) {
+  const s = imageOf(item, candidates);
+  return s ? viewUrl(s) : "";
+}
 </script>
 
 <template>
@@ -52,24 +65,20 @@ function toggle(name) {
     <el-scrollbar class="mrd-extra-scroll">
       <div class="mrd-extra-list">
         <button
-          v-for="s in candidates"
+          v-for="s in extraCandidates"
           :key="s.uid"
           class="mrd-extra-item"
           :class="{
-            on: selectedNames().includes(s.name),
-            mentioned: mentionedNames.has((s.name || '').trim()),
+            on: selectedNames().includes(s.name)
           }"
-          :disabled="mentionedNames.has((s.name || '').trim())"
-          :title="mentionedNames.has((s.name || '').trim()) ? '已在提示词中提及' : s.description || s.name"
+          :title="s.description || s.name"
           @click="toggle(s.name)"
         >
-          <img v-if="s.type === 'Picture' && s.imageFile" :src="viewUrl(s.imageFile)" alt="" />
-          <video v-else-if="s.type === 'Video' && s.videoFile" :src="viewUrl(s.videoFile)" muted preload="metadata" />
+          <img v-if="s.thumb" :src="s.thumb" alt="" />
           <span v-else class="mrd-extra-glyph" :data-type="s.type">{{ SUBJECT_TYPE_LABELS[s.type]?.[0] || "?" }}</span>
           <span class="mrd-extra-name">{{ s.name }}</span>
-          <span v-if="mentionedNames.has((s.name || '').trim())" class="mrd-extra-mark">@</span>
         </button>
-        <span v-if="!candidates.length" class="mrd-extra-empty">暂无主体，请先到「主体管理」页创建</span>
+        <span v-if="!extraCandidates.length" class="mrd-extra-empty">暂无主体，请先到「主体管理」页创建</span>
       </div>
     </el-scrollbar>
   </div>

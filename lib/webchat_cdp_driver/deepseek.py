@@ -5,8 +5,9 @@
 
 - 页面助手：window.__mrdCdp（DeepSeek 专用选择器）
 - 会话列表：首页侧栏滚动加载扫描（a[href*="/a/chat/s/"] 锚点 + 行扫描兜底）
-- 删除会话：悬停条目 → 行内「更多」按钮 → 弹出菜单「删除」→ 确认弹窗兜底
-  （DeepSeek 无 Ctrl+D 快捷键，菜单项无稳定 role/class，用启发式定位 + 可信事件点击）
+- 删除会话：悬停条目 → 锚点内 div[role="button"]（更多）→ 菜单
+  .ds-dropdown-menu-option--error（删除）→ 确认弹窗「删除该对话」（.ds-button--error）
+  → 侧栏条目消失校验；逐步精确选择器，任一步失败立即报错不跳步
 - SSE 协议：DeepSeek 私有协议（p: "response/think..." 排除、v: content 累积）
 
 不再调用 chat.deepseek.com 站内 API（/api/v0/chat_session/*）：带 cookie/Token
@@ -412,90 +413,6 @@ _SCROLL_SIDEBAR_JS = r"""
 }
 """
 
-# DeepSeek：悬停会话条目后标记行内/邻近的「更多」按钮候选（多个候选时逐个尝试）
-_DS_MORE_BUTTON_JS = r"""
-([chatId]) => {
-  const a = [...document.querySelectorAll('a[href]')]
-    .find((el) => (el.getAttribute("href") || "").includes(chatId));
-  if (!a) return { found: false, reason: "anchor not found" };
-  document.querySelectorAll("[data-mrd-more]").forEach((e) => e.removeAttribute("data-mrd-more"));
-  const picked = [];
-  let box = a.parentElement;
-  for (let level = 0; level < 4 && box && box !== document.body; level++) {
-    const cands = [...box.querySelectorAll("button, [role='button'], svg, [class*='more'], [class*='icon'], [class*='option'], [class*='action']")];
-    for (const el of cands) {
-      if (el === a || a.contains(el) || picked.includes(el)) continue;
-      const r = el.getBoundingClientRect();
-      if (r.width < 6 || r.height < 6 || r.width > 48 || r.height > 48) continue;
-      if (getComputedStyle(el).visibility === "hidden") continue;
-      picked.push(el);
-    }
-    if (picked.length) break;
-    box = box.parentElement;
-  }
-  picked.slice(0, 4).forEach((el) => el.setAttribute("data-mrd-more", "1"));
-  return {
-    found: picked.length > 0,
-    count: Math.min(picked.length, 4),
-    samples: picked.slice(0, 3).map((el) => ({
-      tag: el.tagName,
-      cls: String((el.className && el.className.baseVal) || el.className || "").slice(0, 60),
-    })),
-  };
-}
-"""
-
-# DeepSeek：在弹出菜单（portal/浮层）中标记「删除」项（启发式叶子元素定位）
-_DS_DELETE_ITEM_JS = r"""
-() => {
-  const isVisible = (el) => {
-    if (!el) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 8 && r.height > 8 && getComputedStyle(el).visibility !== "hidden" && getComputedStyle(el).display !== "none";
-  };
-  document.querySelectorAll("[data-mrd-del]").forEach((e) => e.removeAttribute("data-mrd-del"));
-  const leaves = [...document.querySelectorAll("body *")].filter((el) => {
-    if (!isVisible(el)) return false;
-    const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent || "").join("");
-    if (!own.includes("删除")) return false;
-    return !el.closest("a[href]");
-  });
-  if (!leaves.length) return { found: false };
-  const target = leaves[leaves.length - 1];
-  target.setAttribute("data-mrd-del", "1");
-  return { found: true, cls: String(target.className || "").slice(0, 60), text: (target.textContent || "").slice(0, 30) };
-}
-"""
-
-# 确认弹窗兜底：仅在弹窗/浮层容器内点「确定/确认/删除」
-_CONFIRM_DELETE_JS = r"""
-() => {
-  const texts = ["确定", "确认", "删除"];
-  const containers = document.querySelectorAll(
-    '[role="dialog"], [class*="modal"], [class*="dialog"], [class*="popover"], [class*="confirm"]'
-  );
-  const visible = (el) => {
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) return false;
-    const s = getComputedStyle(el);
-    return s.visibility !== "hidden" && s.display !== "none";
-  };
-  for (const c of containers) {
-    if (!visible(c)) continue;
-    for (const b of c.querySelectorAll("button, [role=button], [class*=btn], [class*=button]")) {
-      const t = String(b.innerText || b.textContent || "").trim();
-      if (!t || !visible(b)) continue;
-      if (texts.some((x) => t.includes(x))) {
-        b.click();
-        return t;
-      }
-    }
-  }
-  return "";
-}
-"""
-
-
 def _norm_path(p: str) -> str:
     return (p[: -1] if p and len(p) > 1 and p.endswith("/") else p) or "/"
 
@@ -708,25 +625,27 @@ class DeepseekDriver(BaseSiteDriver):
         await asyncio.sleep(1.0)  # 侧栏渲染
 
     async def _verify_session_gone(self, page: Any, loc: Any, site_name: str) -> dict:
-        """删除后校验侧栏条目消失（确认弹窗兜底 + 明确报错）。"""
+        """删除后校验侧栏条目消失（明确报错，不做任何额外点击）。"""
         for _ in range(8):
             await asyncio.sleep(0.8)
-            clicked = await page.evaluate(_CONFIRM_DELETE_JS)
             try:
                 if not await loc.count():
                     return {"ok": True}
             except Exception:
                 pass
-            if clicked:
-                await asyncio.sleep(0.6)
         raise RuntimeError(
-            f"{site_name} 删除会话未生效：侧栏条目仍存在（可能弹出了未识别的确认框）。"
+            f"{site_name} 删除会话未生效：侧栏条目仍存在。"
             "请刷新页面后在该网页内手动确认删除"
         )
 
     async def close_session(self, mgr: Any, page: Any, chat_id: str = "") -> dict:
-        """删除会话：悬停条目 → 更多按钮 → 菜单「删除」→ 确认弹窗兜底 + 消失校验。
+        """删除会话（DeepSeek 新版结构，逐步精确选择器，失败即在当前步骤报错）：
 
+        1. 悬停侧栏条目 → 2. 点锚点内 div[role="button"]（更多按钮）→
+        3. 等 1s → 点 div[role='menu'].ds-elevated .ds-dropdown-menu-option--error（删除）→
+        4. 等 1s → 确认 div[role='dialog'].ds-elevated div[role='button'].ds-button--error
+           存在且 innerText ==「删除该对话」→ 点击 → 5. 校验侧栏条目消失。
+        任何一步失败立即抛错，不做候选轮换、不跳步、不自行往下走。
         全程 Playwright 可信事件（isTrusted=true），无任何站内 API 调用。
         """
         if not chat_id:
@@ -741,56 +660,63 @@ class DeepseekDriver(BaseSiteDriver):
                 "或会话过多被侧栏折叠（可在网页内搜索该会话确认）"
             )
 
-        # 1) 悬停显示操作按钮
+        # 1) 悬停显示操作按钮（失败不阻断：部分主题按钮常显）
         try:
             await anchor.hover(timeout=4000)
         except Exception:
             pass
         await asyncio.sleep(0.5)
 
-        # 2) 标记行内「更多」按钮候选并逐个尝试（启发式，无稳定选择器）
-        tagged = await page.evaluate(_DS_MORE_BUTTON_JS, chat_id)
-        if not tagged.get("found"):
+        # 2) 锚点内 div[role="button"] = 更多按钮，点击
+        more = anchor.locator('div[role="button"]').first
+        if not await more.count():
             raise RuntimeError(
-                "DeepSeek 会话条目上未找到「更多」按钮（页面结构可能改版）："
-                "请刷新页面后在该网页内手动删除该会话"
+                "DeepSeek 删除失败（第 2 步）：会话条目内未找到 div[role=\"button\"]"
+                "（更多按钮）。请刷新页面后重试，或在该网页内手动删除该会话"
             )
-        deleted = False
-        last_err = ""
-        for idx in range(int(tagged.get("count") or 1)):
-            cand = page.locator("[data-mrd-more]").nth(idx)
-            try:
-                try:
-                    await anchor.hover(timeout=2000)  # 悬停态丢失会导致按钮隐藏
-                except Exception:
-                    pass
-                await cand.click(timeout=4000)
-            except Exception as e:
-                last_err = str(e)
-                continue
-            await asyncio.sleep(0.8)
-            # 3) 弹出菜单中点「删除」
-            item = await page.evaluate(_DS_DELETE_ITEM_JS)
-            if not item.get("found"):
-                continue
-            menu = page.locator("[data-mrd-del]").first
-            try:
-                await menu.click(timeout=4000)
-            except Exception as e:
-                last_err = str(e)
-                continue
-            await asyncio.sleep(0.5)
-            # 4) 确认弹窗兜底（_CONFIRM_DELETE_JS 在 _verify_session_gone 内轮询点击）
-            result = await self._verify_session_gone(page, anchor, "DeepSeek")
-            deleted = True
-            log.info("[WebChatCDP] DeepSeek 会话 %s 已删除（UI 模拟，候选 #%d）", chat_id[:8], idx)
-            return result
-        if not deleted:
+        try:
+            await more.click(timeout=4000)
+        except Exception as e:
+            raise RuntimeError(f"DeepSeek 删除失败（第 2 步）：更多按钮点击未生效：{e}")
+
+        # 3) 等 1s → 弹出菜单中 .ds-dropdown-menu-option--error 即「删除」项，点击
+        await asyncio.sleep(1.0)
+        item = page.locator("div[role='menu'].ds-elevated .ds-dropdown-menu-option--error").first
+        if not await item.count():
             raise RuntimeError(
-                f"DeepSeek 删除会话未完成（更多按钮/删除菜单点击失败：{last_err or '未找到「删除」菜单项'}）。"
-                "请刷新页面后在该网页内手动确认删除"
+                "DeepSeek 删除失败（第 3 步）：弹出菜单中未找到"
+                " div[role='menu'].ds-elevated .ds-dropdown-menu-option--error（删除项）。"
+                "请刷新页面后重试，或在该网页内手动删除该会话"
             )
-        return {"ok": True}
+        try:
+            await item.click(timeout=4000)
+        except Exception as e:
+            raise RuntimeError(f"DeepSeek 删除失败（第 3 步）：删除菜单项点击未生效：{e}")
+
+        # 4) 等 1s → 确认弹窗：div[role='button'].ds-button--error 且文本为「删除该对话」，点击
+        await asyncio.sleep(1.0)
+        confirm = page.locator("div[role='dialog'].ds-elevated div[role='button'].ds-button--error").first
+        if not await confirm.count():
+            raise RuntimeError(
+                "DeepSeek 删除失败（第 4 步）：确认弹窗中未找到"
+                " div[role='dialog'].ds-elevated div[role='button'].ds-button--error。"
+                "请刷新页面后重试，或在该网页内手动确认删除"
+            )
+        confirm_text = (await confirm.inner_text()).strip()
+        if confirm_text != "删除该对话":
+            raise RuntimeError(
+                f"DeepSeek 删除失败（第 4 步）：确认按钮文本异常（期望「删除该对话」，实际「{confirm_text}」），"
+                "为避免误删不执行点击。请刷新页面后重试，或在该网页内手动确认删除"
+            )
+        try:
+            await confirm.click(timeout=4000)
+        except Exception as e:
+            raise RuntimeError(f"DeepSeek 删除失败（第 4 步）：确认按钮点击未生效：{e}")
+
+        # 5) 校验侧栏条目消失
+        result = await self._verify_session_gone(page, anchor, "DeepSeek")
+        log.info("[WebChatCDP] DeepSeek 会话 %s 已删除（UI 模拟）", chat_id[:8])
+        return result
 
     # ---- 发送消息 ----
 

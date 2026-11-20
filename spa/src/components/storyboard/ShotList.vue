@@ -94,6 +94,13 @@ watch(
     }
   }
 );
+// 多选删除完成后：分镜全部删光则自动退出多选（空列表下的多选态没有意义）
+watch(
+  () => props.segments.length,
+  (n) => {
+    if (multiMode.value && !n) exitMulti();
+  }
+);
 
 const allChecked = computed(
   () => props.segments.length > 0 && checked.value.length === props.segments.length

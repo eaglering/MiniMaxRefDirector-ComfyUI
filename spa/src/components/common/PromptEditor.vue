@@ -11,6 +11,7 @@ import { EditorState } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, keymap, placeholder } from "@codemirror/view";
 import { SUBJECT_TYPE_LABELS } from "../../constants/subject.js";
 import { viewUrl } from "../../api/client.js";
+import { imageOf } from "../../constants/subject.js"
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
@@ -61,17 +62,11 @@ const filtered = computed(() => {
       (!props.onlyReferencable || (s.relationship && s.relationship !== "none")) &&
       (s.name || "").trim() !== "" &&
       (s.name || "").toLowerCase().includes(q)
-  );
+  ).map((s) => ({
+    ...s,
+    thumb: thumbOf(s, props.candidates),
+  }));
 });
-
-// ---- 主体标签 widget ----
-function thumbOf(subject) {
-  if (!subject) return "";
-  if (subject.type === "Picture" && subject.imageFile) return viewUrl(subject.imageFile);
-  if (subject.type === "Video" && subject.videoFile) return viewUrl(subject.videoFile);
-  if (subject.imageFile) return viewUrl(subject.imageFile);
-  return "";
-}
 
 class SubjectChip extends WidgetType {
   constructor(name, dialogue, isHash, candidates, onEdit, from, to) {
@@ -85,7 +80,7 @@ class SubjectChip extends WidgetType {
     this.from = from;
     this.to = to;
     const s = (candidates || []).find((x) => (x.name || "").trim() === name);
-    this.thumb = thumbOf(s);
+    this.thumb = thumbOf(s, candidates || []);
     this.type = s?.type || "";
   }
   eq(other) {
@@ -93,7 +88,7 @@ class SubjectChip extends WidgetType {
   }
   toDOM() {
     const wrap = document.createElement("span");
-    wrap.className = "cm-subj-chip";
+    wrap.className = "cm-subj-chip-wrap";
     wrap.title = this.dialogue
       ? `<#${this.name}:${this.dialogue}>（双击编辑对白）`
       : `<@${this.name}>（双击编辑引用）`;
@@ -108,16 +103,19 @@ class SubjectChip extends WidgetType {
       ph.textContent = SUBJECT_TYPE_LABELS[this.type]?.[0] || "@";
       wrap.appendChild(ph);
     }
+    const cn = document.createElement("span");
+    cn.className = "cm-subj-chip";
     const nm = document.createElement("span");
     nm.className = "cm-subj-chip-name";
     nm.textContent = this.name;
-    wrap.appendChild(nm);
+    cn.appendChild(nm);
     if (this.dialogue) {
       const dg = document.createElement("span");
       dg.className = "cm-subj-chip-dialogue";
       dg.textContent = this.dialogue;
-      wrap.appendChild(dg);
+      cn.appendChild(dg);
     }
+    wrap.appendChild(cn);
     // 双击编辑引用（改对白 / 删除）；chip 设 user-select:none，单击仍可定位光标
     wrap.addEventListener("dblclick", (e) => {
       e.preventDefault();
@@ -350,7 +348,7 @@ function handleChipEdit(chip) {
   chipEdit.name = name;
   chipEdit.dialogue = isHash ? (m[2] || "") : "";
   chipEdit.isHash = isHash;
-  chipEdit.thumb = thumbOf(props.candidates.find((x) => (x.name || "").trim() === name));
+  chipEdit.thumb = thumbOf(props.candidates.find((x) => (x.name || "").trim() === name), props.candidates);
   chipEdit.left = Math.min(Math.max(8, rect.left), window.innerWidth - 300);
   chipEdit.top = belowFits ? rect.bottom + 6 : Math.max(8, rect.top - POP_H - 6);
   showMenu.value = false;
@@ -470,8 +468,9 @@ function onMenuClick(item) {
   accept(item);
 }
 
-function thumb(s) {
-  return thumbOf(s);
+function thumbOf(item, candidates) {
+  const s = imageOf(item, candidates);
+  return s ? viewUrl(s) : "";
 }
 </script>
 
@@ -493,7 +492,7 @@ function thumb(s) {
           @mousedown.prevent
           @click="onMenuClick(item)"
         >
-          <img v-if="thumb(item)" class="mrd-mention-thumb" :src="thumb(item)" alt="" />
+          <img v-if="item.thumb" class="mrd-mention-thumb" :src="item.thumb" alt="" />
           <span v-else class="mrd-mention-glyph" :data-type="item.type">{{ SUBJECT_TYPE_LABELS[item.type]?.[0] || "?" }}</span>
           <span class="mrd-mention-name">{{ item.name }}</span>
           <span class="mrd-mention-type">{{ SUBJECT_TYPE_LABELS[item.type] || item.type }}</span>
@@ -518,6 +517,9 @@ function thumb(s) {
             <label>对话内容</label>
             <el-input
               v-model="chipEdit.dialogue"
+              borderless
+              type="textarea"
+              rows="5"
               size="small"
               placeholder="该主体的对白内容"
               @keyup.enter="saveChipEdit"
@@ -599,15 +601,15 @@ function thumb(s) {
   gap: 8px;
 }
 .mrd-chip-pop-head { display: flex; align-items: center; gap: 8px; }
-.mrd-chip-pop-head img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+.mrd-chip-pop-head img { width: 26px; height: 26px; border-radius: 5px; object-fit: cover; }
 .mrd-chip-pop-glyph {
   width: 26px; height: 26px; border-radius: 50%;
   background: rgba(108, 92, 231, 0.5); color: #fff;
   display: flex; align-items: center; justify-content: center; font-size: 12px;
 }
 .mrd-chip-pop-name { color: #edeff5; font-size: 13px; font-weight: 600; }
-.mrd-chip-pop-body { display: flex; flex-direction: column; gap: 4px; }
-.mrd-chip-pop-body > label { font-size: 11px; color: #6b7488; }
+.mrd-chip-pop-body { display: flex; flex-direction: column; gap: 4px; margin: 0 -10px; }
+.mrd-chip-pop-body > label { font-size: 11px; color: #6b7488; padding: 0 10px; }
 .mrd-chip-pop-actions { display: flex; align-items: center; gap: 6px; }
 .mrd-chip-pop-gap { flex: 1; }
 </style>

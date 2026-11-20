@@ -93,9 +93,9 @@ DOC_CATEGORIES = ("主体设计", "音频设计", "图片设计", "分镜设计"
 # resources/skills 文件态文档 → (分类, 标题[, 相对 resources/skills 的文件路径])，
 # 作为 DB 缺失时的播种与运行期兜底；未给路径时按 <key>/prompt.md 解析。
 _RESOURCE_DOCS = {
-    "character-design": ("主体设计", "主体设计指南（角色 / 场景）"),
-    "firstframe-design": ("图片设计", "首帧 / 尾帧图提示词设计"),
-    "audio-design": ("音频设计", "音频设计指南（配音 / 音效 / 音乐）"),
+    "character-design": ("分镜设计", "主体设计指南（角色 / 场景）"),
+    "firstframe-design": ("分镜设计", "首帧 / 尾帧图提示词设计"),
+    "audio-design": ("分镜设计", "音频设计指南（配音 / 音效 / 音乐）"),
     "story-design": ("分镜设计", "故事大纲提取"),
     "storyboard-design": ("分镜设计", "分镜设计"),
     "h3-prompt-builder": ("分镜设计", "H3 提示词主模板"),
@@ -103,6 +103,13 @@ _RESOURCE_DOCS = {
                          "h3-prompt-builder/h3-writing-guide.md"),
     "h3-translate-to-en": ("分镜设计", "H3 中英翻译模板",
                            "h3-prompt-builder/prompt_translate_to_en.md"),
+}
+
+# seed.json 内置文档的分类随版本演进的幂等迁移：builtin_key → 期望分类。
+# 每次进程连接后与 DB 对齐一次（seed 只在首次建库生效，老库靠这里归位）。
+_DOC_CATEGORY_MIGRATIONS = {
+    "character-sheet": "分镜设计",  # 主体设定（外貌/服装/道具一致性）
+    "ambience-foley": "分镜设计",   # 底噪 / 环境音 / 拟音设计
 }
 
 
@@ -241,12 +248,26 @@ def _sync_builtin_docs() -> None:
                 (category, title, content, name, 100 + i, now, now),
             )
             changed += 1
-        elif row["updated_at"] == row["created_at"] and (row["content"] or "") != content:
-            conn.execute(
-                "UPDATE skill_docs SET content=?, updated_at=? WHERE id=?",
-                (content, now, row["id"]),
-            )
-            changed += 1
+        else:
+            # 分类随代码演进而迁移（幂等）：内容是否用户编辑过都不影响分类归位
+            if row["category"] != category:
+                conn.execute(
+                    "UPDATE skill_docs SET category=? WHERE id=?", (category, row["id"])
+                )
+                changed += 1
+            if row["updated_at"] == row["created_at"] and (row["content"] or "") != content:
+                conn.execute(
+                    "UPDATE skill_docs SET content=?, updated_at=? WHERE id=?",
+                    (content, now, row["id"]),
+                )
+                changed += 1
+    # seed.json 内置文档的分类迁移（_DOC_CATEGORY_MIGRATIONS）
+    for key, category in _DOC_CATEGORY_MIGRATIONS.items():
+        cur = conn.execute(
+            "UPDATE skill_docs SET category=? WHERE builtin_key=? AND category<>?",
+            (category, key, category),
+        )
+        changed += cur.rowcount if cur.rowcount > 0 else 0
     if changed:
         conn.commit()
         log.info("[SPA] builtin skill docs synced (%d updated)", changed)

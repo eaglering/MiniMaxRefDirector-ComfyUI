@@ -4,7 +4,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
-import { fetchSkillDocs } from "../../api/client.js";
+import { fetchSkillDocs, fetchSkillDoc } from "../../api/client.js";
 import { generateText } from "../../utils/llm.js";
 import { SUBJECT_TYPE_LABELS } from "../../constants/subject.js";
 
@@ -118,7 +118,7 @@ defineExpose({ open });
     <div class="mrd-sp-dialog">
       <div class="mrd-sp-row">
         <label>技能文档（{{ { Subject: "主体设计", Picture: "图片设计", Audio: "音频设计" }[subject.type] || "" }}）</label>
-        <el-select v-model="state.docId" style="width: 100%" placeholder="选择技能文档">
+        <el-select v-model="state.docId" style="width: 100%" placeholder="选择技能文档" filterable>
           <el-option v-for="d in state.docs" :key="d.id" :value="d.id" :label="d.title + (d.builtin ? '（内置）' : '')" />
         </el-select>
         <p v-if="docSummary" class="mrd-sp-sum">{{ docSummary }}</p>

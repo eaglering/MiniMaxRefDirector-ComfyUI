@@ -364,6 +364,11 @@ function addLog(level, msg) {
 
 function summarize(key, result) {
   if (key === "outline") {
+    // 正文模式（故事导入）：无大纲 JSON，展示导入结果；会话模式展示大纲摘要
+    if (storyText.value.trim()) {
+      const cid = stateRef.value ? String(stateRef.value.sessionId || "") : "";
+      return cid ? `故事已导入（会话 ${cid.slice(0, 8)}…）` : "故事已导入";
+    }
     const o = result || {};
     return `${o.title || "(未命名)"} · 主体 ${(o.subjects || []).length} · 场景 ${(o.scenes || []).length}`;
   }
@@ -410,7 +415,7 @@ async function execStep(step) {
     });
   }
   if (storyText.value && key === "outline") {
-    addLog("info", "故事正文模式：将忽略所选会话，自动新建会话注入全文（不污染原会话）");
+    addLog("info", "故事导入模式：将忽略所选会话，自动新建会话分片注入全文（后续步骤在此会话内继续）");
   }
   const state = stateRef.value;
   const token = createImportToken();
@@ -605,14 +610,17 @@ function stepBadge(st) {
   return { text: "未执行", cls: "idle" };
 }
 
-// 大纲步骤在正文模式下展示为「故事导入·大纲提取」
+// 正文模式下步骤标签/提示改为「故事导入」语义（分镜等后续步骤在导入会话内继续）
 function stepLabel(st) {
-  if (st.key === "outline" && storyText.value.trim()) return "故事导入·大纲提取";
+  if (st.key === "outline" && storyText.value.trim()) return "故事导入";
   return st.label;
 }
 function stepHint(st) {
   if (st.key === "outline" && storyText.value.trim()) {
-    return `自动新建会话，${storyChunkCount.value} 条消息分片注入全文后提取大纲（忽略所选会话）`;
+    return `自动新建会话，${storyChunkCount.value} 条消息分片注入全文即完成（后续步骤在此会话内继续）`;
+  }
+  if (st.key === "storyboard" && storyText.value.trim()) {
+    return "在故事会话内依据全文做分镜设计（不再依赖大纲）";
   }
   return st.hint;
 }
@@ -699,7 +707,7 @@ function stepHint(st) {
         <div class="mrd-dsi-story-head">
           <span class="mrd-dsi-story-title">故事正文（可选）</span>
           <span class="mrd-dsi-story-hint">
-            填入后大纲步骤改为「故事导入·大纲提取」：自动新建会话分片注入全文再提取大纲。
+            填入后步骤一改为「故事导入」：自动新建会话分片注入全文；步骤二直接依据全文做分镜设计。
           </span>
         </div>
         <el-input
