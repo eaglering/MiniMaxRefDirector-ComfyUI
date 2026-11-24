@@ -158,9 +158,16 @@ class _Manager:
     # ---- 连接与页面 ----
     @staticmethod
     def _profile_opened_before() -> bool:
-        """CDP 独立用户目录是否已被使用过（此前点过「启动浏览器」并产生登录态等文件）。"""
+        """CDP 独立用户目录是否已被使用过（此前点过「启动浏览器」并产生登录态等文件）。
+
+        注意 BROWSER_PROFILE_DIR 是 os.path.join 的字符串，必须转 Path 再调
+        is_dir/iterdir（此前直接 str.is_dir 抛 AttributeError 被 except 吞掉，
+        本函数恒为 False，导致自动拉起永远不触发）。
+        """
         try:
-            return BROWSER_PROFILE_DIR.is_dir() and any(BROWSER_PROFILE_DIR.iterdir())
+            from pathlib import Path
+            d = Path(BROWSER_PROFILE_DIR)
+            return d.is_dir() and any(d.iterdir())
         except Exception:
             return False
 
@@ -454,6 +461,8 @@ async def _complete(
                 reply = {"ok": False, "error": str(e), "text": "", "chat_id": ""}
             last_err = str(reply.get("error") or "")
             if reply.get("ok"):
+                # 回复直接返回；本次新建会话的删除由 complete() 落到后台线程
+                # （_bg_delete_session），不阻塞节点线程。
                 return _result(
                     True,
                     "",
@@ -535,6 +544,33 @@ async def _diag(cdp_endpoint: str) -> dict:
 
 # ---------------- 对外同步 API（任意线程可调） ----------------
 
+def _bg_delete_session(site_id: str, chat_id: str, endpoint: str, attempts: int = 40) -> None:
+    """后台线程删除本次新建的代理站点会话。
+
+    与节点线程解耦：complete 的回复先行返回，删除在此异步执行。仅当失败原因
+    是「op_lock 被后续生成占用」时重试（每 3s 一次，约 2 分钟窗口，批量执行
+    时会话删除会落在两次生成的采样间隙）；其他失败（会话不存在/风控页等）
+    直接告警放弃，保留现场。
+    """
+    for i in range(attempts):
+        try:
+            r = delete_session(site=site_id, chat_id=chat_id, cdp_endpoint=endpoint)
+        except Exception as e:
+            r = {"ok": False, "error": str(e)}
+        if r.get("ok"):
+            log.info("[WebChatCDP] 后台已删除本次代理会话（chat_id=%s）", chat_id)
+            return
+        err = str(r.get("error") or "")
+        if "已有网页会话任务进行中" not in err:
+            log.warning(
+                "[WebChatCDP] 后台删除代理会话失败（chat_id=%s）：%s，保留现场",
+                chat_id, err or "未知原因",
+            )
+            return
+        time.sleep(3.0)
+    log.warning("[WebChatCDP] 后台删除代理会话超时放弃（chat_id=%s），会话仍保留在代理页侧栏", chat_id)
+
+
 def complete(
     system: str = "",
     prompt: str = "",
@@ -555,7 +591,7 @@ def complete(
     if not mgr.op_lock.acquire(timeout=2.0):
         return {"ok": False, "text": "", "error": "已有网页会话任务进行中，请稍后再试"}
     try:
-        return mgr.submit(
+        result = mgr.submit(
             _complete(system, prompt, expect_json, timeout_s, site_id, session_mode, chat_id, cdp_endpoint),
             timeout=timeout_s + 180.0,  # 余量：疑似风控时的 45-75s 冷却重试
         )
@@ -563,6 +599,22 @@ def complete(
         return {"ok": False, "text": "", "error": f"网页会话调用异常：{e}"}
     finally:
         mgr.op_lock.release()
+    # 回复先行返回：新建会话的删除不阻塞节点线程（原实现内联 await 会给
+    # 每次生成额外增加侧栏删除的几秒）。删除由后台线程执行，与下一次生成
+    # 的 op_lock 竞争由锁自然串行化，落在采样间隙执行。
+    if (
+        isinstance(result, dict)
+        and result.get("ok")
+        and session_mode == "new"
+        and result.get("chat_id")
+    ):
+        threading.Thread(
+            target=_bg_delete_session,
+            args=(site_id, str(result.get("chat_id")), cdp_endpoint or DEFAULT_CDP_ENDPOINT),
+            name="mrd-webchat-del",
+            daemon=True,
+        ).start()
+    return result
 
 
 def list_sessions(site: str = "deepseek", cdp_endpoint: str = "", timeout_s: float = 60.0) -> list:

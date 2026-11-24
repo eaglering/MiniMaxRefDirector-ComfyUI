@@ -287,29 +287,29 @@ def _skill_dict_mutation(handler):
 async def spa_skill_add(request: web.Request) -> web.Response:
     # 新增技能：类别 / 名称必填；字段要求按类别注入方式 render_mode 校验
     # （见 lib/skill_db.py _RENDER_MODE_RULES）
-    return _skill_dict_mutation(lambda d: skill_db.add_skill(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.add_skill(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/update")
 async def spa_skill_update(request: web.Request) -> web.Response:
-    return _skill_dict_mutation(lambda d: skill_db.update_skill(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.update_skill(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/delete")
 async def spa_skill_delete(request: web.Request) -> web.Response:
-    return _skill_dict_mutation(lambda d: skill_db.delete_skill(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.delete_skill(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/category/add")
 async def spa_skill_category_add(request: web.Request) -> web.Response:
     # {name, renderMode: term|example|descriptive|block, description?, sort?}
-    return _skill_dict_mutation(lambda d: skill_db.add_category(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.add_category(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/category/update")
 async def spa_skill_category_update(request: web.Request) -> web.Response:
     # {id, name?, description?, renderMode?, sort?}
-    return _skill_dict_mutation(lambda d: skill_db.update_category(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.update_category(d))(request)
 
 
 # ---------------- 技能文档（md 提示词模板，SQLite skill_docs 表）----------------
@@ -351,18 +351,18 @@ async def spa_skill_doc(request: web.Request) -> web.Response:
 @_routes.post(f"{API_PREFIX}/spa/skill_docs/add")
 async def spa_skill_doc_add(request: web.Request) -> web.Response:
     # {category, title, content?}：分类固定四类，同分类标题唯一
-    return _skill_dict_mutation(lambda d: skill_db.add_doc(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.add_doc(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_docs/update")
 async def spa_skill_doc_update(request: web.Request) -> web.Response:
     # {id, category?, title?, content?}
-    return _skill_dict_mutation(lambda d: skill_db.update_doc(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.update_doc(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_docs/delete")
 async def spa_skill_doc_delete(request: web.Request) -> web.Response:
-    return _skill_dict_mutation(lambda d: skill_db.delete_doc(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.delete_doc(d))(request)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_notes")
@@ -624,7 +624,7 @@ async def spa_webchat_reload(request: web.Request) -> web.Response:
 @_routes.post(f"{API_PREFIX}/spa/skill_dict/batch_add")
 async def spa_skill_batch_add(request: web.Request) -> web.Response:
     # 批量导入技能词条：{categoryId?, newCategory?, items:[{name, nameEn?, desc?, guide?, examples?}]}
-    return _skill_dict_mutation(lambda d: skill_db.batch_add_skills(d))(request)
+    return await _skill_dict_mutation(lambda d: skill_db.batch_add_skills(d))(request)
 
 
 @_routes.get(f"{API_PREFIX}/spa/llm_files")
