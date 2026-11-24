@@ -3,6 +3,18 @@ import { defineStore } from "pinia";
 import { computed, reactive, ref, toRaw } from "vue";
 import { fetchState, saveState, fetchSkillDict } from "../api/client.js";
 import { genId } from "../utils/media.js";
+import { isChildSubject, refDefaultRelationship } from "../constants/subject.js";
+
+// 主体关系归一化（与旧编辑器 js/subject.js 收集逻辑同语义）：
+// 顶层主体 relationship 为空 → 回落该类型默认关系（保证后端 build_h3_subject_bindings
+// 写入 subject_definitions / retention_analysis）；子主体（引用资源）保持空关系。
+function normalizeSubject(s) {
+  const out = { ...toRaw(s) };
+  if (!isChildSubject(out) && !(out.relationship || "").trim()) {
+    out.relationship = refDefaultRelationship(out.type);
+  }
+  return out;
+}
 
 // 与 js/components/director/shared.js parseInitial 对齐的默认值
 function defaultTimeline() {
@@ -124,8 +136,15 @@ function resolveNodeId() {
   return "";
 }
 
+// SPA 节点自身编号（启动器打开时随 URL 传入）：保存时镜像落盘到该编号，
+// 保证工作流里由 SPA 节点执行时，磁盘兜底也能取到数据。
+function resolveSpaNodeId() {
+  return (new URLSearchParams(location.search).get("spa_node_id") || "").trim();
+}
+
 export const useWorkspace = defineStore("workspace", () => {
   const nodeId = ref(resolveNodeId());
+  const spaNodeId = ref(resolveSpaNodeId());
   const nodeTitle = ref("");
   const loaded = ref(false);
   const loadError = ref("");
@@ -279,7 +298,7 @@ export const useWorkspace = defineStore("workspace", () => {
       timeline_data: JSON.stringify(serializeTimeline(timeline)),
       widgets: JSON.parse(JSON.stringify(widgets)),
       global_prompt: globalPrompt.value,
-      subjects: { subjects: toRaw(subjects.subjects) },
+      subjects: { subjects: subjects.subjects.map(normalizeSubject) },
       subject_node_id: subjectNodeId.value,
       llm: { ...toRaw(llm) },
       updated_at: Date.now(),
@@ -291,7 +310,7 @@ export const useWorkspace = defineStore("workspace", () => {
     saving = true;
     saveStatus.value = "saving";
     try {
-      const res = await saveState(nodeId.value, buildState());
+      const res = await saveState(nodeId.value, buildState(), spaNodeId.value);
       if (!res.success) throw new Error(res.error || "保存失败");
       saveStatus.value = "saved";
       lastSavedAt.value = Date.now();

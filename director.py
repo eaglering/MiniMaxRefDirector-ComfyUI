@@ -74,6 +74,90 @@ def _translate_prompt_to_en(prompt: str, opts: dict, glossary: dict | None = Non
     return translated
 
 
+def director_inputs():
+    """导演台输入 schema（历史导演台与 SPA 导演台共用，保证两节点输入严格一致）。"""
+    return [
+        SubjectConfig.Input(
+            "config", optional=True,
+            tooltip="Unified config from MiniMax Reference Subject (VLM opts + subject data).",
+        ),
+        io.Float.Input(
+            "start_second", default=0.0, min=0.0, max=1000.0, step=0.01,
+            tooltip="Start time in seconds of the timeline generation.",
+        ),
+        io.Float.Input(
+            "end_second", default=5.0, min=0.0, max=1000.0, step=0.01,
+            tooltip="End time in seconds of the timeline generation.",
+        ),
+        io.Float.Input(
+            "duration_seconds", default=5.0, min=0.1, max=1000.0, step=0.01,
+            tooltip="Total timeline duration in seconds (computed/synced from frames).",
+        ),
+        io.Int.Input(
+            "start_frame", default=0, min=0, max=10000, step=1,
+            tooltip="Start frame of the timeline generation.",
+        ),
+        io.Int.Input(
+            "end_frame", default=120, min=1, max=10000, step=1,
+            tooltip="End frame of the timeline generation.",
+        ),
+        io.Int.Input(
+            "duration_frames", default=120, min=1, max=10000, step=1,
+            tooltip="Total timeline length in pixel-space frames. Used by the editor for visual scale only.",
+        ),
+        io.String.Input(
+            "timeline_data", default="",
+            tooltip="JSON state of the timeline editor (auto-managed; do not edit by hand).",
+        ),
+        io.String.Input(
+            "local_prompts", multiline=True, default="",
+            tooltip="Auto-populated from the timeline editor.",
+        ),
+        io.String.Input(
+            "segment_lengths", default="",
+            tooltip="Auto-populated from the timeline editor (pixel-space frame counts).",
+        ),
+        io.Float.Input(
+            "frame_rate", default=24, min=1, max=240, step=1, optional=True,
+            tooltip="Frames per second — only affects how time is displayed in the timeline editor when time_units is set to 'seconds'.",
+        ),
+        io.Combo.Input(
+            "display_mode", options=["frames", "seconds"], default="seconds", optional=True,
+            tooltip="Display the ruler, segment ranges, length input, and total in frames or seconds. Internal storage is always pixel-space frames.",
+        ),
+        io.Combo.Input(
+            "outpu_resolution",
+            options=["1:1方形", "9:16竖屏", "16:9横屏", "3:2横屏", "2:3竖屏", "4:3横屏", "3:4竖屏", "21:9超宽"],
+            default="16:9横屏", optional=True,
+            tooltip="Target output aspect ratio. Width/height are calculated from million_pixels.",
+        ),
+        io.Float.Input(
+            "million_pixels", default=0.6, min=0.1, max=4.0, step=0.1, optional=True,
+            tooltip="Million pixels target. 1.0 MP ≈ 1024×1024.",
+        ),
+        io.Combo.Input(
+            "video_mode",
+            options=["h3", "doubao", "off"],
+            default="h3", optional=True,
+            tooltip="Video generation mode: h3 = MiniMax Hailuo (show H3 prompt UI, auto-translate to English); doubao = reserved (not implemented yet); off = generic, no H3 entries.",
+        ),
+    ]
+
+
+def director_outputs():
+    """导演台输出 schema（历史导演台与 SPA 导演台共用，保证两节点输出严格一致）。"""
+    return [
+        GuideData.Output(display_name="guide_data"),
+        io.Int.Output(display_name="segment_count"),
+        io.Float.Output(display_name="frame_rate"),
+        io.Audio.Output(
+            display_name="master_audio",
+            tooltip="完整音频：由补齐后的 audioSegments 合成为覆盖 [start,end) "
+                    "的整轨波形（含空白段静音）。无音轨/全部静音时为 None。",
+        ),
+    ]
+
+
 class MiniMaxRefDirector(io.ComfyNode):
     """Timeline director with resolution config and guide_data output for MiniMax pipelines."""
 
@@ -87,82 +171,8 @@ class MiniMaxRefDirector(io.ComfyNode):
                 "Timeline director that combines prompt scheduling, subject data, "
                 "resolution configuration, and prompt templates into a unified guide_data output."
             ),
-            inputs=[
-                SubjectConfig.Input(
-                    "config", optional=True,
-                    tooltip="Unified config from MiniMax Reference Subject (VLM opts + subject data).",
-                ),
-                io.Float.Input(
-                    "start_second", default=0.0, min=0.0, max=1000.0, step=0.01,
-                    tooltip="Start time in seconds of the timeline generation.",
-                ),
-                io.Float.Input(
-                    "end_second", default=5.0, min=0.0, max=1000.0, step=0.01,
-                    tooltip="End time in seconds of the timeline generation.",
-                ),
-                io.Float.Input(
-                    "duration_seconds", default=5.0, min=0.1, max=1000.0, step=0.01,
-                    tooltip="Total timeline duration in seconds (computed/synced from frames).",
-                ),
-                io.Int.Input(
-                    "start_frame", default=0, min=0, max=10000, step=1,
-                    tooltip="Start frame of the timeline generation.",
-                ),
-                io.Int.Input(
-                    "end_frame", default=120, min=1, max=10000, step=1,
-                    tooltip="End frame of the timeline generation.",
-                ),
-                io.Int.Input(
-                    "duration_frames", default=120, min=1, max=10000, step=1,
-                    tooltip="Total timeline length in pixel-space frames. Used by the editor for visual scale only.",
-                ),
-                io.String.Input(
-                    "timeline_data", default="",
-                    tooltip="JSON state of the timeline editor (auto-managed; do not edit by hand).",
-                ),
-                io.String.Input(
-                    "local_prompts", multiline=True, default="",
-                    tooltip="Auto-populated from the timeline editor.",
-                ),
-                io.String.Input(
-                    "segment_lengths", default="",
-                    tooltip="Auto-populated from the timeline editor (pixel-space frame counts).",
-                ),
-                io.Float.Input(
-                    "frame_rate", default=24, min=1, max=240, step=1, optional=True,
-                    tooltip="Frames per second — only affects how time is displayed in the timeline editor when time_units is set to 'seconds'.",
-                ),
-                io.Combo.Input(
-                    "display_mode", options=["frames", "seconds"], default="seconds", optional=True,
-                    tooltip="Display the ruler, segment ranges, length input, and total in frames or seconds. Internal storage is always pixel-space frames.",
-                ),
-                io.Combo.Input(
-                    "outpu_resolution",
-                    options=["1:1方形", "9:16竖屏", "16:9横屏", "3:2横屏", "2:3竖屏", "4:3横屏", "3:4竖屏", "21:9超宽"],
-                    default="16:9横屏", optional=True,
-                    tooltip="Target output aspect ratio. Width/height are calculated from million_pixels.",
-                ),
-                io.Float.Input(
-                    "million_pixels", default=0.6, min=0.1, max=4.0, step=0.1, optional=True,
-                    tooltip="Million pixels target. 1.0 MP ≈ 1024×1024.",
-                ),
-                io.Combo.Input(
-                    "video_mode",
-                    options=["h3", "doubao", "off"],
-                    default="h3", optional=True,
-                    tooltip="Video generation mode: h3 = MiniMax Hailuo (show H3 prompt UI, auto-translate to English); doubao = reserved (not implemented yet); off = generic, no H3 entries.",
-                ),
-            ],
-            outputs=[
-                GuideData.Output(display_name="guide_data"),
-                io.Int.Output(display_name="segment_count"),
-                io.Float.Output(display_name="frame_rate"),
-                io.Audio.Output(
-                    display_name="master_audio",
-                    tooltip="完整音频：由补齐后的 audioSegments 合成为覆盖 [start,end) "
-                            "的整轨波形（含空白段静音）。无音轨/全部静音时为 None。",
-                ),
-            ],
+            inputs=director_inputs(),
+            outputs=director_outputs(),
         )
 
     @classmethod

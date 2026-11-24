@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useWorkspace } from "./stores/workspace.js";
+import { execWorkflow } from "./api/client.js";
 
 const ws = useWorkspace();
 const route = useRoute();
@@ -45,6 +46,25 @@ const statusText = computed(() => {
     default: return "待编辑";
   }
 });
+
+// ---- 右上角「运行 / 取消」：与 ComfyUI 工作流页面按钮效果一致 ----
+// 指令经后端 /spa/exec → send_sync → ComfyUI 页面 spa-node.js 落地
+// （run = app.queuePrompt，cancel = POST /interrupt）。
+// ComfyUI 页面未打开时指令无法落地，前端会收到失败提示。
+const execBusy = ref(false);
+async function onExec(action) {
+  if (execBusy.value) return;
+  execBusy.value = true;
+  try {
+    const res = await execWorkflow(action);
+    if (!res.success) throw new Error(res.error || "指令发送失败");
+    ElMessage.success(action === "run" ? "已提交运行" : "已发送取消指令");
+  } catch (e) {
+    ElMessage.error(`${action === "run" ? "运行" : "取消"}失败：${e.message || e}`);
+  } finally {
+    setTimeout(() => { execBusy.value = false; }, 600);
+  }
+}
 
 const statusClass = computed(() => `mrd-status mrd-status--${ws.saveStatus}`);
 
@@ -90,6 +110,16 @@ function onMenu(path) {
         <span :class="statusClass">
           <i class="mrd-status-dot" />{{ statusText }}
         </span>
+        <el-button
+          size="small" type="primary" :icon="'VideoPlay'" :loading="execBusy"
+          title="运行工作流（与 ComfyUI 页面运行按钮一致，需 ComfyUI 页面在线）"
+          @click="onExec('run')"
+        >运行</el-button>
+        <el-button
+          size="small" type="warning" plain :icon="'VideoPause'" :disabled="execBusy"
+          title="取消当前执行（中断队列，与 ComfyUI 页面取消按钮一致）"
+          @click="onExec('cancel')"
+        >取消</el-button>
         <el-button size="small" text :icon="'Refresh'" @click="ws.saveNow()">立即保存</el-button>
       </div>
     </header>

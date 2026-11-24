@@ -20,6 +20,9 @@ const props = defineProps({
   canRemove: { type: Boolean, default: true },
   compact: { type: Boolean, default: false },
   border: { type: Boolean, default: true },
+  // 锁定空关系主体：关系为空时不展示且不可修改「关系」，不展示「引用资源」上传
+  // （分镜预览自定义主体场景；主体管理页保持可编辑，不传该 prop 即可）
+  lockNoRelationship: { type: Boolean, default: false },
 });
 const emit = defineEmits(["change", "remove"]);
 
@@ -40,6 +43,10 @@ const children = computed(() =>
 );
 const nameMissing = computed(() => !(props.subject.name || "").trim());
 const descVisible = computed(() => (props.subject.relationship || "") !== "");
+// 空关系锁定（lockNoRelationship 开启且当前关系为空）：隐藏且禁改「关系」「引用资源」
+const lockEmptyRel = computed(
+  () => props.lockNoRelationship && (props.subject.relationship || "") === ""
+);
 // Subject 卡：普通引用资源条过滤掉 Audio（音频走「参考音频」独立行）
 const barChildTypes = computed(() =>
   props.subject.type === "Subject" ? childTypes.value.filter((t) => t !== "Audio") : childTypes.value
@@ -371,7 +378,8 @@ function applyPromptToDescription(text) {
           </template>
         </el-input>
       </div>
-      <div class="mrd-subj-col">
+      <!-- 空关系锁定：不展示「关系」（亦不可修改） -->
+      <div v-if="!lockEmptyRel" class="mrd-subj-col">
         <label class="mrd-subj-label">关系</label>
         <el-select
           v-model="subject.relationship"
@@ -495,8 +503,9 @@ function applyPromptToDescription(text) {
       />
     </div>
 
-    <!-- 引用资源上传条（el-upload file-list：上传 / 列表展示 / 移除；点击卡片插入 <@名>） -->
-    <div v-if="barChildTypes.length" class="mrd-subj-row">
+    <!-- 引用资源上传条（el-upload file-list：上传 / 列表展示 / 移除；点击卡片插入 <@名>）
+         空关系锁定时不展示（亦不可上传） -->
+    <div v-if="barChildTypes.length && !lockEmptyRel" class="mrd-subj-row">
       <label class="mrd-subj-label">引用资源</label>
       <div class="mrd-subj-children">
         <el-upload

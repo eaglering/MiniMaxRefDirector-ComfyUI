@@ -224,6 +224,24 @@ class MiniMaxRefCombine(io.ComfyNode):
                 )["path"]
             except Exception:
                 log.warning("failed to save clip_audio wav", exc_info=True)
+        else:
+            # 无损素材（latent 合并）依赖四要素：clip_audio 连接 + joint latent
+            # （含视频与音频两条流）。缺任一项则本段只产出普通视频，SPA 记录无
+            # image_latent / clip_audio，无法参与「无损合并」。输出跳过原因便于排查。
+            reasons = []
+            if clip_audio is None:
+                reasons.append("clip_audio 未连接")
+            if latent is None:
+                reasons.append("latent 未连接")
+            else:
+                if image_lat is None:
+                    reasons.append("latent 中无视频流")
+                if audio_lat is None:
+                    reasons.append("latent 中无音频流（音频 VAE/模型未启用？）")
+            log.info(
+                "[MiniMaxRefCombine] 无损素材未保存（无法参与无损合并）：%s",
+                "；".join(reasons) or "未知原因",
+            )
 
 
         if audio is None:

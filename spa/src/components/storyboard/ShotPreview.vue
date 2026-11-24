@@ -7,7 +7,7 @@
 import { computed, reactive } from "vue";
 import { ElMessage } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
-import { isChildSubject, SUBJECT_TYPE_LABELS, mergeSegmentSubjects } from "../../constants/subject.js";
+import { SUBJECT_TYPE_LABELS, mergeSegmentSubjects, isChildSubject, refDefaultRelationship } from "../../constants/subject.js";
 import { viewUrl } from "../../api/client.js";
 import SubjectCard from "../subjects/SubjectCard.vue";
 
@@ -31,21 +31,62 @@ const effectiveSubjects = computed(() =>
   mergeSegmentSubjects(globalSubjects.value, overrideList.value)
 );
 
-// 提示词中引用的主体名集合
+// 引用标签（容忍标签内首尾空格与全角分隔冒号，与 PromptEditor TOKEN_RE 同款）
+const NAME_TAGS_RE = /<@\s*([^>\n]+?)\s*>|<#\s*([^:：>\n]+?)\s*(?::[^>]*)?>/g;
+
+// 本分镜引用的主体名集合：
+// 1) 分镜提示词 + H3 四段中的 <@名字> / <#名字:对白>；
+// 2) 递归展开被引用主体 description 内的引用（与后端 build_h3_subject_bindings
+//    的「递归处理描述中的提及」语义一致，带深度与已见集合防环）；
+// 3) additionSubject 中的额外主体。
 const mentionedNames = computed(() => {
   const seg = props.segment;
-  const text = `${seg.prompt || ""} ${seg.h3PromptJson?.detailed_description || ""} ${seg.h3PromptJson?.summary || ""}`;
+  const roots = [
+    seg.prompt || "",
+    seg.h3PromptJson?.summary || "",
+    seg.h3PromptJson?.detailed_description || "",
+    seg.h3PromptJson?.overall_soundscape || "",
+    seg.h3PromptJson?.non_diegetic_music || "",
+  ];
   const names = new Set();
-  for (const m of text.matchAll(/<@([^>]+)>/g)) names.add(m[1].trim());
-  for (const m of text.matchAll(/<#([^:>]+)(?::[^>]*)?>/g)) names.add(m[1].trim());
+  const byName = new Map(
+    effectiveSubjects.value.map((s) => [String(s.name || "").trim(), s])
+  );
+  const pending = [];
+  for (const text of roots) {
+    for (const m of text.matchAll(NAME_TAGS_RE)) {
+      const n = (m[1] || m[2] || "").trim();
+      if (n && !names.has(n)) {
+        names.add(n);
+        pending.push(n);
+      }
+    }
+  }
+  let depth = 0;
+  while (pending.length && depth < 4) {
+    const batch = pending.splice(0, pending.length);
+    for (const n of batch) {
+      const s = byName.get(n);
+      if (!s) continue;
+      for (const m of (s.description || "").matchAll(NAME_TAGS_RE)) {
+        const n2 = (m[1] || m[2] || "").trim();
+        if (n2 && !names.has(n2)) {
+          names.add(n2);
+          pending.push(n2);
+        }
+      }
+    }
+    depth++;
+  }
   for (const n of seg.additionSubject || []) names.add(String(n).trim());
   return names;
 });
 
-// 只展示"被引用"的主体：prompt/H3 中以 <@名字> / <#名字> 出现，或已在
-// additionSubject 里；已开启本分镜自定义的副本始终显示（便于编辑）。
+// 只展示"被引用"的主体：提示词 / H3 / 主体描述（递归）中以 <@名字> / <#名字>
+// 出现，或已在 additionSubject 里；已开启本分镜自定义的副本始终显示（便于编辑）。
+// 子主体（Picture/Video/Audio 等）被引用时同样展示，可单独开启自定义。
 const visibleSubjects = computed(() =>
-  effectiveSubjects.value.filter((s) => !isChildSubject(s) && (isReferenced(s) || isCustom(s)))
+  effectiveSubjects.value.filter((s) => isReferenced(s) || isCustom(s))
 );
 
 function dirty() {
@@ -62,7 +103,13 @@ function enableCustom(s, notify = true) {
   if (!Array.isArray(props.segment.subjectsOverride)) props.segment.subjectsOverride = [];
   const ov = props.segment.subjectsOverride;
   if (ov.some((o) => o.uid === s.uid)) return;
-  ov.push(JSON.parse(JSON.stringify(s)));
+  // 副本归一化：顶层主体空关系回落默认（与 workspace 保存归一化同语义），
+  // 避免段级替换后端 build_h3_subject_bindings 时 definitions 缺失
+  const copy = JSON.parse(JSON.stringify(s));
+  if (!isChildSubject(copy) && !(copy.relationship || "").trim()) {
+    copy.relationship = refDefaultRelationship(copy.type);
+  }
+  ov.push(copy);
   for (const c of globalSubjects.value) {
     if (c.ownerUid === s.uid) ov.push(JSON.parse(JSON.stringify(c)));
   }
@@ -144,7 +191,7 @@ function isReferenced(s) {
       </div>
       <el-empty
         v-if="!visibleSubjects.length"
-        description="本分镜暂无引用主体：在提示词中用 <@名字> 引用后在此显示"
+        description="本分镜暂无引用主体：在提示词或主体描述中用 <@名字> 引用后在此显示"
         :image-size="70"
       />
     </el-scrollbar>
@@ -163,6 +210,7 @@ function isReferenced(s) {
         :subjects="effectiveSubjects"
         :can-remove="false"
         compact
+        lock-no-relationship
         @change="dirty"
       />
       <template #footer>

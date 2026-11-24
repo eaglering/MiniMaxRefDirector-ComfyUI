@@ -154,6 +154,46 @@ def _send_spa_state(node_id: str, state: dict) -> None:
         log.warning("[SPA] send_sync minimax_ref_spa_state failed", exc_info=True)
 
 
+def _send_spa_exec(action: str) -> None:
+    """send_sync 通知 ComfyUI 页面执行运行/取消动作（SPA 页右上角按钮）。"""
+    try:
+        from server import PromptServer
+    except ImportError:
+        from comfy_api.latest import server as _comfy_server
+        PromptServer = _comfy_server.PromptServer
+    try:
+        PromptServer.instance.send_sync(
+            "minimax_ref_spa_exec",
+            {"action": action},
+        )
+    except Exception:
+        log.warning("[SPA] send_sync minimax_ref_spa_exec failed", exc_info=True)
+
+
+@_routes.post(f"{API_PREFIX}/spa/exec")
+async def spa_exec(request: web.Request) -> web.Response:
+    """SPA 页「运行 / 取消」→ send_sync 转发到 ComfyUI 页面执行。
+
+    run: ComfyUI 页面调 app.queuePrompt（与工作流页面运行按钮效果一致）；
+    cancel: ComfyUI 页面 POST /interrupt 中断当前执行。
+    前置条件：ComfyUI 工作流页面处于打开状态（SPA 页是独立标签页，无法直接
+    访问图结构，指令经页面内的 spa-node.js 落地）。
+    """
+    try:
+        data = await _read_json_body(request)
+        action = str(data.get("action") or "").strip()
+        if action not in ("run", "cancel"):
+            return web.json_response(
+                {"success": False, "error": "action 必须是 run 或 cancel"}, status=400)
+        _send_spa_exec(action)
+        return web.json_response({"success": True, "action": action})
+    except ValueError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
 @_routes.post(f"{API_PREFIX}/spa/push")
 async def spa_push(request: web.Request) -> web.Response:
     """入口节点打开页面前推送初始状态（仅落盘，不通知回写）。"""
@@ -189,14 +229,24 @@ async def spa_get_state(request: web.Request) -> web.Response:
 
 @_routes.post(f"{API_PREFIX}/spa/save")
 async def spa_save(request: web.Request) -> web.Response:
-    """SPA 保存：落盘 + send_sync 通知 ComfyUI 页面按 node_id 回写 widget。"""
+    """SPA 保存：落盘 + send_sync 通知 ComfyUI 页面按 node_id 回写 widget。
+
+    mirror_node_id（可选，SPA 节点自身编号）：保存目标为旧导演节点时，把同一份
+    状态额外落盘到该编号下，保证工作流由 SPA 节点执行时磁盘兜底可取。
+    """
     try:
         data = await _read_json_body(request)
         node_id = str(data.get("node_id") or "")
         state = data.get("state") or {}
+        mirror_node_id = str(data.get("mirror_node_id") or "")
         if not node_id:
             return web.json_response({"success": False, "error": "node_id is required"}, status=400)
         saved = spa_store.save_state(node_id, state)
+        if mirror_node_id and mirror_node_id != node_id:
+            try:
+                spa_store.save_state(mirror_node_id, {**saved, "node_id": mirror_node_id})
+            except Exception:
+                log.warning("[SPA] mirror save to %s failed", mirror_node_id, exc_info=True)
         _send_spa_state(node_id, saved)
         return web.json_response({"success": True, "state": saved})
     except ValueError as e:

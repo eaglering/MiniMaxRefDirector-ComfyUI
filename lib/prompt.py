@@ -304,6 +304,13 @@ def unmask_protected_text(text: str, placeholders: dict[str, str]) -> str:
 _unmask_protected = unmask_protected_text
 
 
+def _llama_paths(options: dict) -> tuple[str, str]:
+    """llama 模式的本地模型路径（opts 缺 gguf_path / mmproj_path 时返回空串，
+    由调用方判断并回退——config 未接 Subject 节点或 VLM 设置未保存时 opts 为空）。"""
+    o = options if isinstance(options, dict) else {}
+    return str(o.get("gguf_path") or ""), str(o.get("mmproj_path") or "")
+
+
 def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int, glossary: dict | None = None) -> str:
     """将整段视频提示词文本翻译为英文。
 
@@ -350,10 +357,17 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int, gl
                 api_key=options.get("api_key", ""), seed=seed,
             )
         elif vlm_mode == "llama-cpp":
+            gguf_path, mmproj_path = _llama_paths(options)
+            if not gguf_path:
+                log.warning(
+                    "[MiniMaxRefDirector] llama 模式缺少本地模型路径（gguf_path 为空），"
+                    "跳过翻译保留原文。请检查 Subject 节点的 config 输入是否连接，"
+                    "以及 VLM 设置是否已保存。"
+                )
+                return text
             generated = generate_prompt_with_llama(
                 image=None, prompt=full_prompt,
-                gguf_path=options["gguf_path"],
-                mmproj_path=options["mmproj_path"], seed=seed,
+                gguf_path=gguf_path, mmproj_path=mmproj_path, seed=seed,
             )
         elif vlm_mode == "ollama":
             generated = generate_prompt_with_ollama(
@@ -414,9 +428,17 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
                 api_key=options.get("api_key", ""), seed=seed,
             )
         elif vlm_mode == "llama-cpp":
+            gguf_path, mmproj_path = _llama_paths(options)
+            if not gguf_path:
+                log.warning(
+                    "[MiniMaxRefDirector] llama 模式缺少本地模型路径（gguf_path 为空），"
+                    "跳过翻译保留原文。请检查 Subject 节点的 config 输入是否连接，"
+                    "以及 VLM 设置是否已保存。"
+                )
+                return json_data
             generate_text = generate_prompt_with_llama(
-                image=None, prompt=full_prompt, gguf_path=options["gguf_path"],
-                mmproj_path=options["mmproj_path"], seed=seed,
+                image=None, prompt=full_prompt, gguf_path=gguf_path,
+                mmproj_path=mmproj_path, seed=seed,
             )
         elif vlm_mode == "ollama":
             generate_text = generate_prompt_with_ollama(

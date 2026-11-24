@@ -10,6 +10,7 @@ import { useSplitterMemory } from "../utils/splitter.js";
 import { genId, framesToSeconds, secondsToFrames } from "../utils/media.js";
 import { makeSubject } from "../constants/subject.js";
 import ShotList from "../components/storyboard/ShotList.vue";
+import AudioTrack from "../components/storyboard/AudioTrack.vue";
 import PromptPanel from "../components/storyboard/PromptPanel.vue";
 import ExtraSubjects from "../components/storyboard/ExtraSubjects.vue";
 import ShotParams from "../components/storyboard/ShotParams.vue";
@@ -19,6 +20,8 @@ import DeepseekImportDialog from "../components/storyboard/DeepseekImportDialog.
 const ws = useWorkspace();
 const selectedId = ref("");
 const rightTab = ref("params");
+// 左栏垂直 Tab：分镜 / 音轨
+const leftTab = ref("shots");
 const rightDrawer = ref(false);
 const showDeepseekImport = ref(false);
 
@@ -336,26 +339,33 @@ function onDeepseekSync(payload) {
 
 <template>
   <el-splitter class="mrd-storyboard" @resize-end="mainSplit.onResizeEnd">
-    <!-- 分镜列表 -->
+    <!-- 左栏：垂直 Tab（分镜 / 音轨），分镜 Tab 内容不变 -->
     <el-splitter-panel v-model:size="mainSplit.sizes[0]" :min="240" collapsible>
-      <ShotList
-        ref="shotListRef"
-        :segments="segments"
-        :selected-id="selected ? selected.id : ''"
-        :display-mode="ws.widgets.display_mode"
-        :frame-rate="ws.widgets.frame_rate"
-        :show-deepseek-import="isDeepseek"
-        :import-site-label="SITE_LABELS[importSite] || 'DeepSeek'"
-        @select="id => (selectedId = id)"
-        @change="ws.markDirty()"
-        @add="addShot"
-        @duplicate="duplicateShot"
-        @remove="removeShot"
-        @apply-span="applySpanRange"
-        @apply-segment="applySegmentRange"
-        @remove-many="removeMany"
-        @deepseek-import="showDeepseekImport = true"
-      />
+      <el-tabs v-model="leftTab" tab-position="left" class="mrd-left-tabs">
+        <el-tab-pane label="分镜" name="shots">
+          <ShotList
+            ref="shotListRef"
+            :segments="segments"
+            :selected-id="selected ? selected.id : ''"
+            :display-mode="ws.widgets.display_mode"
+            :frame-rate="ws.widgets.frame_rate"
+            :show-deepseek-import="isDeepseek"
+            :import-site-label="SITE_LABELS[importSite] || 'DeepSeek'"
+            @select="id => (selectedId = id)"
+            @change="ws.markDirty()"
+            @add="addShot"
+            @duplicate="duplicateShot"
+            @remove="removeShot"
+            @apply-span="applySpanRange"
+            @apply-segment="applySegmentRange"
+            @remove-many="removeMany"
+            @deepseek-import="showDeepseekImport = true"
+          />
+        </el-tab-pane>
+        <el-tab-pane label="音轨" name="audio" lazy>
+          <AudioTrack />
+        </el-tab-pane>
+      </el-tabs>
     </el-splitter-panel>
 
     <!-- 中间：提示词区 / 额外主体 / 状态行 -->
@@ -420,6 +430,50 @@ function onDeepseekSync(payload) {
   color: #a9b1c3;
 }
 .mrd-storyboard :deep(.el-splitter-bar__collapse-icon:hover) { background-color: #6c5ce7; }
+
+/* 左栏垂直 Tab（分镜/音轨）暗色化：页签条宽 30px、文字竖排、主题紫激活态 */
+.mrd-left-tabs {
+  height: 100%;
+  background: #10131b;
+}
+.mrd-left-tabs :deep(.el-tabs__header),
+.mrd-left-tabs :deep(.el-tabs__nav-wrap),
+.mrd-left-tabs :deep(.el-tabs__nav-scroll),
+.mrd-left-tabs :deep(.el-tabs__nav) {
+  width: 30px;
+  box-sizing: border-box;
+}
+.mrd-left-tabs :deep(.el-tabs__header) {
+  background-color: #151821;
+  border-right: solid 1px #222736;
+  margin-right: 0;
+}
+.mrd-left-tabs :deep(.el-tabs__nav-wrap::after),
+.mrd-left-tabs :deep(.el-tabs__active-bar) { display: none; }
+.mrd-left-tabs :deep(.el-tabs__item) {
+  width: 30px;
+  height: auto;
+  padding: 14px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  letter-spacing: 3px;
+  color: #6b7488;
+}
+.mrd-left-tabs :deep(.el-tabs__item:hover) { color: #a9b1c3; }
+.mrd-left-tabs :deep(.el-tabs__item.is-active) {
+  color: #c4b5fd;
+  background-color: rgba(108, 92, 231, 0.14);
+  box-shadow: inset 3px 0 0 0 #6c5ce7;
+}
+.mrd-left-tabs :deep(.el-tabs__content) {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+.mrd-left-tabs :deep(.el-tab-pane) { height: 100%; min-height: 0; }
 
 .mrd-storyboard-center {
   height: 100%;

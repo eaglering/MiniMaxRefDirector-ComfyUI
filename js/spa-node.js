@@ -1,15 +1,18 @@
 // ============================================================
-// MiniMaxRefDirectorSPA — SPA 导演台入口节点前端
-// - 节点体上挂「选择目标导演节点 + 打开导演台」按钮
-// - 打开：收集目标 MiniMaxRefDirector widget 状态（含关联 Subject 节点）
+// MiniMaxRefDirectorSPA — SPA 导演台节点前端
+// - 节点体上挂「选择目标节点 + 打开导演台」按钮
+// - 目标不做智能判断：默认显示本节点，数据一律写入用户在下拉中
+//   选择的节点编码（本节点 SPA widget，或遗留 MiniMaxRefDirector 节点）
+// - 打开：收集所选目标节点 widget 状态（含关联 Subject 节点）
 //   → POST /minimax_ref/api/spa/push → 新标签页打开 js/spa/index.html
 // - 回写：监听 send_sync("minimax_ref_spa_state")，把 SPA 保存的状态
 //   写回目标节点 widget（双写 properties / onWidgetChanged / callback），
 //   并同步刷新旧 timeline 编辑器视图（防回环标记 __spaExternalUpdate）
+// - 本节点输入/输出与 MiniMaxRefDirector 一致，执行时产出相同结果
 // ============================================================
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { parseInitial } from "./components/director/shared.js";
+import { parseInitial, hideWidget } from "./components/director/shared.js";
 
 const NODE_NAME = "MiniMaxRefDirectorSPA";
 const DIRECTOR_TYPE = "MiniMaxRefDirector";
@@ -26,8 +29,46 @@ const DIRECTOR_WIDGET_NAMES = [
   "video_mode",
 ];
 
+// 本节点上需要隐藏的 widget（全部由 SPA 页面管理，不在节点体展示）
+const SPA_HIDDEN_WIDGET_NAMES = [
+  ...DIRECTOR_WIDGET_NAMES,
+  "timeline_data", "local_prompts", "segment_lengths",
+];
+
 function directorNodes() {
   return (app.graph?._nodes || []).filter((n) => n?.type === DIRECTOR_TYPE);
+}
+
+// SPA 页右上角「运行 / 取消」指令（send_sync("minimax_ref_spa_exec") → 此处落地）。
+// 模块级只注册一次：挂在 addSpaLauncher 内会随节点数量重复注册、一次运行入队多次。
+// run: app.queuePrompt —— 与工作流页面运行按钮完全一致（graphToPrompt + POST /prompt）；
+// cancel: POST /interrupt —— 中断当前执行（与工作流页面取消按钮一致）。
+let _execListenerRegistered = false;
+function registerSpaExecListener() {
+  if (_execListenerRegistered) return;
+  if (!api || typeof api.addEventListener !== "function") return;
+  _execListenerRegistered = true;
+  api.addEventListener("minimax_ref_spa_exec", async (evt) => {
+    const action = String(evt?.detail?.action || "");
+    try {
+      if (action === "run") {
+        await app.queuePrompt(0, 1);
+        console.info("[SPA] run triggered from SPA page");
+      } else if (action === "cancel") {
+        await api.fetchApi("/interrupt", { method: "POST" });
+        console.info("[SPA] interrupt triggered from SPA page");
+      }
+    } catch (e) {
+      console.error("[SPA] exec action failed:", action, e);
+    }
+  });
+}
+
+// 可编辑目标：SPA 本节点或图中遗留的超级导演节点（以用户在下拉中选择的节点编码为准）
+function findEditableNode(id) {
+  return (app.graph?._nodes || []).find(
+    (n) => String(n.id) === String(id) && (n.type === NODE_NAME || n.type === DIRECTOR_TYPE)
+  );
 }
 
 function widgetValue(node, name) {
@@ -150,9 +191,11 @@ function updateWidgetValue(node, w, val) {
   try { w.callback?.(val); } catch (e) { /* ignore */ }
 }
 
-// SPA 保存状态 → 写回目标节点
-function applyStateToNodes(state) {
-  const directorNode = directorNodes().find((n) => String(n.id) === String(state.node_id));
+// SPA 保存状态 → 写回目标节点（SPA 本节点或遗留导演节点）。
+// mirrorNode（SPA 启动器自身节点）非空且不同于目标时，额外镜像一份 timeline_data
+// 与全局参数到 SPA 节点：目标为旧导演节点时，工作流里的 SPA 节点也能直接执行。
+function applyStateToNodes(state, mirrorNode = null) {
+  const directorNode = findEditableNode(state.node_id);
   if (!directorNode) {
     console.warn("[SPA] director node not found for write-back:", state.node_id);
     return false;
@@ -227,6 +270,21 @@ function applyStateToNodes(state) {
     // 主体面板刷新
     try { subjectNode._reloadMiniMaxSubjects?.(); } catch (e) { /* ignore */ }
   }
+
+  // 5) 镜像到 SPA 节点（目标为旧导演节点时保证 SPA 节点执行有数据）
+  if (mirrorNode && String(mirrorNode.id) !== String(state.node_id)) {
+    mirrorNode.__spaExternalUpdate = true;
+    setTimeout(() => { delete mirrorNode.__spaExternalUpdate; }, 0);
+    updateWidgetValue(mirrorNode, mirrorNode.widgets?.find((w) => w.name === "timeline_data"), timelineJson);
+    if (state.widgets && typeof state.widgets === "object") {
+      for (const [name, val] of Object.entries(state.widgets)) {
+        const w = mirrorNode.widgets?.find((w) => w.name === name);
+        if (w) updateWidgetValue(mirrorNode, w, val);
+      }
+    }
+    mirrorNode.setDirtyCanvas?.(true, true);
+    console.info("[SPA] state mirrored to SPA node #" + mirrorNode.id);
+  }
   return true;
 }
 
@@ -297,26 +355,24 @@ function addSpaLauncher(node) {
   }
 
   function rescan() {
-    const nodes = directorNodes();
-    const prev = select.value;
+    const directors = directorNodes();
     select.innerHTML = "";
-    if (nodes.length === 0) {
+    // 选项：本节点（SPA 数据直接落在本节点 widget）+ 遗留超级导演节点
+    const options = [
+      { id: String(node.id), label: `#${node.id} 本节点（SPA）` },
+      ...directors.map((n) => ({
+        id: String(n.id),
+        label: `#${n.id} ${n.title || "MiniMax 超级导演"}`,
+      })),
+    ];
+    for (const opt0 of options) {
       const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "（图中没有 MiniMax 超级导演节点）";
-      select.appendChild(opt);
-      btn.disabled = true;
-      return;
-    }
-    for (const n of nodes) {
-      const opt = document.createElement("option");
-      opt.value = String(n.id);
-      opt.textContent = `#${n.id} ${n.title || "MiniMax 超级导演"}`;
+      opt.value = opt0.id;
+      opt.textContent = opt0.label;
       select.appendChild(opt);
     }
-    // 自动选中：唯一节点 / 之前的选择
-    if (nodes.length === 1) select.value = String(nodes[0].id);
-    else if (prev && nodes.some((n) => String(n.id) === prev)) select.value = prev;
+    // 不做任何智能判断：默认选中本节点，数据一律写入用户在下拉中选择的节点
+    select.value = String(node.id);
     btn.disabled = false;
   }
 
@@ -331,13 +387,13 @@ function addSpaLauncher(node) {
   select.addEventListener("focus", rescan);
 
   async function open() {
-    rescan();
+    // 不重扫不重置：以用户当前在下拉中选择的节点编码为准
     const nodeId = select.value;
     if (!nodeId) {
-      setStatus("请先选择目标导演节点", "err");
+      setStatus("请先选择目标节点", "err");
       return;
     }
-    const target = directorNodes().find((n) => String(n.id) === nodeId);
+    const target = findEditableNode(nodeId);
     if (!target) {
       setStatus("目标节点不存在（可能已被删除）", "err");
       rescan();
@@ -358,7 +414,7 @@ function addSpaLauncher(node) {
       if (resp.status !== 200) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       if (!data.success) throw new Error(data.error || "推送失败");
-      const url = `${spaPageUrl()}?node_id=${encodeURIComponent(state.node_id)}&api_base=${encodeURIComponent(apiBase())}`;
+      const url = `${spaPageUrl()}?node_id=${encodeURIComponent(state.node_id)}&spa_node_id=${encodeURIComponent(node.id)}&api_base=${encodeURIComponent(apiBase())}`;
       window.open(url, "_blank");
       setStatus(`已打开导演台（节点 #${state.node_id}）`, "ok");
     } catch (e) {
@@ -374,12 +430,12 @@ function addSpaLauncher(node) {
     open();
   });
 
-  // 接收 SPA 保存通知（send_sync），回写目标节点
+  // 接收 SPA 保存通知（send_sync），回写目标节点 + 镜像到本 SPA 节点
   function onSpaState(evt) {
     const detail = evt?.detail || {};
     const state = detail.state || detail;
     if (!state || !state.node_id) return;
-    const ok = applyStateToNodes(state);
+    const ok = applyStateToNodes(state, node);
     const time = new Date().toLocaleTimeString();
     setStatus(ok ? `已同步 SPA 保存（${time}）` : `回写失败：找不到节点 #${state.node_id}`, ok ? "ok" : "err");
   }
@@ -403,14 +459,22 @@ function addSpaLauncher(node) {
 app.registerExtension({
   name: "MiniMaxRefDirectorSPA",
   beforeRegisterNodeDef(nodeType, nodeData) {
+    // 运行/取消指令监听随扩展注册（幂等，多 SPA 节点也只挂一次）
+    registerSpaExecListener();
     if (!nodeData || nodeData.name !== NODE_NAME) return;
     const orig = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function (...args) {
       const r = orig ? orig.apply(this, args) : undefined;
       setTimeout(() => {
         try {
+          // 本节点 widget 全部由 SPA 页面管理：隐藏原始 widget，只留启动器
+          for (const name of SPA_HIDDEN_WIDGET_NAMES) {
+            hideWidget(this.widgets?.find((w) => w.name === name));
+          }
           addSpaLauncher(this);
-          this.size = [340, this.size?.[1] || 140];
+          // 宽度固定 340，高度按 widget 内容自适应（避免压扁隐藏后的布局）
+          const autoH = this.computeSize ? this.computeSize(this.size)?.[1] || 0 : 0;
+          this.size = [340, Math.max(autoH, this.size?.[1] || 0, 160)];
         } catch (err) {
           console.error("[SPA] launcher init failed:", err);
         }

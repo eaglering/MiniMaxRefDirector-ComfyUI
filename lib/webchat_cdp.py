@@ -156,6 +156,14 @@ class _Manager:
         return fut.result(timeout=timeout)
 
     # ---- 连接与页面 ----
+    @staticmethod
+    def _profile_opened_before() -> bool:
+        """CDP 独立用户目录是否已被使用过（此前点过「启动浏览器」并产生登录态等文件）。"""
+        try:
+            return BROWSER_PROFILE_DIR.is_dir() and any(BROWSER_PROFILE_DIR.iterdir())
+        except Exception:
+            return False
+
     async def ensure_connected(self, endpoint: str):
         st = getattr(self, "_st", None)
         if st is not None and st["browser"].is_connected and st["endpoint"] == endpoint:
@@ -176,11 +184,34 @@ class _Manager:
         try:
             browser = await pw.chromium.connect_over_cdp(endpoint, timeout=20_000)
         except Exception as e:
-            try:
-                await pw.stop()
-            except Exception:
-                pass
-            raise RuntimeError(f"{CDP_START_HINT}\n连接失败：{e}")
+            # 自动拉起：此前用「启动浏览器」打开过（独立用户目录已有内容）时，
+            # 执行链路无需用户手动点按钮 —— 自动以调试参数拉起浏览器后重连一次。
+            # 首次使用（目录为空）不自动拉起：浏览器里还没有站点登录态，拉起也无意义。
+            if self._profile_opened_before():
+                log.info(
+                    "[WebChatCDP] CDP 端点不可达，检测到已使用过的浏览器目录，自动拉起浏览器：%s",
+                    endpoint,
+                )
+                try:
+                    await asyncio.to_thread(
+                        launch_browser, cdp_endpoint=endpoint
+                    )
+                except Exception:
+                    log.warning("[WebChatCDP] 自动拉起浏览器失败", exc_info=True)
+                try:
+                    browser = await pw.chromium.connect_over_cdp(endpoint, timeout=20_000)
+                except Exception as e2:
+                    try:
+                        await pw.stop()
+                    except Exception:
+                        pass
+                    raise RuntimeError(f"{CDP_START_HINT}\n连接失败：{e2}")
+            else:
+                try:
+                    await pw.stop()
+                except Exception:
+                    pass
+                raise RuntimeError(f"{CDP_START_HINT}\n连接失败：{e}")
         if not browser.contexts:
             raise RuntimeError("CDP 已连接但未发现浏览器上下文（浏览器可能刚启动未完成初始化）")
         st = {"pw": pw, "browser": browser, "endpoint": endpoint, "pages": {}, "cancel": None}

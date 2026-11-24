@@ -238,7 +238,7 @@ def _sync_builtin_docs() -> None:
             log.warning("[SPA] 读取 skill 文档失败：%s", md, exc_info=True)
             continue
         row = conn.execute(
-            "SELECT id, content, created_at, updated_at FROM skill_docs WHERE builtin_key=?",
+            "SELECT id, category, content, created_at, updated_at FROM skill_docs WHERE builtin_key=?",
             (name,),
         ).fetchone()
         if row is None:

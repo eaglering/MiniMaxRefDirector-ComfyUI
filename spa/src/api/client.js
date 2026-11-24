@@ -56,8 +56,18 @@ export async function postJSON(path, body) {
 export function fetchState(nodeId) {
   return getJSON(`/spa/state?node_id=${encodeURIComponent(nodeId)}`);
 }
-export function saveState(nodeId, state) {
-  return postJSON("/spa/save", { node_id: nodeId, state });
+
+// 运行 / 取消工作流：经后端 send_sync 转发到 ComfyUI 页面执行
+// （run = 工作流页面运行按钮；cancel = 中断当前执行）。需 ComfyUI 页面在线。
+export function execWorkflow(action) {
+  return postJSON("/spa/exec", { action });
+}
+export function saveState(nodeId, state, mirrorNodeId = "") {
+  // mirrorNodeId：SPA 节点自身编号 —— 保存目标为旧导演节点时，同时落盘一份到
+  // SPA 节点编号下（后端 spa_save 处理），保证 SPA 节点执行时磁盘兜底可取。
+  const body = { node_id: nodeId, state };
+  if (mirrorNodeId && String(mirrorNodeId) !== String(nodeId)) body.mirror_node_id = String(mirrorNodeId);
+  return postJSON("/spa/save", body);
 }
 export function fetchLlmFiles() {
   return getJSON("/spa/llm_files");

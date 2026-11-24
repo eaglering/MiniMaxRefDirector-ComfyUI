@@ -7,52 +7,7 @@ import {
 } from "../api/client.js";
 import { formatTime, formatDuration } from "../utils/media.js";
 
-const records = ref([{
-  id: 1,
-  kind: "generate",
-  created_at: "2025-06-01T12:34:56+08:00",
-  duration_frames: 120,
-  fps: 30,
-  width: 1920,
-  height: 1080,
-  video: "output/test.mp4",
-  image_latent: "output/test.png",
-  clip_audio: "output/test.wav",
-  meta: {
-    width: 1920,
-    height: 1080,
-  },
-}, {
-  id: 2,
-  kind: "generate",
-  created_at: "2025-06-01T12:34:56+08:00",
-  duration_frames: 120,
-  fps: 30,
-  width: 1920,
-  height: 1080,
-  video: "output/test.mp4",
-  image_latent: "output/test.png",
-  clip_audio: "output/test.wav",
-  meta: {
-    width: 1920,
-    height: 1080,
-  },
-}, {
-  id: 3,
-  kind: "generate",
-  created_at: "2025-06-01T12:34:56+08:00",
-  duration_frames: 120,
-  fps: 30,
-  width: 1920,
-  height: 1080,
-  video: "output/test.mp4",
-  image_latent: "output/test.png",
-  clip_audio: "output/test.wav",
-  meta: {
-    width: 1920,
-    height: 1080,
-  },
-}]);
+const records = ref([]);
 const loading = ref(false);
 const selection = ref([]);
 const merging = reactive({ active: false, kind: "" });
@@ -76,7 +31,7 @@ async function reload() {
     loading.value = false;
   }
 }
-// onMounted(reload);
+onMounted(reload);
 
 // 记录的视频预览地址：dict（{filename,subfolder,type}）或字符串（output 相对路径）
 function videoUrl(rec) {
