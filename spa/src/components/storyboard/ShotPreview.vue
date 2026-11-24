@@ -266,7 +266,7 @@ function isReferenced(s) {
   color: #fff; border-radius: 4px;
 }
 .mrd-preview-name { font-size: 12.5px; font-weight: 600; color: #edeff5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mrd-preview-desc { font-size: 10.5px; color: #6b7488; line-height: 1.4; min-height: 28px; overflow: hidden; }
+.mrd-preview-desc { font-size: 10.5px; color: #6b7488; line-height: 1.4; min-height: 28px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; text-overflow: ellipsis; word-break: break-all; }
 .mrd-preview-foot {
   display: flex; align-items: center; justify-content: space-between;
   font-size: 11px; color: #a78bfa;

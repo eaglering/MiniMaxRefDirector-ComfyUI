@@ -276,6 +276,11 @@ class MiniMaxRefCombine(io.ComfyNode):
 
         images, audio = _trim_images_and_audio(images, audio, trim_frames, frame_rate)
 
+        # 生成记录用的实际产物参数：裁剪后帧数 / 分辨率（像素张量 [B,H,W,C]）
+        rec_frames = int(images.shape[0]) if images is not None else None
+        rec_w = int(images.shape[2]) if images is not None else None
+        rec_h = int(images.shape[1]) if images is not None else None
+
         meta = encode_frames_with_vhs(
             images=images,
             audio=audio,
@@ -315,7 +320,10 @@ class MiniMaxRefCombine(io.ComfyNode):
                 "meta": payload.get("meta") or {},
                 "clip_audio": payload.get("clip_audio") or "",
                 "director_node_id": str(_notify_ctx_node) if _notify_ctx_node else "",
+                "duration_frames": rec_frames,
                 "fps": float(frame_rate),
+                "width": rec_w,
+                "height": rec_h,
             })
         except Exception:
             log.warning("[MiniMaxRefCombine] failed to append video record", exc_info=True)

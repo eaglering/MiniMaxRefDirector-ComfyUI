@@ -75,8 +75,8 @@ export function fetchLlmFiles() {
 export function fetchRecords(limit = 200) {
   return getJSON(`/spa/records?limit=${limit}`);
 }
-export function deleteRecords(ids) {
-  return postJSON("/spa/records/delete", { ids });
+export function deleteRecords(ids, deleteFiles = false) {
+  return postJSON("/spa/records/delete", { ids, delete_files: deleteFiles });
 }
 export function fetchConfig() {
   return getJSON("/config");

@@ -83,19 +83,54 @@ def list_records(limit: int = 200, offset: int = 0) -> list[dict]:
         return []
 
 
-def delete_records(ids: list[str]) -> int:
+def delete_records(ids: list[str], delete_files: bool = False) -> int:
+    """删除记录。delete_files=True 时同时清理该记录关联的无损素材文件
+    （image_latent / meta_file / clip_audio，均为 output 目录下的中间产物，
+    删除记录后不再有任何引用）；生成视频文件一律保留（与旧导演台素材
+    删除语义一致：仅移除引用，产物保留）。"""
     try:
         id_set = {str(i) for i in (ids or [])}
         with _lock:
             records = _load_all_unlocked()
+            removed = [r for r in records if str(r.get("id")) in id_set]
             kept = [r for r in records if str(r.get("id")) not in id_set]
-            removed = len(records) - len(kept)
-            if removed:
+            n_removed = len(records) - len(kept)
+            if n_removed:
                 _save_all_unlocked(kept)
-        return removed
+        if delete_files:
+            for rec in removed:
+                _delete_record_files(rec)
+        return n_removed
     except Exception:
         log.warning("[Records] delete_records failed", exc_info=True)
         return 0
+
+
+def _delete_record_files(rec: dict) -> None:
+    """安全删除记录关联的无损素材文件（仅限 output/temp 目录内的文件）。"""
+    import folder_paths as _fp
+    allowed = []
+    for getter in ("get_output_directory", "get_temp_directory"):
+        try:
+            allowed.append(os.path.abspath(str(getattr(_fp, getter)())))
+        except Exception:
+            pass
+    for key in ("image_latent", "meta_file", "clip_audio"):
+        path = str(rec.get(key) or "").strip()
+        if not path:
+            continue
+        try:
+            p = Path(path)
+            if not p.is_file():
+                continue
+            ap = os.path.abspath(path)
+            if not any(ap.startswith(base + os.sep) or ap.startswith(base + "/") for base in allowed):
+                log.warning("[Records] skip deleting file outside output/temp: %s", ap)
+                continue
+            p.unlink()
+            log.info("[Records] deleted lossless material file: %s", ap)
+        except Exception:
+            log.warning("[Records] failed to delete file: %s", path, exc_info=True)
 
 
 def build_record(kind: str, video_file: Any, *, image_latent: str = "",

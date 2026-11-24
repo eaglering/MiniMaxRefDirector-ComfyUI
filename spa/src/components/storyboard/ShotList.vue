@@ -3,6 +3,7 @@
 // 多选模式（卡片左下 checkbox，底部 全选·全不选·删除）/
 // 长按 300ms 拖拽排序（连续时间轴，顺序即时间顺序，无空隙）
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { useWorkspace } from "../../stores/workspace.js";
 
 const props = defineProps({
   segments: { type: Array, required: true },
@@ -119,8 +120,25 @@ function removeChecked() {
 // 仅用于：头部图标把选区跨度写入全局开始/结束（时长 = end - start 派生），
 // 以及应用后的 disabled 视觉；不写 selectedId，避免右侧提示词面板跳动。
 const ctxSel = ref([]);        // Ctrl 选中的分镜 id 集合
-const ctxApplied = ref(false); // 已点击头部图标应用跨度（标题 n/m + 置灰）
+const ctxApplied = ref(false); // 已应用选区跨度（标题 n/m + 置灰）
 const marquee = ref(null);     // 框选矩形 { x1, y1, x2, y2 }（视口坐标）
+
+// Ctrl 选区不在 timeline_data 落额外字段：以保存的全局开始/结束为权威，
+// 页面加载时推算选中区域（与范围相交的分镜为选中，其余保持置灰）。
+const ws = useWorkspace();
+const savedRange = computed(() => {
+  const fps = Number(ws.widgets.frame_rate) || 24;
+  if (ws.widgets.display_mode === "seconds") {
+    return {
+      start: Math.round((Number(ws.widgets.start_second) || 0) * fps),
+      end: Math.round((Number(ws.widgets.end_second) || 0) * fps),
+    };
+  }
+  return {
+    start: Math.round(Number(ws.widgets.start_frame) || 0),
+    end: Math.round(Number(ws.widgets.end_frame) || 0),
+  };
+});
 
 function isCtx(id) {
   return ctxSel.value.includes(id);
@@ -150,6 +168,7 @@ function syncCtxSpan() {
   applyCtxSpan();
 }
 function toggleCtx(id) {
+  ctxTouched = true;
   const i = ctxSel.value.indexOf(id);
   if (i >= 0) ctxSel.value.splice(i, 1);
   else ctxSel.value.push(id);
@@ -164,8 +183,27 @@ function emitSpanAll() {
     endFrame: Math.max(...props.segments.map((s) => (s.start || 0) + (s.length || 0))),
   });
 }
+// 页面加载/数据回写时从全局范围推算 Ctrl 选中集（与 [start, end) 相交的分镜）：
+// 范围窄于全部分镜跨度 → 视为已应用选区，范围外分镜置灰。用户手动 Ctrl 选择
+// 或退出多选后停止自动推算（ctxTouched），避免覆盖交互中的选区。
+let ctxTouched = false;
+function deriveCtxFromRange() {
+  const r = savedRange.value;
+  ctxSel.value = props.segments
+    .filter((s) => (s.start || 0) + (s.length || 0) > r.start && (s.start || 0) < r.end)
+    .map((s) => s.id);
+  const all = computeSpan(props.segments.map((s) => s.id));
+  const cur = computeSpan(ctxSel.value);
+  ctxApplied.value = !!(cur && all && (cur.startFrame !== all.startFrame || cur.endFrame !== all.endFrame));
+}
+watch(
+  () => [savedRange.value.start, savedRange.value.end, props.segments.map((s) => s.id).join(",")],
+  () => { if (!ctxTouched) deriveCtxFromRange(); },
+  { immediate: true } // 组件挂载（含 tab 切换重新挂载）时立即推算一次
+);
 // 退出 Ctrl 多选：清空选中与置灰；全局开始/结束/时长 更新为包含所有分镜
 function exitCtxMulti() {
+  ctxTouched = false;
   ctxSel.value = [];
   ctxApplied.value = false;
   emitSpanAll();

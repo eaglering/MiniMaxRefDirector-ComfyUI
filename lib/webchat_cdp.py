@@ -164,7 +164,7 @@ class _Manager:
         except Exception:
             return False
 
-    async def ensure_connected(self, endpoint: str):
+    async def ensure_connected(self, endpoint: str, _recovery: bool = False):
         st = getattr(self, "_st", None)
         if st is not None and st["browser"].is_connected and st["endpoint"] == endpoint:
             return st
@@ -193,11 +193,13 @@ class _Manager:
                     endpoint,
                 )
                 try:
-                    await asyncio.to_thread(
-                        launch_browser, cdp_endpoint=endpoint
-                    )
-                except Exception:
-                    log.warning("[WebChatCDP] 自动拉起浏览器失败", exc_info=True)
+                    await _launch_browser_for_cdp(endpoint)
+                except Exception as le:
+                    try:
+                        await pw.stop()
+                    except Exception:
+                        pass
+                    raise RuntimeError(f"{CDP_START_HINT}\n自动拉起浏览器失败：{le}")
                 try:
                     browser = await pw.chromium.connect_over_cdp(endpoint, timeout=20_000)
                 except Exception as e2:
@@ -205,7 +207,7 @@ class _Manager:
                         await pw.stop()
                     except Exception:
                         pass
-                    raise RuntimeError(f"{CDP_START_HINT}\n连接失败：{e2}")
+                    raise RuntimeError(f"{CDP_START_HINT}\n拉起后重连仍失败：{e2}")
             else:
                 try:
                     await pw.stop()
@@ -213,7 +215,22 @@ class _Manager:
                     pass
                 raise RuntimeError(f"{CDP_START_HINT}\n连接失败：{e}")
         if not browser.contexts:
-            raise RuntimeError("CDP 已连接但未发现浏览器上下文（浏览器可能刚启动未完成初始化）")
+            # 进程存活但无窗口（窗口全被关闭）：拉起新窗口后重连一次
+            if _recovery or not self._profile_opened_before():
+                try:
+                    await pw.stop()
+                except Exception:
+                    pass
+                raise RuntimeError("CDP 已连接但未发现浏览器上下文（浏览器可能刚启动未完成初始化）")
+            try:
+                await pw.stop()
+            except Exception:
+                pass
+            await self._recover_window_contexts(endpoint)
+            st = self._st
+            if st is None or not st["browser"].contexts:
+                raise RuntimeError("CDP 已连接但未发现浏览器上下文（浏览器可能刚启动未完成初始化）")
+            return st
         st = {"pw": pw, "browser": browser, "endpoint": endpoint, "pages": {}, "cancel": None}
         self._st = st
         log.info("[WebChatCDP] 已附加 Chrome（%s）", endpoint)
@@ -228,6 +245,17 @@ class _Manager:
         except Exception:
             pass
         self._st = None
+
+    async def _recover_window_contexts(self, endpoint: str) -> None:
+        """浏览器进程存活但所有窗口已被关闭（CDP contexts 为空）：
+        自动拉起一个新窗口（并入同一调试进程），断开后重连拿到最新 contexts。
+        仅在此前用过「启动浏览器」（独立用户目录有内容）时执行。"""
+        if not self._profile_opened_before():
+            return
+        log.info("[WebChatCDP] 浏览器无窗口上下文，自动拉起浏览器窗口并重连：%s", endpoint)
+        await _launch_browser_for_cdp(endpoint)
+        await self.disconnect()
+        await self.ensure_connected(endpoint, _recovery=True)
 
     @staticmethod
     def _host_matches(url: str, site: dict) -> bool:
@@ -258,10 +286,15 @@ class _Manager:
                     self._attach_sse(page, driver)
                     return page
         if not st["browser"].contexts:
-            raise RuntimeError(
-                "CDP 已连接但浏览器没有任何窗口上下文（浏览器可能已关闭全部窗口）。"
-                "请重新打开浏览器后重试"
-            )
+            # 进程存活但窗口全被关闭：自动拉起新窗口并重连一次（之前已修复
+            # "连接失败自动拉起"，这里补齐"连接成功但无窗口"的同一场景）
+            await self._recover_window_contexts(st["endpoint"])
+            st = self._st
+            if st is None or not st["browser"].contexts:
+                raise RuntimeError(
+                    "CDP 已连接但浏览器没有任何窗口上下文（浏览器可能已关闭全部窗口）。"
+                    "请重新打开浏览器后重试"
+                )
         ctx = st["browser"].contexts[0]
         page = await ctx.new_page()
         st["pages"][site["id"]] = page
@@ -781,3 +814,28 @@ def launch_browser(
             "（无调试参数），请先完全退出它（含托盘/后台进程）再点一次「启动浏览器」。"
         ),
     }
+
+
+async def _launch_browser_for_cdp(endpoint: str) -> None:
+    """launch_browser 的执行链路异步包装：校验返回值，端口未就绪时再等待/
+    探测最多 10s（首次启动初始化慢），仍失败则抛出带具体原因的异常。
+
+    此前执行链路自动拉起时忽略了 launch_browser 的返回值：拉起失败（路径
+    未找到 / 端口 40s 未就绪 / 同 profile 已有无调试参数的实例）被静默吞掉，
+    重连 ECONNREFUSED 后只报笼统提示，真实原因丢失。
+    """
+    from urllib.parse import urlparse
+    result = await asyncio.to_thread(launch_browser, cdp_endpoint=endpoint)
+    if result.get("connected"):
+        return
+    parsed = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 9222
+    for _ in range(20):  # 最多再等 10s
+        await asyncio.sleep(0.5)
+        if _cdp_probe(host, port):
+            return
+    detail = str(result.get("error") or "浏览器已启动但调试端口未就绪")
+    raise RuntimeError(
+        f"{detail}（profile 目录：{result.get('profileDir') or BROWSER_PROFILE_DIR}）"
+    )

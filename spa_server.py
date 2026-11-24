@@ -655,7 +655,8 @@ async def spa_records(request: web.Request) -> web.Response:
 async def spa_records_delete(request: web.Request) -> web.Response:
     try:
         data = await _read_json_body(request)
-        removed = records_lib.delete_records(data.get("ids") or [])
+        removed = records_lib.delete_records(
+            data.get("ids") or [], delete_files=bool(data.get("delete_files")))
         return web.json_response({"success": True, "removed": removed})
     except Exception as e:
         traceback.print_exc()

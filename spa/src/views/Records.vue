@@ -80,15 +80,21 @@ function openPreview(rec) {
 
 async function onDelete() {
   if (!selection.value.length) return;
+  const losslessCount = selection.value.filter((r) => r.image_latent || r.clip_audio).length;
+  const fileNote = losslessCount
+    ? `其中 ${losslessCount} 条含无损素材，关联的 latent / wav / meta 中间文件将一并删除`
+    : "无关联无损素材文件";
   try {
-    await ElMessageBox.confirm(`确定删除 ${selection.value.length} 条记录（不删除视频文件本身）？`, "删除记录", {
-      confirmButtonText: "删除", cancelButtonText: "取消", type: "warning",
-    });
+    await ElMessageBox.confirm(
+      `确定删除 ${selection.value.length} 条记录？${fileNote}；生成视频文件保留（与旧导演台素材删除语义一致）。`,
+      "删除记录",
+      { confirmButtonText: "删除", cancelButtonText: "取消", type: "warning" },
+    );
   } catch {
     return;
   }
   try {
-    await deleteRecords(selection.value.map((r) => r.id));
+    await deleteRecords(selection.value.map((r) => r.id), true);
     ElMessage.success("已删除");
     reload();
   } catch (e) {
