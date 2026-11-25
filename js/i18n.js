@@ -246,6 +246,7 @@ const ZH = {
   "Lossless merge requires at least 2 materials with latent and audio (Guide must output clip_audio)": "无损合并需要至少 2 段含 latent 与音频的素材（Guide 需输出 clip_audio）",
   "Lossless merge requires at least 2 materials with latent": "无损合并需要至少 2 段含 latent 的素材",
   "Lossless merge failed": "无损合并失败",
+  "Lossless merge started in background (decode + encode may take minutes)": "无损合并已在后台启动（解码 + 编码可能需要数分钟）",
   "Losslessly merged {n} segments; the result was added to the material strip": "已无损合并 {n} 段，结果已加入素材条",
   "Lossless merge failed: {msg}": "无损合并失败：{msg}",
   "LosslessMergeHint": "点击后弹出方案选择：方案一为接缝音频淡化合并（片段音频拼接），方案二为上传主音频整轨替代所有片段音频",

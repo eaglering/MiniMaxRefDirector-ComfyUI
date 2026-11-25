@@ -2177,6 +2177,19 @@ export function TransferPanel({ director }) {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || t("Lossless merge failed"));
+      // 后台任务模式：POST 立即返回 job_id，轮询状态直到 done/error
+      if (data.job_id) {
+        showDragHint(t("Lossless merge started in background (decode + encode may take minutes)"));
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const stRes = await api.fetchApi(
+            `/minimax_ref/api/h3/merge_latents/status?job_id=${encodeURIComponent(data.job_id)}`);
+          const st = await stRes.json();
+          if (!st.success) throw new Error(st.error || t("Lossless merge failed"));
+          if (st.job?.state === "error") throw new Error(st.job.error || t("Lossless merge failed"));
+          if (st.job?.state === "done") break;
+        }
+      }
       showDragHint(t("Losslessly merged {n} segments; the result was added to the material strip", { n: sel.length }));
       setMergeDlgOpen(false);
       setCustomAudio(null);

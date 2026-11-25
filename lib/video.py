@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 import folder_paths
 import torch
@@ -701,22 +702,38 @@ def _encode_video_frames_ffmpeg(frames, fps: float, filename_prefix: str, format
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
+            n_frames = 0
+            t0 = time.monotonic()
             for i, frame in enumerate(_iter_video_frames(frames)):
                 if frame.ndim == 4:  # [1,H,W,C] -> [H,W,C]
                     frame = frame[0]
                 img = Image.fromarray((frame.clamp(0, 1).mul(255).round().to(torch.uint8).cpu().numpy()))
                 img.save(os.path.join(tmpdir, f"frame_{i:05d}.png"))
+                n_frames = i + 1
+                if n_frames % 48 == 0:
+                    logger.info(
+                        "[ffmpeg encode] 已导出 %d 帧（%.1fs）...",
+                        n_frames, time.monotonic() - t0,
+                    )
+            logger.info(
+                "[ffmpeg encode] 帧导出完成（%d 帧，%.1fs），开始 ffmpeg %s 编码...",
+                n_frames, time.monotonic() - t0, codec,
+            )
             cmd = [
                 ffmpeg, "-y", "-framerate", str(fps),
                 "-i", os.path.join(tmpdir, "frame_%05d.png"),
             ]
             if audio_path is not None:
                 cmd += ["-i", audio_path]
-            cmd += ["-c:v", codec, "-pix_fmt", "yuv420p"]
+            cmd += ["-c:v", codec, "-preset", "fast", "-pix_fmt", "yuv420p"]
             if audio_path is not None:
                 cmd += ["-c:a", audio_codec, "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
             cmd.append(full_out)
             res = subprocess.run(cmd, capture_output=True)
+            logger.info(
+                "[ffmpeg encode] 编码结束（rc=%d，%.1fs）：%s",
+                res.returncode, time.monotonic() - t0, full_out,
+            )
             if res.returncode != 0 and audio_path is not None:
                 # 音频 mux 失败（容器/编码器不支持等）时降级为纯视频，
                 # 避免音频问题让整个合并流程失败。

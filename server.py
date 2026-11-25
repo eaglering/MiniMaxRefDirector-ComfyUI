@@ -6,7 +6,10 @@ import asyncio
 import json
 import logging
 import os
+import threading
+import time
 import traceback
+import uuid
 
 import folder_paths
 from aiohttp import web
@@ -981,6 +984,30 @@ def _extract_merged_video_path(result) -> str | None:
     return None
 
 
+# ── 无损合并后台任务 ──────────────────────────────────────────────────────────
+# 长任务（VAE 解码 + ffmpeg 编码可达数分钟）不占用 HTTP 请求：POST 立即返回
+# job_id，前端轮询 /h3/merge_latents/status 获取进度与结果，避免"一直没应答"。
+_MERGE_JOBS: dict[str, dict] = {}
+_MERGE_JOBS_LOCK = threading.Lock()
+_MERGE_JOBS_MAX = 20
+
+
+def _probe_video_record_meta(path: str) -> dict:
+    """ffprobe 尽力探测时长/分辨率/fps（登记生成记录用；失败返回空 dict）。"""
+    try:
+        from .lib.video import ffprobe_info
+
+        info = ffprobe_info(path) or {}
+        return {
+            "duration_frames": int(info["frame_count"]) if info.get("frame_count") else None,
+            "fps": float(info["fps"]) if info.get("fps") else None,
+            "width": info.get("width"),
+            "height": info.get("height"),
+        }
+    except Exception:
+        return {}
+
+
 @_routes.post(f"{API_PREFIX}/h3/merge_videos")
 async def merge_videos_api(request: web.Request) -> web.Response:
     """合并多段视频素材为一段。
@@ -1048,11 +1075,17 @@ async def merge_videos_api(request: web.Request) -> web.Response:
         if node_id is not None:
             payload["director_node_id"] = node_id
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
-        # 登记生成记录（失败仅告警不阻断）
+        # 登记生成记录（失败仅告警不阻断）；ffprobe 补时长/分辨率/fps
         try:
             from .lib.records import build_record, append_record
+
+            probe = _probe_video_record_meta(dst)
             append_record(build_record(
                 "merge_video", file_info,
+                fps=probe.get("fps"),
+                width=probe.get("width"), height=probe.get("height"),
+                duration_frames=probe.get("duration_frames"),
+                size=os.path.getsize(dst),
                 director_node_id=str(node_id) if node_id is not None else "",
             ))
         except Exception:
@@ -1242,60 +1275,126 @@ async def merge_latents_api(request: web.Request) -> web.Response:
                 custom_audio=custom_audio,
             )
 
-        meta_out = await asyncio.to_thread(_run_merge)
-        merged_path = meta_out.get("full_path")
-        if not merged_path or not os.path.isfile(merged_path):
-            return web.json_response(
-                {"success": False, "error": "无损合并失败：未生成输出文件"}, status=500
-            )
-
-        # 3) 复制到素材库目录 input/whatdreamscost/，保证可预览、可再参与合并
+        # ── 后台任务：HTTP 立即返回 job_id，前端轮询 status 获取结果 ──
+        # （VAE 解码 + ffmpeg 编码长视频可达数分钟，同步等待会导致"一直没应答"）
         import datetime
         import shutil
 
-        input_dir = folder_paths.get_input_directory()
-        mat_dir = os.path.join(input_dir, "whatdreamscost")
-        os.makedirs(mat_dir, exist_ok=True)
-        ext = os.path.splitext(merged_path)[1] or ".mp4"
-        if ext.lower() not in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"):
-            ext = ".mp4"
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"merge_latent_{ts}{ext}"
-        dst = os.path.join(mat_dir, name)
-        n = 1
-        while os.path.exists(dst):
-            name = f"merge_latent_{ts}_{n}{ext}"
-            dst = os.path.join(mat_dir, name)
-            n += 1
-        shutil.copy2(merged_path, dst)
-
-        file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
-        payload = {
-            "status": "add_material",
-            "type": "video",
-            "imageFile": file_info,
-            "image_latent": None,
-            "audio_latent": None,
+        job_id = uuid.uuid4().hex[:12]
+        job: dict = {
+            "id": job_id, "state": "running", "error": "",
+            "name": "", "file": None,
+            "started_at": time.time(), "finished_at": None,
+            "segments": len(entries),
         }
-        if node_id is not None:
-            payload["director_node_id"] = node_id
-        PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
-        # 登记生成记录（SPA「视频生成记录」页；失败仅告警不阻断）
-        try:
-            from .lib.records import build_record, append_record
-            append_record(build_record(
-                "merge_latent", file_info,
-                fps=float(first_meta.get("fps") or 24.0),
-                director_node_id=str(node_id) if node_id is not None else "",
-            ))
-        except Exception:
-            log.warning("[Records] failed to record merge_latents result", exc_info=True)
-        return web.json_response(
-            {"success": True, "name": f"whatdreamscost/{name}", "file": file_info}
-        )
+        with _MERGE_JOBS_LOCK:
+            _MERGE_JOBS[job_id] = job
+            # 只保留最近若干条，防止长期驻留
+            if len(_MERGE_JOBS) > _MERGE_JOBS_MAX:
+                done_ids = [
+                    k for k, v in sorted(_MERGE_JOBS.items(), key=lambda kv: kv[1]["started_at"])
+                    if v.get("finished_at")
+                ]
+                for k in done_ids[: len(done_ids) - (_MERGE_JOBS_MAX - len(_MERGE_JOBS))]:
+                    _MERGE_JOBS.pop(k, None)
+
+        def _job_body():
+            try:
+                t0 = time.monotonic()
+                log.info(
+                    "[merge_latents] 任务 %s 开始：%d 段素材"
+                    "（VAE 解码 + ffmpeg 编码长视频可能需要数分钟，进度见控制台日志）",
+                    job_id, len(entries),
+                )
+                meta_out = _run_merge()
+                merged_path = meta_out.get("full_path")
+                if not merged_path or not os.path.isfile(merged_path):
+                    raise RuntimeError("无损合并失败：未生成输出文件")
+                log.info(
+                    "[merge_latents] 任务 %s 合并完成，耗时 %.1fs", job_id, time.monotonic() - t0)
+
+                # 复制到素材库目录 input/whatdreamscost/，保证可预览、可再参与合并
+                mat_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
+                os.makedirs(mat_dir, exist_ok=True)
+                ext = os.path.splitext(merged_path)[1] or ".mp4"
+                if ext.lower() not in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"):
+                    ext = ".mp4"
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                name = f"merge_latent_{ts}{ext}"
+                dst = os.path.join(mat_dir, name)
+                n = 1
+                while os.path.exists(dst):
+                    name = f"merge_latent_{ts}_{n}{ext}"
+                    dst = os.path.join(mat_dir, name)
+                    n += 1
+                shutil.copy2(merged_path, dst)
+
+                file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
+                payload = {
+                    "status": "add_material",
+                    "type": "video",
+                    "imageFile": file_info,
+                    "image_latent": None,
+                    "audio_latent": None,
+                }
+                if node_id is not None:
+                    payload["director_node_id"] = node_id
+                PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
+                # 登记生成记录（SPA「视频生成记录」页；失败仅告警不阻断）
+                try:
+                    from .lib.records import build_record, append_record
+
+                    probe = _probe_video_record_meta(dst)
+                    append_record(build_record(
+                        "merge_latent", file_info,
+                        fps=probe.get("fps") or float(first_meta.get("fps") or 24.0),
+                        width=probe.get("width"), height=probe.get("height"),
+                        duration_frames=probe.get("duration_frames"),
+                        size=os.path.getsize(dst),
+                        director_node_id=str(node_id) if node_id is not None else "",
+                    ))
+                except Exception:
+                    log.warning(
+                        "[Records] failed to record merge_latents result", exc_info=True)
+                job["name"] = f"whatdreamscost/{name}"
+                job["file"] = file_info
+                job["state"] = "done"
+            except Exception as e:
+                traceback.print_exc()
+                job["state"] = "error"
+                job["error"] = str(e)
+            finally:
+                job["finished_at"] = time.time()
+
+        threading.Thread(target=_job_body, name=f"mrd-merge-{job_id}", daemon=True).start()
+        return web.json_response({"success": True, "job_id": job_id, "segments": len(entries)})
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/h3/merge_latents/status")
+async def merge_latents_status_api(request: web.Request) -> web.Response:
+    """无损合并后台任务状态（SPA / 旧导演台轮询）。
+
+    带 job_id 查询指定任务；不带或任务已过期时返回最近一个 running 任务
+    （多 tab / 刷新后仍能接上）。返回 {state: running|done|error, elapsed, ...}。
+    """
+    job_id = str(request.query.get("job_id") or "").strip()
+    with _MERGE_JOBS_LOCK:
+        job = _MERGE_JOBS.get(job_id)
+        if job is None:
+            running = [j for j in _MERGE_JOBS.values() if j.get("state") == "running"]
+            job = running[-1] if running else None
+    if job is None:
+        return web.json_response(
+            {"success": False, "error": "任务不存在或已完成清理"}, status=404)
+    started = float(job.get("started_at") or time.time())
+    out = {k: job.get(k) for k in ("id", "state", "error", "name", "file", "segments")}
+    out["elapsed"] = round(time.time() - started, 1)
+    if job.get("finished_at"):
+        out["took"] = round(float(job["finished_at"]) - started, 1)
+    return web.json_response({"success": True, "job": out})
 
 
 # ── 依赖管理（插件 / LoRA）：业务逻辑在 ext_mgmt.py，路由宿主在此 ──

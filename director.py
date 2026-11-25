@@ -29,8 +29,102 @@ _PROTECTED_FRAGMENT_RE = re.compile(
 )
 
 
+def _persist_master_audio(audio: dict) -> dict | None:
+    """把 master_audio（AUDIO dict）写入 input/whatdreamscost/，供 SPA「视频生成
+    记录」登记回听。返回 {file_info, duration_s, sample_rate, size}；失败返回 None。
+
+    写盘方式与 lib.audio.save_audio_to_temp_wav 一致（torchaudio 优先，
+    soundfile 兜底），但落盘到持久目录（temp 目录会被 ComfyUI 清理）。
+    """
+    try:
+        import datetime
+
+        import torch
+
+        waveform = audio.get("waveform")
+        sample_rate = audio.get("sample_rate")
+        if not isinstance(waveform, torch.Tensor) or sample_rate is None:
+            return None
+        wf = waveform[0] if waveform.dim() == 3 else waveform
+        if wf.dim() != 2:
+            return None
+
+        import folder_paths
+
+        out_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
+        os.makedirs(out_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"master_audio_{ts}.wav"
+        path = os.path.join(out_dir, name)
+        n = 1
+        while os.path.exists(path):
+            name = f"master_audio_{ts}_{n}.wav"
+            path = os.path.join(out_dir, name)
+            n += 1
+        try:
+            import torchaudio  # type: ignore[import]
+
+            torchaudio.save(path, wf.detach().cpu().float(), int(sample_rate))
+        except Exception:
+            import soundfile as sf  # type: ignore[import]
+
+            sf.write(path, wf.detach().cpu().float().numpy().T, int(sample_rate))
+        return {
+            "file_info": {"filename": name, "subfolder": "whatdreamscost", "type": "input"},
+            "duration_s": float(wf.shape[-1]) / float(sample_rate),
+            "sample_rate": int(sample_rate),
+            "size": os.path.getsize(path),
+        }
+    except Exception:
+        log.warning("[MiniMaxRefDirector] failed to persist master_audio", exc_info=True)
+        return None
+
+
 def _needs_translate(prompt: str) -> bool:
     return bool(_CJK_RE.search(_PROTECTED_FRAGMENT_RE.sub("", prompt)))
+
+
+def _spa_llm_opts() -> dict:
+    """SPA「LLM 设置」面板的全局持久化配置（api_config.json 的 spa_llm 段）。"""
+    try:
+        from .api_config import api_config_manager
+
+        cfg = api_config_manager.load_config() or {}
+        spa = cfg.get("spa_llm") if isinstance(cfg.get("spa_llm"), dict) else {}
+        spa = spa if isinstance(spa, dict) else {}
+        return {k: str(v or "").strip() for k, v in spa.items() if str(v or "").strip()}
+    except Exception:
+        return {}
+
+
+def _resolve_vlm_opts(opts: dict) -> dict:
+    """补全段提示词翻译的 LLM 选项：节点 opts 缺失/不可用时回落 SPA 全局 LLM 设置。
+
+    SPA 导演台工作流中 Subject 的 config 输入可能未连接（首帧 subgraph 不连），
+    或节点档案里残留旧默认模式（deepseek-proxy）——此时用「LLM 设置」面板
+    持久化的 spa_llm（llama-server / api / ollama 等），保证中文提示词仍能按
+    用户当前选择的模式翻译为英文。节点显式配置且可用的字段始终优先。
+    """
+    merged = dict(opts or {})
+    spa = _spa_llm_opts()
+    spa_mode = str(spa.get("mode") or "").strip()
+    if not spa_mode:
+        return merged
+    mode = str(merged.get("vlm_mode") or "").strip()
+    node_usable = mode in ("llama-cpp", "llama-server", "llama-cpp-server") and bool(
+        merged.get("gguf_path")
+    )
+    if not node_usable:
+        # 节点未配置可用模式（空 / 残留网页桥接旧默认且无任何模型配置）：
+        # 全局 spa_llm 优先，节点非空字段作补充（如 seed）
+        out = {**spa, **{k: v for k, v in merged.items() if v}}
+        out["vlm_mode"] = spa_mode
+        return out
+    # 节点已显式配置可用模式：仅补缺字段
+    for k, v in spa.items():
+        if not merged.get(k):
+            merged[k] = v
+    return merged
 
 
 def _translate_prompt_to_en(prompt: str, opts: dict, glossary: dict | None = None) -> str:
@@ -221,6 +315,7 @@ class MiniMaxRefDirector(io.ComfyNode):
         # （vlm_mode / gguf_path / mmproj_path / provider / api_key 等）；llama-server
         # 模式下翻译经外部 HTTP 服务完成，ComfyUI 进程无模型内存需要释放。
         vlm_opts = ((config or {}).get("opts") or {}) if config else {}
+        vlm_opts = _resolve_vlm_opts(vlm_opts)
         for i, seg in enumerate(timeline_segments):
             dur = int(seg.get("length", 1))
             seg_start_frames = int(seg.get("start", 0))
@@ -349,6 +444,32 @@ class MiniMaxRefDirector(io.ComfyNode):
                     "[MiniMaxRefDirector] failed to synthesize master_audio, "
                     "outputting none", exc_info=True)
                 master_audio = None
+
+        # master_audio 落盘 + 登记 SPA「视频生成记录」（kind=master_audio；失败仅告警）。
+        # 历史语义不变：master_audio 由补齐后的 audio_segments 合成，覆盖本次运行的
+        # [start, end)（选择部分分镜时只含被选中段的音频窗口，空白段静音补齐）。
+        if master_audio is not None:
+            saved = _persist_master_audio(master_audio)
+            if saved:
+                try:
+                    from .lib.records import build_record, append_record
+
+                    rec = build_record(
+                        "master_audio", None,
+                        size=saved["size"],
+                        director_node_id=str(director_node_id or ""),
+                        prompt_excerpt=str(global_prompt or "")[:200],
+                    )
+                    rec["audio"] = saved["file_info"]
+                    rec["meta"] = {
+                        "duration_s": round(saved["duration_s"], 3),
+                        "sample_rate": saved["sample_rate"],
+                    }
+                    append_record(rec)
+                except Exception:
+                    log.warning(
+                        "[MiniMaxRefDirector] failed to record master_audio",
+                        exc_info=True)
 
         log.info(
             f"[MiniMaxRefDirector] {segment_count} segments | timeline: {timeline_data} | "

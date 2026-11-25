@@ -28,6 +28,8 @@ import traceback
 
 from aiohttp import web
 
+import folder_paths
+
 from .server import API_PREFIX, _routes
 from .lib import records as records_lib
 from .lib import skill_notes
@@ -658,6 +660,95 @@ async def spa_records_delete(request: web.Request) -> web.Response:
         removed = records_lib.delete_records(
             data.get("ids") or [], delete_files=bool(data.get("delete_files")))
         return web.json_response({"success": True, "removed": removed})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+_VIDEO_UPLOAD_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+
+
+@_routes.post(f"{API_PREFIX}/spa/records/upload_video")
+async def spa_records_upload_video(request: web.Request) -> web.Response:
+    """上传视频并登记为生成记录（SPA「视频生成记录」页拖拽/手动上传入口）。
+
+    multipart 表单：{file: <视频文件>}。存入 input/whatdreamscost/（与合并
+    产物同目录，可直接预览、可再参与合并）；元信息（时长/分辨率/fps）尽力
+    通过 ffprobe 探测，失败不阻断登记。
+    """
+    import datetime
+
+    try:
+        reader = await request.multipart()
+        if reader is None:
+            return web.json_response(
+                {"success": False, "error": "需要 multipart/form-data 表单"}, status=400)
+        field = None
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if part.name == "file":
+                field = part
+                break
+        if field is None or not field.filename:
+            return web.json_response(
+                {"success": False, "error": "缺少 file 字段"}, status=400)
+        ext = os.path.splitext(field.filename)[1].lower()
+        if ext not in _VIDEO_UPLOAD_EXTS:
+            return web.json_response(
+                {"success": False,
+                 "error": f"不支持的文件类型「{ext or '(无后缀)'}」；支持 mp4/mov/mkv/webm/avi/m4v"},
+                status=400)
+
+        data = bytearray()
+        while True:
+            chunk = await field.read_chunk(1024 * 1024)
+            if not chunk:
+                break
+            data.extend(chunk)
+            if len(data) > 2 * 1024 * 1024 * 1024:
+                return web.json_response(
+                    {"success": False, "error": "文件超过 2GB 上限"}, status=413)
+        if not data:
+            return web.json_response({"success": False, "error": "空文件"}, status=400)
+
+        mat_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
+        os.makedirs(mat_dir, exist_ok=True)
+        stem = os.path.splitext(os.path.basename(field.filename))[0][:80] or "video"
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"upload_{ts}_{stem}{ext}"
+        dst = os.path.join(mat_dir, name)
+        n = 1
+        while os.path.exists(dst):
+            name = f"upload_{ts}_{n}_{stem}{ext}"
+            dst = os.path.join(mat_dir, name)
+            n += 1
+        with open(dst, "wb") as f:
+            f.write(bytes(data))
+
+        # 尽力探测元信息（时长/分辨率/fps），失败仅留空字段
+        fps = width = height = duration_frames = None
+        try:
+            from .lib.video import ffprobe_info
+
+            info = ffprobe_info(dst) or {}
+            fps = info.get("fps")
+            width = info.get("width")
+            height = info.get("height")
+            duration_frames = info.get("frame_count")
+        except Exception:
+            pass
+
+        file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
+        rec = records_lib.append_record(records_lib.build_record(
+            "upload", file_info,
+            fps=float(fps) if fps else None,
+            width=width, height=height,
+            duration_frames=int(duration_frames) if duration_frames else None,
+            size=len(data),
+        ))
+        return web.json_response({"success": True, "record": rec})
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)

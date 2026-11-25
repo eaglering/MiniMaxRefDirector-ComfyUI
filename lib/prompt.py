@@ -356,7 +356,7 @@ def _translate_text_to_en(text: str, vlm_mode: str, options: dict, seed: int, gl
                 provider=options.get("provider", "GLM"),
                 api_key=options.get("api_key", ""), seed=seed,
             )
-        elif vlm_mode == "llama-cpp":
+        elif vlm_mode in ("llama-cpp", "llama-server", "llama-cpp-server"):
             gguf_path, mmproj_path = _llama_paths(options)
             if not gguf_path:
                 log.warning(
@@ -427,7 +427,7 @@ def _translate_h3_prompt_to_en(json_data: dict, vlm_mode: str, options: dict, se
                 image=None, prompt=full_prompt, provider=options.get("provider", "GLM"),
                 api_key=options.get("api_key", ""), seed=seed,
             )
-        elif vlm_mode == "llama-cpp":
+        elif vlm_mode in ("llama-cpp", "llama-server", "llama-cpp-server"):
             gguf_path, mmproj_path = _llama_paths(options)
             if not gguf_path:
                 log.warning(

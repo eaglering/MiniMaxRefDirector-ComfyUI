@@ -152,11 +152,27 @@ export function generateText(payload) {
 }
 
 // ===== 合并 =====
+// 上传视频并登记为生成记录（视频生成记录页拖拽/手动上传，存 input/whatdreamscost/）
+export async function uploadRecordVideo(file) {
+  const body = new FormData();
+  body.append("file", file);
+  const resp = await fetch(url("/spa/records/upload_video"), { method: "POST", body });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data.success) {
+    throw new Error(data.error || `上传失败 (HTTP ${resp.status})`);
+  }
+  return data;
+}
+
 export function mergeVideos(paths) {
   return postJSON("/h3/merge_videos", { paths, source: "spa" });
 }
 export function mergeLatents(materials, opts = {}) {
   return postJSON("/h3/merge_latents", { materials, source: "spa", ...opts });
+}
+// 无损合并后台任务状态轮询（POST 立即返回 job_id，长任务不占用 HTTP 请求）
+export function mergeLatentsStatus(jobId) {
+  return getJSON(`/h3/merge_latents/status?job_id=${encodeURIComponent(jobId)}`);
 }
 
 // ===== 媒体 =====
