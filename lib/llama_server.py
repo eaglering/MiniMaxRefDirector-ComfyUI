@@ -131,6 +131,32 @@ def _terminate(proc: subprocess.Popen, timeout: float = 8.0) -> None:
             pass
 
 
+def resolve_model_file(path: str) -> str:
+    """解析 GGUF / mmproj 文件路径。
+
+    前端下拉只传文件名（basename，来自 models/llm 扫描），而 start() 需要
+    完整路径——此处按「原样 → 工作目录 → models/llm 注册目录」顺序解析，
+    传完整路径时原样返回，避免"文件明明存在却报不存在"。
+    """
+    p = (path or "").strip()
+    if not p or os.path.isfile(p):
+        return p
+    name = os.path.basename(p)
+    candidates: list[str] = []
+    try:
+        candidates.extend(folder_paths.get_folder_paths("llm"))
+    except KeyError:
+        pass
+    for d in (*[os.path.join(folder_paths.models_dir, n) for n in ("llm", "LLM")], os.getcwd()):
+        if d and d not in candidates:
+            candidates.append(d)
+    for d in candidates:
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand):
+            return cand
+    return p  # 未解析到：返回原值，让 start() 的校验报出原路径
+
+
 def start(
     path: str,
     gguf_path: str,
@@ -157,14 +183,14 @@ def start(
         RuntimeError: 启动超时或进程立即退出（附日志尾部）
     """
     path = (path or "").strip()
-    gguf_path = (gguf_path or "").strip()
+    gguf_path = resolve_model_file(gguf_path)
+    mmproj_path = resolve_model_file(mmproj_path)
     if not path:
         raise ValueError("缺少 llama-server 可执行文件路径：请在设置面板配置")
     if not os.path.isfile(path):
         raise ValueError(f"llama-server 可执行文件不存在：{path}")
     if not gguf_path or not os.path.isfile(gguf_path):
         raise ValueError(f"主模型 GGUF 不存在：{gguf_path or '（未选择）'}")
-    mmproj_path = (mmproj_path or "").strip()
     if mmproj_path and not os.path.isfile(mmproj_path):
         raise ValueError(f"视觉投影 mmproj 不存在：{mmproj_path}")
     port = int(port or DEFAULT_PORT)

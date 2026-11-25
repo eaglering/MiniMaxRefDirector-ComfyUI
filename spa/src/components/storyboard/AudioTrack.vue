@@ -435,13 +435,12 @@ function onCardClick(_e, seg) {
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  padding: 0 8px;
 }
-.mrd-at-head { display: flex; align-items: center; justify-content: space-between; flex: none; min-height: 24px; }
+.mrd-at-head { display: flex; align-items: center; justify-content: space-between; flex: none; min-height: 24px; padding: 0 8px; }
 .mrd-at-title { font-size: 13px; font-weight: 600; color: #a9b1c3; }
 .mrd-at-head-ops { display: inline-flex; align-items: center; gap: 6px; }
 .mrd-at-scroll { flex: 1; min-height: 0; }
-.mrd-at-items { position: relative; }
+.mrd-at-items { position: relative; padding: 0 8px; }
 .mrd-at-card {
   position: relative;
   padding: 8px;

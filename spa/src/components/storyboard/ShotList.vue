@@ -442,15 +442,16 @@ function setDuration(seg, val) {
         </span>
       </template>
     </div>
-    <el-button
-      v-if="showDeepseekImport && !multiMode"
-      class="mrd-shotlist-dsi"
-      size="small"
-      plain
-      :icon="'ChatDotRound'"
-      @click="emit('deepseek-import')"
-    >{{ importSiteLabel }} 分镜导入</el-button>
-
+    <div class="mrd-shotlist-dsi">
+      <el-button
+        v-if="showDeepseekImport && !multiMode"
+        class="mrd-shotlist-dsibtn"
+        size="small"
+        plain
+        :icon="'ChatDotRound'"
+        @click="emit('deepseek-import')"
+      >{{ importSiteLabel }} 分镜导入</el-button>
+    </div>
     <el-scrollbar class="mrd-shotlist-scroll">
       <TransitionGroup name="mrd-shot" tag="div" class="mrd-shotlist-items">
         <div
@@ -577,21 +578,21 @@ function setDuration(seg, val) {
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  padding: 0 8px;
 }
-.mrd-shotlist-head { display: flex; align-items: center; justify-content: space-between; flex: none; min-height: 24px; }
-.mrd-shotlist-dsi {
+.mrd-shotlist-head { display: flex; align-items: center; justify-content: space-between; flex: none; min-height: 24px; padding: 0 8px; }
+.mrd-shotlist-dsi { padding: 0 8px; }
+.mrd-shotlist-dsibtn {
   flex: none;
   width: 100%;
   border-style: dashed;
   color: #a78bfa;
   border-color: rgba(167, 139, 250, 0.45);
 }
-.mrd-shotlist-dsi:hover { color: #c4b5fd; border-color: #a78bfa; background: rgba(108, 92, 231, 0.08); }
+.mrd-shotlist-dsibtn:hover { color: #c4b5fd; border-color: #a78bfa; background: rgba(108, 92, 231, 0.08); }
 .mrd-shotlist-title { font-size: 13px; font-weight: 600; color: #a9b1c3; }
 .mrd-shotlist-head-ops { display: inline-flex; align-items: center; gap: 6px; }
 .mrd-shotlist-scroll { flex: 1; min-height: 0; }
-.mrd-shotlist-items { position: relative; }
+.mrd-shotlist-items { position: relative; padding: 0 8px; }
 .mrd-shot-card {
   position: relative;
   padding: 8px;

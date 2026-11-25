@@ -228,10 +228,17 @@ async def llama_server_start_api(request: web.Request) -> web.Response:
         data = await request.json()
         from .lib.llama_server import DEFAULT_PORT, start
 
-        port = int(data.get("port") or 0) or DEFAULT_PORT
+        # 可执行文件路径 / 端口：请求未带时回落 API 管理器「llama-server」页配置
+        cfg_ls = {}
+        try:
+            cfg_ls = dict(api_config_manager.load_config().get("llama_server") or {})
+        except Exception:
+            pass
+        path = str(data.get("path") or "").strip() or str(cfg_ls.get("path") or "").strip()
+        port = int(data.get("port") or 0) or int(cfg_ls.get("port") or 0) or DEFAULT_PORT
         st = await asyncio.to_thread(
             start,
-            str(data.get("path") or "").strip(),
+            path,
             str(data.get("gguf_path") or "").strip(),
             str(data.get("mmproj_path") or "").strip(),
             port,

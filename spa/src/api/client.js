@@ -81,6 +81,9 @@ export function deleteRecords(ids, deleteFiles = false) {
 export function fetchConfig() {
   return getJSON("/config");
 }
+export function saveConfig(config) {
+  return postJSON("/config", { config });
+}
 
 // ===== FastDirector-Desktop skill 词库（deepseek 分镜导入用） =====
 // 无 name 时返回词库清单；有 name 时返回该 skill 的 prompt.md 全文

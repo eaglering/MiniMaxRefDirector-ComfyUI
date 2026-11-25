@@ -70,6 +70,24 @@ DEFAULT_CONFIG = {
         "llm": {"service": "glm", "model": "glm-4.5-flash"},
         "vlm": {"service": "glm", "model": "glm-4v-flash"},
     },
+    # llama-server 进程配置（ComfyUI 设置 → MiniMaxRefDirector → API 管理器「llama-server」页）
+    "llama_server": {
+        "path": "",   # llama-server 可执行文件完整路径
+        "port": 8321,  # 监听端口
+    },
+    # SPA LLM 设置的全局默认（跨工作流持久化；节点内设置优先，空缺字段回落此处）
+    "spa_llm": {
+        "mode": "",
+        "gguf_path": "",
+        "mmproj_path": "",
+        "provider": "",
+        "api_key": "",
+        "ollama_model": "",
+        "ollama_base_url": "",
+        "cdp_endpoint": "",
+        "browser": "",
+        "browser_path": "",
+    },
 }
 
 
@@ -187,7 +205,13 @@ class APIConfigManager:
             "vlm": {**default_current["vlm"], **current.get("vlm", {})},
         }
 
-        return {"services": merged_services, "current": merged_current}
+        merged = {"services": merged_services, "current": merged_current}
+        # 非服务段（llama-server / spa_llm）：缺省字段补默认值
+        for key in ("llama_server", "spa_llm"):
+            default_section = dict(DEFAULT_CONFIG.get(key, {}))
+            user_section = dict(config.get(key) or {})
+            merged[key] = {**default_section, **user_section}
+        return merged
 
     def get_service(self, service_id: str) -> dict | None:
         """Return a service dict by id, or None if not found."""

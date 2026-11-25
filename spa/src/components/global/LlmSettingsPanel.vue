@@ -5,7 +5,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { useWorkspace } from "../../stores/workspace.js";
-import { fetchLlmFiles, fetchConfig } from "../../api/client.js";
+import { fetchLlmFiles, fetchConfig, saveConfig } from "../../api/client.js";
 import {
   setCdpEndpoint,
   webchatListBrowsers,
@@ -82,10 +82,10 @@ async function startLlamaServer() {
   lsLog.value = "";
   try {
     const res = await llamaServerStart({
-      path: ws.llm.llama_server_path,
+      path: lsCfgPath.value || ws.llm.llama_server_path || "",
       ggufPath: ws.llm.gguf_path,
       mmprojPath: ws.llm.mmproj_path,
-      port: Number(ws.llm.llama_server_port) || 0,
+      port: Number(lsCfgPort.value) || 0,
     });
     lsStatus.value = res;
     ElMessage.success(`llama-server 已就绪：${res.model || ""}（${res.endpoint || ""}）`);
@@ -140,6 +140,15 @@ onMounted(async () => {
       providers.value = Object.values(services)
         .filter((s) => s && s.id)
         .map((s) => ({ id: s.id, name: s.name || s.id }));
+      // llama-server 进程配置（API 管理器维护，只读展示）
+      const ls = res.config.llama_server || {};
+      lsCfgPath.value = ls.path || "";
+      lsCfgPort.value = Number(ls.port) || 8321;
+      // LLM 设置全局默认：节点内空缺字段回落 spa_llm（跨工作流保存）
+      const spa = res.config.spa_llm || {};
+      for (const [k, v] of Object.entries(spa)) {
+        if (v && !ws.llm[k]) ws.llm[k] = v;
+      }
     }
   } catch { /* ignore */ }
   try {
@@ -160,9 +169,39 @@ onUnmounted(stopLsTimer);
 const bridgeSite = computed(() => BRIDGE_SITES[NORMALIZED_MODE(ws.llm.mode)] || null);
 const isBridgeMode = computed(() => !!bridgeSite.value);
 
+// API 管理器中的 llama-server 配置（路径/端口在 ComfyUI 设置里维护，此处只读展示）
+const lsCfgPath = ref("");
+const lsCfgPort = ref(8321);
+
+// LLM 设置全局持久化（api_config.json 的 spa_llm 段）：节点内已设置的字段优先，
+// 空缺字段回落全局默认；修改后防抖写回，跨工作流/刷新不丢失，无需每次重选。
+let saveTimer = null;
+async function persistLlmConfig() {
+  try {
+    const res = await fetchConfig();
+    if (!res?.success) return;
+    const config = res.config || {};
+    config.spa_llm = {
+      mode: ws.llm.mode || "",
+      gguf_path: ws.llm.gguf_path || "",
+      mmproj_path: ws.llm.mmproj_path || "",
+      provider: ws.llm.provider || "",
+      api_key: ws.llm.api_key || "",
+      ollama_model: ws.llm.ollama_model || "",
+      ollama_base_url: ws.llm.ollama_base_url || "",
+      cdp_endpoint: ws.llm.cdp_endpoint || "",
+      browser: ws.llm.browser || "",
+      browser_path: ws.llm.browser === "custom" ? (ws.llm.browser_path || "") : "",
+    };
+    await saveConfig(config);
+  } catch { /* 持久化失败不打扰用户（节点内存档仍会保存） */ }
+}
+
 function dirty() {
   ws.markDirty();
   if (isBridgeMode.value) setCdpEndpoint(ws.llm.cdp_endpoint);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(persistLlmConfig, 800);
 }
 
 // 一键启动调试浏览器并打开当前桥接站点（幂等；用户目录 = 项目 userdata/browser）
@@ -227,23 +266,11 @@ async function testConnection() {
       <template v-if="ws.llm.mode === 'llama-server'">
         <el-alert type="info" :closable="false" show-icon class="mrd-bridge-hint">
           <template #title>
-            llama-server 发布页：https://github.com/ggml-org/llama.cpp/releases。
+            可执行文件与端口在 ComfyUI 设置 → MiniMaxRefDirector → API 管理器（llama-server 页）中配置并保存，
+            此处自动使用，无需重复填写；GGUF / mmproj 模型在本页选择。
+            当前：{{ lsCfgPath || "（API 管理器中未配置路径）" }} · 端口 {{ lsCfgPort }}
           </template>
         </el-alert>
-        <div class="mrd-field">
-          <label>llama-server 可执行文件路径</label>
-          <el-input
-            v-model="ws.llm.llama_server_path"
-            placeholder="如 D:\llama.cpp\llama-server.exe"
-            @change="dirty"
-          />
-          <p class="mrd-field-hint">llama.cpp 官方发布的 llama-server 二进制（CUDA 版自动走 GPU）。</p>
-        </div>
-        <div class="mrd-field">
-          <label>端口</label>
-          <el-input-number v-model="ws.llm.llama_server_port" :min="1024" :max="65535" @change="dirty" />
-          <p class="mrd-field-hint">默认 8321；变更后需重启 llama-server 生效。</p>
-        </div>
         <div class="mrd-field">
           <label>GGUF 模型（models/llm）</label>
           <el-select v-model="ws.llm.gguf_path" filterable allow-create clearable placeholder="选择或输入 GGUF 文件名" @change="dirty">
@@ -276,8 +303,14 @@ async function testConnection() {
 
       <!-- api -->
       <template v-else-if="ws.llm.mode === 'api'">
+        <el-alert type="info" :closable="false" show-icon class="mrd-bridge-hint">
+          <template #title>
+            服务商的接入点、模型列表与 API Key 在 ComfyUI 设置 → MiniMaxRefDirector → API 管理器 中配置（保存后全局生效）；
+            此处的服务商选择与 API Key 为本工作流覆盖项，修改后会自动保存。
+          </template>
+        </el-alert>
         <div class="mrd-field">
-          <label>服务商（API 管理器）</label>
+          <label>服务商</label>
           <el-select v-model="ws.llm.provider" filterable allow-create placeholder="如 glm / kimi / qwen / doubao" @change="dirty">
             <el-option v-for="p in providers" :key="p.id" :label="`${p.name} (${p.id})`" :value="p.id" />
           </el-select>
@@ -290,6 +323,11 @@ async function testConnection() {
 
       <!-- ollama -->
       <template v-else-if="ws.llm.mode === 'ollama'">
+        <el-alert type="info" :closable="false" show-icon class="mrd-bridge-hint">
+          <template #title>
+            Ollama 服务地址默认 http://localhost:11434；模型标签与服务地址修改后会自动保存，无需每次重选。
+          </template>
+        </el-alert>
         <div class="mrd-field">
           <label>模型标签</label>
           <el-input v-model="ws.llm.ollama_model" placeholder="如 qwen2.5vl:7b（留空回落配置）" @change="dirty" />

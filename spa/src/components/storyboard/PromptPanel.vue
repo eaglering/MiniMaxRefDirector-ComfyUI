@@ -305,7 +305,7 @@ async function generateH3(lang) {
                 >转H3提示词</el-button>
             </div>
             <!-- 输入框下边框：左低右高，中间曲线连接（fill 与编辑器背景同色，视觉上是下边框本身） -->
-            <div class="mrd-curve-shell">
+            <el-scrollbar class="mrd-curve-shell">
               <PromptEditor
                 :model-value="segment.prompt"
                 :allow-hash="false"
@@ -315,7 +315,7 @@ async function generateH3(lang) {
                 only-referencable
                 @update:model-value="v => { segment.prompt = v; ws.markDirty(); }"
               />
-            </div>
+            </el-scrollbar>
           </div>
         </el-splitter-panel>
       </el-splitter>
@@ -515,8 +515,6 @@ async function generateH3(lang) {
 .mrd-curve-shell {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 /* 编辑器去掉下边框，由下方 SVG 曲线充当底边 */
 .mrd-curve-shell :deep(.mrd-cm-host) {
