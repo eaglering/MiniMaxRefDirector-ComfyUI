@@ -26,7 +26,6 @@ const DIRECTOR_WIDGET_NAMES = [
   "start_frame", "end_frame", "duration_frames",
   "guide_strength",
   "inpaint_audio", "override_audio",
-  "video_mode",
 ];
 
 // 本节点上需要隐藏的 widget（全部由 SPA 页面管理，不在节点体展示）

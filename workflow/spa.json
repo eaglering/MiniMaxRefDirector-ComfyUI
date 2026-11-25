@@ -82,8 +82,7 @@
         "outpu_resolution": "16:9横屏",
         "million_pixels": 0.6,
         "timeline_ui": "",
-        "has_serialized_properties": true,
-        "video_mode": "h3"
+        "has_serialized_properties": true
       },
       "widgets_values": [
         0,
@@ -99,7 +98,6 @@
         "seconds",
         "16:9横屏",
         0.6,
-        "h3",
         ""
       ],
       "widgets_values_named": {
@@ -116,7 +114,6 @@
         "display_mode": "seconds",
         "outpu_resolution": "16:9横屏",
         "million_pixels": 0.6,
-        "video_mode": "h3",
         "timeline_ui": ""
       }
     },
@@ -186,8 +183,7 @@
         24,
         "seconds",
         "16:9横屏",
-        0.6,
-        "h3"
+        0.6
       ],
       "widgets_values_named": {
         "start_second": 0,
@@ -202,8 +198,7 @@
         "frame_rate": 24,
         "display_mode": "seconds",
         "outpu_resolution": "16:9横屏",
-        "million_pixels": 0.6,
-        "video_mode": "h3"
+        "million_pixels": 0.6
       }
     },
     {

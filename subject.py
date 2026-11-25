@@ -112,9 +112,8 @@ class MiniMaxRefSubject(io.ComfyNode):
                                 tooltip="Ollama endpoint. Empty defaults to http://localhost:11434/api/chat (an OpenAI-compatible .../v1/chat/completions URL also works).",
                             ),
                         ]),
-                        io.DynamicCombo.Option("deepseek-proxy", []),
                     ],
-                    tooltip="How the H3 prompt is generated: locally via llama-server (external llama.cpp HTTP server; start it in the LLM settings panel), via a cloud API, with a local Ollama server, or via the DeepSeek web chat (deepseek-proxy: page automation, text-only).",
+                    tooltip="How the H3 prompt is generated: locally via llama-server (external llama.cpp HTTP server; start it in the LLM settings panel), via a cloud API, or with a local Ollama server. Web-chat bridge modes (DeepSeek/Doubao/Qwen) are configured in the SPA director and display as '其他' here; existing values are preserved.",
                 ),
                 io.String.Input(
                     "global_prompt", multiline=True, default="", optional=True,

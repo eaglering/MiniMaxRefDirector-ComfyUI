@@ -9,14 +9,6 @@ const ws = useWorkspace();
 
 const RESOLUTIONS = ["1:1方形", "9:16竖屏", "16:9横屏", "3:2横屏", "2:3竖屏", "4:3横屏", "3:4竖屏", "21:9超宽"];
 
-// 视频生成模式：只有 h3 展示分镜里的「H3 提示词 / 转H3提示词 / 批量转H3提示词」，
-// Python 运行时也只在 h3 模式下走自动转英文；doubao 为预留占位
-const VIDEO_MODES = [
-  { value: "h3", label: "H3（MiniMax 海螺）" },
-  { value: "doubao", label: "豆包生视频（预留）", disabled: true },
-  { value: "off", label: "关闭（通用模式）" },
-];
-
 function dirty() {
   ws.markDirty();
 }
@@ -85,21 +77,6 @@ function onFpsChange() {
           @change="onFpsChange"
         />
       </div>
-      <div class="mrd-field">
-        <label>视频生成模式</label>
-        <el-select v-model="ws.widgets.video_mode" @change="dirty">
-          <el-option
-            v-for="m in VIDEO_MODES" :key="m.value"
-            :label="m.label" :value="m.value" :disabled="m.disabled"
-          />
-        </el-select>
-        <p v-if="ws.widgets.video_mode === 'doubao'" class="mrd-video-mode-hint">
-          预留选项：后续版本支持，当前不启用任何转换入口。
-        </p>
-        <p v-else-if="ws.widgets.video_mode === 'off'" class="mrd-video-mode-hint">
-          通用模式：分镜中隐藏全部 H3 提示词入口，运行时不自动转英文。
-        </p>
-      </div>
     </div>
     <div class="mrd-form-grid mrd-time-grid">
       <div class="mrd-field">
@@ -153,5 +130,4 @@ function onFpsChange() {
   user-select: none;
 }
 .mrd-time-hint { margin-top: 10px; font-size: 12px; color: #6f7889; }
-.mrd-video-mode-hint { margin: 2px 0 0; font-size: 11px; color: #6b7488; }
 </style>

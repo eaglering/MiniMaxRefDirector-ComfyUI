@@ -206,9 +206,7 @@ const stateRef = ref(null);
 const logBoxRef = ref(null);
 const storyboardSynced = ref(false); // 分镜是否已同步（首帧同步依赖已有分镜）
 
-// H3 插件化门控：非 h3 视频生成模式时隐藏「批量转H3提示词」步骤
-const h3Enabled = computed(() => (ws.widgets.video_mode || "h3") === "h3");
-const visibleSteps = computed(() => IMPORT_STEPS.filter((s) => h3Enabled.value || s.key !== "h3"));
+const visibleSteps = IMPORT_STEPS;
 
 function stepOf(key) {
   if (!stepState[key]) stepState[key] = { status: "idle", synced: false, summary: "" };
@@ -524,9 +522,9 @@ async function runAllSteps() {
   if (runningStep.value || autoRunning.value || !isBridgeSite.value) return;
   autoRunning.value = true;
   autoCancelled.value = false;
-  addLog("info", `一键导入开始：将依次执行 ${visibleSteps.value.length} 个步骤，步骤间随机等待 2-6 秒模拟人为节奏`);
+  addLog("info", `一键导入开始：将依次执行 ${visibleSteps.length} 个步骤，步骤间随机等待 2-6 秒模拟人为节奏`);
   try {
-    for (const step of visibleSteps.value) {
+    for (const step of visibleSteps) {
       // 已完成的步骤直接跳过（不重新生成；需要重跑某一步时用该步的「执行」按钮）
       if (stepState[step.key]?.status === "done") {
         addLog("info", `「${step.label}」已完成，一键导入跳过该步`);

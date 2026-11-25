@@ -135,12 +135,6 @@ def director_inputs():
             "million_pixels", default=0.6, min=0.1, max=4.0, step=0.1, optional=True,
             tooltip="Million pixels target. 1.0 MP ≈ 1024×1024.",
         ),
-        io.Combo.Input(
-            "video_mode",
-            options=["h3", "doubao", "off"],
-            default="h3", optional=True,
-            tooltip="Video generation mode: h3 = MiniMax Hailuo (show H3 prompt UI, auto-translate to English); doubao = reserved (not implemented yet); off = generic, no H3 entries.",
-        ),
     ]
 
 
@@ -181,7 +175,7 @@ class MiniMaxRefDirector(io.ComfyNode):
                 start_frame=0, end_frame=120, duration_frames=120, timeline_data="",
                 local_prompts="", segment_lengths="", frame_rate=24,
                 display_mode="seconds",  outpu_resolution="16:9横屏", million_pixels=0.6,
-                video_mode="h3") -> io.NodeOutput:
+        ) -> io.NodeOutput:
         """Assemble guide_data from timeline, subjects, resolution, and prompt template."""
         # config 是可选输入：前端首帧 subgraph 中 director 不连接 config，需容错
         global_prompt = config.get("global_prompt", "") if config else ""
@@ -280,10 +274,7 @@ class MiniMaxRefDirector(io.ComfyNode):
                                          timeline_segment=seg, next_timeline_segment=next_seg, seg_audio=seg_audio,
                                          frame_rate=frame_rate)
             # 非英文（含中文，且非仅出现在对白/主体标签中）的段提示词翻译为英文。
-            # video_mode != "h3"（doubao 预留 / off 通用）时跳过自动转英文：保留原文
-            # 与中文 H3 结构，由所选视频模型的链路自行处理语言。
-            _h3_mode = str(video_mode or "h3").strip().lower() == "h3"
-            if _h3_mode and _needs_translate(prompt_res["prompt"]):
+            if _needs_translate(prompt_res["prompt"]):
                 log.info(
                     "[MiniMaxRefDirector] segment %d pre-translate prompt head: %s",
                     i, repr(prompt_res["prompt"][:160]),

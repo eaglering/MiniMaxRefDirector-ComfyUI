@@ -266,11 +266,16 @@ async def llama_server_stop_api(request: web.Request) -> web.Response:
 
 @_routes.get(f"{API_PREFIX}/llm/llama_server/status")
 async def llama_server_status_api(request: web.Request) -> web.Response:
-    """llama-server 当前状态（running/loading/pid/endpoint/model）。"""
+    """llama-server 当前状态（running/loading/pid/endpoint/model）。
+
+    status() 内含同步 /health 探测（最长 2s）与 _LOCK 竞争，必须放线程池，
+    否则前端 2s 轮询会阻塞事件循环。
+    """
     try:
         from .lib.llama_server import status
 
-        return web.json_response({"success": True, **status()})
+        st = await asyncio.to_thread(status)
+        return web.json_response({"success": True, **st})
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)

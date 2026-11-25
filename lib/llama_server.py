@@ -4,8 +4,10 @@
 - 模型加载在外部 llama-server 进程（subprocess 启动，GGUF + 可选 mmproj 多模态），
   ComfyUI 主进程只做 ``POST /v1/chat/completions`` HTTP 调用，彻底避免进程内
   推理与 torch 抢占显存/RAM 导致 OOM；
-- 串行策略（用户选定「手动启停」）：设置面板「启动/停止」按钮控制生命周期，
-  不做空闲自动回收；``start()`` 前自动调用
+- 串行策略：设置面板「启动/停止」按钮手动控制生命周期；生成链路（lib/llm）可经
+  ``ensure_running()`` 按需自动拉起（不卸载 ComfyUI 显存模型），空闲
+  ``_IDLE_STOP_S`` 秒后由看门狗线程自动停止，把显存还给 ComfyUI；手动启动的
+  实例不参与空闲回收。手动 ``start()`` 前自动调用
   ``comfy.model_management.unload_all_models()`` 卸载 ComfyUI 已加载的显存模型
   ——这是唯一的自动串行点；
 - 日志：stdout/stderr 追加写 ``user/default/MiniMaxRefDirector/llama-server.log``，
@@ -38,6 +40,13 @@ _PROC: subprocess.Popen | None = None
 _PORT: int = 0
 _MODEL_BASENAME: str = ""
 _MMPROJ_BASENAME: str = ""
+
+# 按需启停：_AUTO_STARTED=True 表示当前实例由生成链路自动拉起，空闲看门狗
+# 会在其闲置超过 _IDLE_STOP_S 后自动停止；手动启动的实例不参与回收。
+IDLE_STOP_S = 300.0
+_AUTO_STARTED: bool = False
+_LAST_USE: float = 0.0
+_WATCHDOG_STARTED: bool = False
 
 DEFAULT_PORT = 8321
 HEALTH_TIMEOUT_S = 180.0  # 大 GGUF 首次加载可能较慢
@@ -93,6 +102,16 @@ def status() -> dict:
     with _LOCK:
         proc, port = _PROC, _PORT
         model, mmproj = _MODEL_BASENAME, _MMPROJ_BASENAME
+    return _status_of(proc, port, model, mmproj)
+
+
+def _status_of(proc, port, model, mmproj) -> dict:
+    """由给定进程状态构建状态字典（无锁版本）。
+
+    供 status()（锁外）与 start()（持锁返回就绪状态）共用——threading.Lock
+    不可重入，start() 持锁期间调用 status() 会永久自锁（曾因此卡死整个
+    ComfyUI 事件循环），持锁路径必须走本函数。
+    """
     alive = _alive(proc)
     healthy = _health_ok(port) if (alive and port) else False
     return {
@@ -165,6 +184,8 @@ def start(
     ctx: int = 8192,
     ngl: int = 999,
     timeout_s: float = HEALTH_TIMEOUT_S,
+    auto: bool = False,
+    unload_comfy: bool = True,
 ) -> dict:
     """启动 llama-server（已在运行时先停止旧实例——换模型必须重启进程）。
 
@@ -174,6 +195,10 @@ def start(
         mmproj_path: 视觉投影 GGUF（可选；传图分析必需）
         port: 监听端口（默认 8321）
         ctx: 上下文长度（-c）；ngl: GPU 层数（-ngl 999 = 全部进 GPU）
+        auto: True = 由生成链路自动拉起（参与空闲自动回收）；
+            False = 用户手动启动（不回收）
+        unload_comfy: 是否先卸载 ComfyUI 已加载的显存模型（自动拉起时传 False，
+            避免工作流执行中途释放模型导致重载开销）
 
     Returns:
         status() 的就绪状态 dict。
@@ -196,7 +221,8 @@ def start(
     port = int(port or DEFAULT_PORT)
 
     with _LOCK:
-        global _PROC, _PORT, _MODEL_BASENAME, _MMPROJ_BASENAME
+        global _PROC, _PORT, _MODEL_BASENAME, _MMPROJ_BASENAME, _AUTO_STARTED
+        _AUTO_STARTED = bool(auto)
         # 已在运行：换模型/换端口必须重启进程，同配置则直接复用
         if _alive(_PROC):
             same = (
@@ -206,12 +232,13 @@ def start(
             )
             if same and _health_ok(port):
                 log.info("[llama-server] 已在运行且模型一致，复用现有实例（pid=%s）", _PROC.pid)
-                return status()
+                return _status_of(_PROC, _PORT, _MODEL_BASENAME, _MMPROJ_BASENAME)
             log.info("[llama-server] 重启实例（模型/端口配置变更）")
             _terminate(_PROC)
             _PROC = None
 
-        _unload_comfyui_models()
+        if unload_comfy:
+            _unload_comfyui_models()
 
         # 启动命令：llama-server -m <gguf> [--mmproj <mmproj>] --port <p> -c <ctx> -ngl <ngl>
         cmd = [
@@ -257,7 +284,7 @@ def start(
                     "[llama-server] 就绪：%s（model=%s mmproj=%s pid=%s）",
                     endpoint(port), _MODEL_BASENAME, _MMPROJ_BASENAME or "无", _PROC.pid,
                 )
-                return status()
+                return _status_of(_PROC, _PORT, _MODEL_BASENAME, _MMPROJ_BASENAME)
             time.sleep(1.0)
         # 超时：回收进程
         _terminate(_PROC)
@@ -283,3 +310,112 @@ def stop() -> dict:
         # 兜底：ComfyUI 重启后句柄丢失，但旧 llama-server 进程可能仍在
         log.info("[llama-server] 无运行中的实例句柄")
     return {"running": False, "stopped": proc is not None}
+
+
+def mark_activity() -> None:
+    """记录一次生成调用（刷新空闲计时）。"""
+    global _LAST_USE
+    _LAST_USE = time.monotonic()
+
+
+def _idle_watchdog() -> None:
+    """空闲回收看门狗：自动拉起的实例闲置超过 IDLE_STOP_S 后自动停止。
+
+    手动启动的实例（_AUTO_STARTED=False）不受影响；每 15s 检查一次，
+    进程自行退出或被用户手动停止时自然退出循环。
+    """
+    global _AUTO_STARTED
+    while True:
+        time.sleep(15.0)
+        with _LOCK:
+            alive = _alive(_PROC)
+            auto = _AUTO_STARTED
+        if not alive:
+            _AUTO_STARTED = False
+            continue
+        if not auto:
+            continue
+        idle = time.monotonic() - _LAST_USE
+        if _LAST_USE <= 0.0:
+            idle = 0.0  # 刚拉起还未使用，不回收
+        if idle >= IDLE_STOP_S:
+            with _LOCK:
+                proc = _PROC
+            pid = str(proc.pid) if proc is not None else ""
+            log.info("[llama-server] 空闲 %ds，自动停止以释放显存（pid=%s）",
+                     int(idle), pid)
+            stop()
+            _AUTO_STARTED = False
+
+
+def _ensure_watchdog() -> None:
+    global _WATCHDOG_STARTED
+    if not _WATCHDOG_STARTED:
+        _WATCHDOG_STARTED = True
+        threading.Thread(
+            target=_idle_watchdog, name="mrd-llama-idle", daemon=True
+        ).start()
+
+
+def ensure_running(gguf_path: str = "", mmproj_path: str = "") -> dict:
+    """按需拉起 llama-server（生成链路专用；已运行/加载中则直接复用）。
+
+    可执行文件路径与端口取 API 管理器「llama-server」页配置（api_config.json）；
+    GGUF / mmproj 由调用方传入（SPA 的 LLM 设置），走 resolve_model_file 解析。
+    自动拉起的实例 unload_comfy=False（不卸载 ComfyUI 显存模型）并参与空闲
+    自动回收（IDLE_STOP_S 秒无请求后自动停止）。
+
+    Returns:
+        status() 形态的状态 dict（running=True 表示可用）。
+
+    Raises:
+        ValueError/RuntimeError: 未配置路径 / 模型缺失 / 启动失败（附日志尾部）。
+    """
+    global _LAST_USE
+    st = status()
+    if st.get("running"):
+        mark_activity()
+        _ensure_watchdog()
+        return st
+    if st.get("loading"):
+        # 已在加载中：等待就绪，避免 start() 误判"模型变更"而重启
+        deadline = time.monotonic() + HEALTH_TIMEOUT_S
+        while time.monotonic() < deadline:
+            st = status()
+            if st.get("running"):
+                mark_activity()
+                _ensure_watchdog()
+                return st
+            if not st.get("loading"):
+                break
+            time.sleep(1.0)
+        raise RuntimeError(
+            "llama-server 正在加载模型，稍后重试；或直接访问 "
+            + str(st.get("endpoint") or "")
+        )
+
+    cfg_ls = {}
+    try:
+        from ..api_config import api_config_manager
+
+        cfg_ls = dict(api_config_manager.load_config().get("llama_server") or {})
+    except Exception:
+        pass
+    path = str(cfg_ls.get("path") or "").strip()
+    if not path:
+        raise ValueError(
+            "未配置 llama-server 可执行文件路径：请在 ComfyUI 设置 → "
+            "MiniMaxRefDirector → API 管理器（llama-server 页）填写，"
+            "或在 SPA「LLM 设置」手动启动"
+        )
+    _LAST_USE = time.monotonic()
+    st = start(
+        path,
+        gguf_path,
+        mmproj_path,
+        int(cfg_ls.get("port") or 0) or DEFAULT_PORT,
+        auto=True,
+        unload_comfy=False,
+    )
+    _ensure_watchdog()
+    return st

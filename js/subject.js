@@ -1215,7 +1215,7 @@ app.registerExtension({
 
                 // 读取 vlm 配置（兼容三种 widget 形态：主值 dict / 主值字符串+前缀子 widget / 裸名子 widget）
                 function readVlm() {
-                    const out = { vlm_mode: "deepseek-proxy", gguf_name: "", mmproj_path: "", provider: "", api_key: "", ollama_model: "", ollama_base_url: "" };
+                    const out = { vlm_mode: "llama-cpp", gguf_name: "", mmproj_path: "", provider: "", api_key: "", ollama_model: "", ollama_base_url: "" };
                     const clean = (s) => (s === "None" || s == null) ? "" : String(s);
                     const findW = (...names) => {
                         for (const nm of names) {
@@ -2169,22 +2169,27 @@ app.registerExtension({
 
                 // LLM 设置面板（Preact 组件，值完全由 vlm_mode widget 派生，受控渲染）
                 const LLM_MODES = [
-                    { value: "deepseek-proxy", label: "DeepSeek 代理" },
                     { value: "llama-cpp", label: "llama-cpp" },
                     { value: "api", label: "API" },
                     { value: "ollama", label: "Ollama" },
                 ];
                 const LLMSettings = () => {
                     const v = readVlm();
-                    const mode = v.vlm_mode || "deepseek-proxy";
+                    const mode = v.vlm_mode || "llama-cpp";
                     const comboVal = (f) => v[f] || "None";
                     const onCombo = (f) => (e) => writeVlm({ [f]: e.target.value === "None" ? "" : e.target.value });
+                    // 非 llama-cpp/api/ollama 的模式（SPA 里设置的 DeepSeek/豆包/千问网页桥接）
+                    // 统一展示为「其他」：只读占位项保留底层值，不在本节点发起切换
+                    const known = LLM_MODES.some((m) => m.value === mode);
+                    const modeOptions = known
+                        ? LLM_MODES
+                        : [{ value: mode, label: t("其他") }, ...LLM_MODES];
                     return html`
                     <div class="ref-ms-llm" ref=${setUiEl("llmPanel")}>
                         <div class="ref-ms-llm-head">
                             <span class="ref-ms-llm-title">${t("LLM Settings")}</span>
                             <select value=${mode} onChange=${(e) => writeVlm({ vlm_mode: e.target.value })}>
-                                ${LLM_MODES.map((m) => html`<option key=${m.value} value=${m.value}>${m.label}</option>`)}
+                                ${modeOptions.map((m) => html`<option key=${m.value} value=${m.value}>${m.label}</option>`)}
                             </select>
                         </div>
                         ${mode === "llama-cpp" && html`
@@ -2214,8 +2219,8 @@ app.registerExtension({
                                 <label>URL</label>
                                 <input value=${v.ollama_base_url} onChange=${(e) => writeVlm({ ollama_base_url: e.target.value.trim() })} />
                             </div>`}
-                        ${mode === "deepseek-proxy" && html`
-                            <div class="ref-ms-llm-hint">${t("Uses the backend Playwright CDP channel to chat.deepseek.com (configure the Chrome debug port in the SPA director global params).")}</div>`}
+                        ${!known && html`
+                            <div class="ref-ms-llm-hint">${t("其他模式（网页代理桥接）由 SPA 导演台设置；如需修改请在 SPA 全局参数 → LLM 设置中调整。")}</div>`}
                     </div>`;
                 };
 

@@ -268,6 +268,7 @@ async function testConnection() {
           <template #title>
             可执行文件与端口在 ComfyUI 设置 → MiniMaxRefDirector → API 管理器（llama-server 页）中配置并保存，
             此处自动使用，无需重复填写；GGUF / mmproj 模型在本页选择。
+            生成时若未运行会自动拉起，空闲 5 分钟自动停止；工作流采样前也会自动停止以释放显存，无需手动管理。
             当前：{{ lsCfgPath || "（API 管理器中未配置路径）" }} · 端口 {{ lsCfgPort }}
           </template>
         </el-alert>

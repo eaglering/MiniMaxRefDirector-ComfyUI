@@ -97,11 +97,23 @@ def generate_prompt_with_llama(
     """
     st = _llama_server_status()
     if not st.get("running"):
-        raise RuntimeError(
-            "[llm] llama-server 未运行：请先在设置面板（LLM 设置 → llama-server）"
-            "配置可执行文件路径并点击「启动」。"
-            + (f"（当前状态：模型加载中 {st.get('model', '')}）" if st.get("loading") else "")
-        )
+        # 按需拉起：生成时自动启动 llama-server（配置取 API 管理器 llama-server 页），
+        # 空闲 5 分钟后由看门狗自动停止；失败时给出可操作的指引。
+        try:
+            from .llama_server import ensure_running
+
+            st = ensure_running(gguf_path=gguf_path, mmproj_path=mmproj_path)
+            log.info("[llm] llama-server 已自动拉起（model=%s，空闲 %ds 后自动停止）",
+                     st.get("model"), 300)
+        except Exception as e:
+            raise RuntimeError(
+                "[llm] llama-server 自动启动失败：" + str(e)
+                + "。也可在 SPA「LLM 设置 → llama-server」手动启动。"
+                + (f"（当前状态：模型加载中 {st.get('model', '')}）"
+                   if isinstance(st, dict) and st.get("loading") else "")
+            ) from e
+        if not st.get("running"):
+            raise RuntimeError("[llm] llama-server 启动后健康检查未就绪，请查看 llama-server.log")
     if gguf_path and os.path.basename(gguf_path) != st.get("model", ""):
         log.info(
             "[llm] llama-server 已加载 %s，忽略请求参数 gguf_path=%s（换模型请在设置面板重启服务）",
@@ -128,6 +140,12 @@ def generate_prompt_with_llama(
 
     url = _llama_server_endpoint() + "/v1/chat/completions"
     log.info("[llm] Calling llama-server (%s) at %s ...", st.get("model"), url)
+    try:
+        from .llama_server import mark_activity
+
+        mark_activity()  # 刷新空闲计时（自动拉起的实例用完续命）
+    except ImportError:
+        pass
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),

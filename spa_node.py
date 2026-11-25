@@ -125,7 +125,7 @@ class MiniMaxRefDirectorSPA(io.ComfyNode):
                 start_frame=0, end_frame=120, duration_frames=120, timeline_data="",
                 local_prompts="", segment_lengths="", frame_rate=24,
                 display_mode="seconds", outpu_resolution="16:9横屏", million_pixels=0.6,
-                video_mode="h3") -> io.NodeOutput:
+        ) -> io.NodeOutput:
         """直接复用历史导演台的执行逻辑，保证输出一致（含 master_audio 合成）。"""
         timeline_data = str(timeline_data or "")
         nid = _executing_node_id()
@@ -173,5 +173,4 @@ class MiniMaxRefDirectorSPA(io.ComfyNode):
             display_mode=display_mode,
             outpu_resolution=outpu_resolution,
             million_pixels=million_pixels,
-            video_mode=video_mode,
         )

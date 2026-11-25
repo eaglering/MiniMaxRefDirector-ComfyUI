@@ -159,9 +159,6 @@ export const useWorkspace = defineStore("workspace", () => {
     million_pixels: 0.6,
     display_mode: "seconds",
     frame_rate: 24,
-    // 视频生成模式：h3 = MiniMax Hailuo（展示 H3 提示词 UI + Python 自动转英文）；
-    // doubao = 豆包生视频（预留占位，暂不实现）；off = 通用（隐藏全部 H3 入口）
-    video_mode: "h3",
     start_second: 0,
     end_second: 5,
     // 时间范围双单位（与节点 start_frame/end_frame/duration_frames 对齐），
