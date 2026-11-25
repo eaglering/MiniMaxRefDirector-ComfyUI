@@ -227,8 +227,7 @@ async function testConnection() {
       <template v-if="ws.llm.mode === 'llama-server'">
         <el-alert type="info" :closable="false" show-icon class="mrd-bridge-hint">
           <template #title>
-            llama-server 由外部 llama.cpp 进程加载 GGUF（ComfyUI 只做 HTTP 调用，不抢显存）。
-            启动前会自动卸载 ComfyUI 已加载的显存模型；生成时请确保服务已启动。
+            llama-server 发布页：https://github.com/ggml-org/llama.cpp/releases。
           </template>
         </el-alert>
         <div class="mrd-field">

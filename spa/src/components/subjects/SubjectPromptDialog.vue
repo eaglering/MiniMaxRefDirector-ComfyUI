@@ -32,11 +32,14 @@ const state = reactive({
   docs: [],
   docId: null,
   desc: "",
+  useGlobal: false, // 勾选后把「全局参数 → 全局提示词」附加到请求一并带到代理执行
   result: "",
   running: false,
   elapsed: "",
   timer: null,
 });
+// checkbox 状态跨打开记忆（模块级变量，仅会话内，不写入 timeline_data）
+let lastUseGlobal = false;
 
 const docSummary = computed(() => {
   const d = state.docs.find((x) => x.id === state.docId);
@@ -52,6 +55,7 @@ async function open() {
   state.desc = props.subject.description || "";
   state.result = "";
   state.elapsed = "";
+  state.useGlobal = lastUseGlobal;
   try {
     const res = await fetchSkillDocs(category);
     if (res.success) {
@@ -74,6 +78,7 @@ async function run() {
   state.running = true;
   state.result = "";
   state.elapsed = "0s";
+  lastUseGlobal = state.useGlobal;
   const startedAt = Date.now();
   state.timer = setInterval(() => {
     state.elapsed = `${Math.round((Date.now() - startedAt) / 1000)}s`;
@@ -87,7 +92,16 @@ async function run() {
       type: SUBJECT_TYPE_LABELS[props.subject.type] || props.subject.type || "",
       duration: "",
     });
-    const text = await generateText(ws.llm, { system: prompt, prompt: state.desc });
+    // 勾选「全局提示词」：把全局参数页的全局提示词作为附加约束一并带入代理
+    // 请求（附加在用户描述之后，不混入技能文档 system；全局提示词为空则忽略）
+    let userPrompt = state.desc;
+    const gp = (ws.globalPrompt || "").trim();
+    if (state.useGlobal && gp) {
+      userPrompt = `${state.desc}\n\n【全局提示词（全片约束，生成时请参考）】\n${gp}`;
+    } else if (state.useGlobal && !gp) {
+      ElMessage.warning("全局提示词为空，本次未附加（可在 全局参数 → 全局提示词 填写）");
+    }
+    const text = await generateText(ws.llm, { system: prompt, prompt: userPrompt });
     state.result = text.trim() || "（模型返回为空）";
   } catch (e) {
     ElMessage.error(`生成失败：${e.message || e}`);
@@ -129,6 +143,12 @@ defineExpose({ open });
           v-model="state.desc" type="textarea" :rows="5"
           placeholder="主体外观 / 画面 / 声音需求描述"
         />
+        <el-checkbox v-model="state.useGlobal" class="mrd-sp-global">
+          全局提示词
+          <span class="mrd-sp-global-hint">
+            勾选后自动把「全局参数 → 全局提示词」附加到请求一并带到代理执行
+          </span>
+        </el-checkbox>
       </div>
       <div class="mrd-sp-run">
         <el-button type="primary" :loading="state.running" @click="run">
@@ -153,6 +173,8 @@ defineExpose({ open });
 .mrd-sp-row { display: flex; flex-direction: column; gap: 6px; }
 .mrd-sp-row > label { font-size: 12px; color: #a9b1c3; }
 .mrd-sp-sum { font-size: 11px; color: #6b7488; margin: 2px 0 0; line-height: 1.6; }
+.mrd-sp-global { margin-top: 2px; }
+.mrd-sp-global-hint { font-size: 11px; color: #6b7488; margin-left: 2px; }
 .mrd-sp-run { display: flex; align-items: center; gap: 12px; }
 .mrd-sp-hint { font-size: 11.5px; color: #6b7488; }
 .mrd-sp-result {

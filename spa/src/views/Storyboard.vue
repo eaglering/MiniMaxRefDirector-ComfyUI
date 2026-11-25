@@ -501,7 +501,8 @@ function onDeepseekSync(payload) {
 }
 .mrd-storyboard-right :deep(.el-tabs) { background-color: #151821; border: none; }
 .mrd-storyboard-right :deep(.el-tabs__header) { background-color: #272a33; border-bottom: solid 1px #2a3042; }
-.mrd-storyboard-right :deep(.el-tabs__item.is-active) { background-color: #151821; border-right-color: #2a3042; border-left-color: #2a3042; margin-left: 0; }
+.mrd-storyboard-right :deep(.el-tabs__item:not(.is-disabled):hover) { color: #fff; }
+.mrd-storyboard-right :deep(.el-tabs__item.is-active) { background-color: #151821; border-right-color: #2a3042; border-left-color: #2a3042; margin-left: 0; color: #fff; }
 .mrd-right-pane {
   height: 100%;
   min-height: 0;
