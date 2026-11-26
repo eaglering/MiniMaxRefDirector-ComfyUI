@@ -21,7 +21,7 @@
 import { h, render } from "../../vendor/preact.module.js";
 import { useEffect, useRef, useState } from "../../vendor/hooks.module.js";
 import htm from "../../vendor/htm.module.js";
-import { api, app, viewUrl, ICONS, CAMERA_MOTIONS, SHOT_SIZES, FRAMINGS, MICRO_EXPRESSIONS } from "./shared.js";
+import { api, app, viewUrl, ICONS, SKILL_GROUPS, loadSkillDict } from "./shared.js";
 import { BodyPortal, RefModal } from "./modal.js";
 import { HighlightedTextarea } from "./highlight.js";
 import { getLocale, t } from "../../i18n.js";
@@ -760,11 +760,13 @@ function NumInput({ def, value, onCommit }) {
   />`;
 }
 
-// --- 微表情词库：内置 + 本地导入扩充（结构同 shared.js MICRO_EXPRESSIONS 条目） ---
+// --- 示例类词库：技能词典（DB，按 renderMode==="example" 的类别渲染）
+//     + 本地导入扩充（条目结构 { key, label, title, category? }） ---
 // 自定义条目由用户以 <input type=file> 导入 JSON（数组或 {expressions:[...]}），
-// 持久化到 localStorage（用户级、跨弹窗会话），请求生成时以 expression_catalog
-// 携带给后端识别；与内置 key 冲突的自定义条目被忽略（内置优先）。
-const BASE_EXPR_KEYS = new Set(MICRO_EXPRESSIONS.map(m => m.key));
+// 持久化到 localStorage（用户级、跨弹窗会话）；与词典 key 冲突的自定义条目被
+// 忽略（词典优先）。注意：SKILL_GROUPS 为运行时容器（loadSkillDict 异步填充），
+// 因此每次调用现算 key 集合，不能在模块加载期缓存。
+const baseExprKeys = () => new Set(SKILL_GROUPS.flatMap(g => g.items.map(m => m.key)));
 // 导入弹窗展示的 JSON 格式案例：完整词条数组 / 简写映射
 const EXPR_CASE_FULL = `[
   {
@@ -792,7 +794,7 @@ function loadCustomExpressions() {
       const list = JSON.parse(raw);
       if (Array.isArray(list)) {
         return list
-          .filter(it => it && typeof it === "object" && typeof it.key === "string" && it.key.trim() && !BASE_EXPR_KEYS.has(it.key.trim()))
+          .filter(it => it && typeof it === "object" && typeof it.key === "string" && it.key.trim() && !baseExprKeys().has(it.key.trim()))
           .map(it => ({ key: it.key.trim(), label: String(it.label || it.key), title: String(it.title || it.label || it.key), category: String(it.category || "custom") }));
       }
     }
@@ -805,9 +807,9 @@ function saveCustomExpressions(list) {
   try { localStorage.setItem(CUSTOM_EXPRESSIONS_KEY, JSON.stringify(list)); }
   catch (e) { console.warn("[Transfer] save custom expressions failed:", e); }
 }
-// 合并内置 + 自定义（跳过与内置冲突的 key），供 chips 展示与 catalog 发送
-function buildExprCatalog(custom) {
-  const out = MICRO_EXPRESSIONS.slice();
+// 合并类别词条 + 本地导入（跳过与词典冲突的 key），供 chips 展示
+function buildExprCatalog(custom, group) {
+  const out = ((group && group.items) || []).slice();
   const seen = new Set(out.map(m => m.key));
   for (const it of custom || []) {
     if (!it || typeof it.key !== "string" || seen.has(it.key)) continue;
@@ -830,10 +832,8 @@ export function TransferPanel({ director }) {
   const [editorOpen, setEditorOpen] = useState(false); // 统一弹窗（Segment Prompt / H3 Prompt / 添加主体）
   const [curSeg, setCurSeg] = useState(null); // 当前选中 segment（由 director 推送）
   const [autoEndOn, setAutoEndOn] = useState(false); // Auto End Frame 开关
-  const [camTick, setCamTick] = useState(0); // 运镜 UI 刷新计数：数据存 seg.cameraMotions / timeline.defaultCameraMotions，修改后需显式 setState 才重渲染
-  const [customExpr, setCustomExpr] = useState(() => loadCustomExpressions()); // 本地导入的自定义微表情词条（不含内置）
-  const [exprTick, setExprTick] = useState(0); // 微表情 UI 刷新计数：数据存 seg.expressions / customExpr
-  const [dirTick, setDirTick] = useState(0); // 景别/构图 UI 刷新计数：数据存 seg.shotSizes / seg.framings
+  const [skillTick, setSkillTick] = useState(0); // 技能选择 UI 刷新计数：数据存 seg.skills[类别名] / timeline.defaultSkills
+  const [customExpr, setCustomExpr] = useState(() => loadCustomExpressions()); // 本地导入的自定义示例词条（不含词典内词条）
   const [defsOpen, setDefsOpen] = useState(false); // .tr-resources 信息图标 hover
   const [defsPos, setDefsPos] = useState(null); // 信息图标 tooltip fixed 定位坐标 { left, top, up }
   const [copiedH3, setCopiedH3] = useState(false); // H3 提示词预览“复制”按钮的已复制反馈
@@ -846,6 +846,12 @@ export function TransferPanel({ director }) {
   const [retEdit, setRetEdit] = useState(null); // 主体 retention 编辑弹窗：{ name, value }，null 关闭
   const [exprImportOpen, setExprImportOpen] = useState(false); // 微表情词库导入弹窗：先展示格式说明与案例再选文件
   const [exprImportErr, setExprImportErr] = useState(""); // 导入弹窗内就地展示的解析/校验错误
+  const [dictTick, setDictTick] = useState(0); // 技能词典合并计数：loadSkillDict 完成后 +1 触发胶囊重渲染
+  const [ngpTick, setNgpTick] = useState(0); // 「自定义全局提示词」开关计数：数据存 seg.h3NoGlobalPrompt，切换后需显式刷新
+  const [skillDictData, setSkillDictData] = useState({ categories: [], skills: [] }); // 词典原文（添加技能弹窗的类别下拉）
+  const [skillAddOpen, setSkillAddOpen] = useState(false); // 「添加技能」弹窗（提交到 SQLite 词典）
+  const [skillAddErr, setSkillAddErr] = useState(""); // 添加技能弹窗的就地错误
+  const [skillAdd, setSkillAdd] = useState({ categoryId: "", name: "", nameEn: "", desc: "", examples: "" });
   const [hoverRes, setHoverRes] = useState(null); // 当前 hover 的可编辑资源卡片 key（亮蓝高亮边框提示）
   // 视频素材条：接收后端 minimax_ref_video_progress 通知（status=add_material）。
   // 初始化时从 localStorage 恢复上次会话的素材（key 按节点 id 隔离），刷新页面后保留，
@@ -931,19 +937,19 @@ export function TransferPanel({ director }) {
       setSubjects(getSubjectsLatest());
     };
     window.addEventListener("ref:subjects-changed", onSubjectsChanged);
-    // 监听 settings.js 修改全局默认运镜后发布的事件：刷新当前分段的继承态展示
-    const onCamMotionsChanged = () => {
+    // 监听 settings.js 修改全局默认技能后发布的事件：刷新当前分段的继承态展示
+    const onDefaultSkillsChanged = () => {
       if (!aliveRef.current) return;
-      setCamTick(n => n + 1);
+      setSkillTick(n => n + 1);
     };
-    window.addEventListener("ref:camera-motions-changed", onCamMotionsChanged);
+    window.addEventListener("ref:default-skills-changed", onDefaultSkillsChanged);
     if (director) {
       director._transferSetLeft = setLeftText;
       director._transferSetSeg = (seg) => {
         setCurSeg(seg);
         setAutoEndOn(!!(seg && seg.autoEndFrame));
-        // 运镜无需单独恢复 state：UI 直接读取 seg.cameraMotions（无则继承
-        // timeline.defaultCameraMotions），setCurSeg 已触发该分段的重渲染
+        // 技能选择无需单独恢复 state：UI 直接读取 seg.skills[类别名]（无则继承
+        // timeline.defaultSkills），setCurSeg 已触发该分段的重渲染
         // 切换 segment 时加载该 segment 独立的 H3 prompt JSON（右侧）。
         // 同一 segment 的 UI 刷新（如生成首帧成功后回推）不重置右侧内容。
         const segId = seg ? seg.id : null;
@@ -980,7 +986,7 @@ export function TransferPanel({ director }) {
     return () => {
       aliveRef.current = false;
       window.removeEventListener("ref:subjects-changed", onSubjectsChanged);
-      window.removeEventListener("ref:camera-motions-changed", onCamMotionsChanged);
+      window.removeEventListener("ref:default-skills-changed", onDefaultSkillsChanged);
       clearTimeout(debounceRef.current);
       if (director && director._transferSetLeft === setLeftText) {
         director._transferSetLeft = null;
@@ -1429,151 +1435,162 @@ export function TransferPanel({ director }) {
     }
   }
 
-  // 时间线级全局默认运镜集合（可为空数组 = 全片运镜自由，由模型决定）
-  function globalCameras() {
-    return (director && Array.isArray(director.timeline?.defaultCameraMotions))
-      ? director.timeline.defaultCameraMotions
-      : [];
+  // ---- 技能选择：统一存 seg.skills = { 类别名: [key] } ----
+  // 类别名与词条完全由技能词典（SKILL_GROUPS，DB 驱动）决定，不做固定类别假设。
+
+  function segSkillList(seg, cat) {
+    const v = seg && seg.skills ? seg.skills[cat] : undefined;
+    return Array.isArray(v) ? v : [];
   }
 
-  // 当前分段实际生效的运镜集合：存在显式覆盖数组（可为空 = 本段不指定）则用它，
-  // 否则继承全局默认。空集合 = 运镜自由（后端不注入指令，防回归）。
-  function effectiveCameras(seg) {
-    if (seg && Array.isArray(seg.cameraMotions)) return seg.cameraMotions;
-    return globalCameras();
+  function hasSegSkillOverride(seg, cat) {
+    return !!(seg && seg.skills && Object.prototype.hasOwnProperty.call(seg.skills, cat));
   }
 
-  // 运镜多选 toggle：继承态点击任意类别 → 以「全局集合 ± 该类别」进入本段覆盖
-  // （所见即所得）；覆盖态点击 → 增删该类别，可清空为「本段不指定」。
-  // 改动写入 seg.cameraMotions，随 timeline_data 持久化。
-  function toggleCameraMotion(key) {
+  function setSegSkillList(seg, cat, list) {
+    if (!seg) return;
+    if (!seg.skills || typeof seg.skills !== "object") seg.skills = {};
+    if (Array.isArray(list) && list.length) seg.skills[cat] = list;
+    else delete seg.skills[cat];
+  }
+
+  // 时间线级全局默认技能集合：{ 类别名: [key] }（settings 菜单维护；
+  // 空集合/缺省 = 该类全片自由，由模型决定）
+  function globalSkillList(cat) {
+    const ds = director && director.timeline && director.timeline.defaultSkills;
+    const v = ds && typeof ds === "object" ? ds[cat] : undefined;
+    return Array.isArray(v) ? v : [];
+  }
+
+  // 当前分段实际生效的技能集合：seg.skills[cat] 存在（可为空）则用它，否则继承全局默认
+  function effectiveSkillList(seg, cat) {
+    if (hasSegSkillOverride(seg, cat)) return segSkillList(seg, cat);
+    return globalSkillList(cat);
+  }
+
+  // 多选 toggle：继承态点击任意词条 → 以「全局集合 ± 该词条」进入本段覆盖；
+  // 覆盖态直接增删本段集合
+  function toggleSegSkill(cat, key) {
     const seg = curSeg;
     if (!seg || !director) return;
     let next;
-    if (Array.isArray(seg.cameraMotions)) {
-      next = seg.cameraMotions.includes(key)
-        ? seg.cameraMotions.filter(k => k !== key)
-        : [...seg.cameraMotions, key];
+    if (hasSegSkillOverride(seg, cat)) {
+      const cur = segSkillList(seg, cat);
+      next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
     } else {
-      const glob = globalCameras();
+      const glob = globalSkillList(cat);
       next = glob.includes(key) ? glob.filter(k => k !== key) : [...glob, key];
     }
-    seg.cameraMotions = next;
-    setCamTick(n => n + 1);
+    setSegSkillList(seg, cat, next);
+    setSkillTick(n => n + 1);
     director.commitChanges();
   }
 
-  // 清除本段自定义运镜 → 删除覆盖字段，回到继承全局默认
-  function resetCameraMotion() {
+  // 清除本段自定义选择 → 删除覆盖，回到继承全局默认
+  function resetSegSkill(cat) {
     const seg = curSeg;
     if (!seg || !director) return;
-    delete seg.cameraMotions;
-    setCamTick(n => n + 1);
+    setSegSkillList(seg, cat, []);
+    setSkillTick(n => n + 1);
     director.commitChanges();
   }
 
-  // 当前分段实际生效的微表情集合：仅段级选择（无全局继承）；空集合 = 表演自然自由
-  // （后端不注入指令，防回归）。
-  function effectiveExpressions(seg) {
-    return (seg && Array.isArray(seg.expressions)) ? seg.expressions : [];
-  }
-
-  // 微表情多选 toggle：点击即在本段增删该表演提示，改动写入 seg.expressions，
-  // 随 timeline_data 持久化；可清空为「本段表演自由」。
-  function toggleExpression(key) {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    let next;
-    if (Array.isArray(seg.expressions)) {
-      next = seg.expressions.includes(key)
-        ? seg.expressions.filter(k => k !== key)
-        : [...seg.expressions, key];
-    } else {
-      next = [key];
+  // 供旧 UI 与 H3 请求使用：把 seg.skills 规范成 {类别名: [key]}
+  function segSelections(seg) {
+    const out = {};
+    const skills = seg && seg.skills;
+    if (!skills || typeof skills !== "object") return out;
+    for (const [cat, keys] of Object.entries(skills)) {
+      const list = Array.isArray(keys) ? keys.filter(k => typeof k === "string" && k) : [];
+      if (list.length) out[cat] = list;
     }
-    seg.expressions = next;
-    setExprTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 清除本段微表情选择 → 删除字段，回到表演自由
-  function resetExpressions() {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    delete seg.expressions;
-    setExprTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 当前分段实际生效的景别集合：仅段级选择（无全局继承）；空集合 = 景别自由
-  // （后端不注入指令，防回归）。
-  function effectiveShotSizes(seg) {
-    return (seg && Array.isArray(seg.shotSizes)) ? seg.shotSizes : [];
-  }
-
-  // 景别多选 toggle：点击即在本段增删该档位，改动写入 seg.shotSizes，
-  // 随 timeline_data 持久化；可清空为「本段景别自由」。
-  function toggleShotSize(key) {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    let next;
-    if (Array.isArray(seg.shotSizes)) {
-      next = seg.shotSizes.includes(key)
-        ? seg.shotSizes.filter(k => k !== key)
-        : [...seg.shotSizes, key];
-    } else {
-      next = [key];
-    }
-    seg.shotSizes = next;
-    setDirTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 清除本段景别选择 → 删除字段，回到景别自由
-  function resetShotSizes() {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    delete seg.shotSizes;
-    setDirTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 当前分段实际生效的构图关系集合：仅段级选择（无全局继承）；空集合 = 构图自由
-  function effectiveFramings(seg) {
-    return (seg && Array.isArray(seg.framings)) ? seg.framings : [];
-  }
-
-  // 构图关系多选 toggle：点击即在本段增删该关系，改动写入 seg.framings，
-  // 随 timeline_data 持久化；可清空为「本段构图自由」。
-  function toggleFraming(key) {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    let next;
-    if (Array.isArray(seg.framings)) {
-      next = seg.framings.includes(key)
-        ? seg.framings.filter(k => k !== key)
-        : [...seg.framings, key];
-    } else {
-      next = [key];
-    }
-    seg.framings = next;
-    setDirTick(n => n + 1);
-    director.commitChanges();
-  }
-
-  // 清除本段构图选择 → 删除字段，回到构图自由
-  function resetFramings() {
-    const seg = curSeg;
-    if (!seg || !director) return;
-    delete seg.framings;
-    setDirTick(n => n + 1);
-    director.commitChanges();
+    return out;
   }
 
   // 打开微表情词库导入弹窗：先展示 JSON 格式说明与案例，再引导选择本地文件导入。
   function openExpressionImport() {
     setExprImportErr("");
     setExprImportOpen(true);
+  }
+
+  // ---------- 镜头技能词典（SQLite /spa/skill_dict） ----------
+  // 挂载后异步拉取词典并按类别重建 SKILL_GROUPS（title=描述 → 胶囊悬停即显示描述）
+  useEffect(() => {
+    let alive = true;
+    loadSkillDict()
+      .then((d) => {
+        if (alive && d) {
+          setSkillDictData(d);
+          setDictTick((t) => t + 1);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 「添加技能」弹窗（按类别注入方式 render_mode 动态字段；与后端 _RENDER_MODE_RULES 一致）
+  const skillAddCat = () =>
+    (skillDictData.categories || []).find((c) => String(c.id) === String(skillAdd.categoryId));
+  const skillAddRules = () => {
+    const mode = (skillAddCat() || {}).renderMode || "descriptive";
+    return {
+      needNameEn: mode === "term",
+      needExamples: mode === "example",
+      mode,
+    };
+  };
+
+  function openSkillAdd() {
+    setSkillAddErr("");
+    setSkillAdd({ categoryId: "", name: "", nameEn: "", desc: "", examples: "" });
+    setSkillAddOpen(true);
+  }
+
+  async function submitSkillAdd() {
+    const f = skillAdd;
+    if (!f.categoryId) {
+      setSkillAddErr("请选择类别");
+      return;
+    }
+    if (!f.name.trim()) {
+      setSkillAddErr("名称为必填（中文名直接写入提示词）");
+      return;
+    }
+    const rules = skillAddRules();
+    if (rules.needNameEn && !f.nameEn.trim()) {
+      setSkillAddErr("该类别必须填写英文写法（英文翻译阶段对照）");
+      return;
+    }
+    if (rules.needExamples && !f.examples.trim()) {
+      setSkillAddErr("该类别必须填写示例（分号分隔）");
+      return;
+    }
+    setSkillAddErr("");
+    try {
+      const res = await api.fetchApi("/minimax_ref/api/spa/skill_dict/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categoryId: Number(f.categoryId),
+          name: f.name.trim(),
+          nameEn: f.nameEn.trim(),
+          desc: f.desc.trim(),
+          examples: f.examples.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!data || !data.success) throw new Error((data && data.error) || "保存失败");
+      const d = await loadSkillDict();
+      if (d) {
+        setSkillDictData(d);
+        setDictTick((t) => t + 1);
+      }
+      setSkillAddOpen(false);
+    } catch (err) {
+      setSkillAddErr(String((err && err.message) || err));
+    }
   }
 
   // 从本地 JSON 导入自定义微表情词库：支持数组 / {expressions:[...]} / 简写形态，
@@ -1609,17 +1626,17 @@ export function TransferPanel({ director }) {
         list = list
           .filter(it => it && typeof it === "object" && typeof it.key === "string" && it.key.trim() && typeof (it.label || it.key) === "string")
           .map(it => ({ key: it.key.trim(), label: String(it.label || it.key), title: String(it.title || it.label || it.key), category: String(it.category || "custom") }))
-          .filter(it => !BASE_EXPR_KEYS.has(it.key)); // 内置 key 优先，忽略同名自定义
+          .filter(it => !baseExprKeys().has(it.key)); // 词典 key 优先，忽略同名自定义
         if (!list.length) {
           setExprImportErr(t("No valid expression entries found in the imported file"));
           return;
         }
         setCustomExpr(prev => {
-          const next = buildExprCatalog([...prev, ...list]).filter(it => !BASE_EXPR_KEYS.has(it.key));
+          const next = buildExprCatalog([...prev, ...list]).filter(it => !baseExprKeys().has(it.key));
           saveCustomExpressions(next);
           return next;
         });
-        setExprTick(n => n + 1);
+        setSkillTick(n => n + 1);
         setExprImportOpen(false); // 成功即关闭导入弹窗，新增词条立即可见
         console.log("[Transfer] imported expression library:", list.length, "entries");
       } catch (err) {
@@ -1649,13 +1666,9 @@ export function TransferPanel({ director }) {
         image_path: firstFramePath(),
         duration_seconds: durSecs > 0 ? durSecs : 0,
         lang,
-        camera_motion: effectiveCameras(targetSeg),
-        // 微表情（表演提示）：段级多选 key 数组；自定义词条随 expression_catalog 供后端识别
-        expression: effectiveExpressions(targetSeg),
-        expression_catalog: buildExprCatalog(customExpr).filter(it => !BASE_EXPR_KEYS.has(it.key)),
-        // 景别 / 构图关系（镜头语言）：段级多选 key 数组；空集合不注入，由模型自由决定
-        shot_size: effectiveShotSizes(targetSeg),
-        framing: effectiveFramings(targetSeg),
+        // 技能注入：统一 {类别名: [key]}，由后端 lib/skill_notes.py 渲染（与 SPA 一致）；
+        // 空字典 = 本段不指定技能，后端不注入任何指令
+        selections: segSelections(targetSeg),
       });
       const res = await api.fetchApi("/minimax_ref/api/llm/generate_prompt_json", {
         method: "POST",
@@ -2164,6 +2177,19 @@ export function TransferPanel({ director }) {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || t("Lossless merge failed"));
+      // 后台任务模式：POST 立即返回 job_id，轮询状态直到 done/error
+      if (data.job_id) {
+        showDragHint(t("Lossless merge started in background (decode + encode may take minutes)"));
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const stRes = await api.fetchApi(
+            `/minimax_ref/api/h3/merge_latents/status?job_id=${encodeURIComponent(data.job_id)}`);
+          const st = await stRes.json();
+          if (!st.success) throw new Error(st.error || t("Lossless merge failed"));
+          if (st.job?.state === "error") throw new Error(st.job.error || t("Lossless merge failed"));
+          if (st.job?.state === "done") break;
+        }
+      }
       showDragHint(t("Losslessly merged {n} segments; the result was added to the material strip", { n: sel.length }));
       setMergeDlgOpen(false);
       setCustomAudio(null);
@@ -2365,7 +2391,10 @@ export function TransferPanel({ director }) {
     [t("subject_definitions"), bindings.subject_definitions],
     [t("summary"), rightText.summary],
     [t("retention_analysis"), bindings.retention_analysis],
-    [t("detailed_description"), globalPrompt + "\n" + rightText.detailed_description],
+    // 每镜头「自定义全局提示词」开关（seg.h3NoGlobalPrompt，默认关闭=拼接）
+    [t("detailed_description"), (curSeg && curSeg.h3NoGlobalPrompt)
+      ? rightText.detailed_description
+      : globalPrompt + "\n" + rightText.detailed_description],
     [t("overall_soundscape"), rightText.overall_soundscape],
     [t("non_diegetic_music"), rightText.non_diegetic_music],
   ];
@@ -2807,93 +2836,67 @@ export function TransferPanel({ director }) {
       >
         <div style=${{ display: "flex", gap: "8px", flex: "1 1 0", minHeight: "0", alignItems: "stretch" }}>
           ${
-            /* 第一列：功能。运镜 / 微表情（及其它导演向控件）放在同一容器内，用 <hr> 分隔两组；
-               后续新增功能（转场、节奏、表演参考等）直接在该列追加分组，不挤占右侧两列提示词编辑区。 */
+            /* 第一列：技能分组。分组与词条完全由技能词典（SKILL_GROUPS，DB 驱动）渲染，
+               任意类别名 + renderMode，不做固定类别假设；选择写入 seg.skills[类别名]，
+               未覆盖时继承 timeline.defaultSkills（settings 菜单维护）。 */
             curSeg && curSeg.type !== "audio"
               ? (() => {
-                  const hasOverride = Array.isArray(curSeg.cameraMotions);
-                  const effCams = effectiveCameras(curSeg);
-                  const nChips = effCams.length;
-                  const effExpr = effectiveExpressions(curSeg);
-                  const exprAll = buildExprCatalog(customExpr);
-                  const camModeChip = hasOverride
-                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#3a2f0a", border: "1px solid #8a6d2a", borderRadius: "3px", color: "#e8cf8a", fontSize: "10px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment has its own camera motion selection; click × to clear it and follow the global default again")}>
-                        ${t("Segment custom")}${nChips ? ` (${nChips})` : ""}
-                        <span title=${t("Reset to global default camera motions")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#ffb86b" }} onClick=${(e) => { e.stopPropagation(); resetCameraMotion(); }}>×</span>
-                      </span>`
-                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#14301f", border: "1px solid #2f6a44", borderRadius: "3px", color: "#7fd6a3", fontSize: "10px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment follows the global default camera motions (set in the timeline Settings menu). Click any style below to give this segment its own selection; empty selection means the camera language is left to the model")}>
-                        ${t("Follow global default")}${nChips ? ` (${nChips})` : ""}
-                      </span>`;
-                  const exprModeChip = effExpr.length === 0
-                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#241a2a", border: "1px solid #5a3a66", borderRadius: "3px", color: "#b48fc4", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("No micro-expression selected; the model freely writes natural acting for every shot")}>${t("None (model decides freely)")}</span>`
-                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#3a2450", border: "1px solid #7c4d96", borderRadius: "3px", color: "#d3b3e8", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("This segment has its own micro-expression selection; click × to clear it and leave the acting to the model")}>${t("Segment custom")} (${effExpr.length})<span title=${t("Reset to natural acting")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#e0b3ff" }} onClick=${(e) => { e.stopPropagation(); resetExpressions(); }}>×</span></span>`;
-                  const effShot = effectiveShotSizes(curSeg);
-                  const effFram = effectiveFramings(curSeg);
-                  const shotModeChip = effShot.length === 0
-                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#12312c", border: "1px solid #2f6a5e", borderRadius: "3px", color: "#7fd6c3", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("No shot size selected; the model freely writes the shot scale for every shot")}>${t("None (model decides freely)")}</span>`
-                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#1b463e", border: "1px solid #3f9c8a", borderRadius: "3px", color: "#8fe0d0", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("This segment has its own shot-size selection; click × to clear it and leave the framing to the model")}>${t("Segment custom")} (${effShot.length})<span title=${t("Reset shot-size selection")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#8fe0d0" }} onClick=${(e) => { e.stopPropagation(); resetShotSizes(); }}>×</span></span>`;
-                  const framModeChip = effFram.length === 0
-                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#33290f", border: "1px solid #6e5a20", borderRadius: "3px", color: "#d9c27f", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("No framing selected; the model freely writes the composition for every shot")}>${t("None (model decides freely)")}</span>`
-                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#4a3c14", border: "1px solid #a8893f", borderRadius: "3px", color: "#ecd9a0", fontSize: "10px", whiteSpace: "nowrap" }} title=${t("This segment has its own framing selection; click × to clear it and leave the composition to the model")}>${t("Segment custom")} (${effFram.length})<span title=${t("Reset framing selection")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#ecd9a0" }} onClick=${(e) => { e.stopPropagation(); resetFramings(); }}>×</span></span>`;
                   return html`
                     <div class="mrd-pr-ctl">
                       <div class="mrd-pr-ctl-group">
                         <div class="mrd-pr-ctl-head">
-                          <div class="mrd-pr-ctl-name">${t("Camera Motion")}</div>
-                        </div>
-                        <div class="mrd-pr-ctl-items">
-                          ${camModeChip}
-                          ${CAMERA_MOTIONS.map((cm) => {
-                            const active = effCams.includes(cm.key);
-                            const bg = active ? (hasOverride ? "#3a5db0" : "#27406e") : "#23262e";
-                            return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: bg, border: "1px solid " + (active ? "#6c9bff" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#9bb9ff", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(cm.title)} onClick=${() => toggleCameraMotion(cm.key)}>${t(cm.label)}</span>`;
-                          })}
+                          <div class="mrd-pr-ctl-name">${t("Skills")}</div>
+                          <span
+                            class="mrd-pr-ctl-import"
+                            style=${{ cursor: "pointer", marginLeft: "8px", fontSize: "10px", color: "#8f7ff0" }}
+                            title=${t("Add a skill to the shared skill dictionary (saved to SQLite, shared with the SPA director)")}
+                            onClick=${openSkillAdd}
+                          >＋ ${t("Add Skill")}</span>
                         </div>
                       </div>
-                      <hr class="mrd-pr-hr" />
-                      <div class="mrd-pr-ctl-group">
-                        <div class="mrd-pr-ctl-head">
-                          <div class="mrd-pr-ctl-name">${t("Micro-expression")}</div>
-                          <span class="mrd-pr-ctl-import" title=${t("Import a JSON expression library from a local file to extend the built-in micro-expression cues")} onClick=${openExpressionImport}>${t("Import")}</span>
-                        </div>
-                        <div class="mrd-pr-ctl-items">
-                          ${exprModeChip}
-                          ${exprAll.map((me) => {
-                            const active = effExpr.includes(me.key);
-                            return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: active ? "#5a2d8f" : "#23262e", border: "1px solid " + (active ? "#a06bd8" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#c9a6e8", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${me.title} onClick=${() => toggleExpression(me.key)}>${t(me.label)}</span>`;
-                          })}
-                        </div>
-                      </div>
-                      <hr class="mrd-pr-hr" />
-                      <div class="mrd-pr-ctl-group">
-                        <div class="mrd-pr-ctl-head">
-                          <div class="mrd-pr-ctl-name">${t("Shot Size")}</div>
-                        </div>
-                        <div class="mrd-pr-ctl-items">
-                          ${shotModeChip}
-                          ${SHOT_SIZES.map((ss) => {
-                            const active = effShot.includes(ss.key);
-                            return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: active ? "#1f5a4e" : "#23262e", border: "1px solid " + (active ? "#4fb0a0" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#8fd6c8", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(ss.title)} onClick=${() => toggleShotSize(ss.key)}>${t(ss.label)}</span>`;
-                          })}
-                        </div>
-                      </div>
-                      <hr class="mrd-pr-hr" />
-                      <div class="mrd-pr-ctl-group">
-                        <div class="mrd-pr-ctl-head">
-                          <div class="mrd-pr-ctl-name">${t("Framing")}</div>
-                        </div>
-                        <div class="mrd-pr-ctl-items">
-                          ${framModeChip}
-                          ${FRAMINGS.map((fr) => {
-                            const active = effFram.includes(fr.key);
-                            return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: active ? "#6b5a1c" : "#23262e", border: "1px solid " + (active ? "#c2a24c" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#e6d29a", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${t(fr.title)} onClick=${() => toggleFraming(fr.key)}>${t(fr.label)}</span>`;
-                          })}
-                        </div>
-                      </div>
+                      ${SKILL_GROUPS.map((g) => {
+                        const items = g.renderMode === "example"
+                          ? buildExprCatalog(customExpr, g)
+                          : g.items;
+                        const eff = effectiveSkillList(curSeg, g.name);
+                        const override = hasSegSkillOverride(curSeg, g.name);
+                        const hasGlobal = globalSkillList(g.name).length > 0;
+                        if (!items.length) return null;
+                        return html`
+                          <hr class="mrd-pr-hr" />
+                          <div class="mrd-pr-ctl-group">
+                            <div class="mrd-pr-ctl-head">
+                              <div class="mrd-pr-ctl-name">${g.name}</div>
+                              ${g.renderMode === "example"
+                                ? html`<span class="mrd-pr-ctl-import" title=${t("Import a JSON expression library from a local file to extend the built-in micro-expression cues")} onClick=${openExpressionImport}>${t("Import")}</span>`
+                                : null}
+                              ${override
+                                ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#3a2f0a", border: "1px solid #8a6d2a", borderRadius: "3px", color: "#e8cf8a", fontSize: "10px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment has its own selection; click × to clear it and follow the global default again")}>
+                                    ${t("Segment custom")}${eff.length ? ` (${eff.length})` : ""}
+                                    <span title=${t("Clear this category")} style=${{ cursor: "pointer", marginLeft: "4px", fontWeight: "bold", color: "#ffb86b" }} onClick=${(e) => { e.stopPropagation(); resetSegSkill(g.name); }}>×</span>
+                                  </span>`
+                                : hasGlobal
+                                  ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#14301f", border: "1px solid #2f6a44", borderRadius: "3px", color: "#7fd6a3", fontSize: "10px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment follows the global default selection (set in the timeline Settings menu); click any item below to give this segment its own selection")}>
+                                      ${t("Follow global default")}${eff.length ? ` (${eff.length})` : ""}
+                                    </span>`
+                                  : eff.length
+                                    ? html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#241a2a", border: "1px solid #5a3a66", borderRadius: "3px", color: "#b48fc4", fontSize: "10px", whiteSpace: "nowrap", cursor: "default" }} title=${t("This segment has its own selection; click × to clear it and leave this aspect to the model")}>${t("Segment custom")} (${eff.length})</span>`
+                                    : html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: "#1c2027", border: "1px solid #3a414e", borderRadius: "3px", color: "#8b93a7", fontSize: "10px", whiteSpace: "nowrap", cursor: "default" }} title=${t("No selection; the model freely writes this aspect for every shot")}>${t("None (model decides freely)")}</span>`}
+                            </div>
+                            <div class="mrd-pr-ctl-items">
+                              ${items.map((sk) => {
+                                const active = eff.includes(sk.key);
+                                const bg = active ? (override ? "#3a5db0" : "#27406e") : "#23262e";
+                                return html`<span class="mrd-pr-tag" style=${{ padding: "1px 6px", background: bg, border: "1px solid " + (active ? "#6c9bff" : "#3a414e"), borderRadius: "3px", color: active ? "#fff" : "#9bb9ff", fontSize: "10px", cursor: "pointer", whiteSpace: "nowrap" }} title=${sk.title || sk.label} onClick=${() => toggleSegSkill(g.name, sk.key)}>${sk.label}</span>`;
+                              })}
+                            </div>
+                          </div>
+                        `;
+                      })}
                     </div>
                   `;
                 })()
-              : html`<div class="mrd-pr-ctl mrd-pr-ctl-none">${t("Audio segments need no camera motion or acting direction")}</div>`
+              : html`<div class="mrd-pr-ctl mrd-pr-ctl-none">${t("Audio segments need no skill selection")}</div>`
           }
           <div class="mrd-pr-prompt-wrapper" style=${paneW ? { ...S.col, flex: "0 0 auto", width: paneW + "px" } : S.col}>
             <div class="mrd-pr-prompt-label" style=${S.refTextareaLabel}>${t("Segment Prompt")}</div>
@@ -2956,7 +2959,29 @@ export function TransferPanel({ director }) {
                   </div>
                   <div class="mrd-pr-split" title=${t("Drag to resize")} onPointerDown=${(e) => startPrSplit(e, 0)}><div class="mrd-pr-split-knob"></div></div>
                   <div class="mrd-pr-field" style=${fieldStyle(1)}>
-                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px" }}>${t("detailed_description")}</div>
+                    <div class="mrd-pr-field-label" style=${{ ...S.refTextareaLabel, margin: "0 0 2px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                      <span>${t("detailed_description")}</span>
+                      <span
+                        title=${t("When enabled, this segment's generation and preview no longer prepend the global prompt")}
+                        style=${{
+                          display: "inline-flex", alignItems: "center", gap: "4px",
+                          fontSize: "10px", lineHeight: "16px", padding: "0 6px",
+                          cursor: "pointer", userSelect: "none", borderRadius: "3px",
+                          color: (curSeg && curSeg.h3NoGlobalPrompt) ? "#c9b8ff" : "#5a6274",
+                          border: "1px solid",
+                          borderColor: (curSeg && curSeg.h3NoGlobalPrompt) ? "#6c5ce7" : "#2c313b",
+                          background: (curSeg && curSeg.h3NoGlobalPrompt) ? "rgba(108,92,231,0.15)" : "transparent",
+                        }}
+                        onClick=${(e) => {
+                          e.stopPropagation();
+                          const seg = curSeg;
+                          if (!seg || !director) return;
+                          seg.h3NoGlobalPrompt = !seg.h3NoGlobalPrompt;
+                          director.commitChanges();
+                          setNgpTick((t) => t + 1);
+                        }}
+                      >⇂ ${t("Custom global prompt")}${(curSeg && curSeg.h3NoGlobalPrompt) ? " ✓" : ""}</span>
+                    </div>
                     <${HighlightedTextarea}
                       taRef=${rightDetailRef}
                       className="mrd-pr-prompt-area"
@@ -3128,6 +3153,72 @@ export function TransferPanel({ director }) {
             disabled=${losslessMergeBusy || !customAudio}
             onClick=${() => runLosslessMerge({ customAudio: customAudio && customAudio.path })}
           >${losslessMergeBusy ? t("Lossless merging…") : t("Merge")}</button>
+        </div>
+      </${RefModal}>
+      <${RefModal}
+        open=${skillAddOpen}
+        title=${t("Add skill to dictionary")}
+        width="520px"
+        height="480px"
+        onClose=${() => { setSkillAddOpen(false); setSkillAddErr(""); }}
+      >
+        <div style=${{ display: "flex", flexDirection: "column", gap: "10px", flex: "1 1 0", minHeight: "0", overflowY: "auto", padding: "2px" }}>
+          ${skillAddErr ? html`<div style=${{ fontSize: "11px", color: "#f87171", lineHeight: 1.5 }}>${skillAddErr}</div>` : null}
+          <label style=${{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0 }}>${t("Category")}</span>
+            <select
+              value=${String(skillAdd.categoryId || "")}
+              onChange=${(e) => setSkillAdd((p) => ({ ...p, categoryId: e.target.value }))}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 6px", fontSize: "12px" }}
+            >
+              <option value="">-- ${t("Select category")} --</option>
+              ${(skillDictData.categories || []).map((c) => html`<option key=${c.id} value=${String(c.id)}>${c.name}</option>`)}
+            </select>
+          </label>
+          <label style=${{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0 }}>${t("Name")}</span>
+            <input
+              value=${skillAdd.name}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, name: e.target.value }))}
+              placeholder=${t("Skill display name, e.g. Handheld shake")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px" }}
+            />
+          </label>
+          <label style=${{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0, paddingTop: "4px" }}>${t("Description")}</span>
+            <textarea
+              rows=${2}
+              value=${skillAdd.desc}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, desc: e.target.value }))}
+              placeholder=${t("Shown when hovering the skill pill (required)")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px", resize: "vertical" }}
+            />
+          </label>
+          <label style=${{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0 }}>${t("English term")}</span>
+            <input
+              value=${skillAdd.nameEn}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, nameEn: e.target.value }))}
+              placeholder=${skillAddRules().needNameEn ? t("Required: canonical English term (e.g. two-shot)") : t("Optional English term for the translation pass")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px" }}
+            />
+          </label>
+          <label style=${{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "12px", color: "#9aa3b2" }}>
+            <span style=${{ width: "56px", textAlign: "right", flexShrink: 0, paddingTop: "4px" }}>${t("Examples")}</span>
+            <textarea
+              rows=${2}
+              value=${skillAdd.examples}
+              onInput=${(e) => setSkillAdd((p) => ({ ...p, examples: e.target.value }))}
+              placeholder=${skillAddRules().needExamples
+                ? t("Required: Chinese examples separated by ;")
+                : t("Optional: phrases separated by ;")}
+              style=${{ flex: "1", background: "#11141b", color: "#edeff5", border: "1px solid #2c313b", borderRadius: "4px", padding: "4px 8px", fontSize: "12px", resize: "vertical" }}
+            />
+          </label>
+          <div style=${{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+            <button class="mrd-pr-btn" onClick=${() => { setSkillAddOpen(false); setSkillAddErr(""); }}>${t("Cancel")}</button>
+            <button class="mrd-pr-btn" style=${S.mergeBtnGo} onClick=${submitSkillAdd}>${t("Save to dictionary")}</button>
+          </div>
         </div>
       </${RefModal}>
       <${RefModal}

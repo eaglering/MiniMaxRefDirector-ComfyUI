@@ -229,6 +229,15 @@ export const interaction = {
       return;
     }
 
+    // 多选模式：段左下角 checkbox 命中（先于 gap 按钮与段主体命中）
+    if (this._multiMode) {
+      const cbId = this._hitSegmentCheckbox(x, y);
+      if (cbId) {
+        this.toggleCheckedSegment(cbId);
+        return;
+      }
+    }
+
     if (y >= RULER_HEIGHT && y <= this.canvasHeight) {
       const BTN_R = 12;
       const gapRegions = this.getGapRegions();
@@ -261,6 +270,14 @@ export const interaction = {
         this.updateUIFromSelection();
       }
       this.render();
+      return;
+    }
+
+    // 多选模式：段主体点击 = 切换勾选（暂停拖动 / 单选等常规交互）
+    if (this._multiMode && hit.type === "center") {
+      const arr = this.getSegmentArray(hit.track);
+      const seg = hit.index >= 0 ? arr[hit.index] : null;
+      if (seg) this.toggleCheckedSegment(seg.id);
       return;
     }
 

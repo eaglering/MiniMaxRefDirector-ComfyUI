@@ -1,0 +1,366 @@
+// ===== 工作台中央状态：加载 / 防抖保存 / 状态指示 =====
+import { defineStore } from "pinia";
+import { computed, reactive, ref, toRaw } from "vue";
+import { fetchState, saveState, fetchSkillDict } from "../api/client.js";
+import { genId } from "../utils/media.js";
+import { isChildSubject, refDefaultRelationship } from "../constants/subject.js";
+
+// 主体关系归一化（与旧编辑器 js/subject.js 收集逻辑同语义）：
+// 顶层主体 relationship 为空 → 回落该类型默认关系（保证后端 build_h3_subject_bindings
+// 写入 subject_definitions / retention_analysis）；子主体（引用资源）保持空关系。
+function normalizeSubject(s) {
+  const out = { ...toRaw(s) };
+  if (!isChildSubject(out) && !(out.relationship || "").trim()) {
+    out.relationship = refDefaultRelationship(out.type);
+  }
+  return out;
+}
+
+// 与 js/components/director/shared.js parseInitial 对齐的默认值
+function defaultTimeline() {
+  return {
+    segments: [],
+    audioSegments: [],
+    mainTrackEnabled: true,
+    audioTrackEnabled: true,
+    propHeight: 90,
+    showFilenames: true,
+    overrideAudio: false,
+    inpaint_audio: true,
+    normalStartFrame: 0,
+    normalDurationFrames: 120,
+    // 全片默认技能（{类别名: [技能 key]}）：未覆盖的分镜继承此集合
+    defaultSkills: {},
+  };
+}
+
+function parseInitial(jsonStr) {
+  const parsed = defaultTimeline();
+  try {
+    if (jsonStr) {
+      const p = typeof jsonStr === "string" ? JSON.parse(jsonStr) : jsonStr;
+      // 保留未知自定义字段（defaultShotSizes / defaultExpressions 等）
+      for (const k of Object.keys(parsed)) {
+        if (p[k] !== undefined) parsed[k] = p[k];
+      }
+      for (const k of Object.keys(p)) {
+        if (!(k in parsed)) parsed[k] = p[k];
+      }
+      if (Array.isArray(p.segments)) {
+        parsed.segments = p.segments.map((s) => {
+          const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s || {};
+          return rest;
+        });
+      }
+      if (Array.isArray(p.audioSegments)) {
+        parsed.audioSegments = p.audioSegments.map((s) => {
+          const { _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _decoding, ...rest } = s || {};
+          return rest;
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[SPA] parseInitial failed", e);
+  }
+  let currentStart = 0;
+  for (const seg of parsed.segments) {
+    if (seg.start === undefined) {
+      seg.start = currentStart;
+      currentStart += seg.length;
+    }
+    if (!seg.id) seg.id = genId();
+  }
+  for (const seg of parsed.audioSegments) {
+    if (!seg.id) seg.id = genId();
+    if (seg.trimStart === undefined) seg.trimStart = 0;
+  }
+  return parsed;
+}
+
+// 序列化：与 editing.js commitChanges 的 toSave 语义一致（保留未知字段）
+function serializeTimeline(t) {
+  const out = { ...toRaw(t) };
+  out.segments = [...out.segments].map((s) => {
+    const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
+    return rest;
+  });
+  // 物化相邻分镜视频引用：
+  //   firstFrameSource==="prevVideo" → imageFile = 上一分镜 videoFile
+  //   lastFrameSource==="nextVideo"  → lastFrameFile = 下一分镜 videoFile
+  // （后端只消费 imageFile / lastFrameFile，物化保证旧工作流兼容）
+  out.segments = out.segments.map((s, i) => {
+    if (s.firstFrameSource === "prevVideo") {
+      const prev = out.segments[i - 1];
+      if (prev && prev.videoFile) s.imageFile = prev.videoFile;
+    }
+    if (s.lastFrameSource === "nextVideo") {
+      const next = out.segments[i + 1];
+      if (next && next.videoFile) s.lastFrameFile = next.videoFile;
+    }
+    // 独立上传的首帧/尾帧参考视频（与首尾帧图互不关联）：优先作为帧锚点
+    if (s.firstFrameVideo) s.imageFile = s.firstFrameVideo;
+    if (s.lastFrameVideo) s.lastFrameFile = s.lastFrameVideo;
+    return s;
+  });
+  out.audioSegments = [...(out.audioSegments || [])].map((s) => {
+    const { _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _decoding, _blobUrl, _audioBuffer, ...rest } = s;
+    return rest;
+  });
+  return out;
+}
+
+// ---- node_id 解析 ----
+// 生产：由入口节点通过 URL query 传入（必需）。
+// dev（vite dev server）：允许缺省，优先 localStorage 记住的上次节点，其次 "dev"，
+// 便于 `npm run dev` + `?node_id=12` 直接联调热更新。
+const DEV_NODE_ID = "dev";
+const LS_KEY = "mrd_spa_node_id";
+
+function resolveNodeId() {
+  const q = (new URLSearchParams(location.search).get("node_id") || "").trim();
+  if (q) {
+    try {
+      localStorage.setItem(LS_KEY, q);
+    } catch {
+      /* ignore */
+    }
+    return q;
+  }
+  if (import.meta.env.DEV) {
+    try {
+      return (localStorage.getItem(LS_KEY) || "").trim() || DEV_NODE_ID;
+    } catch {
+      return DEV_NODE_ID;
+    }
+  }
+  return "";
+}
+
+// SPA 节点自身编号（启动器打开时随 URL 传入）：保存时镜像落盘到该编号，
+// 保证工作流里由 SPA 节点执行时，磁盘兜底也能取到数据。
+function resolveSpaNodeId() {
+  return (new URLSearchParams(location.search).get("spa_node_id") || "").trim();
+}
+
+export const useWorkspace = defineStore("workspace", () => {
+  const nodeId = ref(resolveNodeId());
+  const spaNodeId = ref(resolveSpaNodeId());
+  const nodeTitle = ref("");
+  const loaded = ref(false);
+  const loadError = ref("");
+  // idle | saving | saved | error | offline
+  const saveStatus = ref("idle");
+  const lastSavedAt = ref(0);
+  const updatedAt = ref(0);
+
+  const timeline = reactive(parseInitial(""));
+  const widgets = reactive({
+    outpu_resolution: "16:9横屏",
+    million_pixels: 0.6,
+    display_mode: "seconds",
+    frame_rate: 24,
+    start_second: 0,
+    end_second: 5,
+    // 时间范围双单位（与节点 start_frame/end_frame/duration_frames 对齐），
+    // 由分镜页时间线跨度自动同步，全局参数页只读展示
+    duration_seconds: 5,
+    start_frame: 0,
+    end_frame: 120,
+    duration_frames: 120,
+    guide_strength: "",
+    inpaint_audio: true,
+    override_audio: false,
+  });
+  const globalPrompt = ref("");
+  const subjects = reactive({ subjects: [] });
+  const subjectNodeId = ref("");
+  const llm = reactive({
+    mode: "deepseek-proxy",
+    gguf_path: "",
+    mmproj_path: "",
+    // llama-server（外部 llama.cpp HTTP 服务端，替代进程内 llama-cpp-python）
+    llama_server_path: "",
+    llama_server_port: 8321,
+    provider: "",
+    api_key: "",
+    ollama_model: "",
+    ollama_base_url: "",
+    // 网页会话 CDP 通道：附加用户真实浏览器（chrome / edge / brave / chromium / custom）
+    cdp_endpoint: "http://127.0.0.1:9222",
+    browser: "chrome",
+    browser_path: "",
+    // 旧字段（浏览器扩展桥接已弃用）：保留只为旧存档兼容，UI 不再读写
+    extension_id: "",
+  });
+
+  // ---- 镜头技能词典（SQLite：/spa/skill_dict）----
+  const skillDict = reactive({ loaded: false, loading: false, categories: [], skills: [] });
+
+  async function loadSkillDict(force = false) {
+    if (skillDict.loading || (skillDict.loaded && !force)) return;
+    skillDict.loading = true;
+    try {
+      const res = await fetchSkillDict();
+      if (res.success) {
+        skillDict.categories = res.categories || [];
+        skillDict.skills = res.skills || [];
+        skillDict.loaded = true;
+      }
+    } catch (e) {
+      console.error("[SPA] skill_dict load failed", e);
+    } finally {
+      skillDict.loading = false;
+    }
+  }
+
+  // 按类别分组的技能组：{ id, label, categoryName, renderMode, items }
+  // 选择统一写入 seg.skills[categoryName]（类别名 UNIQUE，可无限扩展）
+  const skillGroups = computed(() =>
+    skillDict.categories.map((c) => ({
+      id: `cat_${c.id}`,
+      label: c.name,
+      categoryName: c.name,
+      renderMode: c.renderMode || "descriptive",
+      categoryId: c.id,
+      description: c.description,
+      items: skillDict.skills
+        .filter((s) => s.categoryId === c.id)
+        .map((s) => ({
+          ...s,
+          label: s.name,
+          title: s.desc,
+        })),
+    }))
+  );
+
+  // 分镜技能选择（只保留有选中项的类别，避免 timeline 里存一堆空数组）
+  function segmentSelections(seg) {
+    const out = {};
+    const skills = seg?.skills;
+    if (!skills || typeof skills !== "object") return out;
+    for (const [cat, keys] of Object.entries(skills)) {
+      const list = Array.isArray(keys) ? keys.filter((k) => typeof k === "string" && k) : [];
+      if (list.length) out[cat] = list;
+    }
+    return out;
+  }
+
+  // ---- 加载 ----
+  async function load() {
+    if (!nodeId.value) {
+      loadError.value = "缺少 node_id 参数：请通过导演台入口节点打开本页面";
+      return;
+    }
+    try {
+      const stateRes = await fetchState(nodeId.value);
+      loadSkillDict();
+      if (!stateRes.success) throw new Error(stateRes.error || "加载失败");
+      applyState(stateRes.state || {});
+      loaded.value = true;
+      loadError.value = "";
+    } catch (e) {
+      loadError.value = e.message || String(e);
+    }
+  }
+
+  function applyState(state) {
+    nodeTitle.value = state.node_title || "";
+    subjectNodeId.value = state.subject_node_id || "";
+    const tl = parseInitial(state.timeline_data || "");
+    for (const k of Object.keys(timeline)) delete timeline[k];
+    Object.assign(timeline, tl);
+    if (state.widgets) Object.assign(widgets, state.widgets);
+    globalPrompt.value = state.global_prompt || "";
+    if (state.subjects && Array.isArray(state.subjects.subjects)) {
+      subjects.subjects = state.subjects.subjects;
+    }
+    if (state.llm) Object.assign(llm, state.llm);
+    if (!llm.mode) llm.mode = "deepseek-proxy";
+    // 兼容旧配置值：qwen-proxy → qianwen-proxy（桥接仍支持两种写法）
+    if (llm.mode === "qwen-proxy") llm.mode = "qianwen-proxy";
+    // 旧存档无 cdp_endpoint（extension_id 时代）：补默认值
+    if (!llm.cdp_endpoint) llm.cdp_endpoint = "http://127.0.0.1:9222";
+    if (!llm.browser) llm.browser = "chrome";
+    updatedAt.value = state.updated_at || 0;
+  }
+
+  // ---- 防抖保存 ----
+  let saveTimer = null;
+  let saving = false;
+  let pendingAgain = false;
+
+  function buildState() {
+    return {
+      node_id: nodeId.value,
+      timeline_data: JSON.stringify(serializeTimeline(timeline)),
+      widgets: JSON.parse(JSON.stringify(widgets)),
+      global_prompt: globalPrompt.value,
+      subjects: { subjects: subjects.subjects.map(normalizeSubject) },
+      subject_node_id: subjectNodeId.value,
+      llm: { ...toRaw(llm) },
+      updated_at: Date.now(),
+    };
+  }
+
+  async function doSave() {
+    if (!nodeId.value) return;
+    saving = true;
+    saveStatus.value = "saving";
+    try {
+      const res = await saveState(nodeId.value, buildState(), spaNodeId.value);
+      if (!res.success) throw new Error(res.error || "保存失败");
+      saveStatus.value = "saved";
+      lastSavedAt.value = Date.now();
+    } catch (e) {
+      console.error("[SPA] save failed", e);
+      saveStatus.value = "error";
+    } finally {
+      saving = false;
+      if (pendingAgain) {
+        pendingAgain = false;
+        scheduleSave();
+      }
+    }
+  }
+
+  function scheduleSave() {
+    if (!nodeId.value) return;
+    if (saving) {
+      pendingAgain = true;
+      return;
+    }
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      doSave();
+    }, 500);
+  }
+
+  // 任意编辑后调用
+  function markDirty() {
+    scheduleSave();
+  }
+
+  async function saveNow() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (saving) {
+      pendingAgain = true;
+      return;
+    }
+    await doSave();
+  }
+
+  async function reload() {
+    await load();
+  }
+
+  return {
+    nodeId, nodeTitle, loaded, loadError, saveStatus, lastSavedAt, updatedAt,
+    timeline, widgets, globalPrompt, subjects, subjectNodeId, llm,
+    skillDict, skillGroups, loadSkillDict, segmentSelections,
+    load, reload, markDirty, saveNow, buildState,
+  };
+});

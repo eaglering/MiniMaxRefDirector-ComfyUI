@@ -376,7 +376,7 @@ export const menus = {
       items.push(this._menuDivider());
     }
 
-    // Group 7: Second Pass + Flash VSR + Mark Selection + Delete
+    // Group 7: Second Pass + Flash VSR + Multi-Select + Mark Selection + Delete
     items.push(this._menuBtn(t("Second Pass"), {
       onClick: () => {
         seg.secondPass = !seg.secondPass;
@@ -393,6 +393,13 @@ export const menus = {
         this.dismissMenu();
       }
     }));
+    items.push(this._menuBtn(this._multiMode ? t("Exit Multi-Select") : t("Multi-Select"), {
+      onClick: () => {
+        if (this._multiMode) this.exitMultiSelectMode();
+        else this.enterMultiSelectMode();
+        this.dismissMenu();
+      }
+    }));
     items.push(this._menuBtn(t("Mark Selection"), {
       onClick: () => {
         if (this.selectedSegmentIds && this.selectedSegmentIds.includes(seg.id)) this.markCurrentSelection();
@@ -404,9 +411,16 @@ export const menus = {
     items.push(this._menuBtn(t("Delete"), {
       color: "#ff4444",
       onClick: () => {
-        this.selectionType = trackType;
-        const list = this.getSegmentArray(trackType);
-        this.selectedIndex = list.findIndex(s => s.id === seg.id);
+        // 多选模式且目标在勾选集合中 → 批量删除确认；否则单删确认
+        const baseCount = new Set(this.selectedSegmentIds.map(id => String(id).replace(/_(v|a)$/, ""))).size;
+        const multiDelete = this.selectedSegmentIds.includes(seg.id) && baseCount > 1;
+        const msg = multiDelete ? t("Delete {n} selected segment(s)?", { n: baseCount }) : t("Delete this segment?");
+        if (!window.confirm(msg)) { this.dismissMenu(); return; }
+        if (!multiDelete) {
+          this.selectionType = trackType;
+          const list = this.getSegmentArray(trackType);
+          this.selectedIndex = list.findIndex(s => s.id === seg.id);
+        }
         this.deleteSelectedSegment();
         this.dismissMenu();
       }

@@ -1,7 +1,7 @@
 # MiniMaxRefDirector-ComfyUI
 
 
-**v3.1.9** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
+**v4.0.0** — 面向 MiniMax H3 Reference-to-Video 的「导演式」多段分镜工作流。
 
 ComfyUI 自定义节点包：在时间线上编排多段镜头，用 VLM 自动撰写分镜提示词，绑定参考图 / 参考视频 / 参考音频，逐段生成视频并跨段衔接（motion context），最终按顺序合并输出。
 
@@ -27,7 +27,7 @@ ComfyUI 自定义节点包：在时间线上编排多段镜头，用 VLM 自动�
 cd ComfyUI/custom_nodes
 git clone https://github.com/<your-repo>/MiniMaxRefDirector-ComfyUI.git
 cd MiniMaxRefDirector-ComfyUI
-pip install -r requirements.txt   # 仅 av 一个额外依赖，其余由 ComfyUI 自带
+pip install -r requirements.txt   # av / soundfile / playwright，其余由 ComfyUI 自带
 ```
 
 重启 ComfyUI 后即可在节点列表中看到本包全部节点。
@@ -47,6 +47,54 @@ pip install -r requirements.txt   # 仅 av 一个额外依赖，其余由 ComfyU
 | `MiniMaxRefSaveAudio` | 保存音频到输出目录 |
 | `MiniMaxRefHybridLoader` | fl2va + ref2va 混合加载器：加载基底模型并叠加参考条件覆盖 |
 | `MiniMaxRefPureVRAM` | 清理 VRAM / 卸载模型，防止长时间批量生成导致显存耗尽 |
+| `MiniMaxRefDirectorSPA` | **导演台入口**：选择图中已有的 `MiniMaxRefDirector` 节点，新标签页打开 SPA 导演台（Vue3 + Element Plus 单文件页面），编辑结果写回该节点的 `timeline_data` |
+
+## 导演台（SPA）
+
+`MiniMaxRefDirectorSPA` 节点在新标签页打开独立的导演台页面，数据结构与 `timeline_data`
+完全一致，旧工作流与 Director 节点现有面板不受影响。
+
+- **打开方式**：添加 `MiniMax Ref Director` → `MiniMax Director SPA` 节点 → 下拉选择目标
+  超级导演节点（图中仅一个时自动选中）→ 点「打开导演台」。
+- **保存机制**：编辑后 500ms 防抖自动保存至服务端
+  （`user/default/MiniMaxRefDirector/spa/state/{node_id}.json`），
+  再经 WebSocket 回写目标节点 widget；刷新/重开标签页不丢数据。
+- **四个菜单**：全局参数（基础设置 / LLM：llama-cpp·API·Ollama·DeepSeek 代理 / 全局提示词）、
+  主体管理、分镜（三栏：分镜列表 + 提示词与技能 + 参数/预览）、视频生成记录（多选合并 / 无损合并）。
+- **分镜级主体**：分镜预览中每个被引用的主体都可单独「自定义」（深拷贝该主体及其引用资源），
+  仅对当前分镜生效；未自定义的主体继续跟随全局主体。
+
+构建 SPA（前端源码在 `spa/`，产物 `js/spa/index.html` 已入仓，通常无需重新构建）：
+
+```bash
+cd spa
+npm install
+npm run build   # → ../js/spa/index.html（JS/CSS 全内联的单文件）
+```
+
+### 开发模式（热更新）
+
+改前端不必每次手动构建，用 Vite dev server 联调：
+
+```bash
+cd spa
+npm install
+npm run dev     # http://127.0.0.1:5173
+```
+
+- 后端请求（`/minimax_ref`、`/view`、`/upload` 等）由 `vite.config.js` 的 `server.proxy`
+  转发到 ComfyUI（默认 `http://127.0.0.1:8188`）。端口不同时：
+  PowerShell `$env:COMFY_URL="http://127.0.0.1:8188"; npm run dev`，bash 用
+  `COMFY_URL=... npm run dev` 前缀。
+- 打开 `http://127.0.0.1:5173/?node_id=<节点ID>` 直接加载该节点状态；不带 `node_id` 时进入
+  `dev` 沙盒（状态存 `state/dev.json`，不会影响真实节点）。顶栏的 `DEV` 标记表示当前是 dev 构建，
+  旁边的「节点」标签可点击切换 node_id。
+- 想从 ComfyUI 里一键打开 dev 页面（携带真实节点 ID），把 `js/spa-node.js` 顶部的
+  `SPA_DEV_ORIGIN` 改为 `"http://127.0.0.1:5173/"` 后刷新 ComfyUI 页面即可。
+- 功能调试完成后执行 `npm run build` 更新 `js/spa/index.html`（提交前必须重新构建，
+  运行时不依赖 dev server）。
+
+DeepSeek / 豆包 / 千问代理模式通过 CDP 附加用户真实浏览器（`--remote-debugging-port=9222`）完成网页会话自动化，无需安装任何浏览器扩展（LLM 设置面板可一键启动浏览器）。
 
 ## 使用流程
 
@@ -96,6 +144,21 @@ MiniMaxRefDirector-ComfyUI/
 ```
 
 ## 更新日志
+
+### v4.0.0
+
+- **全新 SPA 导演台（Vue3 + Element Plus 单页应用）**：新增 `MiniMaxRefDirectorSPA` 节点，新标签页打开独立导演台，编辑结果经服务端落盘（`user/default/MiniMaxRefDirector/spa/state/{node_id}.json`）并通过 WebSocket 回写目标节点 `timeline_data`，刷新/重开不丢数据：
+  - **四个菜单**：全局参数（基础设置 / LLM / 全局提示词 / 技能词典 / 技能文档）、主体管理、分镜（三栏：分镜列表 + 提示词与技能 + 参数/预览）、视频生成记录；
+  - **视频生成记录**：多选按顺序合并、无损合并后台任务、记录删除；
+  - **分镜级主体**：分镜预览中被引用的主体可单独「自定义」（深拷贝主体及其引用资源），仅对当前分镜生效；
+  - 前端源码在 `spa/`（Vite 构建，产物 `js/spa/index.html` 已入仓），支持 dev server 热更新联调。
+- **网页会话 LLM 代理（DeepSeek / 豆包 / 千问）**：新增 CDP 网页会话通道（`lib/webchat_cdp.py` + `webchat_cdp_driver/`），通过 Playwright 附加用户真实 Chrome（`--remote-debugging-port=9222`）完成网页会话自动化，无需浏览器扩展，也无需 `playwright install` 下载浏览器；LLM 设置面板可一键启动浏览器，未安装 playwright 时其余 LLM 模式不受影响。
+- **DeepSeek 分镜导入**：SPA 分镜页新增导入对话框，可从 DeepSeek 网页会话导入分镜脚本并解析为时间线片段（`spa/src/utils/deepseekImport.js` 导入管线，支持回读校验与调试）。
+- **技能系统（Skill）**：提示词模板迁移为技能库（`resources/skills/`，含 audio-design / character-design / firstframe-design / h3-prompt-builder / story-design / storyboard-design 等，`prompt.md` + `skill.json`）；新增 SQLite 技能词典存储与 CRUD（`lib/skill_db.py`）、技能备注（`lib/skill_notes.py`）与首次安装种子数据（`install/skill_seed.py`）；分镜生成可按技能注入写作规范。
+- **llama-server 配置页与 SPA LLM 全局默认**：新增本地 llama-server 配置页（`lib/llama_server.py`），SPA 的 LLM 全局默认配置支持多级回退。
+- **master_audio 落盘登记**：主音频文件登记到生成记录，配合视频记录的无损合并后台任务使用。
+- **移除 director 节点 `video_mode` 选项**及相关的自动翻译开关逻辑，提示词写作统一由技能与 LLM 链路承担。
+- 依赖更新：`requirements.txt` 新增 `playwright>=1.40.0`（仅网页会话代理模式需要）。
 
 ### v3.1.9
 

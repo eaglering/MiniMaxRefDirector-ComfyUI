@@ -1,6 +1,6 @@
 // 拆分自 minimax_ref_director.js 的 TimelineEditor 类方法（mixin，通过 Object.assign 合并到原型）
 // 方法: get_settingsWidgetNames, hideSettingsWidgets, showSettingsWidgets, handleLoadTimeline, _applyLoadedTimeline, _getTimelineSavePayload, handleSaveTimeline, handleSaveTimelineAs, _makeSettingRow, showSettingsMenu, dismissSettingsMenu
-import { ICONS, api, app, hideWidget, parseInitial, showWidget, CAMERA_MOTIONS } from "./shared.js";
+import { ICONS, api, app, hideWidget, parseInitial, showWidget, SKILL_GROUPS } from "./shared.js";
 import { t } from "../../i18n.js";
 
 // 导入 Excel 的 loading 遮罩样式（幂等注入）
@@ -243,7 +243,7 @@ export const settings = {
         propHeight: this.propHeight,
         normalStartFrame: this.timeline.normalStartFrame,
         normalDurationFrames: this.timeline.normalDurationFrames,
-        defaultCameraMotions: this.timeline.defaultCameraMotions || [],
+        defaultSkills: this.timeline.defaultSkills && typeof this.timeline.defaultSkills === "object" ? this.timeline.defaultSkills : {},
         segments: (this.timeline.segments || []).map(s => {
           const { imgObj, videoEl, _isSeeking, thumbnails, _extractingThumbs, _sSecs, _lSecs, _tSecs, _dSecs, _uploading, _blobUrl, ...rest } = s;
           // 确保 guideStrength 始终落盘（前端默认 22，state.js 读取时 ?? 22）
@@ -978,40 +978,53 @@ export const settings = {
       }
     )));
 
-    // Default Camera Motion: 时间线级全局默认运镜（多选，空 = 运镜自由由模型决定）。
-    // 分段未单独设置（seg.cameraMotions 缺省）时继承此集合；改动落盘并通知已打开的分段编辑弹窗刷新。
-    const camRow = document.createElement("div");
-    camRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;align-items:center";
-    const renderCamRow = () => {
-      camRow.innerHTML = "";
-      const glob = Array.isArray(this.timeline.defaultCameraMotions) ? this.timeline.defaultCameraMotions : [];
-      if (glob.length === 0) {
-        const hint = document.createElement("span");
-        hint.textContent = t("None (model decides freely)");
-        hint.title = t("Empty default camera motions: the model freely writes the camera language for every shot");
-        hint.style.cssText = "color:#8a8a8a;font-size:11px";
-        camRow.appendChild(hint);
-      }
-      CAMERA_MOTIONS.forEach((cm) => {
-        const active = glob.includes(cm.key);
-        const chip = document.createElement("span");
-        chip.className = "mrd-pr-tag";
-        chip.textContent = t(cm.label);
-        chip.title = t(cm.title);
-        chip.style.cssText = `padding:1px 6px;background:${active ? "#3a5db0" : "#2a2a2a"};border:1px solid ${active ? "#6c9bff" : "#444"};border-radius:3px;color:${active ? "#fff" : "#9bb9ff"};font-size:11px;cursor:pointer;white-space:nowrap`;
-        chip.onclick = () => {
-          const cur = Array.isArray(this.timeline.defaultCameraMotions) ? this.timeline.defaultCameraMotions : [];
-          const next = cur.includes(cm.key) ? cur.filter(k => k !== cm.key) : [...cur, cm.key];
-          this.timeline.defaultCameraMotions = next;
-          renderCamRow();
-          this.commitChanges(true);
-          window.dispatchEvent(new CustomEvent("ref:camera-motions-changed", { detail: { motions: next } }));
-        };
-        camRow.appendChild(chip);
+    // Default Skills: 时间线级全局默认技能 { 类别名: [key] }（多选，空 = 该类自由由模型决定）。
+    // 分段未单独设置（seg.skills 缺省该类别）时继承此集合；改动落盘并通知已打开的分段编辑弹窗刷新。
+    const skillRow = document.createElement("div");
+    skillRow.style.cssText = "display:flex;flex-direction:column;gap:6px;min-width:0";
+    const renderSkillRow = () => {
+      skillRow.innerHTML = "";
+      const ds = (this.timeline.defaultSkills && typeof this.timeline.defaultSkills === "object")
+        ? this.timeline.defaultSkills : {};
+      SKILL_GROUPS.forEach((g) => {
+        if (!g.items.length) return;
+        const rowHead = document.createElement("div");
+        rowHead.textContent = g.name;
+        rowHead.style.cssText = "font-size:10px;color:#8a93a5;margin-top:2px";
+        skillRow.appendChild(rowHead);
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;align-items:center";
+        const glob = Array.isArray(ds[g.name]) ? ds[g.name] : [];
+        if (glob.length === 0) {
+          const hint = document.createElement("span");
+          hint.textContent = t("None (model decides freely)");
+          hint.style.cssText = "color:#8a8a8a;font-size:11px";
+          row.appendChild(hint);
+        }
+        g.items.forEach((sk) => {
+          const active = glob.includes(sk.key);
+          const chip = document.createElement("span");
+          chip.className = "mrd-pr-tag";
+          chip.textContent = sk.label;
+          chip.title = sk.title || sk.label;
+          chip.style.cssText = `padding:1px 6px;background:${active ? "#3a5db0" : "#2a2a2a"};border:1px solid ${active ? "#6c9bff" : "#444"};border-radius:3px;color:${active ? "#fff" : "#9bb9ff"};font-size:11px;cursor:pointer;white-space:nowrap`;
+          chip.onclick = () => {
+            const cur = Array.isArray(ds[g.name]) ? ds[g.name] : [];
+            const next = cur.includes(sk.key) ? cur.filter(k => k !== sk.key) : [...cur, sk.key];
+            const nd = { ...ds, [g.name]: next };
+            if (!next.length) delete nd[g.name];
+            this.timeline.defaultSkills = nd;
+            renderSkillRow();
+            this.commitChanges(true);
+            window.dispatchEvent(new CustomEvent("ref:default-skills-changed", { detail: { category: g.name, keys: next } }));
+          };
+          row.appendChild(chip);
+        });
+        skillRow.appendChild(row);
       });
     };
-    renderCamRow();
-    menu.appendChild(this._makeSettingRow(t("Default Camera Motion"), camRow));
+    renderSkillRow();
+    menu.appendChild(this._makeSettingRow(t("Default Skills"), skillRow));
 
     menu.appendChild(divider());
 

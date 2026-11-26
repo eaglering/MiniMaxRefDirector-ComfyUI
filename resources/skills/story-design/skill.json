@@ -1,0 +1,5 @@
+{
+  "name": "story-design",
+  "title": "故事大纲提取",
+  "description": "通读 DeepSeek 会话，提取用户讨论出的故事，输出 title/logline/story/subjects/scenes 结构化大纲"
+}

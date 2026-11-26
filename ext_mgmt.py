@@ -980,30 +980,13 @@ def restart_comfyui() -> bool:
         return False
 
 
-def pip_install_package(pkg: str = "llama-cpp-python", extra_args: str = "") -> dict:
+def pip_install_package(pkg: str, extra_args: str = "") -> dict:
     """以当前解释器执行 ``python -m pip install [extra_args] pkg`` 并返回结果。
 
     同步阻塞、由 server 经 ``asyncio.to_thread`` 调用（pip 可能耗时数分钟，
     期间不冻结 aiohttp 事件循环）。extra_args 按空白切分（覆盖常见
     ``--extra-index-url`` / ``-i`` 等用法）；输出截尾返回便于前端展示。
-
-    llama-cpp-python 且未填附加参数时（默认按钮场景）**不走裸 pip**，改走
-    ``lib.llm.auto_install_llama_cpp()``：已能 import 直接成功；未装则从
-    JamePeng/llama-cpp-python GitHub release 下载与平台/Python/CUDA 匹配的
-    预编译 wheel 以 ``--no-deps`` 安装 —— PyPI 没有 Windows 预编译 wheel，
-    源码编译极易失败；且裸 pip 的全量依赖解析会访问配置的镜像/代理，在网络
-    受限环境即便已装也会误报失败。填了附加参数则按原逻辑执行，尊重用户指定
-    的索引 / 镜像源。
     """
-    if pkg.replace("_", "-").lower() == "llama-cpp-python" and not (extra_args or "").strip():
-        from .lib import llm as _llm  # 延迟导入：仅默认按钮路径需要
-        try:
-            res = _llm.auto_install_llama_cpp()
-        except Exception as e:
-            log.warning("[ext_mgmt] auto install llama-cpp-python failed: %s", e, exc_info=True)
-            return {"ok": False, "tail": str(e), "cmd": "auto wheel (GitHub release)"}
-        return {"ok": bool(res.get("ok")), "tail": res.get("tail", ""),
-                "cmd": "auto wheel (GitHub release)"}
     cmd = [sys.executable, "-m", "pip", "install",
            "--disable-pip-version-check", "--no-input"]
     if extra_args and extra_args.strip():
@@ -1020,26 +1003,25 @@ def pip_install_package(pkg: str = "llama-cpp-python", extra_args: str = "") -> 
         return {"ok": False, "tail": str(e), "cmd": " ".join(cmd)}
 
 
-def llama_cpp_status() -> dict:
-    """探测当前解释器 llama-cpp-python 的安装状态(面板 Python 依赖区展示)。
+def llama_server_status() -> dict:
+    """llama-server 运行状态（面板 Python 依赖区/LLM 设置区展示）。
 
-    - ok=False → 未安装或导入失败(前端红色提示,可点「安装」自动下载 wheel);
-    - ok=True  → version 为版本号;gpu: True=CUDA 版 / False=CPU 版 / None=未知。
+    llama-cpp-python 已被外部 llama-server 取代：ok=True 表示服务正在运行，
+    model/endpoint 为当前加载模型与端点；未运行时 ok=False + hint 指引。
     """
-    import importlib.util
-    if importlib.util.find_spec("llama_cpp") is None:
-        return {"ok": False, "version": None, "gpu": None, "error": None}
     try:
-        import llama_cpp  # noqa: F401  (进程内模块缓存,仅首次扫描有一次 import 开销)
+        from .lib.llama_server import status
+        st = status()
+        return {
+            "ok": bool(st.get("running")),
+            "loading": bool(st.get("loading")),
+            "model": st.get("model") or "",
+            "endpoint": st.get("endpoint") or "",
+            "pid": st.get("pid"),
+            "hint": None if st.get("running") else "未运行：LLM 设置面板配置路径后点「启动」",
+        }
     except Exception as e:
-        return {"ok": False, "version": None, "gpu": None, "error": str(e)}
-    ver = str(getattr(llama_cpp, "__version__", "") or "")
-    gpu: bool | None = None
-    try:
-        gpu = bool(llama_cpp.llama_supports_gpu_offload())
-    except Exception:
-        gpu = None  # 旧版 API 缺失,视为未知
-    return {"ok": True, "version": ver or "?", "gpu": gpu, "error": None}
+        return {"ok": False, "model": "", "endpoint": "", "pid": None, "hint": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -1366,7 +1348,7 @@ def scan_payload(node_classes: list[str] | None,
         "pendingRestart": pending_restart(),
         "customNodesDir": CUSTOM_NODES_DIR,
         "trace": trace,
-        "llamaCpp": llama_cpp_status(),
+        "llamaServer": llama_server_status(),
     }
 
 

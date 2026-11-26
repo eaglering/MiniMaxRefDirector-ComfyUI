@@ -144,10 +144,52 @@ export class APIConfigManager {
         };
         tabs.appendChild(tab);
       });
+      // llama-server 进程配置页（SPA 的 llama-server 模式从这里取路径/端口）
+      const lsTab = document.createElement("button");
+      lsTab.textContent = "llama-server";
+      lsTab.type = "button";
+      lsTab.style.padding = "6px 12px";
+      lsTab.style.cursor = "pointer";
+      lsTab.style.border = "1px solid #555";
+      lsTab.style.borderRadius = "4px";
+      const lsIdx = this.config.services.length;
+      lsTab.style.background = this.activeIdx === lsIdx ? "#3a86ff" : "#2a2a2a";
+      lsTab.style.color = this.activeIdx === lsIdx ? "#fff" : "#ddd";
+      lsTab.onclick = () => {
+        this.activeIdx = lsIdx;
+        refreshTabs();
+        renderPanel();
+      };
+      tabs.appendChild(lsTab);
     };
 
     const renderPanel = () => {
       panel.innerHTML = "";
+      // llama-server 配置页：可执行文件路径 + 端口（SPA llama-server 模式共用）
+      if (this.activeIdx >= this.config.services.length) {
+        const ls = this.config.llama_server || (this.config.llama_server = { path: "", port: 8321 });
+        panel.appendChild(
+          this._row(
+            "可执行文件路径",
+            this._input(ls.path, (v) => (ls.path = v.trim()), false, "text",
+              "如 D:\\llama.cpp\\llama-server.exe")
+          )
+        );
+        panel.appendChild(
+          this._row("端口", this._input(ls.port, (v) => (ls.port = parseInt(v, 10) || 8321)))
+        );
+        const help = document.createElement("div");
+        help.style.marginTop = "12px";
+        help.style.fontSize = "12px";
+        help.style.color = "#aaa";
+        help.textContent =
+          "llama.cpp 官方发布的 llama-server 二进制（CUDA 版自动走 GPU），下载地址：" +
+          "https://github.com/ggml-org/llama.cpp/releases。" +
+          "SPA「全局参数 → LLM 设置」选择 llama-server 模式时自动使用这里的路径与端口，" +
+          "GGUF / mmproj 模型文件仍在 SPA 内选择。修改端口后需重启 llama-server 生效。";
+        panel.appendChild(help);
+        return;
+      }
       const svc = this.config.services[this.activeIdx];
       if (!svc) return;
 
@@ -271,11 +313,12 @@ export class APIConfigManager {
     return row;
   }
 
-  _input(value, onChange, readonly = false, type = "text") {
+  _input(value, onChange, readonly = false, type = "text", placeholder = "") {
     const input = document.createElement("input");
     input.type = type;
     input.value = value || "";
     input.readOnly = readonly;
+    if (placeholder) input.placeholder = placeholder;
     input.style.width = "100%";
     input.style.padding = "6px";
     input.style.boxSizing = "border-box";

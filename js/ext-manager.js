@@ -585,10 +585,6 @@ function ExtManagerRoot() {
   const [msBusy, setMsBusy] = useState(false);
   const [msTarget, setMsTarget] = useState("loras"); // 手填区下载保存路径(相对 models/)
   const [rsBusy, setRsBusy] = useState(false); // 重启按钮进行中（弹窗顶栏）
-  // llama-cpp-python 自动安装（Python 依赖区常驻；从 GitHub release 自动下载
-  // 匹配的预编译 wheel，无需附加 pip 参数）
-  const [pipBusy, setPipBusy] = useState(false);
-  const [pipTail, setPipTail] = useState(""); // pip 输出尾部
   const [showTrace, setShowTrace] = useState(false); // 扫描归属诊断折叠
 
   async function refresh() {
@@ -710,26 +706,8 @@ function ExtManagerRoot() {
       setRsBusy(false);
     }
   };
-  // llama-cpp-python pip 安装（Python 依赖区常驻；耗时请求由后端 to_thread 执行）
-  const pipInstall = async () => {
-    if (pipBusy) return;
-    setPipBusy(true);
-    setStatus("");
-    setPipTail("");
-    try {
-      const b = await callApi("pip_install", { pkg: "llama-cpp-python" });
-      const d = b.data || {};
-      const tail = (d.tail || "").trim();
-      const head = d.ok ? t("ExtPipOk") : t("ExtPipFail");
-      setPipTail(head + (tail ? "\n" + tail : ""));
-      setStatus(head + "：llama-cpp-python");
-    } catch (e) {
-      setPipTail("");
-      setStatus("pip 安装失败：" + (e.message || e));
-    } finally {
-      setPipBusy(false);
-    }
-  };
+  // （llama-cpp-python 自动安装已随 llama-server 方案移除：模型由外部
+  // llama-server 进程加载，路径与启停在 LLM 设置面板配置）
 
   // 「详情」：拉取后端对该 class 的完整归属判定链路（归属排障用）
   const debugClassDetail = async (c) => {
@@ -802,27 +780,20 @@ function ExtManagerRoot() {
               <div style=${{ fontSize: "11px", color: "#60a5fa" }}>${t("ExtPyDeps")}：</div>
               <div style=${{ display: "flex", flexDirection: "column", gap: "4px", border: "1px dashed #3a5a8a", borderRadius: "4px", padding: "4px 5px", background: "rgba(96,165,250,0.05)" }}>
                 <div style=${{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span style=${{ fontSize: "10px", color: "#60a5fa", flexShrink: "0", fontFamily: "monospace" }}>llama-cpp-python</span>
-                  ${data && data.llamaCpp
-                    ? data.llamaCpp.ok
+                  <span style=${{ fontSize: "10px", color: "#60a5fa", flexShrink: "0", fontFamily: "monospace" }}>llama-server</span>
+                  ${data && data.llamaServer
+                    ? data.llamaServer.ok
                       ? html`<span
-                          title=${data.llamaCpp.gpu === false ? t("ExtLlamaCpuHint") : ""}
+                          title=${data.llamaServer.endpoint || ""}
                           style=${{
                             fontSize: "9px", flexShrink: "0", borderRadius: "3px", padding: "0 4px", lineHeight: "13px",
-                            color: data.llamaCpp.gpu === false ? "#fbbf24" : "#34d399",
-                            border: "1px solid " + (data.llamaCpp.gpu === false ? "rgba(251,191,36,0.4)" : "rgba(52,211,153,0.4)"),
+                            color: "#34d399",
+                            border: "1px solid rgba(52,211,153,0.4)",
                           }}
-                        >v${data.llamaCpp.version || "?"} · ${data.llamaCpp.gpu === true ? t("ExtLlamaCuda") : data.llamaCpp.gpu === false ? t("ExtLlamaCpu") : "GPU:?"}</span>`
-                      : html`<span style=${{ fontSize: "9px", flexShrink: "0", color: "#f87171", border: "1px solid rgba(248,113,113,0.4)", borderRadius: "3px", padding: "0 4px", lineHeight: "13px" }}>${t("ExtLlamaMissing")}</span>`
+                        >运行中 · ${data.llamaServer.model || "?"}</span>`
+                      : html`<span style=${{ fontSize: "9px", flexShrink: "0", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.4)", borderRadius: "3px", padding: "0 4px", lineHeight: "13px" }}>${data.llamaServer.loading ? "模型加载中…" : "未运行（LLM 设置面板可启动）"}</span>`
                     : null}
-                  <span style=${{ flex: "1 1 auto" }}></span>
-                  <${ActBtn} onClick=${pipInstall} busy=${pipBusy} title=${t("ExtPipHint")}>${t("ExtPipInstall")}</${ActBtn}>
                 </div>
-                ${pipBusy
-                  ? html`<div style=${{ fontSize: "10px", color: "#60a5fa" }}>${t("ExtPipBusy")}</div>`
-                  : pipTail
-                    ? html`<div style=${{ maxHeight: "72px", overflowY: "auto", fontSize: "9px", color: pipTail.startsWith(t("ExtPipOk")) ? "#34d399" : "#f87171", wordBreak: "break-all", whiteSpace: "pre-wrap", lineHeight: "13px", opacity: "0.95" }}>${pipTail}</div>`
-                    : null}
               </div>
               <!-- 扫描归属诊断：当前工作流各节点 class 的归属（builtin/ui 省略） -->
               ${data && data.trace

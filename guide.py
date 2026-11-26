@@ -256,6 +256,28 @@ class MiniMaxRefGuide(io.ComfyNode):
                     seg_start_frames = int(entry.get("startFrames", 0))
                     clip_start_seconds = max(0.0,
                                              (seg_start_frames - range_start) / frame_rate)
+                    # master_audio 整轨可能恰好止于本段画面末帧：外部 prepare 除画面
+                    # 时长外还要求 H3 audio grid 的尾部 overhang（最长约一个 audio
+                    # token ≈ 0.25s），整体波形偏短会抛 "master audio is N samples
+                    # short" 并放弃音频掩码（clip_audio=None → 该段无无损素材）。
+                    # 先对整轨尾部静音补足 1s 余量，覆盖 grid overhang 与重采样误差。
+                    try:
+                        import torch as _torch
+                        _wave = master_audio.get("waveform")
+                        _sr = int(master_audio.get("sample_rate") or 32000)
+                        _need = int(round((clip_start_seconds + length / frame_rate + 1.0) * _sr))
+                        _have = int(_wave.shape[-1]) if _wave is not None else 0
+                        if _wave is not None and _have < _need:
+                            master_audio = dict(master_audio)
+                            master_audio["waveform"] = _torch.nn.functional.pad(
+                                _wave, (0, _need - _have))
+                            log.info(
+                                "[MiniMaxRefGuide] guide_index=%d master audio padded "
+                                "%d -> %d samples (H3 audio grid overhang margin)",
+                                idx, _have, _need)
+                    except Exception:
+                        log.warning(
+                            "[MiniMaxRefGuide] master audio tail pad failed", exc_info=True)
                     latent, _song_trim, clip_audio = song_node().prepare(
                         latent, audio_vae, master_audio,
                         clip_start_seconds=clip_start_seconds,

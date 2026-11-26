@@ -224,6 +224,11 @@ def _generated_frame_generator(
     """
     seam_ovs = _seam_overlaps(raw_frames, contexts, overlap)
     tail = None
+    # 全局进度基准（与 merge_latents_to_video 的 total_frames 口径一致）
+    merge_total = int(raw_frames[0]) + sum(
+        int(raw_frames[k]) - int(contexts[k]) for k in range(1, len(raw_frames))
+    )
+    emitted_total = 0
 
     for i, video_latent in enumerate(videos):
         video_t, _audio_t = latent_lib.split_joint_latent(video_latent)
@@ -239,7 +244,8 @@ def _generated_frame_generator(
         hold_n = 0
 
         def _emit(frame):
-            nonlocal hold_n
+            nonlocal hold_n, emitted_total
+            emitted_total += 1
             clip_tail.append(frame.detach().to("cpu", dtype=torch.float32))
             hold_n += 1
             if hold_n > next_hold:
@@ -283,6 +289,11 @@ def _generated_frame_generator(
         for frame_start, frames in latent_lib.iter_decode_video_latent(
             video_vae, video_t, chunks_per_slice=chunks_per_slice
         ):
+            log.info(
+                "[%s] 解码进度：段 %d/%d 分片起点 %d（累计输出 %d/%d 帧，长视频解码需数分钟）",
+                log_prefix, i + 1, len(videos), frame_start,
+                emitted_total, merge_total,
+            )
             for j in range(int(frames.shape[0])):
                 p = frame_start + j
                 if p >= expected:

@@ -224,6 +224,24 @@ class MiniMaxRefCombine(io.ComfyNode):
                 )["path"]
             except Exception:
                 log.warning("failed to save clip_audio wav", exc_info=True)
+        else:
+            # 无损素材（latent 合并）依赖四要素：clip_audio 连接 + joint latent
+            # （含视频与音频两条流）。缺任一项则本段只产出普通视频，SPA 记录无
+            # image_latent / clip_audio，无法参与「无损合并」。输出跳过原因便于排查。
+            reasons = []
+            if clip_audio is None:
+                reasons.append("clip_audio 未连接")
+            if latent is None:
+                reasons.append("latent 未连接")
+            else:
+                if image_lat is None:
+                    reasons.append("latent 中无视频流")
+                if audio_lat is None:
+                    reasons.append("latent 中无音频流（音频 VAE/模型未启用？）")
+            log.info(
+                "[MiniMaxRefCombine] 无损素材未保存（无法参与无损合并）：%s",
+                "；".join(reasons) or "未知原因",
+            )
 
 
         if audio is None:
@@ -258,6 +276,11 @@ class MiniMaxRefCombine(io.ComfyNode):
 
         images, audio = _trim_images_and_audio(images, audio, trim_frames, frame_rate)
 
+        # 生成记录用的实际产物参数：裁剪后帧数 / 分辨率（像素张量 [B,H,W,C]）
+        rec_frames = int(images.shape[0]) if images is not None else None
+        rec_w = int(images.shape[2]) if images is not None else None
+        rec_h = int(images.shape[1]) if images is not None else None
+
         meta = encode_frames_with_vhs(
             images=images,
             audio=audio,
@@ -286,6 +309,24 @@ class MiniMaxRefCombine(io.ComfyNode):
             payload.get("clip_audio"), _notify_ctx_node,
         )
         _send_progress(payload)
+        # 登记视频生成记录（SPA「视频生成记录」页；append_record 内部吞异常，不阻断主流程）
+        try:
+            from .lib.records import append_record
+            append_record({
+                "kind": "generate",
+                "video": payload.get("imageFile") or filename,
+                "image_latent": payload.get("image_latent") or "",
+                "meta_file": payload.get("meta_file") or "",
+                "meta": payload.get("meta") or {},
+                "clip_audio": payload.get("clip_audio") or "",
+                "director_node_id": str(_notify_ctx_node) if _notify_ctx_node else "",
+                "duration_frames": rec_frames,
+                "fps": float(frame_rate),
+                "width": rec_w,
+                "height": rec_h,
+            })
+        except Exception:
+            log.warning("[MiniMaxRefCombine] failed to append video record", exc_info=True)
         # Filename 输出本段视频路径，供下一段 MiniMax Ref Guide 的 prev_tail 输入
         # 直接使用（motion context 像素路径 / 降噪来源）。
         return io.NodeOutput(filename, ui=ui)

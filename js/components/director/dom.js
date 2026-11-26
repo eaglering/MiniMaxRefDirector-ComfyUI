@@ -1185,10 +1185,20 @@ export const dom = {
 
     this.layoutContainer.appendChild(this.sidebar);
 
+    // 多选模式覆盖条容器（相对定位包住 viewport，供顶部计数条/底部工具条绝对定位）
+    this.timelineWrap = document.createElement("div");
+    this.timelineWrap.style.position = "relative";
+    this.timelineWrap.style.flexGrow = "1";
+    this.timelineWrap.style.minWidth = "0";
+    this.timelineWrap.style.display = "flex";
+
     // Viewport takes remaining space
     this.viewport.style.flexGrow = "1";
     this.viewport.style.minWidth = "0";
-    this.layoutContainer.appendChild(this.viewport);
+    this.timelineWrap.appendChild(this.viewport);
+    this._multiMode = false;
+    if (this._buildMultiBars) this._buildMultiBars();
+    this.layoutContainer.appendChild(this.timelineWrap);
 
     // 全局参数分组：渲染在 .mrd-pr-toolbar 之上（preact inline 输入框）
     this.globalParamsMount = document.createElement("div");

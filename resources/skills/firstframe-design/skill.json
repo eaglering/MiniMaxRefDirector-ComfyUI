@@ -1,0 +1,5 @@
+{
+  "name": "firstframe-design",
+  "title": "首帧图提示词",
+  "description": "为缺少首/尾帧提示词的分镜补写含环境描述的 first_frame_prompt / last_frame_prompt"
+}

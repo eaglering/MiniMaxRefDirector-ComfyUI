@@ -13,21 +13,75 @@ def find_index(list: list, func: callable):
             return i
     return -1
 
-def parse_generated_json(generated_text: str) -> dict:
-    """Parse JSON from model output, return a dict with all fields."""
-    # Prefer extracting content from ```json ... ``` code blocks
-    json_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", generated_text)
-    if json_match:
-        clean_text = json_match.group(1)
-    else:
-        # Fallback: match the first raw JSON object in the text
-        json_match = re.search(r"\{[\s\S]*\}", generated_text)
-        if json_match:
-            clean_text = json_match.group(0)
-        else:
-            clean_text = generated_text.strip()
+def _extract_balanced_json(text: str) -> str | None:
+    """从文本中提取首个括号配平的 JSON 对象（跳过字符串字面量与转义）。
 
-    return json.loads(clean_text, strict=False)
+    与前端 parseJsonBlock 的平衡扫描同构：正则非贪婪匹配在 JSON 值内含
+    ``}`` + 围栏样文本时会截断，平衡扫描则始终返回完整对象。
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def parse_generated_json(generated_text: str) -> dict:
+    """Parse JSON from model output, return a dict with all fields.
+
+    解析顺序：```json 围栏 → 平衡括号扫描（容忍模型输出的前后缀文字/追问尾巴）
+    → 裸 JSON.parse 兜底；全部失败抛带原文摘录的 RuntimeError（HTTP 层转 400）。
+    """
+    raw = str(generated_text or "")
+    # 1) 围栏内容优先（其中若被截断再回落平衡扫描）
+    fence = re.search(r"```(?:json)?\s*(\{[\s\S]*?\}?)\s*```", raw)
+    candidates = []
+    if fence:
+        candidates.append(fence.group(1))
+    balanced = _extract_balanced_json(raw)
+    if balanced:
+        candidates.append(balanced)
+    # 2) 兜底：首 { 到尾 }（旧行为）
+    lazy = re.search(r"\{[\s\S]*\}", raw)
+    if lazy:
+        candidates.append(lazy.group(0))
+    candidates.append(raw.strip())
+
+    last_err: Exception | None = None
+    for cand in candidates:
+        if not cand.strip():
+            continue
+        try:
+            obj = json.loads(cand, strict=False)
+        except Exception as e:
+            last_err = e
+            continue
+        if isinstance(obj, dict):
+            return obj
+    raise RuntimeError(
+        f"返回内容无法解析为 JSON（回复中未找到完整 JSON 对象）。"
+        f"解析错误：{last_err}。原文摘录：{raw[:300]!r}"
+    )
 
 class RefJoinString(io.ComfyNode):
     """Replace placeholders in an expression with up to 4 fixed values.

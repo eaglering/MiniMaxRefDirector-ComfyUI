@@ -6,7 +6,10 @@ import asyncio
 import json
 import logging
 import os
+import threading
+import time
 import traceback
+import uuid
 
 import folder_paths
 from aiohttp import web
@@ -19,6 +22,8 @@ from server import PromptServer
 from .api_config import api_config_manager
 
 API_PREFIX = "/minimax_ref/api"
+
+log = logging.getLogger(__name__)
 
 
 async def _await_llm_work(fn, *args, **kwargs):
@@ -175,8 +180,17 @@ _LazyRoutes.flush()
 async def save_api_config(request: web.Request) -> web.Response:
     """Persist the full API configuration from the Settings panel."""
     try:
-        data = await request.json()
-        config = data.get("config", {})
+        body = await request.read()
+        if not body:
+            # 页面刷新/关闭时被中断的在途保存请求会以空 body 到达，干净拒绝即可
+            return web.json_response(
+                {"success": False, "error": "empty request body"}, status=400)
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return web.json_response(
+                {"success": False, "error": "invalid JSON body"}, status=400)
+        config = (data.get("config") if isinstance(data, dict) else None) or {}
         api_config_manager.save_config(config)
         return web.json_response({"success": True})
     except Exception as e:
@@ -192,17 +206,92 @@ _LazyRoutes.flush()
 
 @_routes.post(f"{API_PREFIX}/llm/unload")
 async def unload_llama_models_api(request: web.Request) -> web.Response:
-    """Unload all cached local GGUF (llama-cpp) models to free RAM/VRAM.
+    """Stop the external llama-server to free its VRAM (legacy endpoint kept for compat).
 
-    Lazy import keeps this module import-order agnostic (avoids cycles with
-    minimax_ref_prompt_enhance which imports comfy modules).
+    旧语义为卸载进程内 llama-cpp 模型；llama-server 模式下模型在外部进程，
+    此端点即「停止 llama-server」（与 /llm/llama_server/stop 等效）。
     """
     try:
         from .lib.llm import unload_llama_models as _unload
 
-        # 卸载走线程池（close()/gc/empty_cache 在锁内执行，排队等待进行中的推理）
+        # 停止走线程池（模块锁内执行，排队等待进行中的推理结束）
         await asyncio.to_thread(_unload)
         return web.json_response({"success": True, "unloaded": True})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+# ---------------- llama-server 进程管理（设置面板手动启停） ----------------
+
+@_routes.post(f"{API_PREFIX}/llm/llama_server/start")
+async def llama_server_start_api(request: web.Request) -> web.Response:
+    """启动 llama-server（先卸载 ComfyUI 显存模型，再拉起外部进程并轮询就绪）。"""
+    try:
+        data = await request.json()
+        from .lib.llama_server import DEFAULT_PORT, start
+
+        # 可执行文件路径 / 端口：请求未带时回落 API 管理器「llama-server」页配置
+        cfg_ls = {}
+        try:
+            cfg_ls = dict(api_config_manager.load_config().get("llama_server") or {})
+        except Exception:
+            pass
+        path = str(data.get("path") or "").strip() or str(cfg_ls.get("path") or "").strip()
+        port = int(data.get("port") or 0) or int(cfg_ls.get("port") or 0) or DEFAULT_PORT
+        st = await asyncio.to_thread(
+            start,
+            path,
+            str(data.get("gguf_path") or "").strip(),
+            str(data.get("mmproj_path") or "").strip(),
+            port,
+        )
+        return web.json_response({"success": True, **st})
+    except (ValueError, RuntimeError) as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/llm/llama_server/stop")
+async def llama_server_stop_api(request: web.Request) -> web.Response:
+    """停止 llama-server 并回收进程。"""
+    try:
+        from .lib.llama_server import stop
+
+        st = await asyncio.to_thread(stop)
+        return web.json_response({"success": True, **st})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/llm/llama_server/status")
+async def llama_server_status_api(request: web.Request) -> web.Response:
+    """llama-server 当前状态（running/loading/pid/endpoint/model）。
+
+    status() 内含同步 /health 探测（最长 2s）与 _LOCK 竞争，必须放线程池，
+    否则前端 2s 轮询会阻塞事件循环。
+    """
+    try:
+        from .lib.llama_server import status
+
+        st = await asyncio.to_thread(status)
+        return web.json_response({"success": True, **st})
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/llm/llama_server/log")
+async def llama_server_log_api(request: web.Request) -> web.Response:
+    """llama-server 日志尾部（启动失败排查）。"""
+    try:
+        from .lib.llama_server import tail_log
+
+        n = int(request.query.get("lines", "60"))
+        return web.json_response({"success": True, "log": tail_log(n)})
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
@@ -220,16 +309,17 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
         image_path = data.get("image_path", "")
         prompt = data.get("prompt", "")
         vlm_mode = data.get("vlm_mode", "llama-cpp")
+        if vlm_mode == "llama-server":
+            vlm_mode = "llama-cpp"  # 新模式名归一化（内部值保留 llama-cpp 兼容旧存档）
         gguf_path = data.get("gguf_path", "")
         mmproj_path = data.get("mmproj_path", "")
         seed = data.get("seed", 42)
         if not prompt:
             return web.json_response({"success": False, "error": "prompt is required"}, status=400)
         if vlm_mode == "llama-cpp":
-            gguf_path = _resolve_llm_file(gguf_path)
-            if not gguf_path:
-                return web.json_response({"success": False, "error": "gguf_path is required (no GGUF found under models/llm)"}, status=400)
-            mmproj_path = _resolve_llm_file(mmproj_path)
+            # llama-server 模式：模型由外部服务进程加载（设置面板启动时指定），
+            # 不再要求请求带 gguf/mmproj；未启动时由 generate_prompt_with_llama
+            # 返回带设置面板指引的错误
             work = lambda: image_analysis(gguf_path, mmproj_path, prompt, image_path, seed)
         elif vlm_mode == "ollama":
             model = data.get("ollama_model", "")
@@ -243,6 +333,13 @@ async def generate_image_analysis_api(request: web.Request) -> web.Response:
                     base_url=base_url, api_key=api_key, seed=seed,
                 )
                 return {"detailed_description": text}
+        elif vlm_mode in ("deepseek-proxy", "doubao-proxy", "qianwen-proxy", "qwen-proxy"):
+            # 网页会话无法传图，图片分析不支持任何网页代理模式（必须在 api 兜底分支之前）
+            return web.json_response(
+                {"success": False,
+                 "error": f"{vlm_mode} 不支持图片分析（网页会话无法传图）：请改用 api / ollama / llama-server 模式"},
+                status=400,
+            )
         else:
             provider = data.get("provider", "GLM")
             api_key = data.get("api_key", "")
@@ -273,17 +370,19 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         prompt = data.get("prompt", "")
         image_path = data.get("image_path", "")
         vlm_mode = data.get("vlm_mode", "llama-cpp")
+        if vlm_mode == "llama-server":
+            vlm_mode = "llama-cpp"  # 新模式名归一化（内部值保留 llama-cpp 兼容旧存档）
         seed = data.get("seed", 42)
-        lang = data.get("lang", "en")
-        # 运镜可为 str 单值（兼容旧客户端）或 list 多选（空列表 = 不注入）；后端归一化兜底
-        camera_motion = data.get("camera_motion", "")
-        # 微表情（表演提示）多选：list[str]（空 = 不注入）；expression_catalog 携带前端
-        # 本地导入的自定义词条（{key,label,title}），供后端识别自定义 key 并注入描述
-        expression = data.get("expression", "")
-        expression_catalog = data.get("expression_catalog", []) or []
-        # 景别 / 构图关系多选：list[str]（空 = 不注入，由模型自由决定）；后端归一化兜底
-        shot_size = data.get("shot_size", "")
-        framing = data.get("framing", "")
+        # lang：未显式传参时 "auto" = 跟随输入语言（中文输入→中文输出），
+        # 与网页通道的语言跟随策略一致，避免旧调用方静默拿到英文模板
+        lang = data.get("lang") or "auto"
+        # 技能注入：优先用调用方已渲染好的 skill_notes（前端经 /spa/skill_notes 取），
+        # 否则按 selections（{类别名: [技能 key]}，类别名 = skill_categories.name）
+        # 在服务端按 DB render_mode 现渲染。
+        skill_notes = str(data.get("skill_notes") or "")
+        selections = data.get("selections")
+        if not isinstance(selections, dict):
+            selections = None
         try:
             duration_seconds = float(data.get("duration_seconds") or 0)
         except (TypeError, ValueError):
@@ -299,10 +398,10 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
         if not prompt:
             return web.json_response({"success": False, "error": "prompt is required"}, status=400)
         if vlm_mode == "llama-cpp":
-            options["gguf_path"] = _resolve_llm_file(options["gguf_path"])
-            if not options["gguf_path"]:
-                return web.json_response({"success": False, "error": "gguf_path is required (no GGUF found under models/llm)"}, status=400)
-            options["mmproj_path"] = _resolve_llm_file(options["mmproj_path"])
+            # llama-server 模式：模型由外部服务进程加载（设置面板启动时指定），
+            # 请求无需 gguf/mmproj；未启动时由 generate_prompt_with_llama
+            # 返回带设置面板指引的错误
+            pass
         elif vlm_mode == "api":
             if not options["provider"]:
                 return web.json_response({"success": False, "error": "provider is required"}, status=400)
@@ -311,16 +410,59 @@ async def generate_prompt_json_api(request: web.Request) -> web.Response:
             # model / base_url 允许为空：generate_prompt_with_ollama 会回落
             # API 管理器 ollama 服务配置 / 内置默认值（http://localhost:11434）
             pass
+        elif vlm_mode in ("deepseek-proxy", "doubao-proxy", "qianwen-proxy", "qwen-proxy"):
+            # 经浏览器扩展 WS 桥接调用对应站点网页会话（纯文本，不支持传图）
+            if image_path:
+                return web.json_response(
+                    {"success": False,
+                     "error": f"{vlm_mode} 不支持参考图（网页会话无法传图）：请改用 api / ollama / llama-server，或移除参考图"},
+                    status=400,
+                )
         work = lambda: generate_h3_prompt(
             prompt=prompt, image_path=image_path, seed=seed,
             vlm_mode=vlm_mode, options=options,
             duration_seconds=duration_seconds, lang=lang,
-            camera_motion=camera_motion, expression=expression,
-            expression_catalog=expression_catalog,
-            shot_size=shot_size, framing=framing,
+            skill_notes=skill_notes, selections=selections,
         )
         json_data = await _await_llm_work(work)
         return web.json_response({"success": True, "json_data": json_data})
+    except RuntimeError as e:
+        # 模型输出解析失败等可预期错误 → 400 + 友好文案（含原文摘录），便于前端展示
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.post(f"{API_PREFIX}/llm/generate_text")
+async def generate_text_api(request: web.Request) -> web.Response:
+    """纯文本生成（技能文档「生成提示词」等场景，无 JSON 约束）。
+
+    body: {prompt, system?, image_path?, seed?, vlm_mode, options{...}}
+    网页代理（*-proxy）同样支持：拼 system+prompt 后走网页会话单轮。
+    返回 {success, text}。
+    """
+    try:
+        from .lib.prompt import generate_text
+        data = await request.json()
+        prompt = str(data.get("prompt") or "")
+        system = str(data.get("system") or "")
+        image_path = str(data.get("image_path") or "")
+        seed = data.get("seed", 42)
+        vlm_mode = str(data.get("vlm_mode") or "llama-cpp")
+        if vlm_mode == "llama-server":
+            vlm_mode = "llama-cpp"  # 新模式名归一化
+        options = data.get("options") if isinstance(data.get("options"), dict) else {}
+        if not prompt.strip():
+            return web.json_response({"success": False, "error": "prompt is required"}, status=400)
+        work = lambda: generate_text(
+            prompt=prompt, system=system, image_path=image_path,
+            seed=seed, vlm_mode=vlm_mode, options=options,
+        )
+        text = await _await_llm_work(work)
+        return web.json_response({"success": True, "text": text})
+    except RuntimeError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
@@ -842,6 +984,30 @@ def _extract_merged_video_path(result) -> str | None:
     return None
 
 
+# ── 无损合并后台任务 ──────────────────────────────────────────────────────────
+# 长任务（VAE 解码 + ffmpeg 编码可达数分钟）不占用 HTTP 请求：POST 立即返回
+# job_id，前端轮询 /h3/merge_latents/status 获取进度与结果，避免"一直没应答"。
+_MERGE_JOBS: dict[str, dict] = {}
+_MERGE_JOBS_LOCK = threading.Lock()
+_MERGE_JOBS_MAX = 20
+
+
+def _probe_video_record_meta(path: str) -> dict:
+    """ffprobe 尽力探测时长/分辨率/fps（登记生成记录用；失败返回空 dict）。"""
+    try:
+        from .lib.video import ffprobe_info
+
+        info = ffprobe_info(path) or {}
+        return {
+            "duration_frames": int(info["frame_count"]) if info.get("frame_count") else None,
+            "fps": float(info["fps"]) if info.get("fps") else None,
+            "width": info.get("width"),
+            "height": info.get("height"),
+        }
+    except Exception:
+        return {}
+
+
 @_routes.post(f"{API_PREFIX}/h3/merge_videos")
 async def merge_videos_api(request: web.Request) -> web.Response:
     """合并多段视频素材为一段。
@@ -909,6 +1075,21 @@ async def merge_videos_api(request: web.Request) -> web.Response:
         if node_id is not None:
             payload["director_node_id"] = node_id
         PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
+        # 登记生成记录（失败仅告警不阻断）；ffprobe 补时长/分辨率/fps
+        try:
+            from .lib.records import build_record, append_record
+
+            probe = _probe_video_record_meta(dst)
+            append_record(build_record(
+                "merge_video", file_info,
+                fps=probe.get("fps"),
+                width=probe.get("width"), height=probe.get("height"),
+                duration_frames=probe.get("duration_frames"),
+                size=os.path.getsize(dst),
+                director_node_id=str(node_id) if node_id is not None else "",
+            ))
+        except Exception:
+            log.warning("[Records] failed to record merge_videos result", exc_info=True)
         return web.json_response({"success": True, "name": f"whatdreamscost/{name}", "file": file_info})
     except Exception as e:
         traceback.print_exc()
@@ -1094,50 +1275,126 @@ async def merge_latents_api(request: web.Request) -> web.Response:
                 custom_audio=custom_audio,
             )
 
-        meta_out = await asyncio.to_thread(_run_merge)
-        merged_path = meta_out.get("full_path")
-        if not merged_path or not os.path.isfile(merged_path):
-            return web.json_response(
-                {"success": False, "error": "无损合并失败：未生成输出文件"}, status=500
-            )
-
-        # 3) 复制到素材库目录 input/whatdreamscost/，保证可预览、可再参与合并
+        # ── 后台任务：HTTP 立即返回 job_id，前端轮询 status 获取结果 ──
+        # （VAE 解码 + ffmpeg 编码长视频可达数分钟，同步等待会导致"一直没应答"）
         import datetime
         import shutil
 
-        input_dir = folder_paths.get_input_directory()
-        mat_dir = os.path.join(input_dir, "whatdreamscost")
-        os.makedirs(mat_dir, exist_ok=True)
-        ext = os.path.splitext(merged_path)[1] or ".mp4"
-        if ext.lower() not in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"):
-            ext = ".mp4"
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"merge_latent_{ts}{ext}"
-        dst = os.path.join(mat_dir, name)
-        n = 1
-        while os.path.exists(dst):
-            name = f"merge_latent_{ts}_{n}{ext}"
-            dst = os.path.join(mat_dir, name)
-            n += 1
-        shutil.copy2(merged_path, dst)
-
-        file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
-        payload = {
-            "status": "add_material",
-            "type": "video",
-            "imageFile": file_info,
-            "image_latent": None,
-            "audio_latent": None,
+        job_id = uuid.uuid4().hex[:12]
+        job: dict = {
+            "id": job_id, "state": "running", "error": "",
+            "name": "", "file": None,
+            "started_at": time.time(), "finished_at": None,
+            "segments": len(entries),
         }
-        if node_id is not None:
-            payload["director_node_id"] = node_id
-        PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
-        return web.json_response(
-            {"success": True, "name": f"whatdreamscost/{name}", "file": file_info}
-        )
+        with _MERGE_JOBS_LOCK:
+            _MERGE_JOBS[job_id] = job
+            # 只保留最近若干条，防止长期驻留
+            if len(_MERGE_JOBS) > _MERGE_JOBS_MAX:
+                done_ids = [
+                    k for k, v in sorted(_MERGE_JOBS.items(), key=lambda kv: kv[1]["started_at"])
+                    if v.get("finished_at")
+                ]
+                for k in done_ids[: len(done_ids) - (_MERGE_JOBS_MAX - len(_MERGE_JOBS))]:
+                    _MERGE_JOBS.pop(k, None)
+
+        def _job_body():
+            try:
+                t0 = time.monotonic()
+                log.info(
+                    "[merge_latents] 任务 %s 开始：%d 段素材"
+                    "（VAE 解码 + ffmpeg 编码长视频可能需要数分钟，进度见控制台日志）",
+                    job_id, len(entries),
+                )
+                meta_out = _run_merge()
+                merged_path = meta_out.get("full_path")
+                if not merged_path or not os.path.isfile(merged_path):
+                    raise RuntimeError("无损合并失败：未生成输出文件")
+                log.info(
+                    "[merge_latents] 任务 %s 合并完成，耗时 %.1fs", job_id, time.monotonic() - t0)
+
+                # 复制到素材库目录 input/whatdreamscost/，保证可预览、可再参与合并
+                mat_dir = os.path.join(folder_paths.get_input_directory(), "whatdreamscost")
+                os.makedirs(mat_dir, exist_ok=True)
+                ext = os.path.splitext(merged_path)[1] or ".mp4"
+                if ext.lower() not in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"):
+                    ext = ".mp4"
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                name = f"merge_latent_{ts}{ext}"
+                dst = os.path.join(mat_dir, name)
+                n = 1
+                while os.path.exists(dst):
+                    name = f"merge_latent_{ts}_{n}{ext}"
+                    dst = os.path.join(mat_dir, name)
+                    n += 1
+                shutil.copy2(merged_path, dst)
+
+                file_info = {"filename": name, "subfolder": "whatdreamscost", "type": "input"}
+                payload = {
+                    "status": "add_material",
+                    "type": "video",
+                    "imageFile": file_info,
+                    "image_latent": None,
+                    "audio_latent": None,
+                }
+                if node_id is not None:
+                    payload["director_node_id"] = node_id
+                PromptServer.instance.send_sync("minimax_ref_video_progress", payload)
+                # 登记生成记录（SPA「视频生成记录」页；失败仅告警不阻断）
+                try:
+                    from .lib.records import build_record, append_record
+
+                    probe = _probe_video_record_meta(dst)
+                    append_record(build_record(
+                        "merge_latent", file_info,
+                        fps=probe.get("fps") or float(first_meta.get("fps") or 24.0),
+                        width=probe.get("width"), height=probe.get("height"),
+                        duration_frames=probe.get("duration_frames"),
+                        size=os.path.getsize(dst),
+                        director_node_id=str(node_id) if node_id is not None else "",
+                    ))
+                except Exception:
+                    log.warning(
+                        "[Records] failed to record merge_latents result", exc_info=True)
+                job["name"] = f"whatdreamscost/{name}"
+                job["file"] = file_info
+                job["state"] = "done"
+            except Exception as e:
+                traceback.print_exc()
+                job["state"] = "error"
+                job["error"] = str(e)
+            finally:
+                job["finished_at"] = time.time()
+
+        threading.Thread(target=_job_body, name=f"mrd-merge-{job_id}", daemon=True).start()
+        return web.json_response({"success": True, "job_id": job_id, "segments": len(entries)})
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@_routes.get(f"{API_PREFIX}/h3/merge_latents/status")
+async def merge_latents_status_api(request: web.Request) -> web.Response:
+    """无损合并后台任务状态（SPA / 旧导演台轮询）。
+
+    带 job_id 查询指定任务；不带或任务已过期时返回最近一个 running 任务
+    （多 tab / 刷新后仍能接上）。返回 {state: running|done|error, elapsed, ...}。
+    """
+    job_id = str(request.query.get("job_id") or "").strip()
+    with _MERGE_JOBS_LOCK:
+        job = _MERGE_JOBS.get(job_id)
+        if job is None:
+            running = [j for j in _MERGE_JOBS.values() if j.get("state") == "running"]
+            job = running[-1] if running else None
+    if job is None:
+        return web.json_response(
+            {"success": False, "error": "任务不存在或已完成清理"}, status=404)
+    started = float(job.get("started_at") or time.time())
+    out = {k: job.get(k) for k in ("id", "state", "error", "name", "file", "segments")}
+    out["elapsed"] = round(time.time() - started, 1)
+    if job.get("finished_at"):
+        out["took"] = round(float(job["finished_at"]) - started, 1)
+    return web.json_response({"success": True, "job": out})
 
 
 # ── 依赖管理（插件 / LoRA）：业务逻辑在 ext_mgmt.py，路由宿主在此 ──
@@ -1261,10 +1518,12 @@ async def ext_restart_api(request: web.Request) -> web.Response:
 
 @_routes.post(f"{API_PREFIX}/ext/pip_install")
 async def ext_pip_install_api(request: web.Request) -> web.Response:
-    """pip 安装 python 依赖（默认 llama-cpp-python，可带附加 pip 参数）。"""
+    """pip 安装 python 依赖（可带附加 pip 参数）。"""
     try:
         body = await request.json()
-        pkg = (body.get("pkg") or "llama-cpp-python").strip()
+        pkg = (body.get("pkg") or "").strip()
+        if not pkg:
+            return web.json_response({"success": False, "error": "pkg is required"}, status=400)
         args = body.get("args") or ""
         from . import ext_mgmt as _ext
         res = await asyncio.to_thread(_ext.pip_install_package, pkg, str(args))

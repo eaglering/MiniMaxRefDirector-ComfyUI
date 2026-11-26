@@ -170,6 +170,7 @@ export const state = {
 ,
 
   updateUIFromSelection() {
+    if (this._updateMultiBars) this._updateMultiBars();
     if (this.selectedSegmentIds && this.isMultiSelectActive()) {
       if (this.promptWrapper) this.promptWrapper.style.display = "block";
       if (this.promptInput) {
@@ -480,5 +481,235 @@ export const state = {
     }
     this.commitChanges(true);
     this.render();
-  }
+  },
+
+  // ================= 多选模式（checkbox 式不连续多选） =================
+  // 进入/退出由右键菜单「多选」触发；勾选直接读写 selectedSegmentIds
+  //（含 _v/_a 音频兄弟 id），从而复用既有的多选删除 / Mark Selection 逻辑。
+
+  enterMultiSelectMode() {
+    this._multiMode = true;
+    this.selectedSegmentIds = [];
+    this.updateUIFromSelection();
+    this.render();
+  },
+
+  exitMultiSelectMode() {
+    this._multiMode = false;
+    this.selectedSegmentIds = [];
+    this.updateUIFromSelection();
+    this.render();
+  },
+
+  // 勾选/取消一个段（自动带音频兄弟段）
+  toggleCheckedSegment(segId) {
+    if (!segId) return;
+    const ids = this.selectedSegmentIds;
+    const sibId = segId.endsWith("_v") ? segId.slice(0, -2) + "_a"
+      : (segId.endsWith("_a") ? segId.slice(0, -2) + "_v" : null);
+    if (ids.includes(segId)) {
+      this.selectedSegmentIds = ids.filter(id => id !== segId && id !== sibId);
+    } else {
+      ids.push(segId);
+      if (sibId && !ids.includes(sibId)) ids.push(sibId);
+    }
+    this.updateUIFromSelection();
+    this.render();
+  },
+
+  // 全选：勾选主轨全部段（含视频段音频兄弟），并把跨度写入全局参数
+  selectAllSegments() {
+    if (!this._multiMode) return;
+    const ids = [];
+    for (const seg of this.timeline.segments) {
+      ids.push(seg.id);
+      if (seg.id.endsWith("_v")) {
+        const sibId = seg.id.slice(0, -2) + "_a";
+        if (this.timeline.audioSegments.some(s => s.id === sibId)) ids.push(sibId);
+      }
+    }
+    this.selectedSegmentIds = ids;
+    // markCurrentSelection：选区跨度（min start → max end）写入秒/帧两套全局 widget
+    this.markCurrentSelection();
+    this.updateUIFromSelection();
+    this.render();
+  },
+
+  // 全不选：清空勾选，全局参数改用单个选中段的边界
+  deselectAllSegments() {
+    if (!this._multiMode) return;
+    // 先取当前单选段（清空后 selectedIndex 会被重置）
+    let seg = null;
+    if (this.selectedIndex >= 0) {
+      seg = this.selectionType === "audio"
+        ? this.timeline.audioSegments[this.selectedIndex]
+        : this.timeline.segments[this.selectedIndex];
+    }
+    this.selectedSegmentIds = [];
+    if (seg) this.markSegment(seg);
+    this.updateUIFromSelection();
+    this.render();
+  },
+
+  // 批量删除勾选段（二次确认；>1 段走 deleteSelectedSegment 多选分支，
+  // 仅勾选 1 段时直接按 id 删除（含音频兄弟级联），避免 selectedIndex 未定位导致无效）
+  deleteCheckedSegments() {
+    const baseIds = new Set(this.selectedSegmentIds.map(id => String(id).replace(/_(v|a)$/, "")));
+    const n = baseIds.size;
+    if (!n) return;
+    if (!window.confirm(t("Delete {n} selected segment(s)?", { n }))) return;
+    if (!this.isMultiSelectActive()) {
+      const id = this.selectedSegmentIds[0];
+      const isAud = id.endsWith("_a");
+      const sibId = id.endsWith("_v") ? id.slice(0, -2) + "_a"
+        : (id.endsWith("_a") ? id.slice(0, -2) + "_v" : null);
+      const arr = isAud ? this.timeline.audioSegments : this.timeline.segments;
+      const idx = arr.findIndex(s => s.id === id);
+      if (idx !== -1) arr.splice(idx, 1);
+      if (sibId) {
+        const sibArr = isAud ? this.timeline.segments : this.timeline.audioSegments;
+        const sIdx = sibArr.findIndex(s => s.id === sibId);
+        if (sIdx !== -1) sibArr.splice(sIdx, 1);
+      }
+      this.selectedSegmentIds = [];
+      this.updateUIFromSelection();
+      this.commitChanges();
+      this.render();
+      return;
+    }
+    this.deleteSelectedSegment();
+  },
+
+  // 命中检测：段左下角 checkbox 小方块
+  _hitSegmentCheckbox(x, y) {
+    const CB = 13, M = 4;
+    const logicalWidth = this.canvas.offsetWidth || 1;
+    const totalFrames = this.getVisualDurationFrames();
+    const toPx = (f) => (f / totalFrames) * logicalWidth;
+    const hit = (seg, yBottom) => {
+      const x1 = toPx(seg.start) + M;
+      const y1 = yBottom - CB - M;
+      return x >= x1 && x <= x1 + CB && y >= y1 && y <= y1 + CB;
+    };
+    const imgBottom = RULER_HEIGHT + this.blockHeight;
+    if (y >= RULER_HEIGHT && y <= imgBottom) {
+      for (const seg of this.timeline.segments) if (hit(seg, imgBottom)) return seg.id;
+    }
+    if ((this.audioTrackHeight || 0) > 0) {
+      const audBottom = imgBottom + this.audioTrackHeight;
+      if (y > imgBottom && y <= audBottom) {
+        for (const seg of this.timeline.audioSegments) if (hit(seg, audBottom)) return seg.id;
+      }
+    }
+    return null;
+  },
+
+  // canvas 绘制各段左下角 checkbox（render() 末段调用）
+  _drawSegmentCheckboxes(ctx, width, totalFrames) {
+    const CB = 13, M = 4;
+    const toPx = (f) => (f / totalFrames) * width;
+    const draw = (seg, yBottom) => {
+      const x1 = toPx(seg.start) + M;
+      const y1 = yBottom - CB - M;
+      if (x1 + CB < 0 || x1 > width) return;
+      const on = this.selectedSegmentIds.includes(seg.id);
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x1, y1, CB, CB, 3);
+      ctx.fillStyle = on ? "#6c5ce7" : "rgba(20,22,30,0.85)";
+      ctx.fill();
+      ctx.strokeStyle = on ? "#a78bfa" : "#666";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      if (on) {
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(x1 + 3, y1 + CB / 2);
+        ctx.lineTo(x1 + CB / 2 - 0.5, y1 + CB - 3.5);
+        ctx.lineTo(x1 + CB - 3, y1 + 3);
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+    const imgBottom = RULER_HEIGHT + this.blockHeight;
+    for (const seg of this.timeline.segments) draw(seg, imgBottom);
+    if ((this.audioTrackHeight || 0) > 0) {
+      const audBottom = imgBottom + this.audioTrackHeight;
+      for (const seg of this.timeline.audioSegments) draw(seg, audBottom);
+    }
+  },
+
+  // 顶部/底部覆盖条（dom.js 创建 timelineWrap 后调用 _buildMultiBars）
+  _buildMultiBars() {
+    const mkBar = (pos) => {
+      const bar = document.createElement("div");
+      bar.style.position = "absolute";
+      bar.style.left = "8px";
+      bar.style.right = "8px";
+      bar.style[pos] = "6px";
+      bar.style.display = "none";
+      bar.style.alignItems = "center";
+      bar.style.gap = "8px";
+      bar.style.padding = "4px 10px";
+      bar.style.background = "rgba(20,22,30,0.92)";
+      bar.style.border = "1px solid #333";
+      bar.style.borderRadius = "6px";
+      bar.style.zIndex = "5";
+      bar.style.fontSize = "11px";
+      bar.style.color = "#ddd";
+      bar.style.boxSizing = "border-box";
+      bar.style.pointerEvents = "auto";
+      return bar;
+    };
+    const mkBtn = (label, onClick, color) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.background = "#2a2f3d";
+      b.style.color = color || "#ddd";
+      b.style.border = "1px solid #3a4152";
+      b.style.borderRadius = "4px";
+      b.style.padding = "3px 10px";
+      b.style.fontSize = "11px";
+      b.style.cursor = "pointer";
+      b.onclick = onClick;
+      return b;
+    };
+    // 顶部条：计数 + 右上角退出图标按钮
+    this.multiTopbar = mkBar("top");
+    this.multiTopbar.style.justifyContent = "space-between";
+    this._multiCountEl = document.createElement("span");
+    const exitBtn = document.createElement("button");
+    exitBtn.textContent = "✕";
+    exitBtn.title = t("Exit Multi-Select");
+    exitBtn.style.background = "transparent";
+    exitBtn.style.border = "none";
+    exitBtn.style.color = "#aaa";
+    exitBtn.style.fontSize = "13px";
+    exitBtn.style.cursor = "pointer";
+    exitBtn.style.padding = "0 2px";
+    exitBtn.onclick = () => this.exitMultiSelectMode();
+    this.multiTopbar.appendChild(this._multiCountEl);
+    this.multiTopbar.appendChild(exitBtn);
+    // 底部条：全选 / 全不选 / 删除
+    this.multiBottombar = mkBar("bottom");
+    this.multiBottombar.style.justifyContent = "flex-start";
+    this.multiBottombar.appendChild(mkBtn(t("Select All"), () => this.selectAllSegments(), "#a78bfa"));
+    this.multiBottombar.appendChild(mkBtn(t("Deselect All"), () => this.deselectAllSegments()));
+    this.multiBottombar.appendChild(mkBtn(t("Delete"), () => this.deleteCheckedSegments(), "#ff6b6b"));
+    this.timelineWrap.appendChild(this.multiTopbar);
+    this.timelineWrap.appendChild(this.multiBottombar);
+  },
+
+  // 依据 _multiMode / 勾选数刷新覆盖条（updateUIFromSelection 内自动调用）
+  _updateMultiBars() {
+    if (!this.multiTopbar || !this._multiCountEl) return;
+    const on = !!this._multiMode;
+    this.multiTopbar.style.display = on ? "flex" : "none";
+    this.multiBottombar.style.display = on ? "flex" : "none";
+    if (!on) return;
+    const total = this.timeline.segments.length;
+    const sel = new Set(this.selectedSegmentIds.map(id => String(id).replace(/_(v|a)$/, ""))).size;
+    this._multiCountEl.textContent = t("Selected {n}/{m} segments", { n: sel, m: total });
+  },
 };
