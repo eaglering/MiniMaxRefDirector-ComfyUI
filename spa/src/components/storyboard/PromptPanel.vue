@@ -11,11 +11,26 @@ import { addSkillDict, addSkillCategory, fetchSkillNotes } from "../../api/clien
 import { framesToSeconds } from "../../utils/media.js";
 import { REF_MENTION_TYPES, mergeSegmentSubjects } from "../../constants/subject.js";
 import PromptEditor from "../common/PromptEditor.vue";
+import PromptEnhanceDialog from "../subjects/PromptEnhanceDialog.vue";
 
 const props = defineProps({
   segment: { type: Object, required: true },
 });
 const ws = useWorkspace();
+
+// 提示词增强（复用主体卡片弹窗组件）：带入本镜用户提示词，结果一键写回
+const enhanceDlgRef = ref(null);
+function openEnhance() {
+  if (!props.segment.prompt?.trim()) {
+    ElMessage.warning("请先输入用户提示词");
+    return;
+  }
+  enhanceDlgRef.value?.open();
+}
+function applyEnhanced(text) {
+  props.segment.prompt = text;
+  ws.markDirty();
+}
 
 // 分栏尺寸记忆（左右分栏 / 左栏内部纵向，拖拽后写 localStorage）
 const hSplit = useSplitterMemory("mrd-prompt-split-h", [46, 54]);
@@ -56,7 +71,7 @@ function toggleSkill(group, key) {
 // ---- 新增技能弹窗（按类别注入方式 render_mode 动态字段） ----
 // 规则与后端 lib/skill_db.py _RENDER_MODE_RULES 对齐，新增类别无需改前端：
 //   term 术语：中文名+英文写法（运镜 / 景别 / 镜头结构）
-//   example 示例：名称+示例数组，每镜挑一句（微表情）
+//   example 示例：名称+示例数组，每镜挑一句
 //   descriptive 描述：名称+描述/短语（人物主体 / 打斗 / 特效）
 //   block 片段：名称+整段内容（风格 / 效果预置）
 const RENDER_MODE_RULES = {
@@ -292,6 +307,13 @@ async function generateH3(lang) {
               </div>
               <el-button
                   size="small"
+                  type="success"
+                  plain
+                  title="选择增强技能优化本镜提示词"
+                  @click="openEnhance"
+                >提示词增强</el-button>
+              <el-button
+                  size="small"
                   type="primary"
                   :loading="translating === 'zh'"
                   :disabled="!!translating && translating !== 'zh'"
@@ -416,6 +438,13 @@ async function generateH3(lang) {
       <el-button type="primary" :loading="addDialog.saving" @click="submitAddSkill">保存到词典</el-button>
     </template>
   </el-dialog>
+
+  <PromptEnhanceDialog
+    ref="enhanceDlgRef"
+    :initial-description="segment.prompt"
+    title="提示词增强 · 分镜提示词"
+    @apply="applyEnhanced"
+  />
 </template>
 
 <style scoped>

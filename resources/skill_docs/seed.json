@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "内置技能文档初始化清单。仅首次建库（install/skill_docs.seeded 不存在）时导入；用户改库不会被覆盖。file 相对本目录。",
+  "note": "内置技能文档初始化清单。仅首次建库时导入（.lock 存在则跳过）；用户改库不会被覆盖。file 相对本目录（resources/skill_docs/）。",
   "docs": [
     {
       "key": "krea2-four-view",

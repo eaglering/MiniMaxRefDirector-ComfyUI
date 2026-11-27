@@ -690,12 +690,38 @@ def status(cdp_endpoint: str = "") -> dict:
 # ---------------- 浏览器探测与一键启动（设置面板「启动浏览器」按钮） ----------------
 # 目标：用户在 SPA 设置里选好浏览器、点一下按钮，后端即以调试参数拉起浏览器并
 # 自动打开当前桥接站点网页，全程无需手动敲命令行。不限于 Chrome（Edge / Brave /
-# Chromium / 自定义路径均可），用户目录固定放在项目 userdata/browser 下（随项目
-# 备份迁移，登录态持久保留）。
+# Chromium / 自定义路径均可），用户目录固定放在项目 resources/userdata/browser 下
+# （随项目备份迁移，登录态持久保留）。
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _resolve_browser_profile_dir() -> str:
+    """浏览器独立用户目录（Chrome/Edge 136+ 禁止默认 profile 开调试端口）。
+
+    固定位置 resources/userdata/browser；历史版本存放在项目根 userdata/browser，
+    检测到旧目录且新目录不存在时整体搬移一次（同盘 rename，登录态无损），
+    搬移失败则继续沿用旧路径（仅告警，不影响启动）。
+    """
+    new_dir = os.path.join(_PROJECT_ROOT, "resources", "userdata", "browser")
+    old_dir = os.path.join(_PROJECT_ROOT, "userdata", "browser")
+    try:
+        if not os.path.exists(new_dir) and os.path.isdir(old_dir):
+            os.makedirs(os.path.dirname(new_dir), exist_ok=True)
+            os.replace(old_dir, new_dir)
+            logging.getLogger(__name__).info(
+                "[webchat] browser profile 已迁移 userdata/browser -> resources/userdata/browser")
+        elif not os.path.exists(new_dir):
+            os.makedirs(new_dir, exist_ok=True)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "[webchat] browser profile 迁移失败，沿用旧目录 %s", old_dir, exc_info=True)
+        return old_dir
+    return new_dir
+
+
 # 独立用户目录：Chrome/Edge 136+ 禁止默认 profile 开调试端口，必须用独立目录。
-BROWSER_PROFILE_DIR = os.path.join(_PROJECT_ROOT, "userdata", "browser")
+BROWSER_PROFILE_DIR = _resolve_browser_profile_dir()
 
 _BROWSER_DEFINITIONS: list[tuple[str, str, list[str]]] = [
     ("chrome", "Chrome", [
@@ -773,7 +799,7 @@ def launch_browser(
     cdp_endpoint: str = "",
     timeout_s: float = 40.0,
 ) -> dict:
-    """以调试参数启动浏览器（独立用户目录 = 项目 userdata/browser）。
+    """以调试参数启动浏览器（独立用户目录 = 项目 resources/userdata/browser）。
 
     - 目标端口已有 CDP：幂等返回已连接（按钮可重复点击，不会重复拉起）；
     - 端口被其它程序占用：自动向后寻找空闲端口，返回实际 endpoint；

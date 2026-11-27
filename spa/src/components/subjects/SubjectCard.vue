@@ -11,6 +11,7 @@ import {
 import { uploadImage, uploadAudio, uploadVideo, viewUrl } from "../../api/client.js";
 import PromptEditor from "../common/PromptEditor.vue";
 import SubjectPromptDialog from "./SubjectPromptDialog.vue";
+import PromptEnhanceDialog from "./PromptEnhanceDialog.vue";
 import { el } from "element-plus/es/locale/index.mjs";
 import { Picture, VideoCameraFilled, Microphone } from "@element-plus/icons-vue";
 
@@ -350,6 +351,12 @@ function applyPromptToDescription(text) {
   props.subject.description = text;
   changed();
 }
+
+// 「提示词增强」弹窗（独立新功能，与上方「生成提示词」互不影响；四类型均开放）
+const enhanceDialogRef = ref(null);
+function openEnhanceDialog() {
+  enhanceDialogRef.value?.open();
+}
 </script>
 
 <template>
@@ -482,6 +489,14 @@ function applyPromptToDescription(text) {
             title="选择技能文档生成提示词"
             @click="openPromptDialog"
           >生成提示词</el-button>
+          <el-button
+            v-if="canRemove"
+            size="small"
+            type="success"
+            plain
+            title="选择增强技能优化描述（md 指令 + 脚本后处理）"
+            @click="openEnhanceDialog"
+          >提示词增强</el-button>
         </div>
       </div>
     </div>
@@ -566,6 +581,7 @@ function applyPromptToDescription(text) {
       </div>
     </el-dialog>
     <SubjectPromptDialog ref="promptDialogRef" :subject="subject" @apply="applyPromptToDescription" />
+    <PromptEnhanceDialog ref="enhanceDialogRef" :subject="subject" @apply="applyPromptToDescription" />
   </div>
 </template>
 

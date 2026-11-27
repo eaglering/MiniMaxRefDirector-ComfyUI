@@ -1,0 +1,48 @@
+{
+  "note": "镜头技能词典种子数据（lib/skill_db.py 首次创建 install/skills.db 时读取本文件写入数据库并写 .lock 标记；之后一律以数据库为准，lock 存在则不再重复初始化）。类别只声明注入方式 render_mode：term=中文名直写提示词+name_en 英文对照；example=每镜挑一句示例自然融入。字段精简原则见各 skills 条目。",
+  "categories": [
+    {
+      "name": "运镜",
+      "render_mode": "term",
+      "description": "运镜方式词条（中文名直写提示词，英文阶段按英文对照还原）。分镜 / H3 提示词中的运镜描写用自然语言即可，此处词条供导演台按镜头勾选。",
+      "skills": [
+        { "key": "push_in", "name": "推近", "name_en": "Push-in / Dolly-in", "desc": "机位向主体或兴趣点前移，画面逐渐收紧，增强张力或亲密感。" },
+        { "key": "pull_back", "name": "拉远", "name_en": "Pull-back / Dolly-out", "desc": "机位自主体后退，视野逐渐张开，交代环境、比例与情境。" },
+        { "key": "push_pull", "name": "推拉组合", "name_en": "Push + Pull", "desc": "同一镜头内先推后拉（或反之）的连贯运动，形成推拉相间的节奏。" },
+        { "key": "orbit", "name": "环绕", "name_en": "Orbit", "desc": "机位沿人物作弧线环绕（半圈或整圈），不断变换观察角度。" },
+        { "key": "tracking", "name": "跟拍", "name_en": "Tracking / Handheld", "desc": "机位与人物平行或跟随其后移动，同步其行进（可带轻微手持的真实感）。" },
+        { "key": "aerial", "name": "航拍", "name_en": "Aerial / Drone", "desc": "俯拍、航拍或无人机镜头，用于建立场景、飞掠而过或向兴趣点下降。" },
+        { "key": "crane", "name": "升降", "name_en": "Crane / Tilt", "desc": "垂直方向的镜头运动：升降臂起落或俯仰扫动，用以重新构图画面。" },
+        { "key": "pan", "name": "横摇", "name_en": "Pan", "desc": "机位不动，镜头水平扫动，掠过场景或在主体之间移动。" },
+        { "key": "close_up", "name": "特写", "name_en": "Close-up / Macro", "desc": "大特写或微距构图，将面孔、物体、质感或细节充满画面。" }
+      ]
+    },
+    {
+      "name": "景别",
+      "render_mode": "term",
+      "description": "画面取景范围档位（大远景→特写），同一镜头只用一种；提示词中直接写入中文名称。",
+      "skills": [
+        { "key": "extreme_wide", "name": "大远景", "name_en": "extreme wide shot" },
+        { "key": "wide", "name": "远景", "name_en": "wide shot" },
+        { "key": "full", "name": "全身", "name_en": "full shot" },
+        { "key": "medium_long", "name": "中远景", "name_en": "medium long shot" },
+        { "key": "cowboy", "name": "牛仔镜头", "name_en": "cowboy shot" },
+        { "key": "medium", "name": "中景", "name_en": "medium shot" },
+        { "key": "medium_close_up", "name": "中近景", "name_en": "medium close-up" },
+        { "key": "close_up_shot", "name": "近景", "name_en": "close-up" },
+        { "key": "extreme_close_up", "name": "特写", "name_en": "extreme close-up" }
+      ]
+    },
+    {
+      "name": "镜头结构",
+      "render_mode": "term",
+      "description": "构图与镜头关系惯例：过肩/双人/插入/定场；提示词中直接写入中文名称。",
+      "skills": [
+        { "key": "over_the_shoulder", "name": "过肩镜头", "name_en": "over-the-shoulder shot" },
+        { "key": "two_shot", "name": "双人镜头", "name_en": "two-shot" },
+        { "key": "insert", "name": "插入镜头", "name_en": "insert shot" },
+        { "key": "establishing", "name": "定场镜头", "name_en": "establishing shot" }
+      ]
+    }
+  ]
+}

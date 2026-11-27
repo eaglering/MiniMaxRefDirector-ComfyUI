@@ -95,7 +95,7 @@ def image_analysis(gguf_path: str, mmproj_path: str, prompt: str,
 
 
 # ── H3 skills 模板 ──────────────────────────────────────────────
-# 模板统一放在 resources/skills/h3-prompt-builder/（历史位于 prompt/，已整合）：
+# 模板统一放在 resources/skill_flows/h3-prompt-builder/（历史位于 prompt/，已整合）：
 #   prompt.md                       主模板（骨架 + 规则 + 占位符）
 #   h3-writing-guide.md             四字段写作指南（注入 {{skills_guide}}，中英通用；
 #                                   输出语言由 lang_note 控制，不再分中英两份）
@@ -103,7 +103,7 @@ def image_analysis(gguf_path: str, mmproj_path: str, prompt: str,
 #   minimaxh3_official_ref2v_prompt_writing.txt  官方原版六段式指南（存档，运行时不读取）
 _H3_SKILLS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "resources", "skills", "h3-prompt-builder",
+    "resources", "skill_flows", "h3-prompt-builder",
 )
 _H3_SKILLS_TEMPLATE_PATH = os.path.join(_H3_SKILLS_DIR, "h3-writing-guide.md")
 # 提示词翻译为英文的 skill 模板（非英文语言生成后调用）
@@ -129,9 +129,9 @@ def _load_h3_skills_template(lang: str = "en") -> str:
 
 
 def _build_h3_prompt(skills: str, prompt: str, has_image: bool, duration_seconds: float = 0, lang: str = "en", skill_notes: str = "") -> str:
-    """用通用模板（resources/skills/h3-prompt-builder/prompt.md）组装 H3 生成提示词。
+    """用通用模板（resources/skill_flows/h3-prompt-builder/prompt.md）组装 H3 生成提示词。
 
-    - skills：四字段写作指南（resources/skills/h3-prompt-builder/h3-writing-guide.md）
+    - skills：四字段写作指南（resources/skill_flows/h3-prompt-builder/h3-writing-guide.md）
     - skill_notes：分镜技能注入块（lib/skill_notes.py 按 DB 类别 render_mode 渲染；
       服务端与桥接共用同一份）
     - 模板与注入块均不申明触发词写法：camera motion 等触发词由用户写在全局提示词中
@@ -226,7 +226,7 @@ def _load_skill_doc(key: str, fallback_path: str = "") -> str:
     """内置 H3 模板统一读取：DB（技能文档面板，用户可编辑）优先，文件回落。
 
     - key 为 skill_docs.builtin_key（h3-prompt-builder / h3-writing-guide /
-      h3-translate-to-en），DB 无该行或读取失败时回落 resources/skills 文件，
+      h3-translate-to-en），DB 无该行或读取失败时回落 resources/skill_flows 文件，
       保证流水线不断链。
     """
     try:

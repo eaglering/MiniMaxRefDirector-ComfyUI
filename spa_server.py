@@ -7,6 +7,9 @@
 - GET  /spa/skill_docs    技能文档列表（md 提示词模板，按分类过滤）
 - GET  /spa/skill_doc     单篇技能文档全文（id 或内置 key，缺失回落文件库）
 - POST /spa/skill_docs/add|update|delete  技能文档增删改
+- GET  /spa/skill_enhances        提示词增强技能列表（resources/skill_enhances）
+- GET  /spa/skill_enhance/content 单个增强技能 md 全文
+- POST /spa/prompt_enhance        提示词增强（md 注入 + script 链式后处理）
 - POST /spa/skill_notes   技能选择 → skill_notes 渲染（服务端与桥接共用）
 - GET  /spa/llm_files     models/llm 下 GGUF / mmproj 文件列表
 - GET  /spa/records       视频生成记录列表
@@ -51,10 +54,10 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SPA_HTML_PATH = os.path.join(_PROJECT_ROOT, "js", "spa", "index.html")
 
 # --- skill 词库目录（本项目自带，deepseek 分镜导入用）---
-# 优先级：环境变量 MINIMAX_REF_SKILL_LIBRARY > 项目内 resources/skills
+# 优先级：环境变量 MINIMAX_REF_SKILL_LIBRARY > 项目内 resources/skill_flows
 _SKILL_LIBRARY_CANDIDATES = [
     os.environ.get("MINIMAX_REF_SKILL_LIBRARY", ""),
-    os.path.join(_PROJECT_ROOT, "resources", "skills"),
+    os.path.join(_PROJECT_ROOT, "resources", "skill_flows"),
 ]
 _SKILL_LIBRARY_ROOT = next((p for p in _SKILL_LIBRARY_CANDIDATES if p and os.path.isdir(p)), "")
 
@@ -70,7 +73,7 @@ def _resolve_skill_dir(name: str) -> str:
         raise ValueError(f"未知 skill：{name or '(空)'}，可用：{', '.join(_SKILL_NAMES)}")
     if not _SKILL_LIBRARY_ROOT:
         raise ValueError(
-            "skill 词库目录不存在：请确认 custom_nodes/MiniMaxRefDirector-ComfyUI/resources/skills，"
+            "skill 词库目录不存在：请确认 custom_nodes/MiniMaxRefDirector-ComfyUI/resources/skill_flows，"
             "或设置环境变量 MINIMAX_REF_SKILL_LIBRARY 指向词库目录"
         )
     d = os.path.join(_SKILL_LIBRARY_ROOT, name)
@@ -337,7 +340,7 @@ async def spa_skill_docs(request: web.Request) -> web.Response:
 async def spa_skill_doc(request: web.Request) -> web.Response:
     """单篇技能文档全文：?id= 或 ?key=（内置 key，如 storyboard-design）。
 
-    key 在库中不存在时回落 resources/skills/<key>/prompt.md（导入流水线不断链）。
+    key 在库中不存在时回落 resources/skill_flows/<key>/prompt.md（导入流水线不断链）。
     """
     try:
         doc_id = int(request.query.get("id") or 0)
@@ -365,6 +368,217 @@ async def spa_skill_doc_update(request: web.Request) -> web.Response:
 @_routes.post(f"{API_PREFIX}/spa/skill_docs/delete")
 async def spa_skill_doc_delete(request: web.Request) -> web.Response:
     return await _skill_dict_mutation(lambda d: skill_db.delete_doc(d))(request)
+
+
+# ---------------- 提示词增强技能池（resources/skill_enhances，md + script） ----------------
+# 技能由 seed.json 登记（id/name/description/tags/doc/script），文件式管理：
+# 增删技能改清单 + 放文件即可，无需重启。md 技能注入 system 指令；script 技能
+# 在 LLM 生成后按选择顺序链式执行 run(text, ctx) -> str（全部 vlm_mode 生效）。
+
+_SKILL_ENHANCES_DIR = os.path.join(_PROJECT_ROOT, "resources", "skill_enhances")
+_ENHANCE_DOC_MAX = 200_000          # md 全文上限（字符）
+_ENHANCE_SCRIPT_TIMEOUT = 30.0      # 单个脚本执行超时（秒）
+
+
+def _enhance_rel_path(rel: str) -> str | None:
+    """校验 seed.json 里的相对路径（仅允许本目录内、非绝对、无 .. 穿越）。"""
+    rel = str(rel or "").strip().replace("\\", "/")
+    if not rel or os.path.isabs(rel) or ".." in rel.split("/"):
+        return None
+    full = os.path.join(_SKILL_ENHANCES_DIR, *rel.split("/"))
+    if not os.path.realpath(full).startswith(os.path.realpath(_SKILL_ENHANCES_DIR)):
+        return None
+    return full
+
+
+def _skill_enhances_manifest() -> list[dict]:
+    """读取 seed.json 技能清单（校验 doc/script 文件存在，路径穿越条目剔除）。"""
+    path = os.path.join(_SKILL_ENHANCES_DIR, "seed.json")
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except Exception:
+        log.warning("[SPA] skill_enhances seed.json 读取失败", exc_info=True)
+        return []
+    items = data if isinstance(data, list) else (data.get("skills") or [])
+    out: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        sid = str(it.get("id") or "").strip()
+        if not sid:
+            continue
+        doc_full = _enhance_rel_path(it.get("doc")) if it.get("doc") else None
+        script_full = _enhance_rel_path(it.get("script")) if it.get("script") else None
+        out.append({
+            "id": sid,
+            "name": str(it.get("name") or sid),
+            "description": str(it.get("description") or ""),
+            "tags": [str(t).strip() for t in (it.get("tags") or []) if str(t).strip()],
+            "hasDoc": bool(doc_full) and os.path.isfile(doc_full),
+            "hasScript": bool(script_full) and os.path.isfile(script_full),
+            "_doc": doc_full or "",      # 内部字段：doc 全路径（列表路由剥离）
+            "_script": script_full or "",  # 内部字段：script 全路径（列表路由剥离）
+        })
+    return out
+
+
+def _enhance_public(item: dict) -> dict:
+    """剥掉内部路径字段后的技能条目（返回前端）。"""
+    return {k: v for k, v in item.items() if not k.startswith("_")}
+
+
+@_routes.get(f"{API_PREFIX}/spa/skill_enhances")
+async def spa_skill_enhances(request: web.Request) -> web.Response:
+    """提示词增强技能列表（前端本地按名称/描述/标签检索）。"""
+    skills = [_enhance_public(s) for s in _skill_enhances_manifest()]
+    return web.json_response({"success": True, "skills": skills})
+
+
+@_routes.get(f"{API_PREFIX}/spa/skill_enhance/content")
+async def spa_skill_enhance_content(request: web.Request) -> web.Response:
+    """单个增强技能的 md 全文：?id=（超出上限截断并标记 truncated）。"""
+    sid = (request.query.get("id") or "").strip()
+    item = next((s for s in _skill_enhances_manifest() if s["id"] == sid), None)
+    if item is None:
+        return web.json_response({"success": False, "error": f"未知技能 id：{sid or '(空)'}"}, status=404)
+    if not item["hasDoc"]:
+        return web.json_response({"success": False, "error": "该技能没有 md 文档"}, status=400)
+    try:
+        with open(item["_doc"], encoding="utf-8-sig") as f:
+            content = f.read(_ENHANCE_DOC_MAX)
+    except Exception:
+        log.warning("[SPA] skill_enhance 文档读取失败：%s", item["_doc"], exc_info=True)
+        return web.json_response({"success": False, "error": "文档读取失败"}, status=500)
+    return web.json_response({
+        "success": True, "skill": _enhance_public(item), "content": content,
+        "truncated": len(content) >= _ENHANCE_DOC_MAX,
+    })
+
+
+def _load_enhance_script_fn(full_path: str):
+    """importlib 加载脚本技能，返回 run(text, ctx) 函数（每次请求重新加载，支持热改）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        f"mrd_skill_enhance_{abs(hash(full_path))}", full_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"脚本加载失败：{full_path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    fn = getattr(mod, "run", None)
+    if not callable(fn):
+        raise ValueError("脚本缺少 run(text, ctx) 函数")
+    return fn
+
+
+def _run_enhance_scripts(scripts: list[dict], text: str, ctx: dict) -> tuple[str, list[str]]:
+    """按选择顺序链式执行脚本技能；单个超时/异常即中断并抛错（消息透传前端）。"""
+    import concurrent.futures
+
+    applied: list[str] = []
+    for item in scripts:
+        full = _enhance_rel_path(item["_script"])
+        if not full:
+            raise RuntimeError(f"脚本技能「{item['name']}」路径非法")
+        fn = _load_enhance_script_fn(full)
+        call_ctx = {**ctx, "skill_id": item["id"], "skill_name": item["name"]}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(fn, text, call_ctx)
+            try:
+                out = future.result(timeout=_ENHANCE_SCRIPT_TIMEOUT)
+            except concurrent.futures.TimeoutError as exc:
+                raise RuntimeError(
+                    f"脚本技能「{item['name']}」执行超时（>{_ENHANCE_SCRIPT_TIMEOUT:.0f}s）") from exc
+        text = str(out)
+        applied.append(item["id"])
+    return text, applied
+
+
+@_routes.post(f"{API_PREFIX}/spa/prompt_enhance")
+async def spa_prompt_enhance(request: web.Request) -> web.Response:
+    """提示词增强（主体卡片「提示词增强」弹窗）。
+
+    body: {description, skills: [id...], global_prompt?, subject_type?, subject_name?,
+           seed?, llm: {mode, provider?, api_key?, ollama_model?, ollama_base_url?,
+                         gguf_path?, mmproj_path?}}
+    流程：所选 md 技能拼接 system 指令 → lib.prompt.generate_text（api / ollama /
+    llama-server / deepseek / doubao / qianwen 网页桥接全模式）→ 所选 script 技能
+    按顺序链式执行 run(text, ctx)。返回 {success, text, applied_scripts}。
+    """
+    try:
+        data = await request.json()
+        description = str(data.get("description") or "").strip()
+        skill_ids = data.get("skills") if isinstance(data.get("skills"), list) else []
+        if not description:
+            return web.json_response({"success": False, "error": "description is required"}, status=400)
+
+        manifest = {s["id"]: s for s in _skill_enhances_manifest()}
+        doc_parts: list[str] = []
+        scripts: list[dict] = []
+        for sid in skill_ids:
+            sid = str(sid or "").strip()
+            item = manifest.get(sid)
+            if item is None:
+                return web.json_response(
+                    {"success": False, "error": f"未知增强技能 id：{sid}"}, status=400)
+            if item["hasDoc"]:
+                with open(item["_doc"], encoding="utf-8-sig") as f:
+                    content = f.read(_ENHANCE_DOC_MAX)
+                doc_parts.append(f"### 技能：{item['name']}\n{content}")
+            if item["hasScript"]:
+                scripts.append(item)
+
+        # system：所选 md 技能全文拼接（空则不注入，纯描述生成）
+        system = "\n\n---\n\n".join(doc_parts) if doc_parts else ""
+
+        # 用户提示词：原始描述（+ 可选全局提示词附加，与旧「生成提示词」弹窗语义一致）
+        user_prompt = description
+        gp = str(data.get("global_prompt") or "").strip()
+        if gp:
+            user_prompt = f"{description}\n\n【全局提示词（全片约束，生成时请参考）】\n{gp}"
+
+        # LLM 模式映射（与前端 utils/llm.js generateText 一致）
+        llm = data.get("llm") if isinstance(data.get("llm"), dict) else {}
+        mode = str(llm.get("mode") or "llama-server").strip()
+        vlm_mode = mode if mode.endswith("-proxy") else (
+            "api" if mode == "api" else "ollama" if mode == "ollama" else "llama-cpp")
+        options = {
+            "provider": str(llm.get("provider") or "GLM"),
+            "api_key": str(llm.get("api_key") or ""),
+            "ollama_model": str(llm.get("ollama_model") or ""),
+            "ollama_base_url": str(llm.get("ollama_base_url") or ""),
+            "gguf_path": str(llm.get("gguf_path") or ""),
+            "mmproj_path": str(llm.get("mmproj_path") or ""),
+        }
+        seed = int(data.get("seed") or 42)
+
+        def _work() -> tuple[str, list[str]]:
+            from .lib.prompt import generate_text
+
+            text = generate_text(
+                prompt=user_prompt, system=system, seed=seed,
+                vlm_mode=vlm_mode, options=options,
+            )
+            if scripts:
+                ctx = {
+                    "description": description,
+                    "subject_type": str(data.get("subject_type") or ""),
+                    "subject_name": str(data.get("subject_name") or ""),
+                    "mode": mode,
+                }
+                return _run_enhance_scripts(scripts, text, ctx)
+            return text, []
+
+        text, applied = await asyncio.to_thread(_work)
+        return web.json_response({
+            "success": True, "text": str(text or "").strip(), "applied_scripts": applied,
+        })
+    except RuntimeError as e:
+        return web.json_response({"success": False, "error": str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
 @_routes.post(f"{API_PREFIX}/spa/skill_notes")
@@ -556,7 +770,7 @@ async def spa_webchat_launch(request: web.Request) -> web.Response:
     """一键启动调试浏览器并打开桥接站点网页（幂等，可重复点击）。
 
     body: {browser?: chrome|edge|brave|chromium, browser_path?, site?, cdpEndpoint?}
-    用户目录固定为项目 userdata/browser（独立于浏览器默认 profile）。
+    用户目录固定为项目 resources/userdata/browser（独立于浏览器默认 profile）。
     返回 {success, launched, connected, endpoint, profileDir, error?}
     """
     try:

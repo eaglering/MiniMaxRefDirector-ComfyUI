@@ -513,7 +513,7 @@ export async function webchatListBrowsers() {
   return Array.isArray(data.browsers) ? data.browsers : [];
 }
 
-// 一键启动调试浏览器（幂等）：独立用户目录在后端 userdata/browser，
+// 一键启动调试浏览器（幂等）：独立用户目录在后端 resources/userdata/browser，
 // site 传 vlm_mode（deepseek-proxy 等，后端自动归一化）时自动打开对应站点首页。
 export async function webchatLaunch({ browser = "", browserPath = "", site = "", cdpEndpoint = "" } = {}) {
   return postJSON("/spa/webchat/launch", {

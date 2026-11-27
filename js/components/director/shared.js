@@ -357,7 +357,7 @@ function parseInitial(jsonStr) {
 
 
 // --- 镜头技能词典运行时缓存（共享给 transfer.js / settings.js 使用） ---
-// 技能定义一律来自 SQLite 技能词典（/spa/skill_dict，首次由 install/skill_seed.py
+// 技能定义一律来自 SQLite 技能词典（/spa/skill_dict，首次由 resources/skill_words/seed.json
 // 初始化），本文件不内置任何词条。类别完全由数据库驱动（任意类别名 + renderMode），
 // 不做固定类别假设；条目结构 { key, label, title, category? }，
 // title=技能描述（胶囊悬停显示），category=展示分组（取自 groupName）。

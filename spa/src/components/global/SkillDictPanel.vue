@@ -28,7 +28,7 @@ const RENDER_MODE_RULES = {
 const RENDER_MODE_OPTIONS = [
   { value: "descriptive", label: "描述型 · 人物/打斗/特效等，自然融入" },
   { value: "term", label: "术语型 · 中文名 + 英文对照（运镜/景别/构图）" },
-  { value: "example", label: "示例型 · 每镜挑一句示例（微表情）" },
+  { value: "example", label: "示例型 · 每镜挑一句示例" },
   { value: "block", label: "片段型 · 整段内容近似原样（风格/效果）" },
 ];
 const MODE_LABEL = { term: "术语", example: "示例", descriptive: "描述", block: "片段" };

@@ -15,8 +15,8 @@
 
 初始化：
 - 首次连接（install/skills.db.lock 不存在）时写入种子：内置技能类别与词条
-  （install/skill_seed.py）+ 技能文档（install/skill_docs/seed.json，
-  缺失时回落 resources/skills）。
+  （resources/skill_words/seed.json）+ 技能文档（resources/skill_docs/seed.json，
+  文件态内置文档缺失时回落 resources/skill_flows）。
 - .lock 存在即不再播种，数据库是唯一数据源；删库重建请同时删除 .lock。
 - 建表全部 IF NOT EXISTS；旧结构（含 protect_keywords / guide 列、camera 注入方式）
   由 _migrate_legacy_schema() 在连接时自动迁移。
@@ -38,16 +38,74 @@ import threading
 import time
 from pathlib import Path
 
-from ..install.skill_seed import (
-    BUILTIN_CATEGORY_RENDER,
-    RENDER_MODES,
-    build_builtin_categories,
-)
-
 log = logging.getLogger(__name__)
 
 _lock = threading.RLock()
 _conn: sqlite3.Connection | None = None
+
+# 注入方式（render_mode）枚举（原 install/skill_seed.py 定义，随种子 JSON 化保留在代码侧）
+RENDER_MODES = ("term", "example", "descriptive", "block")
+
+
+def _load_seed_json() -> dict:
+    """读取 resources/skill_words/seed.json（内置技能类别与词条的静态定义来源）。"""
+    path = Path(__file__).resolve().parent.parent / "resources" / "skill_words" / "seed.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        log.warning("[SPA] 技能种子加载失败：%s", path, exc_info=True)
+        return {"categories": []}
+    cats = data.get("categories") if isinstance(data, dict) else None
+    return {"categories": cats if isinstance(cats, list) else []}
+
+
+def build_builtin_categories() -> list:
+    """组装内置类别与技能行（种子 JSON → DB 行结构；key 全局唯一校验保留）。
+
+    skills 支持两种写法：数组 [{key, name, ...}] 或对象 {key: {...}}。
+    """
+    def _skill_row(key: str, data: dict) -> dict:
+        return {
+            "key": str(key or ""),
+            "name": data.get("name") or key,
+            "name_en": data.get("name_en") or "",
+            "desc": data.get("desc") or "",
+            "examples": list(data.get("examples") or []),
+            "group_name": data.get("group") or "",
+        }
+
+    cats: list = []
+    for cat in _load_seed_json()["categories"]:
+        if not isinstance(cat, dict) or not str(cat.get("name") or "").strip():
+            continue
+        raw_skills = cat.get("skills")
+        if isinstance(raw_skills, dict):
+            skills = [_skill_row(k, d or {}) for k, d in raw_skills.items()]
+        else:
+            skills = [
+                _skill_row(str((s or {}).get("key") or ""), s or {})
+                for s in (raw_skills or []) if isinstance(s, dict)
+            ]
+        cats.append({
+            "name": str(cat["name"]).strip(),
+            "render_mode": str(cat.get("render_mode") or "descriptive"),
+            "description": cat.get("description") or "",
+            "skills": skills,
+        })
+    # skills.key 全局唯一（跨类别也不得重名，否则后入库的会被 INSERT OR IGNORE 静默吞掉）
+    seen: dict = {}
+    for cat in cats:
+        for s in cat["skills"]:
+            prev = seen.get(s["key"])
+            if prev:
+                raise ValueError(
+                    f"skill seed 内置技能 key 重名：{s['key']}（{prev} / {cat['name']}）")
+            seen[s["key"]] = cat["name"]
+    return cats
+
+
+# 内置类别 → render_mode（由种子 JSON 派生；导入时一次性加载，重复 key 直接报错）
+BUILTIN_CATEGORY_RENDER = {c["name"]: c["render_mode"] for c in build_builtin_categories()}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS skill_categories (
@@ -90,7 +148,7 @@ CREATE INDEX IF NOT EXISTS idx_skill_docs_category ON skill_docs(category);
 # 技能文档二级分类（固定枚举：不做自由增删，避免「分类标识」歧义）
 DOC_CATEGORIES = ("主体设计", "音频设计", "图片设计", "分镜设计")
 
-# resources/skills 文件态文档 → (分类, 标题[, 相对 resources/skills 的文件路径])，
+# resources/skill_flows 文件态文档 → (分类, 标题[, 相对 resources/skill_flows 的文件路径])，
 # 作为 DB 缺失时的播种与运行期兜底；未给路径时按 <key>/prompt.md 解析。
 _RESOURCE_DOCS = {
     "character-design": ("分镜设计", "主体设计指南（角色 / 场景）"),
@@ -114,10 +172,10 @@ _DOC_CATEGORY_MIGRATIONS = {
 
 
 def _resource_doc_path(key: str) -> Path:
-    """内置 key 对应的文件态正文路径（resources/skills 相对路径）。"""
+    """内置 key 对应的文件态正文路径（resources/skill_flows 相对路径）。"""
     meta = _RESOURCE_DOCS.get(key) or ()
     rel = meta[2] if len(meta) > 2 else f"{key}/prompt.md"
-    return Path(__file__).resolve().parent.parent / "resources" / "skills" / rel
+    return Path(__file__).resolve().parent.parent / "resources" / "skill_flows" / rel
 
 # key 只允许小写字母数字下划线（内置 key 皆如此）；自动生成时做同样约束
 _KEY_RE = re.compile(r"^[a-z0-9_]{1,64}$")
@@ -158,9 +216,9 @@ def _parse_examples(raw: str | None) -> list[str]:
 
 
 def _seed_skill_docs() -> None:
-    """技能文档首次播种：install/skill_docs/seed.json 清单（正文相对清单目录）。
+    """技能文档首次播种：resources/skill_docs/seed.json 清单（正文相对清单目录）。
 
-    种子缺失或读取失败只告警，不影响启动；resources/skills 文件态内置文档由
+    种子缺失或读取失败只告警，不影响启动；resources/skill_flows 文件态内置文档由
     ``_sync_builtin_docs`` 负责（每次进程连接后同步一次）。INSERT OR IGNORE，
     用户已改过的文档不会被覆盖。
     """
@@ -171,7 +229,7 @@ def _seed_skill_docs() -> None:
         return
     root = Path(__file__).resolve().parent.parent
     now = int(time.time() * 1000)
-    seed_dir = root / "install" / "skill_docs"
+    seed_dir = root / "resources" / "skill_docs"
     manifest = seed_dir / "seed.json"
     added = 0
     if manifest.is_file():
@@ -208,10 +266,12 @@ def _seed_skill_docs() -> None:
 
 # 内置文档每进程只同步一次（避免每次 DB 访问都读 8 份文件）
 _builtin_docs_synced = False
+# 内置词条收敛每进程只执行一次
+_builtin_pruned = False
 
 
 def _sync_builtin_docs() -> None:
-    """resources/skills 内置文档 ↔ DB 同步（每次进程连接后执行一次）。
+    """resources/skill_flows 内置文档 ↔ DB 同步（每次进程连接后执行一次）。
 
     - DB 缺行（新装 / 新增内置文档 / 用户在面板删过）→ 从文件补种；
     - 行存在且从未在面板编辑过（updated_at == created_at）→ 内容随文件升级，
@@ -273,6 +333,36 @@ def _sync_builtin_docs() -> None:
         log.info("[SPA] builtin skill docs synced (%d updated)", changed)
 
 
+def _prune_builtin_removed(conn: sqlite3.Connection) -> None:
+    """内置词条/类别随种子收敛（每次进程连接后执行一次）：
+
+    - 种子已不含 key 的 builtin=1 词条 → 删除（用户自建 builtin=0 词条不受影响）；
+    - 种子已不含且删除词条后已空的类别 → 删除（仍留有用户词条的类别保留）。
+    """
+    global _builtin_pruned
+    if _builtin_pruned:
+        return
+    seed_keys = {
+        s["key"] for c in build_builtin_categories() for s in c.get("skills") or []
+    }
+    if seed_keys:
+        placeholders = ",".join("?" * len(seed_keys))
+        conn.execute(
+            f"DELETE FROM skills WHERE builtin=1 AND key NOT IN ({placeholders})",
+            tuple(seed_keys),
+        )
+    seed_cats = {c["name"] for c in build_builtin_categories()}
+    for row in conn.execute("SELECT id, name FROM skill_categories").fetchall():
+        if row["name"] in seed_cats:
+            continue
+        left = conn.execute(
+            "SELECT 1 FROM skills WHERE category_id=? LIMIT 1", (int(row["id"]),)
+        ).fetchone()
+        if left is None:
+            conn.execute("DELETE FROM skill_categories WHERE id=?", (int(row["id"]),))
+    _builtin_pruned = True
+
+
 def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
     """旧结构一次性迁移（仅当检测到 legacy 列时执行，避免覆盖用户后续编辑）：
 
@@ -324,6 +414,7 @@ def _connect() -> sqlite3.Connection:
             _conn.execute("PRAGMA foreign_keys=ON")
             _conn.executescript(_SCHEMA)
             _migrate_legacy_schema(_conn)
+            _prune_builtin_removed(_conn)
             _sync_builtin_docs()
             # .lock 存在 → 已初始化过，不再跑种子（避免覆盖用户的库内编辑）。
             # 技能词条与技能文档共用这一个标记：删库重建时一并联动的只有它。
@@ -345,7 +436,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def _seed_builtin() -> None:
-    """install/skill_seed.py 的内置类别 + 技能写入（key 唯一，存在即跳过）。"""
+    """resources/skill_words/seed.json 的内置类别 + 技能写入（key 唯一，存在即跳过）。"""
     conn = _connect()
     for sort, cat in enumerate(build_builtin_categories()):
         cur = conn.execute("SELECT id FROM skill_categories WHERE name=?", (cat["name"],))
@@ -740,7 +831,7 @@ def list_docs(category: str = "") -> dict:
 def get_doc(doc_id: int = 0, key: str = "") -> dict:
     """按 id 或内置 key 取文档全文。
 
-    key 在 DB 中不存在时回落 resources/skills/<key>/prompt.md（保证导入流水线
+    key 在 DB 中不存在时回落 resources/skill_flows/<key>/prompt.md（保证导入流水线
     即使用户删了文档也不断链）。
     """
     doc_id = int(doc_id or 0)

@@ -132,6 +132,17 @@ export function fetchSkillDoc({ id = 0, key = "" } = {}) {
 export function addSkillDoc(payload) {
   return postJSON("/spa/skill_docs/add", payload);
 }
+// ===== 提示词增强（resources/skill_enhances，md + script 技能池） =====
+export function fetchSkillEnhances() {
+  return getJSON("/spa/skill_enhances");
+}
+export function fetchSkillEnhanceContent(id) {
+  return getJSON(`/spa/skill_enhance/content?id=${encodeURIComponent(id)}`);
+}
+// skills: [id]（按选择顺序）；llm: workspace 的 llm 配置（mode/provider/api_key/...）
+export function enhancePrompt(payload) {
+  return postJSON("/spa/prompt_enhance", payload);
+}
 export function updateSkillDoc(payload) {
   return postJSON("/spa/skill_docs/update", payload);
 }

@@ -14,7 +14,7 @@
 // 是否删除本次新建会话改为「清理会话」独立操作（三站均支持，默认不自动删除）。
 // 全部经后端 Playwright CDP 桥接（deepseek / doubao / qianwen），不使用 llama-cpp。
 //
-// skills 词库为本项目 resources/skills（后端 /spa/skill_library）。
+// skills 词库为本项目 resources/skill_flows（后端 /spa/skill_library）。
 
 import { fetchSkillDoc, fetchSkillLibrary } from "../api/client.js";
 import {
@@ -48,7 +48,7 @@ function checkCancelled(token) {
 }
 
 // 技能文档读取：DB（全局参数 → 技能文档，可编辑）优先，缺失回落文件库
-// （resources/skills）。内置 key 与 resources/skills 目录同名（story-design 等）。
+// （resources/skill_flows）。内置 key 与 resources/skill_flows 目录同名（story-design 等）。
 async function loadSkill(name) {
   try {
     const res = await fetchSkillDoc({ key: name });
@@ -56,7 +56,7 @@ async function loadSkill(name) {
   } catch { /* DB 未就绪或文档不存在 → 回落文件库 */ }
   const res = await fetchSkillLibrary(name);
   if (!res.success || !res.prompt) {
-    throw new Error(res.error || `skill 词库缺失：${name}（技能文档与 resources/skills/${name}/prompt.md 均不存在）`);
+    throw new Error(res.error || `skill 词库缺失：${name}（技能文档与 resources/skill_flows/${name}/prompt.md 均不存在）`);
   }
   return res.prompt;
 }
@@ -305,7 +305,7 @@ export async function runOutlineStep(state, { token = null, onLog = () => {} } =
     input:
       "（提取指令）请通读本会话上方的全部对话内容，按你的任务要求提取用户想拍的故事。" +
       "以用户表达的内容为准；对话中未被用户采纳的方案不要写入。" +
-      "特别注意：对话中的台词、字幕、音效/环境音、运镜、微表情等制作要素必须逐场原样保留，" +
+      "特别注意：对话中的台词、字幕、音效/环境音、运镜等制作要素必须逐场原样保留，" +
       "台词保留原句全文与说话人，一句都不许丢；无台词的场次显式写「无台词」。",
   });
   if (!state.sessionId) {
@@ -362,7 +362,7 @@ export async function runStoryboardStep(state, { token = null, onLog = () => {} 
     const sbPrompt = fillTemplate(sbTpl, {
       input:
         "（分镜指令）本会话上方已完整发送故事全文。请通读全文，依据故事全文做分镜设计，" +
-        "不要遗漏主线与关键情节；全文中的台词、字幕、音效/环境音、运镜、微表情等制作要素" +
+        "不要遗漏主线与关键情节；全文中的台词、字幕、音效/环境音、运镜等制作要素" +
         "必须逐场原样保留，台词保留原句全文与说话人，一句都不许丢；无台词的场次显式写「无台词」。",
       timeline_digest: state.timelineDigest,
       frame_rate: state.frameRate,

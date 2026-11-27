@@ -154,7 +154,7 @@ MiniMaxRefDirector-ComfyUI/
   - 前端源码在 `spa/`（Vite 构建，产物 `js/spa/index.html` 已入仓），支持 dev server 热更新联调。
 - **网页会话 LLM 代理（DeepSeek / 豆包 / 千问）**：新增 CDP 网页会话通道（`lib/webchat_cdp.py` + `webchat_cdp_driver/`），通过 Playwright 附加用户真实 Chrome（`--remote-debugging-port=9222`）完成网页会话自动化，无需浏览器扩展，也无需 `playwright install` 下载浏览器；LLM 设置面板可一键启动浏览器，未安装 playwright 时其余 LLM 模式不受影响。
 - **DeepSeek 分镜导入**：SPA 分镜页新增导入对话框，可从 DeepSeek 网页会话导入分镜脚本并解析为时间线片段（`spa/src/utils/deepseekImport.js` 导入管线，支持回读校验与调试）。
-- **技能系统（Skill）**：提示词模板迁移为技能库（`resources/skills/`，含 audio-design / character-design / firstframe-design / h3-prompt-builder / story-design / storyboard-design 等，`prompt.md` + `skill.json`）；新增 SQLite 技能词典存储与 CRUD（`lib/skill_db.py`）、技能备注（`lib/skill_notes.py`）与首次安装种子数据（`install/skill_seed.py`）；分镜生成可按技能注入写作规范。
+- **技能系统（Skill）**：提示词模板迁移为技能库（`resources/skill_flows/`，含 audio-design / character-design / firstframe-design / h3-prompt-builder / story-design / storyboard-design 等，`prompt.md` + `skill.json`）；新增 SQLite 技能词典存储与 CRUD（`lib/skill_db.py`）、技能备注（`lib/skill_notes.py`），首次安装种子数据为 `resources/skill_words/seed.json`（词典）与 `resources/skill_docs/`（技能文档）；分镜生成可按技能注入写作规范；主体卡片支持「提示词增强」（`resources/skill_enhances/`，md + script 技能池）。
 - **llama-server 配置页与 SPA LLM 全局默认**：新增本地 llama-server 配置页（`lib/llama_server.py`），SPA 的 LLM 全局默认配置支持多级回退。
 - **master_audio 落盘登记**：主音频文件登记到生成记录，配合视频记录的无损合并后台任务使用。
 - **移除 director 节点 `video_mode` 选项**及相关的自动翻译开关逻辑，提示词写作统一由技能与 LLM 链路承担。

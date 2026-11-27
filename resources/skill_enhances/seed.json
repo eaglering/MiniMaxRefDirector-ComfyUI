@@ -1,0 +1,19 @@
+{
+  "note": "提示词增强技能池清单（主体卡片「提示词增强」弹窗数据源）。id 全局唯一；doc=同目录 md 文档（注入 system 指令），script=同目录 py 脚本（LLM 生成后按选择顺序链式执行 run(text, ctx) -> str）。增删技能：改本清单 + 放对应文件即可，无需重启。",
+  "skills": [
+    {
+      "id": "general-enhance",
+      "name": "通用提示词增强",
+      "description": "在不改变原意的前提下扩写描述：补充画面细节、光线氛围与镜头感，输出保持一段连贯文本",
+      "tags": ["通用", "扩写"],
+      "doc": "general-enhance.md"
+    },
+    {
+      "id": "upper-case-demo",
+      "name": "示例：结果转大写",
+      "description": "脚本技能示例：把生成结果整段转大写，演示 script 协议 run(text, ctx) -> str",
+      "tags": ["示例", "脚本"],
+      "script": "upper_case_demo.py"
+    }
+  ]
+}

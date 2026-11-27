@@ -204,7 +204,7 @@ function dirty() {
   saveTimer = setTimeout(persistLlmConfig, 800);
 }
 
-// 一键启动调试浏览器并打开当前桥接站点（幂等；用户目录 = 项目 userdata/browser）
+// 一键启动调试浏览器并打开当前桥接站点（幂等；用户目录 = 项目 resources/userdata/browser）
 async function launchBrowser() {
   launching.value = true;
   try {
@@ -368,7 +368,7 @@ async function testConnection() {
             @change="dirty"
           />
           <p class="mrd-field-hint">
-            启动使用独立用户目录（项目 userdata\browser），首次在里面登录站点后 cookies 会保留，
+            启动使用独立用户目录（项目 resources\userdata\browser），首次在里面登录站点后 cookies 会保留，
             之后无需重复登录；按钮可重复点击，已在运行时不会重复拉起。
           </p>
         </div>
